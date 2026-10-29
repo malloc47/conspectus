@@ -349,7 +349,7 @@ impl Ingredient for SearchVariant {
         Self::send_chars(&mut state, self.query);
         state.refresh_matches(&items);
         Self::advance_cursor(&mut state, self.cursor_advance);
-        SearchOverlayWidget::new(&state, &items, &theme).render(area, buf);
+        SearchOverlayWidget::new(&mut state, &items, &theme).render(area, buf);
     }
 }
 

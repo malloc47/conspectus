@@ -1,3 +1,4 @@
+use super::rows::*;
 use super::*;
 use crate::model::{
     AgentSessionId, AgentSessionNode, BranchId, CheckoutId, CheckoutNode, ForgePrId, ForgePrNode,
@@ -6,6 +7,7 @@ use crate::model::{
 };
 use crate::tui::search::items_from_rows;
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::text::Span;
 use tuikit::testkit::keys::{chord, press};
 
 fn type_text(state: &mut SearchOverlayState, text: &str) {
@@ -103,7 +105,8 @@ fn render_with(
     let theme = Theme::default();
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
-    SearchOverlayWidget::new(state, items, &theme)
+    let mut state = state.clone();
+    SearchOverlayWidget::new(&mut state, items, &theme)
         .with_outcomes(&words)
         .render(area, &mut buf);
     (0..height)
@@ -116,6 +119,16 @@ fn render_with(
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The reach strip as the palette's title draws it.
+fn reach_segments(reach: Reach, theme: &Theme) -> Vec<Span<'static>> {
+    let segments: Vec<(&str, bool)> = REACHES
+        .iter()
+        .enumerate()
+        .map(|(choice, word)| (*word, choice == reach.choice()))
+        .collect();
+    tuikit::chip::SegmentedTitle::new(&segments).spans(theme)
 }
 
 fn current_items() -> Vec<crate::tui::rows::Row> {
@@ -490,7 +503,7 @@ fn the_query_line_draws_its_caret_and_windows_by_cells() {
     state.refresh_matches(&items);
     let area = Rect::new(0, 0, 60, 16);
     let mut buf = Buffer::empty(area);
-    SearchOverlayWidget::new(&state, &items, &theme).render(area, &mut buf);
+    SearchOverlayWidget::new(&mut state, &items, &theme).render(area, &mut buf);
     let at = buffer::find(&buf, "/東").expect("the query line");
     let caret = &buf[(at.x + 3, at.y)];
     assert_eq!(caret.symbol(), "京", "the caret is on the second character");

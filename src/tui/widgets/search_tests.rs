@@ -1,9 +1,35 @@
+use super::rows::*;
 use super::*;
 use crate::model::{AgentSessionId, NodeId};
+use crate::tui::icons::NodeKind;
 use crate::tui::rows::{AgentSessionRow, MuxIndicator, Row, RowKind};
 use crate::tui::search::items_from_rows;
 use ratatui::crossterm::event::KeyCode;
+use ratatui::text::Line;
+use tuikit::selection::{self, Cursor, GUTTER_WIDTH};
 use tuikit::testkit::keys::{ctrl, press};
+
+/// A match row as the palette draws it in a list `width` cells wide: the
+/// cursor gutter, then the row's cells, which leave the reserved
+/// scrollbar column before the frame.
+fn build_match_line(
+    label: String,
+    item: Option<&SearchItem<'_>>,
+    m: &SearchMatch,
+    is_cursor: bool,
+    width: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    let haystack = item.map_or("", |item| item.haystack.as_ref());
+    let cells = match_cells(
+        &label,
+        haystack,
+        m,
+        width.saturating_sub(GUTTER_WIDTH + 1),
+        theme,
+    );
+    selection::row(cells, Cursor::of(is_cursor, true), theme)
+}
 
 fn agent_row(key: &str, alias: Option<&str>) -> Row {
     let session_id = AgentSessionId::new("claude-code", "/state", key);

@@ -1,42 +1,45 @@
-//! The search overlay: one wide modal with two modes.
+//! The search overlay: quick select and content search, two palettes.
 //!
 //! Quick select (`/`) picks an entity by name. It looks at the current
 //! view's rows by default and widens to every entity in the snapshot
 //! with Tab. Content search looks inside what was said.
 //!
-//! Reuses the ADR 0030 text-input primitive for the query line and
-//! displays matches ranked by [`crate::tui::search::rank`] (rows) or
-//! [`crate::tui::search_entities::EntityIndex::rank`] (entities).
+//! Both are [`tuikit::palette::Palette`]s: the palette keeps the query,
+//! the title's strips and count, the cursor, the scroll window, the
+//! status row, the options pane, the debounce, and the footer. This
+//! module is the adapter that says what they mean: the ranking
+//! ([`crate::tui::search::rank`] over the view's rows,
+//! [`crate::tui::search_entities::EntityIndex::rank`] over every entity),
+//! the outcome words, the content kinds and the history paging, the
+//! column plan of a content hit, and the messages a pick commits.
 //!
 //! Per ADR 0031 and 0149 the current scope ranks every row of the active
 //! view after filters, collapsed rows included: the host hands the overlay
 //! those rows as [`SearchItem`]s.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::macros::{line, span};
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
-use tuikit::chip::{self, SegmentedTitle};
-use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
-use tuikit::palette::{Column, ColumnLayout, ColumnPlan};
-use tuikit::scroll::ScrollWindow;
-use tuikit::selection::{self, Cursor, Ends};
-use tuikit::text;
-use tuikit::text_edit::{LineEdit, TextField};
+use ratatui::widgets::Widget;
+use tuikit::keys::PaletteKey;
+use tuikit::overlay::Outcome;
+use tuikit::palette::{Count, Options, PALETTE_SIZE, Palette, PaletteAction, Progress};
 
 use crate::model::NodeId;
 use crate::tui::Theme;
-use crate::tui::search_entities::{EntityIndex, EntityMatch, SearchEntity};
-
-use crate::tui::icons::{NodeKind, node_kind_style};
+use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, SEARCH_KEYS, SearchKey};
 use crate::tui::rows::RowId;
 use crate::tui::search::{SearchItem, SearchMatch, rank};
+use crate::tui::search_entities::{EntityIndex, EntityMatch, SearchEntity};
 use crate::viewer::search::{ContentKinds, Grouping};
+
+mod rows;
+
+pub(crate) use rows::MARKDOWN_TICKS;
+use rows::{QuickRow, content_cells};
 
 /// How long the query rests before a contents scan starts, so typing a
 /// word does not start a scan per letter.
@@ -72,11 +75,40 @@ impl Reach {
             Self::All => Self::Current,
         }
     }
+
+    /// The reach's choice in the title's first strip ([`REACHES`]).
+    fn choice(self) -> usize {
+        match self {
+            Self::Current => 0,
+            Self::All => 1,
+        }
+    }
+
+    /// The reach the first strip's `choice` names.
+    fn chosen(choice: usize) -> Self {
+        if choice == 0 {
+            Self::Current
+        } else {
+            Self::All
+        }
+    }
+}
+
+/// The reach choices the title shows, in [`Reach`] order: both are always
+/// there, the chosen one in brackets, so the title is as wide whichever
+/// is chosen.
+const REACHES: [&str; 2] = ["Current", "All"];
+/// The granularity choices of content search's second strip.
+const GRANULARITIES: [&str; 2] = ["Sessions", "Messages"];
+
+/// The granularity's choice in the second strip.
+fn granularity_choice(group: Grouping) -> usize {
+    usize::from(group.granularity() != Grouping::Session)
 }
 
 /// How large the overlay is: a palette's size, most of the screen, so a
 /// wide terminal shows more of each result.
-pub(crate) const SEARCH_SIZE: ModalSize = ModalSize::PALETTE;
+pub(crate) const SEARCH_SIZE: tuikit::frame::ModalSize = PALETTE_SIZE;
 
 /// What a content result opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -150,37 +182,6 @@ pub enum DueSearch {
     Clear,
 }
 
-/// Pure state for the search overlay. Holds the query text input,
-/// the latest match list (recomputed by the host whenever the
-/// query changes), and the cursor inside that list.
-#[derive(Debug, Clone)]
-pub struct SearchOverlayState {
-    input: LineEdit,
-    matches: Vec<SearchMatch>,
-    cursor: usize,
-    mode: SearchMode,
-    reach: Reach,
-    /// Every entity, built the first time the wider reach is chosen.
-    entities: Option<EntityIndex>,
-    entity_matches: Vec<EntityMatch>,
-    group: Grouping,
-    kinds: ContentKinds,
-    /// Whether the search reads pane scrollback as well as transcripts.
-    panes: bool,
-    /// The options pane is open, with its cursor on this option.
-    options: Option<usize>,
-    /// Whether the contents scope can run (live preview is on).
-    contents_enabled: bool,
-    /// Results in the contents scope, set by the host before a key.
-    content_len: usize,
-    /// When the query or options last changed and a scan is owed.
-    edited_at: Option<Instant>,
-    /// Earlier searches, newest first, for paging back through.
-    past: Vec<PastSearch>,
-    /// The earlier search the field shows; `None` for the operator's own.
-    past_at: Option<usize>,
-}
-
 /// An earlier content search the field can be filled from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PastSearch {
@@ -188,234 +189,6 @@ pub struct PastSearch {
     pub reach: Reach,
     pub kinds: ContentKinds,
     pub panes: bool,
-}
-
-impl SearchOverlayState {
-    pub fn new() -> Self {
-        Self {
-            input: LineEdit::default(),
-            matches: Vec::new(),
-            cursor: 0,
-            mode: SearchMode::Quick,
-            reach: Reach::Current,
-            entities: None,
-            entity_matches: Vec::new(),
-            group: Grouping::default(),
-            kinds: ContentKinds::default(),
-            panes: true,
-            options: None,
-            contents_enabled: true,
-            content_len: 0,
-            edited_at: None,
-            past: Vec::new(),
-            past_at: None,
-        }
-    }
-
-    /// An overlay set up the way the operator left it, or with a search
-    /// already active: `query` fills the field, and a non-empty one in
-    /// content mode is searched at once. It always opens on the current
-    /// reach.
-    pub fn configured(
-        mode: SearchMode,
-        group: Grouping,
-        kinds: ContentKinds,
-        contents_enabled: bool,
-        query: &str,
-    ) -> Self {
-        let mut state = Self::new();
-        state.input = LineEdit::new(query);
-        state.group = group.granularity();
-        state.kinds = kinds;
-        state.contents_enabled = contents_enabled;
-        if mode == SearchMode::Content && contents_enabled {
-            state.mode = SearchMode::Content;
-        }
-        state
-    }
-
-    /// Open on `reach` instead of the current context.
-    #[must_use]
-    pub fn with_reach(mut self, reach: Reach) -> Self {
-        self.reach = reach;
-        self
-    }
-
-    /// Open with `past` (newest first) available to page back through.
-    #[must_use]
-    pub fn with_past(mut self, past: Vec<PastSearch>) -> Self {
-        self.past = past;
-        self
-    }
-
-    /// Open with the pane scrollback option set as given.
-    #[must_use]
-    pub fn with_panes(mut self, panes: bool) -> Self {
-        self.panes = panes;
-        self
-    }
-
-    /// Turn off pane scrollback, as the options pane would.
-    #[cfg(test)]
-    pub fn with_panes_off(&mut self) {
-        self.panes = false;
-    }
-
-    /// Open with the options pane showing.
-    #[must_use]
-    pub fn with_options_open(mut self) -> Self {
-        self.options = Some(0);
-        self
-    }
-
-    /// Whether pane scrollback is searched.
-    pub fn panes(&self) -> bool {
-        self.panes
-    }
-
-    /// The options pane's cursor, when the pane is open.
-    pub fn options_cursor(&self) -> Option<usize> {
-        self.options
-    }
-
-    pub fn mode(&self) -> SearchMode {
-        self.mode
-    }
-
-    pub fn reach(&self) -> Reach {
-        self.reach
-    }
-
-    /// Whether the entity index is wanted but not built yet.
-    pub fn needs_entities(&self) -> bool {
-        self.mode == SearchMode::Quick && self.reach == Reach::All && self.entities.is_none()
-    }
-
-    /// Whether `event` is the key that widens a quick select that has not
-    /// built its entity index yet, so the host can build it first.
-    pub fn widens_with(&self, event: KeyEvent) -> bool {
-        use crate::tui::keybindings::overlay::{SEARCH_KEYS, SearchKey};
-        use tuikit::keys::resolve;
-        self.mode == SearchMode::Quick
-            && self.reach == Reach::Current
-            && self.entities.is_none()
-            && resolve(SEARCH_KEYS, event) == Some(SearchKey::Scope)
-    }
-
-    /// Entities matching the query, best first (the wider reach).
-    pub fn entity_matches(&self) -> &[EntityMatch] {
-        &self.entity_matches
-    }
-
-    /// The entity behind a match.
-    pub fn entity(&self, hit: &EntityMatch) -> Option<&SearchEntity> {
-        self.entities.as_ref()?.get(hit.index)
-    }
-
-    pub fn group(&self) -> Grouping {
-        self.group
-    }
-
-    pub fn kinds(&self) -> ContentKinds {
-        self.kinds
-    }
-
-    /// The host reports how many contents results there are, so the
-    /// cursor can move among them.
-    pub fn set_content_len(&mut self, len: usize) {
-        self.content_len = len;
-        // The cursor belongs to the contents results only in content
-        // mode; quick select keeps its own and the host passes no
-        // contents then, which must not send it back to the top.
-        if self.mode == SearchMode::Content && self.cursor >= len {
-            self.cursor = 0;
-        }
-    }
-
-    /// Owe a contents scan for the current query, as soon as the host
-    /// asks (`force`) or after the debounce.
-    pub fn mark_edited(&mut self, at: Instant) {
-        self.edited_at = Some(at);
-    }
-
-    /// The scan the overlay is owed once the query has rested, if any.
-    /// `Clear` says to stop previewing (rows scope, or an empty query).
-    pub fn take_due_search(&mut self, now: Instant, force: bool) -> Option<DueSearch> {
-        let at = self.edited_at?;
-        if !force && now.duration_since(at) < DEBOUNCE {
-            return None;
-        }
-        self.edited_at = None;
-        let text = self.input.value().trim().to_string();
-        if self.mode == SearchMode::Content && !text.is_empty() {
-            Some(DueSearch::Preview {
-                text,
-                kinds: self.kinds,
-                group: self.group,
-                reach: self.reach,
-            })
-        } else {
-            Some(DueSearch::Clear)
-        }
-    }
-
-    /// The query as the contents scan will see it.
-    pub fn content_text(&self) -> String {
-        self.input.value().trim().to_string()
-    }
-
-    /// Current query text (post-edit, pre-rank).
-    pub fn query(&self) -> &str {
-        self.input.value()
-    }
-
-    pub fn matches(&self) -> &[SearchMatch] {
-        &self.matches
-    }
-
-    pub fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    /// Refresh the match list against `items` using `backend`. The
-    /// host calls this after every key dispatch so the operator
-    /// sees the list shrink/grow as they type. Resets the cursor
-    /// to 0 so a newly typed character doesn't strand it past the
-    /// end of the new result list.
-    pub fn refresh_matches(&mut self, items: &[SearchItem<'_>]) {
-        self.matches = if self.mode == SearchMode::Quick && self.reach == Reach::Current {
-            rank(self.input.value(), items)
-        } else {
-            Vec::new()
-        };
-        self.entity_matches = match (&self.entities, self.mode, self.reach) {
-            (Some(index), SearchMode::Quick, Reach::All) => index.rank(self.input.value()),
-            _ => Vec::new(),
-        };
-        // The cursor belongs to the contents results in content mode.
-        if self.mode == SearchMode::Quick && self.cursor >= self.result_len() {
-            self.cursor = 0;
-        }
-    }
-
-    /// Hand the overlay the entity index the wider reach searches.
-    pub fn set_entities(&mut self, entities: EntityIndex) {
-        self.entities.get_or_insert(entities);
-    }
-
-    fn result_len(&self) -> usize {
-        match (self.mode, self.reach) {
-            (SearchMode::Quick, Reach::Current) => self.matches.len(),
-            (SearchMode::Quick, Reach::All) => self.entity_matches.len(),
-            (SearchMode::Content, _) => self.content_len,
-        }
-    }
-}
-
-impl Default for SearchOverlayState {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// What the host should do after passing a key event through the
@@ -443,123 +216,491 @@ pub enum SearchOutcome {
 /// The options the pane lists, in order.
 pub const SEARCH_OPTIONS: [&str; 3] = ["Tool calls and output", "Thinking", "Pane scrollback"];
 
-impl SearchOverlayState {
-    /// Dispatch a crossterm key event.
-    ///
-    /// - `Esc` / `Ctrl-C`: cancel.
-    /// - `Enter`: confirm with the cursor's match, or cancel if no
-    ///   matches are present.
-    /// - `Down` / `Ctrl-N`: move cursor down (wraps).
-    /// - `Up` / `Ctrl-P`: move cursor up (wraps).
-    /// - Everything else: passed through to the text input. We do
-    ///   not intercept `j` / `k` here because typing them into the
-    ///   query is the common case; result-list navigation uses
-    ///   arrow keys + ctrl-N/P instead.
-    pub fn handle_key(&mut self, event: KeyEvent) -> SearchOutcome {
-        use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, SEARCH_KEYS, SearchKey};
-        use tuikit::keys::resolve;
-        let table = match self.mode {
-            SearchMode::Quick => SEARCH_KEYS,
-            SearchMode::Content => SEARCH_CONTENT_KEYS,
-        };
-        let contents = self.mode == SearchMode::Content;
-        if contents && self.options.is_some() {
-            return self.handle_options_key(event);
+/// The search tables bind the palette's own actions and the search's
+/// verbs; the verbs are the overlay's to handle.
+impl PaletteAction for SearchKey {
+    fn palette_key(self) -> Option<PaletteKey> {
+        match self {
+            Self::Abort => Some(PaletteKey::Abort),
+            Self::Cancel => Some(PaletteKey::Cancel),
+            Self::Pick => Some(PaletteKey::Pick),
+            Self::Down => Some(PaletteKey::Down),
+            Self::Up => Some(PaletteKey::Up),
+            Self::Scope => Some(PaletteKey::Scope),
+            Self::Options => Some(PaletteKey::Options),
+            Self::Granularity
+            | Self::ApplyFilter
+            | Self::Keep
+            | Self::PrevQuery
+            | Self::NextQuery => None,
         }
-        match resolve(table, event) {
-            Some(SearchKey::Abort | SearchKey::Cancel) => SearchOutcome::Cancel,
-            Some(SearchKey::Pick) if contents => {
-                if self.content_len == 0 {
-                    SearchOutcome::Cancel
-                } else {
-                    SearchOutcome::OpenHit(self.cursor)
-                }
+    }
+}
+
+/// Quick select: the view's rows or every entity, ranked by the host.
+type QuickPalette = Palette<QuickRow, SearchOutcome, SearchKey>;
+/// Content search: the scan's results; a pick is the hit under the
+/// cursor.
+type ContentPalette = Palette<ContentRow, (), SearchKey>;
+
+/// The overlay's palette, one per mode.
+#[derive(Clone, Debug)]
+enum Palettes {
+    Quick(QuickPalette),
+    Content(ContentPalette),
+}
+
+/// Quick select's palette, its query filled with `query`.
+fn quick_palette(query: &str) -> QuickPalette {
+    Palette::new("/ quick select", Vec::new(), |row: &QuickRow| {
+        Outcome::Commit(row.pick())
+    })
+    .keys(SEARCH_KEYS)
+    .scopes(REACHES)
+    .count(Count::Listed)
+    .size(SEARCH_SIZE)
+    .empty_note("(start typing)")
+    .no_match_note("(no matches)")
+    .reserve_scrollbar()
+    .with_query(query)
+}
+
+/// Content search's palette, its query filled with `query` (not
+/// searched: opening is no edit), with the options as given.
+fn content_palette(
+    query: &str,
+    group: Grouping,
+    kinds: ContentKinds,
+    panes: bool,
+) -> ContentPalette {
+    let on = [kinds.tools, kinds.thinking, panes];
+    let mut palette = Palette::new("/ search contents", Vec::new(), |_: &ContentRow| {
+        Outcome::Commit(())
+    })
+    .keys(SEARCH_CONTENT_KEYS)
+    .scopes(REACHES)
+    .scopes(GRANULARITIES)
+    .count(Count::None)
+    .size(SEARCH_SIZE)
+    .options(Options::new(SEARCH_OPTIONS.into_iter().zip(on)))
+    .debounced(DEBOUNCE)
+    .reserve_scrollbar()
+    .with_query(query);
+    palette.set_scope(1, granularity_choice(group));
+    palette
+}
+
+/// State for the search overlay: its palette, and what quick select
+/// ranked and content search is set to.
+#[derive(Debug, Clone)]
+pub struct SearchOverlayState {
+    palette: Palettes,
+    /// The view's rows that match the query, best first (the current
+    /// reach).
+    matches: Vec<SearchMatch>,
+    /// Every entity, built the first time the wider reach is chosen.
+    entities: Option<EntityIndex>,
+    entity_matches: Vec<EntityMatch>,
+    group: Grouping,
+    kinds: ContentKinds,
+    /// Whether the search reads pane scrollback as well as transcripts.
+    panes: bool,
+    /// Earlier searches, newest first, for paging back through.
+    past: Vec<PastSearch>,
+    /// The earlier search the field shows; `None` for the operator's own.
+    past_at: Option<usize>,
+}
+
+impl SearchOverlayState {
+    pub fn new() -> Self {
+        Self {
+            palette: Palettes::Quick(quick_palette("")),
+            matches: Vec::new(),
+            entities: None,
+            entity_matches: Vec::new(),
+            group: Grouping::default(),
+            kinds: ContentKinds::default(),
+            panes: true,
+            past: Vec::new(),
+            past_at: None,
+        }
+    }
+
+    /// An overlay set up the way the operator left it: `query` fills the
+    /// field (opening searches nothing; the first change does). It always
+    /// opens on the current reach.
+    pub fn configured(
+        mode: SearchMode,
+        group: Grouping,
+        kinds: ContentKinds,
+        contents_enabled: bool,
+        query: &str,
+    ) -> Self {
+        let group = group.granularity();
+        let palette = if mode == SearchMode::Content && contents_enabled {
+            Palettes::Content(content_palette(query, group, kinds, true))
+        } else {
+            Palettes::Quick(quick_palette(query))
+        };
+        Self {
+            palette,
+            group,
+            kinds,
+            ..Self::new()
+        }
+    }
+
+    /// Open on `reach` instead of the current context.
+    #[must_use]
+    pub fn with_reach(mut self, reach: Reach) -> Self {
+        self.set_reach(reach);
+        self
+    }
+
+    /// Open with `past` (newest first) available to page back through.
+    #[must_use]
+    pub fn with_past(mut self, past: Vec<PastSearch>) -> Self {
+        self.past = past;
+        self
+    }
+
+    /// Open with the pane scrollback option set as given.
+    #[must_use]
+    pub fn with_panes(mut self, panes: bool) -> Self {
+        self.set_panes(panes);
+        self
+    }
+
+    /// Turn off pane scrollback, as the options pane would.
+    #[cfg(test)]
+    pub fn with_panes_off(&mut self) {
+        self.set_panes(false);
+    }
+
+    /// Open with the options pane showing.
+    #[must_use]
+    pub fn with_options_open(mut self) -> Self {
+        if let Palettes::Content(palette) = &mut self.palette {
+            palette.open_options();
+        }
+        self
+    }
+
+    /// Whether pane scrollback is searched.
+    pub fn panes(&self) -> bool {
+        self.panes
+    }
+
+    /// The options pane's cursor, when the pane is open.
+    pub fn options_cursor(&self) -> Option<usize> {
+        match &self.palette {
+            Palettes::Content(palette) => palette
+                .options_pane()
+                .filter(|options| options.is_open())
+                .map(Options::cursor),
+            Palettes::Quick(_) => None,
+        }
+    }
+
+    pub fn mode(&self) -> SearchMode {
+        match self.palette {
+            Palettes::Quick(_) => SearchMode::Quick,
+            Palettes::Content(_) => SearchMode::Content,
+        }
+    }
+
+    pub fn reach(&self) -> Reach {
+        Reach::chosen(match &self.palette {
+            Palettes::Quick(palette) => palette.scope(0),
+            Palettes::Content(palette) => palette.scope(0),
+        })
+    }
+
+    /// Whether the entity index is wanted but not built yet.
+    pub fn needs_entities(&self) -> bool {
+        self.mode() == SearchMode::Quick && self.reach() == Reach::All && self.entities.is_none()
+    }
+
+    /// Whether `event` is the key that widens a quick select that has not
+    /// built its entity index yet, so the host can build it first.
+    pub fn widens_with(&self, event: KeyEvent) -> bool {
+        let Palettes::Quick(palette) = &self.palette else {
+            return false;
+        };
+        self.reach() == Reach::Current
+            && self.entities.is_none()
+            && palette.action(event) == Some(SearchKey::Scope)
+    }
+
+    /// Entities matching the query, best first (the wider reach).
+    pub fn entity_matches(&self) -> &[EntityMatch] {
+        &self.entity_matches
+    }
+
+    /// The entity behind a match.
+    pub fn entity(&self, hit: &EntityMatch) -> Option<&SearchEntity> {
+        self.entities.as_ref()?.get(hit.index)
+    }
+
+    pub fn group(&self) -> Grouping {
+        self.group
+    }
+
+    pub fn kinds(&self) -> ContentKinds {
+        self.kinds
+    }
+
+    /// The host hands over the contents results, in the order the overlay
+    /// lists them, so the cursor can move among them.
+    fn set_content(&mut self, rows: &[ContentRow]) {
+        // Quick select passes no contents, and its cursor is its own.
+        if let Palettes::Content(palette) = &mut self.palette {
+            palette.set_rows(rows.to_vec());
+        }
+    }
+
+    /// The scan the overlay is owed once the query has rested, if any.
+    /// `Clear` says to stop previewing (an empty query). Quick select
+    /// owes none.
+    pub fn take_due_search(&mut self, now: Instant, force: bool) -> Option<DueSearch> {
+        let Palettes::Content(palette) = &mut self.palette else {
+            return None;
+        };
+        if !palette.take_due(now, force) {
+            return None;
+        }
+        let text = self.content_text();
+        if text.is_empty() {
+            Some(DueSearch::Clear)
+        } else {
+            Some(DueSearch::Preview {
+                text,
+                kinds: self.kinds,
+                group: self.group,
+                reach: self.reach(),
+            })
+        }
+    }
+
+    /// The query as the contents scan will see it.
+    pub fn content_text(&self) -> String {
+        self.query().trim().to_string()
+    }
+
+    /// Current query text (post-edit, pre-rank).
+    pub fn query(&self) -> &str {
+        match &self.palette {
+            Palettes::Quick(palette) => palette.query(),
+            Palettes::Content(palette) => palette.query(),
+        }
+    }
+
+    pub fn matches(&self) -> &[SearchMatch] {
+        &self.matches
+    }
+
+    pub fn cursor(&self) -> usize {
+        match &self.palette {
+            Palettes::Quick(palette) => palette.cursor(),
+            Palettes::Content(palette) => palette.cursor(),
+        }
+    }
+
+    /// Refresh the match list against `items` using `backend`. The
+    /// host calls this after every key dispatch so the operator
+    /// sees the list shrink/grow as they type. The cursor stays on its
+    /// position while that is still a result, and goes to the top
+    /// otherwise.
+    pub fn refresh_matches(&mut self, items: &[SearchItem<'_>]) {
+        let quick = self.mode() == SearchMode::Quick;
+        let reach = self.reach();
+        let query = self.query().to_string();
+        self.matches = if quick && reach == Reach::Current {
+            rank(&query, items)
+        } else {
+            Vec::new()
+        };
+        self.entity_matches = match (&self.entities, quick, reach) {
+            (Some(index), true, Reach::All) => index.rank(&query),
+            _ => Vec::new(),
+        };
+        self.list_results(items);
+    }
+
+    /// Hands quick select's palette its results: the matching rows with
+    /// the labels `items` give them now, or the matching entities.
+    fn list_results(&mut self, items: &[SearchItem<'_>]) {
+        let reach = self.reach();
+        let Palettes::Quick(palette) = &mut self.palette else {
+            return;
+        };
+        let rows = match reach {
+            Reach::Current => {
+                let by_id: HashMap<&RowId, &SearchItem<'_>> =
+                    items.iter().map(|item| (&item.id, item)).collect();
+                self.matches
+                    .iter()
+                    .map(|hit| {
+                        let item = by_id.get(&hit.id);
+                        QuickRow::Row {
+                            hit: hit.clone(),
+                            label: item.map_or_else(
+                                || "<missing>".to_string(),
+                                |item| item.label.to_string(),
+                            ),
+                            haystack: item
+                                .map_or_else(String::new, |item| item.haystack.to_string()),
+                        }
+                    })
+                    .collect()
             }
-            Some(SearchKey::Pick) if self.reach == Reach::All => {
-                match self.entity_matches.get(self.cursor) {
-                    Some(hit) => match self.entity(hit) {
-                        Some(entity) => SearchOutcome::OpenEntity(Box::new(entity.node.clone())),
-                        None => SearchOutcome::Cancel,
-                    },
-                    None => SearchOutcome::Cancel,
-                }
-            }
-            Some(SearchKey::Pick) => match self.matches.get(self.cursor) {
-                Some(m) => SearchOutcome::Confirm(Box::new(m.id.clone())),
-                None => SearchOutcome::Cancel,
-            },
-            Some(SearchKey::Down) => {
-                self.move_cursor(1);
-                SearchOutcome::Continue
-            }
-            Some(SearchKey::Up) => {
-                self.move_cursor(-1);
-                SearchOutcome::Continue
-            }
-            Some(SearchKey::Scope) => {
-                self.cursor = 0;
-                self.reach = self.reach.other();
-                if contents {
-                    self.edited_at = Some(Instant::now());
-                }
-                SearchOutcome::Continue
-            }
-            Some(SearchKey::Granularity) => {
+            Reach::All => self
+                .entity_matches
+                .iter()
+                .filter_map(|hit| {
+                    let entity = self.entities.as_ref()?.get(hit.index)?;
+                    Some(QuickRow::Entity {
+                        hit: hit.clone(),
+                        entity: entity.clone(),
+                    })
+                })
+                .collect(),
+        };
+        palette.set_rows(rows);
+    }
+
+    /// Hand the overlay the entity index the wider reach searches.
+    pub fn set_entities(&mut self, entities: EntityIndex) {
+        self.entities.get_or_insert(entities);
+    }
+
+    fn set_reach(&mut self, reach: Reach) {
+        match &mut self.palette {
+            Palettes::Quick(palette) => palette.set_scope(0, reach.choice()),
+            Palettes::Content(palette) => palette.set_scope(0, reach.choice()),
+        }
+    }
+
+    /// Sets what a search looks in, in the options pane too.
+    fn set_options(&mut self, kinds: ContentKinds, panes: bool) {
+        self.kinds = kinds;
+        self.panes = panes;
+        if let Palettes::Content(palette) = &mut self.palette
+            && let Some(options) = palette.options_mut()
+        {
+            options.set(0, kinds.tools);
+            options.set(1, kinds.thinking);
+            options.set(2, panes);
+        }
+    }
+
+    fn set_panes(&mut self, panes: bool) {
+        self.set_options(self.kinds, panes);
+    }
+
+    /// Reads back what the options pane has set.
+    fn read_options(&mut self) {
+        let Palettes::Content(palette) = &self.palette else {
+            return;
+        };
+        if let Some(options) = palette.options_pane() {
+            self.kinds.tools = options.is_on(0);
+            self.kinds.thinking = options.is_on(1);
+            self.panes = options.is_on(2);
+        }
+    }
+}
+
+impl Default for SearchOverlayState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// What a palette's outcome asks the overlay's host to do, for a palette
+/// whose pick is `picked`.
+fn search_outcome<M>(
+    outcome: Outcome<M>,
+    picked: impl FnOnce(M) -> SearchOutcome,
+) -> SearchOutcome {
+    match outcome {
+        Outcome::Commit(message) | Outcome::Stay(message) => picked(message),
+        Outcome::Close | Outcome::Dismiss => SearchOutcome::Cancel,
+        Outcome::Consumed => SearchOutcome::Continue,
+    }
+}
+
+impl SearchOverlayState {
+    /// Dispatch a crossterm key event: the palette's keys (`Esc` and
+    /// `Ctrl-C` close, `Enter` picks the result under the cursor or closes
+    /// an empty list, the arrows and `Ctrl-N`/`Ctrl-P` move, wrapping,
+    /// `Tab` switches the reach, `Ctrl-O` opens the options, and the rest
+    /// edit the query, `j` and `k` included), and content search's own
+    /// verbs.
+    pub fn handle_key(&mut self, event: KeyEvent) -> SearchOutcome {
+        match self.palette {
+            Palettes::Quick(_) => self.handle_quick(event),
+            Palettes::Content(_) => self.handle_content(event),
+        }
+    }
+
+    fn handle_quick(&mut self, event: KeyEvent) -> SearchOutcome {
+        let Palettes::Quick(palette) = &mut self.palette else {
+            return SearchOutcome::Continue;
+        };
+        let before = palette.cursor();
+        let query = palette.query().to_string();
+        let outcome = palette.handle_key(event);
+        // Quick select keeps the cursor's position across an edit while
+        // it is still a result (the host's next ranking goes to the top
+        // when it is not); the palette would put it on the first.
+        if palette.query() != query {
+            palette.select(before);
+        }
+        search_outcome(outcome, |picked| picked)
+    }
+
+    fn handle_content(&mut self, event: KeyEvent) -> SearchOutcome {
+        let Palettes::Content(palette) = &mut self.palette else {
+            return SearchOutcome::Continue;
+        };
+        if let Some(verb) = palette.host_action(event) {
+            return self.content_verb(verb);
+        }
+        let outcome = palette.handle_key(event);
+        let cursor = palette.cursor();
+        self.read_options();
+        search_outcome(outcome, |()| SearchOutcome::OpenHit(cursor))
+    }
+
+    /// Content search's own verbs: regroup, promote, and page through
+    /// earlier searches.
+    fn content_verb(&mut self, verb: SearchKey) -> SearchOutcome {
+        match verb {
+            SearchKey::Granularity => {
                 // Listing the same matches another way is not a new search.
                 self.group = match self.group.granularity() {
                     Grouping::Session => Grouping::Flat,
                     _ => Grouping::Session,
                 };
-                self.cursor = 0;
+                if let Palettes::Content(palette) = &mut self.palette {
+                    palette.set_scope(1, granularity_choice(self.group));
+                    palette.select(0);
+                }
                 SearchOutcome::Regroup(self.group)
             }
-            Some(SearchKey::Options) => {
-                self.options = Some(0);
-                SearchOutcome::Continue
-            }
-            Some(SearchKey::ApplyFilter) => self.promote(SearchOutcome::ApplyFilter),
-            Some(SearchKey::Keep) => self.promote(SearchOutcome::Keep),
-            Some(SearchKey::PrevQuery) => self.page_past(1),
-            Some(SearchKey::NextQuery) => self.page_past(-1),
-            None => {
-                // Everything the table leaves is the query's to edit;
-                // a contents query that changed is searched again once
-                // it rests.
-                if self.input.handle(event).changed && contents {
-                    self.cursor = 0;
-                    self.edited_at = Some(Instant::now());
-                }
-                SearchOutcome::Continue
-            }
+            SearchKey::ApplyFilter => self.promote(SearchOutcome::ApplyFilter),
+            SearchKey::Keep => self.promote(SearchOutcome::Keep),
+            SearchKey::PrevQuery => self.page_past(1),
+            SearchKey::NextQuery => self.page_past(-1),
+            SearchKey::Abort
+            | SearchKey::Cancel
+            | SearchKey::Pick
+            | SearchKey::Down
+            | SearchKey::Up
+            | SearchKey::Scope
+            | SearchKey::Options => SearchOutcome::Continue,
         }
-    }
-
-    /// A key while the options pane is open.
-    fn handle_options_key(&mut self, event: KeyEvent) -> SearchOutcome {
-        use crate::tui::keybindings::overlay::{SEARCH_OPTION_KEYS, SearchOptionKey};
-        use tuikit::keys::resolve;
-        let at = self.options.unwrap_or(0);
-        match resolve(SEARCH_OPTION_KEYS, event) {
-            Some(SearchOptionKey::Abort) => return SearchOutcome::Cancel,
-            Some(SearchOptionKey::Back) => self.options = None,
-            Some(SearchOptionKey::Down) => {
-                self.options = Some(Ends::Wrap.step(at, SEARCH_OPTIONS.len(), 1));
-            }
-            Some(SearchOptionKey::Up) => {
-                self.options = Some(Ends::Wrap.step(at, SEARCH_OPTIONS.len(), -1));
-            }
-            Some(SearchOptionKey::Toggle) => {
-                match at {
-                    0 => self.kinds.tools = !self.kinds.tools,
-                    1 => self.kinds.thinking = !self.kinds.thinking,
-                    _ => self.panes = !self.panes,
-                }
-                self.cursor = 0;
-                self.edited_at = Some(Instant::now());
-            }
-            None => {}
-        }
-        SearchOutcome::Continue
     }
 
     /// Fill the field from the earlier search `delta` places back (negative
@@ -582,16 +723,19 @@ impl SearchOverlayState {
             return SearchOutcome::Continue;
         };
         self.past_at = Some(next);
-        self.reach = past.reach;
-        self.kinds = past.kinds;
-        self.panes = past.panes;
+        self.set_reach(past.reach);
+        self.set_options(past.kinds, past.panes);
         self.fill_query(past.text)
     }
 
+    /// Fill the field with `text` and owe a search for it, from the first
+    /// result.
     fn fill_query(&mut self, text: String) -> SearchOutcome {
-        self.input = LineEdit::new(text);
-        self.cursor = 0;
-        self.edited_at = Some(Instant::now());
+        if let Palettes::Content(palette) = &mut self.palette {
+            palette.set_query(text);
+            palette.select(0);
+            palette.mark_edited(Instant::now());
+        }
         SearchOutcome::Continue
     }
 
@@ -603,25 +747,16 @@ impl SearchOverlayState {
             outcome
         }
     }
-
-    fn move_cursor(&mut self, delta: i32) {
-        let len = self.result_len();
-        if len == 0 {
-            self.cursor = 0;
-            return;
-        }
-        self.cursor = Ends::Wrap.step(self.cursor, len, delta);
-    }
 }
 
 /// What a result's outcome word says, for the host to compute per row.
 pub type OutcomeWords<'a> = &'a dyn Fn(&NodeId) -> String;
 
-/// Centered modal that renders the query line on top and a
-/// ranked match list below. Caps the visible match list at the
-/// available height; the cursor scrolls within it.
+/// Draws the overlay: the palette of its mode, with the rows the host
+/// holds now. Drawing keeps the results' scroll window, so it borrows the
+/// state mutably.
 pub struct SearchOverlayWidget<'a> {
-    state: &'a SearchOverlayState,
+    state: &'a mut SearchOverlayState,
     items: &'a [SearchItem<'a>],
     theme: &'a Theme,
     content: Option<&'a ContentView>,
@@ -630,7 +765,7 @@ pub struct SearchOverlayWidget<'a> {
 
 impl<'a> SearchOverlayWidget<'a> {
     pub fn new(
-        state: &'a SearchOverlayState,
+        state: &'a mut SearchOverlayState,
         items: &'a [SearchItem<'a>],
         theme: &'a Theme,
     ) -> Self {
@@ -658,630 +793,95 @@ impl<'a> SearchOverlayWidget<'a> {
     }
 }
 
-/// The reach choices as a segmented title: the chosen one in brackets,
-/// so the title is as wide whichever is chosen.
-fn reach_segments(reach: Reach, theme: &Theme) -> Vec<Span<'static>> {
-    SegmentedTitle::new(&[
-        ("Current", reach == Reach::Current),
-        ("All", reach == Reach::All),
-    ])
-    .spans(theme)
-}
-
-/// The granularity choices as a segmented title, the same way.
-fn granularity_segments(group: Grouping, theme: &Theme) -> Vec<Span<'static>> {
-    let sessions = group.granularity() == Grouping::Session;
-    SegmentedTitle::new(&[("Sessions", sessions), ("Messages", !sessions)]).spans(theme)
-}
-
 impl Widget for SearchOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let title = match (self.state.mode(), self.content) {
-            (SearchMode::Content, _) => {
-                let mut spans = vec![Span::raw("/ search contents  ")];
-                spans.extend(reach_segments(self.state.reach(), self.theme));
-                spans.push(Span::raw("  "));
-                spans.extend(granularity_segments(self.state.group(), self.theme));
-                Line::from(spans)
+        let Self {
+            state,
+            items,
+            theme,
+            content,
+            outcomes,
+        } = self;
+        // The current reach's labels come from the rows as they are now,
+        // so a label never lags behind a refresh.
+        if state.mode() == SearchMode::Quick && state.reach() == Reach::Current {
+            state.list_results(items);
+        }
+        let kinds = state.kinds;
+        match &mut state.palette {
+            Palettes::Quick(palette) => {
+                palette.draw_with(area, buf, theme, |row, cells| {
+                    row.cells(cells, theme, outcomes)
+                });
             }
-            (SearchMode::Quick, _) => {
-                let n = match self.state.reach() {
-                    Reach::Current => self.state.matches().len(),
-                    Reach::All => self.state.entity_matches().len(),
-                };
-                let mut spans = vec![Span::raw("/ quick select  ")];
-                spans.extend(reach_segments(self.state.reach(), self.theme));
-                spans.push(Span::raw(format!("  ({n})")));
-                Line::from(spans)
-            }
-        };
-        let body = SearchBody {
-            state: self.state,
-            items: self.items,
-            content: self.content,
-            outcomes: self.outcomes,
-            theme: self.theme,
-        };
-        ModalFrame::new(self.theme, SEARCH_SIZE)
-            .title(title)
-            .render(area, buf, body);
-    }
-}
-
-/// The query row over the ranked results, drawn in the frame's inner
-/// area.
-struct SearchBody<'a> {
-    state: &'a SearchOverlayState,
-    items: &'a [SearchItem<'a>],
-    content: Option<&'a ContentView>,
-    outcomes: Option<OutcomeWords<'a>>,
-    theme: &'a Theme,
-}
-
-/// Widths of the columns in an entity result, left to right after the
-/// two-cell cursor mark and two-cell kind glyph.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct EntityColumns {
-    pub label: usize,
-    pub context: usize,
-    pub outcome: usize,
-}
-
-/// The widest an outcome word gets (`in Sessions view`).
-const OUTCOME_WIDTH: usize = 16;
-/// Cursor mark plus kind glyph.
-const ROW_LEAD: usize = 4;
-const COLUMN_GAP: usize = 2;
-/// The label column stops growing here, so a wide modal gives the room to
-/// the context instead of padding.
-const LABEL_CAP: usize = 48;
-/// A context narrower than this is not worth showing.
-const MIN_CONTEXT: usize = 10;
-
-/// Split a row `inner` cells wide into columns. The outcome word keeps its
-/// width; the label takes up to 45% of the rest (at most [`LABEL_CAP`]) and
-/// the context what is left, dropped when too narrow to read.
-pub(crate) fn entity_columns(inner: usize) -> EntityColumns {
-    let outcome = OUTCOME_WIDTH.min(inner / 3);
-    let body = inner.saturating_sub(ROW_LEAD + outcome + COLUMN_GAP);
-    let label = (body * 45 / 100).clamp(16, LABEL_CAP).min(body);
-    let context = body.saturating_sub(label + COLUMN_GAP);
-    if context < MIN_CONTEXT {
-        EntityColumns {
-            label: body,
-            context: 0,
-            outcome,
-        }
-    } else {
-        EntityColumns {
-            label,
-            context,
-            outcome,
-        }
-    }
-}
-
-impl ModalBody for SearchBody<'_> {
-    type Output = ();
-
-    /// The overlay fills its frame, so it is laid out in `render`.
-    fn measure(&mut self, _width: u16) -> u16 {
-        0
-    }
-
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        // First row: the query, after a `/`, with its caret while the
-        // field has the keys (the options pane takes them while open).
-        let query_area = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 1,
-        };
-        TextField::new(&self.state.input)
-            .prefix(Span::styled("/", Style::default().fg(self.theme.accent)))
-            .focused(self.state.options_cursor().is_none())
-            .render(query_area, buf, self.theme);
-
-        if self.state.mode() == SearchMode::Content {
-            self.render_contents(area, buf);
-            return;
-        }
-
-        // Footer hints at the bottom, then the ranked list.
-        let hint_rows = self.render_footer(
-            area,
-            buf,
-            &tuikit::keys::footer(crate::tui::keybindings::overlay::SEARCH_KEYS),
-        );
-        let list_area = Rect {
-            x: area.x,
-            y: area.y.saturating_add(1),
-            width: area.width,
-            height: area.height.saturating_sub(1).saturating_sub(hint_rows),
-        };
-        let total = match self.state.reach() {
-            Reach::Current => self.state.matches().len(),
-            Reach::All => self.state.entity_matches().len(),
-        };
-        if total == 0 {
-            let label = if self.state.query().is_empty() {
-                "(start typing)"
-            } else {
-                "(no matches)"
-            };
-            Paragraph::new(line![span!(self.theme.muted; "{label}")]).render(list_area, buf);
-            return;
-        }
-
-        let cursor = self.state.cursor();
-        let range = ScrollWindow::new(usize::from(list_area.height), total)
-            .following(cursor..cursor + 1)
-            .visible();
-        let lines: Vec<Line<'static>> = match self.state.reach() {
-            Reach::All => range
-                .map(|idx| self.entity_line(idx, list_area.width as usize))
-                .collect(),
-            Reach::Current => {
-                let id_to_item: std::collections::HashMap<&RowId, &SearchItem<'_>> =
-                    self.items.iter().map(|item| (&item.id, item)).collect();
-                range
-                    .map(|idx| {
-                        let m = &self.state.matches()[idx];
-                        let item = id_to_item.get(&m.id);
-                        let label =
-                            item.map_or_else(|| "<missing>".to_string(), |i| i.label.to_string());
-                        build_match_line(
-                            label,
-                            item.copied(),
-                            m,
-                            idx == self.state.cursor(),
-                            list_area.width as usize,
-                            self.theme,
-                        )
-                    })
-                    .collect()
-            }
-        };
-        Paragraph::new(lines).render(list_area, buf);
-    }
-}
-
-impl SearchBody<'_> {
-    /// One entity result: cursor mark, kind glyph, label, context, and the
-    /// outcome word at the right edge.
-    fn entity_line(&self, idx: usize, width: usize) -> Line<'static> {
-        let cursor = Cursor::of(idx == self.state.cursor(), true);
-        let Some(entity) = self
-            .state
-            .entity_matches()
-            .get(idx)
-            .and_then(|hit| self.state.entity(hit).map(|e| (e, hit)))
-        else {
-            return Line::default();
-        };
-        let (entity, hit) = entity;
-        // Leave a blank cell before the frame.
-        let width = width.saturating_sub(1);
-        let columns = entity_columns(width);
-        let dim = Style::default().add_modifier(self.theme.muted);
-        let label = text::truncate_end(&entity.label, columns.label);
-        let label_width = text::width(&label);
-        let mut spans: Vec<Span<'static>> = vec![search_kind_glyph_span_for(
-            NodeKind::from(&entity.node),
-            self.theme,
-        )];
-        let label_style = if entity.gone { dim } else { Style::default() };
-        let match_style = self.theme.match_style();
-        spans.extend(text::paint(
-            &[Span::styled(label.as_str(), label_style)],
-            hit.label_range.clone().filter(|r| r.end <= label.len()),
-            |_| match_style,
-        ));
-        let mut used = ROW_LEAD + label_width;
-        if columns.context > 0 {
-            let pad = columns.label.saturating_sub(label_width) + COLUMN_GAP;
-            let context = text::truncate_end(&entity.context, columns.context);
-            used += pad + text::width(&context);
-            spans.push(Span::raw(" ".repeat(pad)));
-            spans.push(span!(dim; "{context}"));
-        }
-        let word = self
-            .outcomes
-            .map(|outcomes| outcomes(&entity.node))
-            .unwrap_or_default();
-        let word = text::truncate_end(&word, columns.outcome);
-        let word_width = text::width(&word);
-        let gap = width.saturating_sub(used + word_width);
-        spans.push(Span::raw(" ".repeat(gap)));
-        spans.push(span!(dim; "{word}"));
-        selection::row(spans, cursor, self.theme)
-    }
-}
-
-impl SearchBody<'_> {
-    /// The contents scope: scan status, results, and the key hints.
-    fn render_contents(&self, area: Rect, buf: &mut Buffer) {
-        use crate::tui::keybindings::overlay::SEARCH_CONTENT_KEYS;
-        use tuikit::keys::footer;
-        let width = area.width as usize;
-        let empty = ContentView::default();
-        let view = self.content.unwrap_or(&empty);
-
-        let options = self.state.options_cursor();
-        let hints = match options {
-            Some(_) => footer(crate::tui::keybindings::overlay::SEARCH_OPTION_KEYS),
-            None => footer(SEARCH_CONTENT_KEYS),
-        };
-        let hint_rows = self.render_footer(area, buf, &hints);
-        let hint_top = area.y + area.height - hint_rows;
-
-        // Status row: what is searched and how far the scan has got.
-        let status = text::truncate_end(&self.status_text(view), width);
-        let status_rect = Rect {
-            x: area.x,
-            y: area.y.saturating_add(1),
-            width: area.width,
-            height: 1,
-        };
-        Paragraph::new(line![span!(self.theme.muted; "{status}")]).render(status_rect, buf);
-
-        let list_top = area.y.saturating_add(2);
-        let list_height = hint_top.saturating_sub(list_top) as usize;
-        let list_area = Rect {
-            x: area.x,
-            y: list_top,
-            width: area.width,
-            height: u16::try_from(list_height).unwrap_or(0),
-        };
-        if let Some(at) = options {
-            self.render_options(list_area, buf, at);
-            return;
-        }
-        if view.rows.is_empty() {
-            let label = if let Some(reason) = view.unavailable {
-                reason
-            } else if view.empty_scope {
-                "(this view lists no sessions or muxes; Tab searches all of them)"
-            } else if self.state.content_text().is_empty() {
-                "(type to search what was said)"
-            } else if view.done && view.with_panes {
-                "(no sessions or panes match)"
-            } else if view.done {
-                "(no sessions match)"
-            } else {
-                "(searching…)"
-            };
-            let label = text::truncate_end(label, width);
-            Paragraph::new(line![span!(self.theme.muted; "{label}")]).render(list_area, buf);
-            return;
-        }
-        let cursor = self.state.cursor();
-        let window = ScrollWindow::new(list_height, view.rows.len()).following(cursor..cursor + 1);
-        // Leave a blank cell before the frame.
-        let columns = content_columns(width.saturating_sub(1), chip::width(self.theme));
-        let lines: Vec<Line<'static>> = window
-            .visible()
-            .map(|idx| {
-                content_row_line(
-                    &view.rows[idx],
-                    idx == self.state.cursor(),
-                    &columns,
-                    self.theme,
-                )
-            })
-            .collect();
-        Paragraph::new(lines).render(list_area, buf);
-    }
-
-    /// The options pane: what a search looks in. Changing one searches
-    /// again.
-    fn render_options(&self, area: Rect, buf: &mut Buffer, at: usize) {
-        let kinds = self.state.kinds();
-        let on = [kinds.tools, kinds.thinking, self.state.panes()];
-        let lines: Vec<Line<'static>> = SEARCH_OPTIONS
-            .iter()
-            .zip(on)
-            .enumerate()
-            .map(|(i, (name, on))| {
-                let boxed = if on { "[x]" } else { "[ ]" };
-                selection::row(
-                    [Span::raw(format!("{boxed} {name}"))],
-                    Cursor::of(i == at, true),
-                    self.theme,
-                )
-            })
-            .collect();
-        Paragraph::new(lines).render(area, buf);
-    }
-
-    /// The key hints, wrapped to the modal and drawn on its last rows.
-    /// Returns how many rows they took.
-    fn render_footer(&self, area: Rect, buf: &mut Buffer, hints: &str) -> u16 {
-        let separator = tuikit::keys::HINT_SEPARATOR;
-        let lines: Vec<String> = text::wrap_at(hints, separator, area.width as usize)
-            .into_iter()
-            .map(|row| row.trim_end().to_string())
-            .collect();
-        let rows = lines
-            .len()
-            .min(4)
-            .min(area.height.saturating_sub(3) as usize);
-        let rows = u16::try_from(rows).unwrap_or(0);
-        let top = area.y + area.height - rows;
-        for (i, text) in lines.iter().take(usize::from(rows)).enumerate() {
-            let rect = Rect {
-                x: area.x,
-                y: top + u16::try_from(i).unwrap_or(0),
-                width: area.width,
-                height: 1,
-            };
-            Paragraph::new(line![span!(self.theme.muted; "{text}")]).render(rect, buf);
-        }
-        rows
-    }
-
-    fn status_text(&self, view: &ContentView) -> String {
-        let kinds = self.state.kinds();
-        let mut what = vec!["messages"];
-        if kinds.tools {
-            what.push("tools");
-        }
-        if kinds.thinking {
-            what.push("thinking");
-        }
-        let n = view.rows.len();
-        let mut text = format!(
-            "{n} {} · {}",
-            if n == 1 { "result" } else { "results" },
-            what.join(" + ")
-        );
-        if view.total > 0 {
-            let noun = if view.with_panes {
-                "sessions and panes"
-            } else if view.total == 1 {
-                "session"
-            } else {
-                "sessions"
-            };
-            if view.done {
-                text.push_str(&format!(" · {} {noun} searched", view.total));
-            } else {
-                text.push_str(&format!(" · {}/{} {noun}", view.scanned, view.total));
-            }
-            if view.skipped > 0 {
-                text.push_str(&format!(" · {} skipped", view.skipped));
-            }
-        }
-        text
-    }
-}
-
-/// The widths of a content result's cells, as the hit plan lays them
-/// out.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ContentColumns {
-    /// The row's width, the cursor gutter included.
-    pub inner: usize,
-    /// `session` or `pane`; 0 when dropped.
-    pub source: usize,
-    /// The harness chip or pane command; 0 when dropped.
-    pub chip: usize,
-    pub label: usize,
-    /// The hit count or turn; at least a few cells.
-    pub tag: usize,
-    /// The age; 0 when dropped.
-    pub age: usize,
-    layout: ColumnLayout,
-}
-
-/// The source word's width: the longer of `session` and `pane`.
-const SOURCE_WIDTH: usize = 7;
-/// The age's width: `999d` at most.
-const AGE_WIDTH: usize = 4;
-/// A snippet narrower than this is not worth showing, so cells give way
-/// to it.
-const MIN_SNIPPET: usize = 20;
-/// The hit count's or the position's width, by the row's width.
-const TAG_STEPS: &[(usize, usize)] = &[(100, 22), (78, 20), (0, 14)];
-/// Characters a one-line snippet drops: Markdown code ticks only add
-/// noise to a preview.
-pub(crate) const MARKDOWN_TICKS: &[char] = &['`'];
-
-/// Where each cell of a content result sits in [`hit_plan`].
-const SOURCE: usize = 0;
-const CHIP: usize = 1;
-const LABEL: usize = 2;
-const TAG: usize = 3;
-const AGE: usize = 4;
-
-impl ContentColumns {
-    /// Cells the snippet gets: what is left after the other cells, their
-    /// two-cell cursor mark, and the gaps between them.
-    fn snippet(&self) -> usize {
-        self.layout.fill()
-    }
-}
-
-/// The column plan of a content result, shared out over the row with its
-/// cursor gutter: where it was found, the harness chip or pane command
-/// (`chip` cells, a harness chip's footprint from the theme), the label
-/// (a fifth of the row, 12 to 32 cells), the hit count or position (by
-/// the row's width), the age, and the snippet, which keeps
-/// [`MIN_SNIPPET`] cells: the chip gives way first, then the source word,
-/// then the age, and the label narrows last, to 8 cells.
-pub(crate) fn hit_plan(chip: usize) -> ColumnPlan {
-    ColumnPlan::new([
-        Column::fixed(SOURCE_WIDTH).gap(1).drops(1),
-        Column::fixed(chip).gap(1).drops(0),
-        Column::share(1, 5).within(12, 32).gap(2).shrinks(3, 8),
-        Column::steps(TAG_STEPS).gap(2),
-        Column::fixed(AGE_WIDTH).gap(1).drops(2).end(),
-        Column::fill(MIN_SNIPPET),
-    ])
-    .lead(selection::GUTTER_WIDTH)
-}
-
-/// The content result's cells in a row `inner` cells wide, the cursor
-/// gutter included, with a chip `chip` cells wide: [`hit_plan`] laid out.
-pub(crate) fn content_columns(inner: usize, chip: usize) -> ContentColumns {
-    let layout = hit_plan(chip).layout(inner);
-    ContentColumns {
-        inner,
-        source: layout.width(SOURCE),
-        chip: layout.width(CHIP),
-        label: layout.width(LABEL),
-        tag: layout.width(TAG),
-        age: layout.width(AGE),
-        layout,
-    }
-}
-
-/// One contents result: cursor mark, where it was found, harness chip or
-/// pane command, label, hit count or position, age, and the snippet with
-/// the match marked.
-fn content_row_line(
-    row: &ContentRow,
-    is_cursor: bool,
-    columns: &ContentColumns,
-    theme: &Theme,
-) -> Line<'static> {
-    use crate::tui::widgets::badge::harness_badge;
-
-    let layout = &columns.layout;
-    let dim = Style::default().add_modifier(theme.muted);
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    if let Some(cell) = layout.fit(SOURCE, row.target.source_word()) {
-        spans.push(Span::styled(cell, dim));
-    }
-    if layout.is_shown(CHIP) {
-        match row.target {
-            ContentTarget::Session { .. } => {
-                spans.push(harness_badge(&row.chip, theme));
-                spans.push(Span::raw(" ".repeat(layout.gap(CHIP))));
-            }
-            ContentTarget::Pane { .. } => {
-                if let Some(cell) = layout.fit(CHIP, &row.chip) {
-                    spans.push(Span::styled(cell, dim));
-                }
+            Palettes::Content(palette) => {
+                let empty = ContentView::default();
+                let view = content.unwrap_or(&empty);
+                palette.set_rows(view.rows.clone());
+                palette.set_status(Some(status_text(view, kinds)));
+                let note = content_note(view, palette.query());
+                palette.set_empty_note(note);
+                palette.set_no_match_note(note);
+                palette.draw_with(area, buf, theme, |row, cells| {
+                    content_cells(row, cells.width, theme)
+                });
             }
         }
     }
-    spans.push(Span::raw(layout.fit(LABEL, &row.label).unwrap_or_default()));
-    let tag = match &row.turn {
-        Some(turn) => turn.clone(),
-        None => format!(
-            "{} {}",
-            row.hits,
-            if row.hits == 1 { "hit" } else { "hits" }
-        ),
-    };
-    spans.push(Span::styled(layout.fit(TAG, &tag).unwrap_or_default(), dim));
-    if let Some(cell) = layout.fit(AGE, &row.age) {
-        spans.push(Span::styled(cell, dim));
+}
+
+/// The contents scope's status row: how many results, what is searched,
+/// and how far the scan has got.
+fn status_text(view: &ContentView, kinds: ContentKinds) -> String {
+    let mut what = vec!["messages"];
+    if kinds.tools {
+        what.push("tools");
     }
-    let budget = columns.snippet().max(8);
-    let snippet = text::fit_snippet(
-        &row.snippet,
-        row.highlight.clone().unwrap_or(0..0),
-        budget,
-        MARKDOWN_TICKS,
+    if kinds.thinking {
+        what.push("thinking");
+    }
+    let n = view.rows.len();
+    let mut text = format!(
+        "{n} {} · {}",
+        if n == 1 { "result" } else { "results" },
+        what.join(" + ")
     );
-    let match_style = theme.match_style();
-    spans.extend(text::paint(
-        &[Span::styled(snippet.text, dim)],
-        snippet.highlight,
-        |_| match_style,
-    ));
-    selection::row(spans, Cursor::of(is_cursor, true), theme)
-}
-
-/// Render a single match row with the cursor gutter, kind glyph, label,
-/// and a snippet of the haystack around the matched range. Off the
-/// cursor row's highlight the snippet's context recedes so the matched
-/// portion pops; the matched bytes are drawn in the match style on every
-/// row.
-fn build_match_line(
-    label: String,
-    item: Option<&SearchItem<'_>>,
-    m: &SearchMatch,
-    is_cursor: bool,
-    width: usize,
-    theme: &Theme,
-) -> Line<'static> {
-    let dim = Style::default().add_modifier(theme.muted);
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    // Prepend a kind glyph so operators scan
-    // results by symbol (`● session`, `▣ mux`, `⇄ pr`, …) instead
-    // of relying on the textual `kind:` prefix some labels carry.
-    // RowIds without a NodeKind mapping (Pin, Synthetic) get two
-    // spaces so the label column stays aligned across the result
-    // list — operators don't see the label jiggle row by row.
-    spans.push(search_kind_glyph_span(&m.id, theme));
-    spans.push(Span::raw(label.clone()));
-
-    // If we can show a snippet (haystack present and either
-    // distinct from the label or carrying a match range), append
-    // `· …<context>…` after the label so the operator sees *why*
-    // the row matched.
-    let haystack = item.map_or("", |i| i.haystack.as_ref());
-    let matched_range = m.matched_range.clone().unwrap_or(0..0);
-    let snippet_distinct = haystack != label;
-    if !haystack.is_empty() && snippet_distinct {
-        spans.push(span!(dim; "  · "));
-        // The snippet takes the rest of the row but the blank cell before
-        // the frame that entity rows leave, so its cut ends in `…`
-        // instead of at the frame; a long label leaves it a few cells.
-        let used = selection::GUTTER_WIDTH + text::spans_width(&spans);
-        let budget = width.saturating_sub(used + 1).max(8);
-        let snippet = text::fit_snippet(haystack, matched_range, budget, &[]);
-        let match_style = theme.match_style();
-        spans.extend(text::paint(
-            &[Span::styled(snippet.text, dim)],
-            snippet.highlight,
-            |_| match_style,
-        ));
-    }
-
-    selection::row(spans, Cursor::of(is_cursor, true), theme)
-}
-
-/// Resolve the NodeKind a search result row represents, when there
-/// is one. `RowId::Pin` and `RowId::Synthetic` are not graph nodes
-/// and return `None`; callers render two spaces in the glyph slot
-/// to keep label-column alignment across the result list.
-fn search_row_node_kind(id: &RowId) -> Option<NodeKind> {
-    match id {
-        RowId::Group(node_id) | RowId::AgentSession(node_id) | RowId::MuxSession(node_id) => {
-            Some(NodeKind::from(node_id))
-        }
-        RowId::Hit { session, .. } => Some(NodeKind::from(session)),
-        RowId::Pane { mux, .. } | RowId::PaneHit { mux, .. } => Some(NodeKind::from(mux)),
-        RowId::Pr(_) => Some(NodeKind::ForgePr),
-        RowId::Pin { .. } => Some(NodeKind::Pin),
-        RowId::Nested { node, .. } => Some(NodeKind::from(node)),
-        RowId::History { .. } | RowId::Remote(_) | RowId::Bucket(_) | RowId::Synthetic(_) => None,
-    }
-}
-
-/// Build the leading glyph span for a search result row. Two cells
-/// wide: `<glyph> ` for graph-backed rows; `  ` for Pin / Synthetic
-/// rows that don't carry a NodeKind. The glyph keeps its kind color on
-/// the cursor row too, where the row's highlight covers it, so the
-/// symbol's identity stays legible.
-fn search_kind_glyph_span(id: &RowId, theme: &Theme) -> Span<'static> {
-    let Some(kind) = search_row_node_kind(id) else {
-        return Span::raw("  ");
+    let noun = if view.with_panes {
+        "sessions and panes"
+    } else if view.total == 1 {
+        "session"
+    } else {
+        "sessions"
     };
-    search_kind_glyph_span_for(kind, theme)
+    let progress = Progress {
+        scanned: view.scanned,
+        total: view.total,
+        skipped: view.skipped,
+        done: view.done,
+    };
+    if let Some(progress) = progress.status(noun) {
+        text.push_str(" · ");
+        text.push_str(&progress);
+    }
+    text
 }
 
-/// The glyph span for a known kind.
-fn search_kind_glyph_span_for(kind: NodeKind, theme: &Theme) -> Span<'static> {
-    // A PR's glyph takes the `pr_open` hue: search results carry no
-    // PR state.
-    let style = node_kind_style(kind, theme);
-    span!(Style::default().fg(style.color); "{} ", style.glyph)
+/// What the contents scope says while it lists nothing, for the query
+/// `query`.
+fn content_note(view: &ContentView, query: &str) -> &'static str {
+    if let Some(reason) = view.unavailable {
+        reason
+    } else if view.empty_scope {
+        "(this view lists no sessions or muxes; Tab searches all of them)"
+    } else if query.trim().is_empty() {
+        "(type to search what was said)"
+    } else if view.done && view.with_panes {
+        "(no sessions or panes match)"
+    } else if view.done {
+        "(no sessions match)"
+    } else {
+        "(searching…)"
+    }
 }
 
 /// What the search overlay reads on each key: the current visible-row
@@ -1299,13 +899,8 @@ pub struct SearchContext<'a> {
 impl SearchOverlayState {
     /// One key with what the overlay reads (`ctx`): edit the query, move,
     /// pick a row, an entity, or a hit, regroup, keep the search, or close.
-    pub fn handle_in(
-        &mut self,
-        ctx: SearchContext<'_>,
-        key: KeyEvent,
-    ) -> tuikit::overlay::Outcome<crate::tui::Msg> {
-        use tuikit::overlay::Outcome;
-        self.set_content_len(ctx.content.len());
+    pub fn handle_in(&mut self, ctx: SearchContext<'_>, key: KeyEvent) -> Outcome<crate::tui::Msg> {
+        self.set_content(ctx.content);
         if let Some(entities) = ctx.entities {
             self.set_entities(entities);
         }
@@ -1343,7 +938,7 @@ impl SearchOverlayState {
                 text: self.content_text(),
                 kinds: self.kinds,
                 group: self.group,
-                reach: self.reach,
+                reach: self.reach(),
                 show_results: false,
             }),
             SearchOutcome::Regroup(group) => Outcome::Stay(crate::tui::Msg::SetContentGroup(group)),
@@ -1351,7 +946,7 @@ impl SearchOverlayState {
                 text: self.content_text(),
                 kinds: self.kinds,
                 group: self.group,
-                reach: self.reach,
+                reach: self.reach(),
             }),
         }
     }

@@ -1,3 +1,4 @@
+use super::rows::*;
 use super::*;
 use crate::model::AgentSessionId;
 use crate::tui::Msg;
@@ -405,7 +406,8 @@ fn render(state: &SearchOverlayState, view: &ContentView, width: u16, height: u1
     let theme = Theme::default();
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
-    SearchOverlayWidget::new(state, &[], &theme)
+    let mut state = state.clone();
+    SearchOverlayWidget::new(&mut state, &[], &theme)
         .with_content(view)
         .render(area, &mut buf);
     (0..height)
@@ -569,11 +571,11 @@ fn the_chip_column_follows_the_theme_badge_width() {
         theme.badge_width = badge_width;
         let chip = tuikit::chip::width(&theme);
         assert_eq!(content_columns(200, chip).chip, badge_width + 2);
-        let state = contents_overlay("quokka");
+        let mut state = contents_overlay("quokka");
         let content = view(vec![row("aaaa1111", 3), pane_row(4)], true);
         let area = Rect::new(0, 0, 200, 20);
         let mut buf = Buffer::empty(area);
-        SearchOverlayWidget::new(&state, &[], &theme)
+        SearchOverlayWidget::new(&mut state, &[], &theme)
             .with_content(&content)
             .render(area, &mut buf);
         let lines: Vec<String> = (0..20)
@@ -698,4 +700,29 @@ fn the_options_pane_lists_what_a_search_looks_in() {
     assert!(text.contains("Esc back"), "{text}");
     assert!(!text.contains("session aaaa1111"), "the results give way");
     insta::assert_snapshot!("search_overlay_options_pane", text);
+}
+
+#[test]
+fn an_overflowing_list_keeps_its_columns_and_shows_the_scrollbar() {
+    // A scan streams results in: once they overflow the modal, the bar
+    // takes the column the rows always leave, so no column moves.
+    let state = contents_overlay("quokka");
+    let few = render(
+        &state,
+        &view(vec![row("aaaa1111", 3), row("bbbb2222", 5)], true),
+        100,
+        24,
+    );
+    let mut rows = vec![row("aaaa1111", 3)];
+    rows.extend((0..39).map(|n| row(&format!("{n:08}"), n)));
+    let many = render(&state, &view(rows, true), 100, 24);
+    let first = |text: &str| {
+        text.lines()
+            .find(|line| line.contains("session aaaa1111"))
+            .map(str::to_string)
+            .expect("the first result")
+    };
+    assert_eq!(first(&few), first(&many));
+    assert!(!few.contains('█'), "{few}");
+    assert!(many.contains('█') && many.contains('▼'), "{many}");
 }
