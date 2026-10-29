@@ -136,7 +136,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0024](0024-tui-runtime-and-architecture.md) | TUI Runtime, App Architecture, And Dependency Policy | Accepted |
 | [0025](0025-tui-preview-ansi-rendering-dependency.md) | TUI Preview ANSI Rendering Dependency | Accepted (amended by 0181) |
 | [0030](0030-tui-text-input-primitive.md) | TUI Text-Input Primitive | Accepted (narrowed by 0165, 0166) |
-| [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149, 0173, 0176) |
+| [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149, 0173, 0176, 0182) |
 | [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted (amended by 0153, 0159) |
 | [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Superseded by 0074 |
 | [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
@@ -178,7 +178,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted (amended by 0163, 0180) |
 | [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted (amended by 0168, 0179, 0181) |
 | [0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md) | Text Is Measured, Cut, And Wrapped In Terminal Cells By One Module | Accepted |
-| [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161, 0177) |
+| [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161, 0177, 0182) |
 | [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted |
 | [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted (amended by 0166, 0174) |
 | [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted |
@@ -204,6 +204,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted |
 | [0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) | The Transcript Viewer Is A Pager Content, And The Viewer Boundary Keeps Only The Transcript | Accepted |
 | [0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md) | Rich Text Is A Framework Feature, And The Preview Scrolls In A Region Counted From An Anchor | Accepted |
+| [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted |
 
 ## Transcript viewer
 

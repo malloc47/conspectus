@@ -20,7 +20,11 @@ the multi-select primitive named under the module layout below is gone.
 Amended by [ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md): the Controls
 overlay is the framework's `SettingsPanel`, its rows built from the App on
 every key and frame, and its editors open as steps over it whose answers
-step back to it.
+step back to it. Amended by
+[ADR 0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md):
+the per-view expanded set, selection, and left-panel scroll are one
+framework `TreeState`, saved and restored whole with the position the
+selection showed at.
 
 ## Context
 

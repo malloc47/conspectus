@@ -15,7 +15,11 @@ window it drew as it draws, so the viewport report carries the panes'
 windows only. Amended by
 [ADR 0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md):
 the framework's pager keeps a window with a sticky end, and the pane
-viewer is one.
+viewer is one. Amended by
+[ADR 0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md):
+the tree's window is kept in the framework's `TreeState`, which
+`TreeView` draws from and returns it to, and page keys move by it
+without carrying a height.
 
 ## Context
 
