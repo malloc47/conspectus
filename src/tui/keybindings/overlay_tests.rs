@@ -56,7 +56,7 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("NEW_MUX_KEYS", problems(NEW_MUX_KEYS)),
         ("MUX_LAUNCH_KEYS", problems(MUX_LAUNCH_KEYS)),
         ("PIN_EDIT_KEYS", problems(PIN_EDIT_KEYS)),
-        ("PANE_VIEWER_KEYS", problems(PANE_VIEWER_KEYS)),
+        ("PANE_KEYS", problems(PANE_KEYS)),
         ("VIEWER_KEYS", problems(VIEWER_KEYS)),
         ("VIEWER_FIND_KEYS", problems(VIEWER_FIND_KEYS)),
     ]
@@ -65,13 +65,14 @@ fn registry() -> Vec<(&'static str, Problems)> {
 /// Tables that are a part of another table or of a field, not a whole
 /// overlay's, so they need not start with `Ctrl-C`: the form's option
 /// rows are included after `FORM_KEYS`, the pager's scroll rows after
-/// `PAGER_KEYS` and `PAGER_HELP_KEYS` start with it, the path field's one
-/// row is consulted by a form after the form's own table, and the line
-/// editor's keys are every text field's, consulted after its overlay's
-/// table.
+/// `PAGER_KEYS` and `PAGER_HELP_KEYS` start with it, the pane viewer's own
+/// keys after the pager's `READER_KEYS`, the path field's one row is
+/// consulted by a form after the form's own table, and the line editor's
+/// keys are every text field's, consulted after its overlay's table.
 const FRAGMENTS: &[&str] = &[
     "FORM_OPTION_KEYS",
     "PAGER_SCROLL_KEYS",
+    "PANE_KEYS",
     "LINE_EDIT_KEYS",
     "PATH_FIELD_KEYS",
 ];
@@ -322,7 +323,8 @@ fn every_list_moves_with_ctrl_n_and_ctrl_p() {
     );
     // The viewers are pagers with no cursor; Ctrl-N is not their `n`.
     assert_eq!(resolve(VIEWER_KEYS, ctrl_n), None);
-    assert_eq!(resolve(PANE_VIEWER_KEYS, ctrl_n), None);
+    assert_eq!(resolve(READER_KEYS, ctrl_n), None);
+    assert_eq!(resolve(PANE_KEYS, ctrl_n), None);
 }
 
 #[test]

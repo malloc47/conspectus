@@ -35,9 +35,11 @@ pub(super) fn open_viewer(app: &mut App) {
     app.open_viewer_modal(crate::viewer::state::ViewerState::new(document));
 }
 
-pub(super) fn open_pane_viewer(app: &mut App) {
+/// The pane the pane viewer cases read: `shell`'s first pane, running
+/// `bash`.
+pub(super) fn pane() -> crate::content_search::PaneRef {
     use crate::content_search::{MuxRef, PaneRef};
-    let pane = PaneRef {
+    PaneRef {
         mux: MuxRef {
             backend: "tmux".into(),
             socket: None,
@@ -47,11 +49,13 @@ pub(super) fn open_pane_viewer(app: &mut App) {
         window_index: "0".into(),
         pane_index: "0".into(),
         command: Some("bash".into()),
-    };
+    }
+}
+
+pub(super) fn open_pane_viewer(app: &mut App) {
+    let pane = pane();
     let lines = (1..=30).map(|n| format!("line {n} of output")).collect();
-    app.open_pane_viewer(crate::tui::widgets::pane_viewer::PaneViewerState::open(
-        pane, lines, 4, "",
-    ));
+    app.open_pane_viewer(crate::tui::widgets::pane_viewer::open(pane, lines, 4, ""));
 }
 
 /// Every modal, built: the layout suite's framed modals and the two

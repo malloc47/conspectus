@@ -309,8 +309,14 @@ fn a_pane_hit_opens_the_pane_viewer_on_the_recorded_scrollback() {
     run_effects_opening_viewers(&mut app, vec![effect], rebase, &mut notes);
     assert!(notes.is_empty(), "{notes:?}");
     let viewer = app.pane_viewer().expect("the pane viewer opens");
-    assert!(viewer.lines.iter().any(|line| line == "the match"));
-    assert_eq!(viewer.matches.len(), 1);
+    assert!(
+        viewer
+            .content()
+            .lines
+            .iter()
+            .any(|line| line == "the match")
+    );
+    assert_eq!(viewer.find().matches().len(), 1);
 }
 
 #[test]

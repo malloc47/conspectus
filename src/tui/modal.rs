@@ -140,8 +140,10 @@ modals! {
     /// reducer says so.
     Viewer(crate::viewer::state::ViewerState),
     /// Full-screen viewer over a mux pane's scrollback, opened from a pane
-    /// search result; `a` attaches. Boxed to keep [`Modal`] small.
-    PaneViewer(Box<crate::tui::widgets::pane_viewer::PaneViewerState>),
+    /// search result: the framework's pager over the scrollback, whose `a`
+    /// asks to attach with [`Msg::AttachPane`]. Boxed to keep [`Modal`]
+    /// small.
+    PaneViewer(Box<crate::tui::widgets::pane_viewer::PaneViewer>),
     /// `w` worktree action menu: the framework's action menu over the
     /// worktree verbs for the selection, whose question entries open
     /// their branch prompt, confirmation, or choice as a step over it.

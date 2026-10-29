@@ -936,23 +936,21 @@ impl App {
     }
 
     /// The pane scrollback viewer, when it is on top.
-    pub fn pane_viewer(&self) -> Option<&crate::tui::widgets::pane_viewer::PaneViewerState> {
+    pub fn pane_viewer(&self) -> Option<&crate::tui::widgets::pane_viewer::PaneViewer> {
         match self.modal_stack.top()? {
             crate::tui::Modal::PaneViewer(state) => Some(state),
             _ => None,
         }
     }
 
-    pub fn pane_viewer_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::pane_viewer::PaneViewerState> {
+    pub fn pane_viewer_mut(&mut self) -> Option<&mut crate::tui::widgets::pane_viewer::PaneViewer> {
         match self.modal_stack.top_mut()? {
             crate::tui::Modal::PaneViewer(state) => Some(state),
             _ => None,
         }
     }
 
-    pub fn open_pane_viewer(&mut self, state: crate::tui::widgets::pane_viewer::PaneViewerState) {
+    pub fn open_pane_viewer(&mut self, state: crate::tui::widgets::pane_viewer::PaneViewer) {
         self.modal_stack
             .push(crate::tui::Modal::PaneViewer(Box::new(state)));
     }

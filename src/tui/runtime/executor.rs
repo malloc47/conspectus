@@ -388,7 +388,7 @@ pub(super) fn open_pane_scrollback(
     match tmux.pane_history(pane.mux.socket.as_deref(), &pane.pane_id) {
         Ok(TmuxCaptureOutcome::Captured(capture)) => {
             let scrollback = crate::content_search::panes::scrollback_lines(&capture.text);
-            app.open_pane_viewer(crate::tui::widgets::pane_viewer::PaneViewerState::open(
+            app.open_pane_viewer(crate::tui::widgets::pane_viewer::open(
                 pane.clone(),
                 scrollback.lines,
                 line,

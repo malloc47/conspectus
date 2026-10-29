@@ -203,7 +203,7 @@ fn open_viewer_find(app: &mut App) {
 
 fn open_pane_viewer_find(app: &mut App) {
     use crate::content_search::{MuxRef, PaneRef};
-    use crate::tui::widgets::pane_viewer::PaneViewerState;
+    use crate::tui::widgets::pane_viewer;
     let pane = PaneRef {
         mux: MuxRef {
             backend: "tmux".into(),
@@ -216,7 +216,7 @@ fn open_pane_viewer_find(app: &mut App) {
         command: Some("bash".into()),
     };
     let lines = (1..=10).map(|n| format!("output {n}")).collect();
-    app.open_pane_viewer(PaneViewerState::open(pane, lines, 1, ""));
+    app.open_pane_viewer(pane_viewer::open(pane, lines, 1, ""));
     send(app, press(KeyCode::Char('/')));
 }
 

@@ -7,10 +7,10 @@
 //! that were on screen. Every entry draws through the shared modal frame,
 //! which clears what it covers, or fills the screen. The rename and step
 //! prompts, the new mux form, the row, mux, and worktree menus, the
-//! dialogs, Clean up, the Controls panel and its editors, and the picker
-//! have no impl here: they are the framework's text prompt, form, action
-//! menu, dialog, checklist, settings panel, and palette, which implement
-//! the trait for any context.
+//! dialogs, Clean up, the Controls panel and its editors, the picker, and
+//! the pane viewer have no impl here: they are the framework's text
+//! prompt, form, action menu, dialog, checklist, settings panel, palette,
+//! and pager, which implement the trait for any context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
@@ -24,7 +24,6 @@ use crate::tui::widgets::{
     help::{HelpOutcome, HelpOverlayState, HelpOverlayWidget},
     messages::{MessagesOverlayState, MessagesWidget},
     mux_launch::MuxLaunchForm,
-    pane_viewer::{PaneViewerOutcome, PaneViewerState},
     pin_edit::PinEditForm,
     search::SearchOverlayState,
     value_modal::{ValueModalOutcome, ValueModalState, ValueModalWidget},
@@ -186,29 +185,6 @@ impl Overlay<Msg, App> for crate::viewer::state::ViewerState {
 
     fn takes_text(&self) -> bool {
         self.find.prompt.is_some()
-    }
-}
-
-impl Overlay<Msg, App> for PaneViewerState {
-    fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
-        match self.handle_key(key) {
-            PaneViewerOutcome::Continue => Outcome::Consumed,
-            PaneViewerOutcome::Close => Outcome::Close,
-            // Whether the pane's mux can be attached is the reducer's call.
-            PaneViewerOutcome::Attach => Outcome::Stay(Msg::AttachPane),
-        }
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        crate::tui::widgets::pane_viewer::draw(self, app.theme(), buf, area);
-    }
-
-    fn fills_screen(&self) -> bool {
-        true
-    }
-
-    fn takes_text(&self) -> bool {
-        self.prompt.is_some()
     }
 }
 

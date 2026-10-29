@@ -1838,7 +1838,7 @@ impl App {
                 let Some(viewer) = self.pane_viewer() else {
                     return effects;
                 };
-                let mux = crate::model::MuxSessionId::new(viewer.pane.mux.native_id());
+                let mux = crate::model::MuxSessionId::new(viewer.content().pane.mux.native_id());
                 match crate::tui::actions::attach_target_for_mux(self, &mux) {
                     Ok(target) => {
                         self.close_pane_viewer();
@@ -1848,8 +1848,9 @@ impl App {
                     }
                     Err(reason) => {
                         if let Some(viewer) = self.pane_viewer_mut() {
-                            viewer.note =
-                                Some(crate::tui::actions::attach_disabled_reason(&reason));
+                            viewer.set_note(Feedback::warning(
+                                crate::tui::actions::attach_disabled_reason(&reason),
+                            ));
                         }
                     }
                 }

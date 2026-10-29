@@ -21,16 +21,16 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use tuikit::keys::{
-    CHECKLIST_KEYS, Convention, DIALOG_KEYS, MENU_KEYS, PALETTE_KEYS, SETTINGS_KEYS,
-    TEXT_INPUT_KEYS,
+    CHECKLIST_KEYS, Convention, DIALOG_KEYS, FIND_KEYS, MENU_KEYS, PALETTE_KEYS, READER_KEYS,
+    SETTINGS_KEYS, TEXT_INPUT_KEYS,
 };
-use tuikit::testkit::conformance::{self, Case, Check, KeyTable, Registry, Rig, table};
+use tuikit::testkit::conformance::{self, Case, Check, KeyTable, Registry, Rig, part, table};
 
 use super::layout::{Open, app_with, builders};
 use super::registry::{open_pane_viewer, open_viewer};
 use super::*;
 use crate::tui::keybindings::overlay::{
-    HELP_KEYS, MESSAGES_KEYS, MODAL_CONVENTION, MUX_LAUNCH_KEYS, NEW_MUX_KEYS, PANE_VIEWER_KEYS,
+    HELP_KEYS, MESSAGES_KEYS, MODAL_CONVENTION, MUX_LAUNCH_KEYS, NEW_MUX_KEYS, PANE_KEYS,
     PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, VALUE_MODAL_KEYS, VIEWER_FIND_KEYS,
     VIEWER_KEYS,
 };
@@ -135,7 +135,12 @@ fn tables(modal: &str) -> Vec<KeyTable> {
         "ValueModal" => vec![table("VALUE_MODAL_KEYS", VALUE_MODAL_KEYS)],
         "Messages" => vec![table("MESSAGES_KEYS", MESSAGES_KEYS)],
         "Viewer" => vec![table("VIEWER_KEYS", VIEWER_KEYS)],
-        "PaneViewer" => vec![table("PANE_VIEWER_KEYS", PANE_VIEWER_KEYS)],
+        // The framework's pager, then the pane's own keys after it.
+        "PaneViewer" => vec![
+            table("READER_KEYS", READER_KEYS),
+            part("PANE_KEYS", PANE_KEYS),
+        ],
+        "PagerFind" => vec![table("FIND_KEYS", FIND_KEYS)],
         "ViewerFind" => vec![table("VIEWER_FIND_KEYS", VIEWER_FIND_KEYS)],
         // The worktree menu's steps are modals of their own: a prompt and
         // dialogs.
@@ -231,10 +236,16 @@ pub(super) fn registry() -> Registry<Host> {
             .keys(convention("Viewer"), tables("Viewer"))
             .keys(convention("ViewerFind"), tables("ViewerFind")),
     );
+    let pane_footer = {
+        let app = app_with(View::Pinned, open_pane_viewer);
+        app.pane_viewer().expect("the pane viewer opens").footer()
+    };
     registry.push(
         Case::new("PaneViewer", || app_with(View::Pinned, open_pane_viewer))
             .full_screen()
-            .keys(convention("PaneViewer"), tables("PaneViewer")),
+            .keys(convention("PaneViewer"), tables("PaneViewer"))
+            .keys(convention("ViewerFind"), tables("PagerFind"))
+            .footer(pane_footer),
     );
     registry
 }

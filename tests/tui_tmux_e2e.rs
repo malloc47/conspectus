@@ -1354,10 +1354,10 @@ fn the_pane_viewer_is_full_screen_and_a_attaches() {
     world.keys(&["Enter"]);
     wait_screen(
         &world,
-        "the full-screen viewer with an attach chip",
+        "the full-screen viewer with its attach key",
         |screen| {
             screen.contains("shell 0.0 scrollback")
-                && screen.contains("(a) attach")
+                && screen.contains("a attach")
                 && !screen.contains("search contents")
         },
     );

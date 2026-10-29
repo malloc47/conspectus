@@ -13,9 +13,9 @@ use tuikit::help::{HelpPage, HelpScroll};
 use tuikit::testkit::conformance::same_chrome;
 
 use crate::tui::Theme;
-use crate::tui::keybindings::overlay::{PANE_VIEWER_KEYS, VIEWER_KEYS};
+use crate::tui::keybindings::overlay::VIEWER_KEYS;
 use crate::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
-use crate::tui::widgets::viewer_help;
+use crate::tui::widgets::{pane_viewer, viewer_help};
 
 const SIZES: [(u16, u16); 4] = [(60, 20), (80, 24), (120, 40), (160, 50)];
 
@@ -34,10 +34,24 @@ fn page_at(page: &str, area: Rect, theme: &Theme, scroll: usize) -> Buffer {
             viewer_help::render(VIEWER_KEYS, area, &mut buf, theme, &scroll);
         }
         _ => {
-            viewer_help::render(PANE_VIEWER_KEYS, area, &mut buf, theme, &scroll);
+            pane_help(area, &mut buf, theme, scroll.offset() > 0);
         }
     }
     buf
+}
+
+/// The pane viewer's help page drawn over it, at the top or, with
+/// `at_end`, scrolled to its end; returns how far the page scrolled.
+fn pane_help(area: Rect, buf: &mut Buffer, theme: &Theme, at_end: bool) -> usize {
+    use tuikit::testkit::keys::typed;
+    let lines = (1..=30).map(|n| format!("output {n}")).collect();
+    let mut viewer = pane_viewer::open(super::registry::pane(), lines, 1, "");
+    viewer.handle_key(typed('?'));
+    if at_end {
+        viewer.handle_key(typed('G'));
+    }
+    viewer.draw(area, buf, theme);
+    viewer.help_scroll().map_or(0, HelpScroll::offset)
 }
 
 fn page(page: &str, area: Rect, theme: &Theme) -> Buffer {
@@ -187,12 +201,11 @@ fn the_viewer_helps_scroll_where_the_keymap_help_does() {
         let max_scroll = |area: Rect| {
             let mut buf = Buffer::empty(area);
             let scroll = HelpScroll::new();
-            let window = if table == 0 {
-                viewer_help::render(VIEWER_KEYS, area, &mut buf, &theme, &scroll)
+            if table == 0 {
+                viewer_help::render(VIEWER_KEYS, area, &mut buf, &theme, &scroll).last_offset()
             } else {
-                viewer_help::render(PANE_VIEWER_KEYS, area, &mut buf, &theme, &scroll)
-            };
-            window.last_offset()
+                pane_help(area, &mut buf, &theme, true)
+            }
         };
         assert!(max_scroll(Rect::new(0, 0, 60, 12)) > 0);
         assert_eq!(max_scroll(Rect::new(0, 0, 100, 60)), 0);

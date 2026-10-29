@@ -322,7 +322,7 @@ fn paging_the_transcript_viewers_help_moves_by_the_rows_it_shows() {
 #[test]
 fn paging_the_pane_viewers_help_moves_by_the_rows_it_shows() {
     use crate::content_search::{MuxRef, PaneRef};
-    use crate::tui::widgets::pane_viewer::PaneViewerState;
+    use crate::tui::widgets::pane_viewer;
     for size in VIEWER_HELP_SIZES {
         let label = describe("pane viewer help", size);
         let mut app = app_in(View::Pinned);
@@ -338,7 +338,7 @@ fn paging_the_pane_viewers_help_moves_by_the_rows_it_shows() {
             command: Some("bash".into()),
         };
         let lines = (1..=100).map(|n| format!("output {n}")).collect();
-        app.open_pane_viewer(PaneViewerState::open(pane, lines, 1, ""));
+        app.open_pane_viewer(pane_viewer::open(pane, lines, 1, ""));
         press(&mut app, size, KeyCode::Char('?'));
         let rows = scrolling_rows(&mut app, size, KeyCode::Char('j'));
         press(&mut app, size, KeyCode::Char('g'));
