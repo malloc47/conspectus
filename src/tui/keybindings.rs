@@ -5,9 +5,9 @@
 //! footers all consume the same source-of-truth list. A drift test
 //! asserts every entry's `help_text` appears in
 //! `crate::tui::widgets::help::keymap_sections`. Keys the table
-//! doesn't hold stay as match arms in `keymap::translate`;
-//! `PageUp` / `PageDown` must, because they carry the viewport
-//! height.
+//! doesn't hold stay as match arms in `keymap::translate`
+//! (`PageUp` / `PageDown`, which the help page documents as one
+//! pair, among them).
 //!
 //! Actions with runtime parameters (`SwitchView(v)`,
 //! `CycleView(dir)`) are represented as closures returning the

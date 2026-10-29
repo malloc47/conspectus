@@ -476,7 +476,7 @@ impl App {
             .tree
             .rows
             .iter()
-            .filter(|row| self.expanded.contains(&row.id))
+            .filter(|row| self.tree_state.is_expanded(&row.id))
             .filter_map(|row| match &row.kind {
                 crate::tui::rows::RowKind::AgentSession(session) => Some((
                     session.session.harness_key.clone(),
@@ -984,8 +984,8 @@ impl App {
             }
             Msg::OpenSelectedPane => {
                 let selected = self
-                    .selection
-                    .as_ref()
+                    .tree_state
+                    .selected()
                     .and_then(|id| self.tree.rows.iter().find(|row| &row.id == id));
                 let (pane, line) = match selected.map(|row| &row.kind) {
                     Some(RowKind::Pane(row)) => (row.pane.clone(), row.line),
@@ -1359,7 +1359,7 @@ impl App {
             .tree
             .rows
             .iter()
-            .filter(|row| row.expandable && is_session(row) && self.expanded.contains(&row.id))
+            .filter(|row| row.expandable && is_session(row) && self.tree_state.is_expanded(&row.id))
             .count();
         for row in &self.tree.rows {
             if !row.expandable || !self.search_auto_expanded.insert(row.id.clone()) {
@@ -1373,7 +1373,7 @@ impl App {
                 }
                 open_sessions += 1;
             }
-            self.expanded.insert(row.id.clone());
+            self.tree_state.expand_id(row.id.clone());
         }
         self.queue_details();
     }

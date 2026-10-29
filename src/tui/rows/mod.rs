@@ -140,6 +140,24 @@ pub struct Row {
     pub kind: RowKind,
 }
 
+/// The framework's tree keeps its selection and folds by `RowId`, and
+/// reads a row's depth and whether it has children from here.
+impl tuikit::tree::TreeRow for Row {
+    type Id = RowId;
+
+    fn id(&self) -> &RowId {
+        &self.id
+    }
+
+    fn depth(&self) -> u16 {
+        u16::from(self.depth)
+    }
+
+    fn expandable(&self) -> bool {
+        self.expandable
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 // AgentSessionRow carries a handful of optional display strings and
 // is the only variant the renderer hot-loops over. Boxing would push

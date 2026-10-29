@@ -1,4 +1,9 @@
 //! Row-tree state: loading data, selection movement, and expansion.
+//!
+//! The selection, the expanded rows, and the window the tree drew are the
+//! framework's [`TreeState`]; this file loads rebuilt rows into it, keeps
+//! the selection across the rebuild, and points the right pane at the row
+//! a move lands on.
 
 use super::*;
 
@@ -12,46 +17,18 @@ impl App {
     ) {
         self.refresh_failure = None;
         self.loaded_at_epoch = Some(loaded_at_epoch);
-        let prev_selection = self.selection.take();
-        let is_first_load = prev_selection.is_none();
-        let prev_visible_index = prev_selection
-            .as_ref()
-            .and_then(|id| self.visible_rows().iter().position(|r| &r.id == id));
-        if is_first_load {
-            self.expanded = initial_expanded_rows(&tree);
+        let before = self.tree_state.begin_rebuild(&self.tree.rows);
+        if before.selected().is_none() {
+            self.tree_state.set_expanded(initial_expanded_rows(&tree));
         }
         self.handle = Some(snapshot);
         self.tree = tree;
         self.auto_expand_search_rows();
-
-        let visible = self.visible_rows_owned();
-        if visible.is_empty() {
-            self.selection = None;
-            self.last_visible_index = None;
-        } else if let Some(prev) = prev_selection.as_ref()
-            && let Some(pos) = self.position_closest_to(&visible, prev, prev_visible_index)
-        {
-            self.selection = Some(visible[pos].clone());
-            self.last_visible_index = Some(pos);
-        } else if let Some(prev_index) = prev_visible_index {
-            let clamped = prev_index.min(visible.len() - 1);
-            self.selection = Some(visible[clamped].clone());
-            self.last_visible_index = Some(clamped);
-        } else if is_first_load
-            && let Some(hint) = initial_selection_hint
-            && let Some(pos) = visible.iter().position(|id| id == &hint)
-        {
-            // First-load launch-context hint: pre-select the row
-            // the operator's cwd points at instead of the leading
-            // tree row. Only honored on the first SetData so later
-            // refreshes don't fight the operator's manual
-            // selection.
-            self.selection = Some(hint);
-            self.last_visible_index = Some(pos);
-        } else {
-            self.selection = Some(visible[0].clone());
-            self.last_visible_index = Some(0);
-        }
+        // A first load opens on the row the launch context's hint names
+        // instead of the leading tree row. Later refreshes keep the
+        // operator's selection, so the hint never fights it.
+        self.tree_state
+            .finish_rebuild(before, &self.tree.rows, initial_selection_hint.as_ref());
         self.recompute_explorer();
     }
 
@@ -87,165 +64,29 @@ impl App {
     }
 
     pub(super) fn set_tree(&mut self, tree: RowTree) {
-        let prev_selection = self.selection.take();
-        let prev_visible_index = prev_selection
-            .as_ref()
-            .and_then(|id| self.visible_rows().iter().position(|r| &r.id == id));
+        let before = self.tree_state.begin_rebuild(&self.tree.rows);
         self.tree = tree;
-
-        let visible = self.visible_rows_owned();
-        if visible.is_empty() {
-            self.selection = None;
-            self.last_visible_index = None;
-        } else if let Some(prev) = prev_selection.as_ref()
-            && let Some(pos) = self.position_closest_to(&visible, prev, prev_visible_index)
-        {
-            self.selection = Some(visible[pos].clone());
-            self.last_visible_index = Some(pos);
-        } else if let Some(prev_index) = prev_visible_index {
-            let clamped = prev_index.min(visible.len() - 1);
-            self.selection = Some(visible[clamped].clone());
-            self.last_visible_index = Some(clamped);
-        } else {
-            self.selection = Some(visible[0].clone());
-            self.last_visible_index = Some(0);
-        }
+        self.tree_state
+            .finish_rebuild(before, &self.tree.rows, None);
         self.recompute_explorer();
     }
 
-    /// Find `selection` in `visible`, preferring the occurrence
-    /// closest to `hint` when the id appears more than once.
-    /// Returns `None` when the id is gone (the refresh dropped the
-    /// row). Used by [`Self::set_data`] so refreshes don't snap a
-    /// stable cursor to the first copy of a duplicated row.
-    pub(super) fn position_closest_to(
-        &self,
-        visible: &[RowId],
-        selection: &RowId,
-        hint: Option<usize>,
-    ) -> Option<usize> {
-        let mut matches = visible
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, id)| (id == selection).then_some(idx));
-        let first = matches.next()?;
-        let Some(hint) = hint else {
-            return Some(first);
-        };
-        let mut best = first;
-        let mut best_distance = first.abs_diff(hint);
-        for idx in matches {
-            let distance = idx.abs_diff(hint);
-            if distance < best_distance {
-                best = idx;
-                best_distance = distance;
-            }
-        }
-        Some(best)
-    }
-
-    pub(super) fn move_selection(&mut self, delta: i32) {
+    /// Move the selection with one of the tree's moves (a step, a page,
+    /// an end), then point the right pane at the row it lands on. With
+    /// no rows showing nothing is selected and the right pane is empty.
+    pub(super) fn move_selection(
+        &mut self,
+        step: impl FnOnce(&mut TreeState<RowId>, &[Row]) -> Option<usize>,
+    ) {
         self.status_message = None;
-        let visible = self.visible_rows_owned();
-        if visible.is_empty() {
-            self.selection = None;
-            self.explorer = None;
-            self.last_visible_index = None;
-            return;
-        }
-        let current = self
-            .selection
-            .as_ref()
-            .map_or(0, |id| self.current_visible_index(&visible, id));
-        let target = tuikit::selection::Ends::Clamp.step(current, visible.len(), delta);
-        self.selection = Some(visible[target].clone());
-        self.last_visible_index = Some(target);
-        self.recompute_explorer();
-    }
-
-    pub(super) fn move_selection_to(&mut self, index: usize) {
-        self.status_message = None;
-        let visible = self.visible_rows_owned();
-        if visible.is_empty() {
-            self.selection = None;
-            self.explorer = None;
-            self.last_visible_index = None;
-            return;
-        }
-        let clamped = index.min(visible.len() - 1);
-        self.selection = Some(visible[clamped].clone());
-        self.last_visible_index = Some(clamped);
-        self.recompute_explorer();
-    }
-
-    /// Resolve the visible-row index of the currently-selected
-    /// `RowId`. When the id appears more than once (mux view: same
-    /// session under multiple candidate muxes), return the
-    /// occurrence closest to `last_visible_index` so navigation
-    /// reads as "step away from where I am", not "step away from
-    /// the first copy in the tree". Falls back to the first
-    /// occurrence (or zero if the id is gone) when no cached index
-    /// exists.
-    pub(super) fn current_visible_index(&self, visible: &[RowId], selection: &RowId) -> usize {
-        let mut matches = visible
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, id)| (id == selection).then_some(idx));
-        let Some(first) = matches.next() else {
-            return 0;
-        };
-        let Some(cached) = self.last_visible_index else {
-            return first;
-        };
-        let mut best = first;
-        let mut best_distance = first.abs_diff(cached);
-        for idx in matches {
-            let distance = idx.abs_diff(cached);
-            if distance < best_distance {
-                best = idx;
-                best_distance = distance;
-            }
-        }
-        best
-    }
-
-    pub(super) fn toggle_expand_selected(&mut self) {
-        let Some(id) = self.selection.clone() else {
-            return;
-        };
-        let is_expandable = self.tree.rows.iter().any(|r| r.id == id && r.expandable);
-        if !is_expandable {
-            return;
-        }
-        if self.expanded.contains(&id) {
-            self.expanded.remove(&id);
+        if step(&mut self.tree_state, &self.tree.rows).is_some() {
+            self.recompute_explorer();
         } else {
-            self.expanded.insert(id);
+            self.explorer = None;
         }
     }
 
-    pub(super) fn expand_selected(&mut self) {
-        let Some(id) = self.selection.clone() else {
-            return;
-        };
-        let is_expandable = self.tree.rows.iter().any(|r| r.id == id && r.expandable);
-        if !is_expandable {
-            return;
-        }
-        self.expanded.insert(id);
-    }
-
-    pub(super) fn collapse_selected(&mut self) {
-        let Some(id) = self.selection.clone() else {
-            return;
-        };
-        let is_expandable = self.tree.rows.iter().any(|r| r.id == id && r.expandable);
-        if !is_expandable {
-            return;
-        }
-        self.expanded.remove(&id);
-    }
-
+    #[cfg(test)]
     pub(super) fn visible_rows_owned(&self) -> Vec<RowId> {
         self.visible_rows().iter().map(|r| r.id.clone()).collect()
     }

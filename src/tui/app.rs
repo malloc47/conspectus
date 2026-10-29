@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use tuikit::feedback::{Feedback, Toasts};
 use tuikit::scroll::{Anchor, ScrollRegion, ScrollWindow};
+use tuikit::tree::TreeState;
 
 use crate::model::{AgentSessionId, GraphSnapshot, MuxSessionId, NodeId, PinId};
 use crate::tui::explorer::{
@@ -122,11 +123,14 @@ pub struct App {
     /// Latest row tree built from `snapshot`. Empty until `SetData`
     /// arrives.
     tree: RowTree,
-    /// Set of row ids whose children are visible. Group rows that
-    /// the reducer expands on first sight land here too.
-    expanded: BTreeSet<RowId>,
-    /// Selected row by id. `None` when the tree is empty.
-    selection: Option<RowId>,
+    /// What the operator did to the active view's tree: the selected
+    /// row by id (`None` when the tree is empty) and the position it
+    /// showed at, the expanded rows (group rows the reducer opens on
+    /// first sight included), and the window the last frame drew, which
+    /// the next frame starts from and page keys move by. A frame reports
+    /// the window in a [`ViewportReport`], which [`App::keep_viewports`]
+    /// stores. Saved per view in [`ViewStateSlot`].
+    tree_state: TreeState<RowId>,
     /// Right-panel graph explorer state. Carries
     /// the focused node view, the navigation cursor, group expansion,
     /// and the breadcrumb stack for drilldown. Recomputed whenever
@@ -227,13 +231,6 @@ pub struct App {
     /// transcripts (ADR 0112 §5). The renderer reads this for the
     /// right-panel Preview zone.
     preview_store: PreviewStore,
-    /// The window the tree drew in the last frame: its offset in rows,
-    /// the rows it showed, and the visible rows there were. The next
-    /// frame starts from it and follows the selection by the minimal
-    /// motion rule; `PageUp` / `PageDown` move the selection by its
-    /// height. The frame reports it in a [`ViewportReport`], which
-    /// [`App::keep_viewports`] stores. Empty before the first frame.
-    left_window: ScrollWindow,
     /// The window the explorer zone of the right pane drew in the last
     /// frame, over its wrapped rows, kept the same way. It keeps the
     /// explorer cursor visible when the Related list grows past the
@@ -241,15 +238,6 @@ pub struct App {
     /// not move [`Self::preview_scroll`], which scrolls the Preview
     /// body.
     explorer_window: ScrollWindow,
-    /// Last visible-row index the selection landed on, used as a
-    /// tiebreaker when the same `RowId` appears in multiple visible
-    /// positions (e.g. the mux view lists the same ambiguously-
-    /// attached session under every candidate mux). Without this,
-    /// navigation looks up "current position" with `.position(...)`
-    /// which always returns the first occurrence, and `j` from a
-    /// later duplicate snaps the cursor back to the row after the
-    /// first one.
-    last_visible_index: Option<usize>,
     /// Open overlays as a stack (ADR 0085 contract 3, ADR 0161). Keys
     /// go to the top entry, every entry is drawn bottom to top, and a
     /// close or a commit closes the top. See [`crate::tui::modal`].
@@ -311,17 +299,15 @@ pub struct App {
 
 /// Saved-per-view UI state. Each entry holds everything that needs
 /// to round-trip across view switches per ADR 0031: filter,
-/// grouping, expanded-row set, selection, and left-panel scroll
-/// offset. Constructed lazily — view_states is empty at App::new
-/// and slots fill in as the operator visits each view (or saves
-/// the currently-active view on the first switch away).
+/// grouping, and the tree's state (expanded-row set, selection, and
+/// left-panel window). Constructed lazily — view_states is empty at
+/// App::new and slots fill in as the operator visits each view (or
+/// saves the currently-active view on the first switch away).
 #[derive(Debug, Clone)]
 pub(crate) struct ViewStateSlot {
     pub filter: crate::filter::RowFilter,
     pub grouping: super::Grouping,
-    pub expanded: BTreeSet<RowId>,
-    pub selection: Option<RowId>,
-    pub left_window: ScrollWindow,
+    pub tree: TreeState<RowId>,
 }
 
 impl ViewStateSlot {
@@ -329,9 +315,7 @@ impl ViewStateSlot {
         Self {
             filter: crate::filter::RowFilter::default(),
             grouping: super::Grouping::default_for(view),
-            expanded: BTreeSet::new(),
-            selection: None,
-            left_window: ScrollWindow::default(),
+            tree: TreeState::new(),
         }
     }
 }
@@ -541,8 +525,7 @@ impl App {
             should_quit: false,
             handle: None,
             tree: RowTree::default(),
-            expanded: BTreeSet::new(),
-            selection: None,
+            tree_state: TreeState::new(),
             explorer: None,
             focus: Focus::Left,
             edge_meta_visible,
@@ -573,9 +556,7 @@ impl App {
             pending_restore_focus: None,
             undo: crate::tui::undo::UndoStack::default(),
             preview_store: PreviewStore::new(),
-            left_window: ScrollWindow::default(),
             explorer_window: ScrollWindow::default(),
-            last_visible_index: None,
             modal_stack: crate::tui::modal::ModalStack::new(),
             rename_node: None,
             toasts: Toasts::new(),
@@ -597,9 +578,7 @@ impl App {
         ViewStateSlot {
             filter: self.filter.clone(),
             grouping: self.grouping,
-            expanded: self.expanded.clone(),
-            selection: self.selection.clone(),
-            left_window: self.left_window,
+            tree: self.tree_state.clone(),
         }
     }
 
@@ -607,9 +586,7 @@ impl App {
     fn restore_active_state(&mut self, slot: ViewStateSlot) {
         self.filter = slot.filter;
         self.grouping = slot.grouping;
-        self.expanded = slot.expanded;
-        self.selection = slot.selection;
-        self.left_window = slot.left_window;
+        self.tree_state = slot.tree;
     }
 
     /// Switch the active view to `target`, saving the previous
@@ -647,15 +624,17 @@ impl App {
     /// in the new layout: open the default groups, select the first
     /// row, and scroll to the top so every group header is on screen.
     fn show_top_of_tree(&mut self) {
-        self.expanded = tree::initial_expanded_rows(&self.tree);
+        self.tree_state
+            .set_expanded(tree::initial_expanded_rows(&self.tree));
         if let Some(first) = self.visible_rows().first().map(|row| row.id.clone()) {
             self.set_selection(first);
         }
-        self.left_window.to_top();
+        self.tree_state.scroll_to_top();
     }
 
     fn seed_first_visit(&mut self) {
-        self.expanded = tree::initial_expanded_rows(&self.tree);
+        self.tree_state
+            .set_expanded(tree::initial_expanded_rows(&self.tree));
         let launch = self.tree.rows.iter().find_map(|row| match &row.kind {
             RowKind::Group(group) if group.is_launch_context => Some(row.id.clone()),
             _ => None,
@@ -756,16 +735,12 @@ impl App {
     /// when the id isn't currently visible (the overlay would have
     /// rejected it during commit; the guard here is defensive).
     pub fn set_selection(&mut self, id: RowId) {
-        if !self.tree.rows.iter().any(|row| row.id == id) {
+        // A caller-driven jump (search overlay commit, etc.) targets a
+        // row id with no meaningful "current position", so between
+        // copies of a duplicated row it lands on the first that shows.
+        if !self.tree_state.select(&self.tree.rows, id) {
             return;
         }
-        // Caller-driven jumps (search overlay commit, etc.) target a
-        // specific RowId without a meaningful "current position", so
-        // reset the duplicate-RowId tiebreaker. The next NavDown
-        // falls back to the first occurrence in `visible_rows`, then
-        // the cache repopulates from there.
-        self.last_visible_index = None;
-        self.selection = Some(id);
         self.status_message = None;
         self.recompute_explorer();
     }
@@ -883,9 +858,7 @@ impl App {
                 .or_insert_with(|| ViewStateSlot {
                     filter,
                     grouping,
-                    expanded: BTreeSet::new(),
-                    selection: None,
-                    left_window: ScrollWindow::default(),
+                    tree: TreeState::new(),
                 });
 
             // Apply to active fields for the current view.
@@ -975,7 +948,13 @@ impl App {
     /// Current selection, `None` before the first `SetData` or when
     /// the tree is empty.
     pub fn selection(&self) -> Option<&RowId> {
-        self.selection.as_ref()
+        self.tree_state.selected()
+    }
+
+    /// The active view's tree state: its selection, folds, and the
+    /// window the last frame drew.
+    pub fn tree_state(&self) -> &TreeState<RowId> {
+        &self.tree_state
     }
 
     /// Right-pane graph explorer state for the current focused
@@ -997,7 +976,7 @@ impl App {
 
     /// True when the row is currently expanded.
     pub fn is_expanded(&self, id: &RowId) -> bool {
-        self.expanded.contains(id)
+        self.tree_state.is_expanded(id)
     }
 
     /// Rows the right panel's Preview has been scrolled from its anchor:
@@ -1121,7 +1100,7 @@ impl App {
     /// Whether the selected left-pane row still shows values from
     /// before the pending hand-off (ADR 0132).
     pub fn selected_row_awaits_handoff(&self) -> bool {
-        let (Some(_), Some(selection)) = (&self.handoff, &self.selection) else {
+        let (Some(_), Some(selection)) = (&self.handoff, self.tree_state.selected()) else {
             return false;
         };
         let Some(row) = self.tree.rows.iter().find(|row| &row.id == selection) else {
@@ -1221,7 +1200,7 @@ impl App {
     /// Preview's scroll.
     fn preview_focus(&self) -> (Option<RowId>, Option<(NodeId, usize)>) {
         (
-            self.selection.clone(),
+            self.tree_state.selected().cloned(),
             self.explorer
                 .as_ref()
                 .map(|state| (state.view.focused.clone(), state.cursor)),
@@ -1231,23 +1210,7 @@ impl App {
     /// Iterate the row tree, skipping rows whose ancestors are
     /// collapsed. Iteration order matches display order.
     pub fn visible_rows(&self) -> Vec<&Row> {
-        let mut out = Vec::with_capacity(self.tree.rows.len());
-        // Track the depth of the most recent collapsed ancestor;
-        // any row deeper than that is hidden.
-        let mut hidden_below: Option<u8> = None;
-        for row in &self.tree.rows {
-            if let Some(d) = hidden_below
-                && row.depth > d
-            {
-                continue;
-            }
-            hidden_below = None;
-            out.push(row);
-            if row.expandable && !self.expanded.contains(&row.id) {
-                hidden_below = Some(row.depth);
-            }
-        }
-        out
+        self.tree_state.visible(&self.tree.rows)
     }
 
     /// Apply a single [`Msg`] to the state. Pure: no I/O, no panics,
@@ -1301,33 +1264,23 @@ impl App {
             Msg::OpenEntity(node) => {
                 self.open_entity(&node);
             }
-            Msg::NavDown => {
-                self.move_selection(1);
-            }
-            Msg::NavUp => {
-                self.move_selection(-1);
-            }
-            Msg::PageDown(viewport) => {
-                self.move_selection(i32::from(viewport.max(1)));
-            }
-            Msg::PageUp(viewport) => {
-                self.move_selection(-i32::from(viewport.max(1)));
-            }
-            Msg::Home => {
-                self.move_selection_to(0);
-            }
-            Msg::End => {
-                self.move_selection_to(usize::MAX);
-            }
+            Msg::NavDown => self.move_selection(|state, rows| state.step(rows, 1)),
+            Msg::NavUp => self.move_selection(|state, rows| state.step(rows, -1)),
+            Msg::PageDown => self.move_selection(TreeState::page_down),
+            Msg::PageUp => self.move_selection(TreeState::page_up),
+            Msg::Home => self.move_selection(TreeState::home),
+            Msg::End => self.move_selection(TreeState::end),
             Msg::ToggleExpand => {
-                self.toggle_expand_selected();
+                self.tree_state.toggle(&self.tree.rows);
                 self.queue_details();
             }
             Msg::ExpandRow => {
-                self.expand_selected();
+                self.tree_state.expand(&self.tree.rows);
                 self.queue_details();
             }
-            Msg::CollapseRow => self.collapse_selected(),
+            Msg::CollapseRow => {
+                self.tree_state.collapse(&self.tree.rows);
+            }
             Msg::ExplorerNavDown => self.explorer_move_cursor(1),
             Msg::ExplorerNavUp => self.explorer_move_cursor(-1),
             Msg::ExplorerHome => self.explorer_jump_cursor_to(0),
@@ -1428,7 +1381,7 @@ impl App {
             }
             Msg::FollowEntity(node) => {
                 self.pending_follow = Some(node);
-                self.pending_follow_row = self.selection.clone();
+                self.pending_follow_row = self.tree_state.selected().cloned();
             }
             Msg::HandoffSettled => {
                 self.handoff = None;
@@ -1920,7 +1873,7 @@ impl App {
             Some(NodeId::AgentSession(id)) => Some(RowId::AgentSession(NodeId::AgentSession(id))),
             Some(NodeId::MuxSession(id)) => Some(RowId::MuxSession(NodeId::MuxSession(id))),
             Some(_) => None,
-            None => self.selection.clone(),
+            None => self.tree_state.selected().cloned(),
         };
         match target {
             Some(RowId::AgentSession(NodeId::AgentSession(id))) => {

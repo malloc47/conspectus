@@ -34,7 +34,7 @@ fn open_every_session(app: &mut App) {
         .collect();
     for id in rows {
         app.set_selection(id);
-        if !app.expanded.contains(app.selection().unwrap()) {
+        if !app.is_expanded(app.selection().unwrap()) {
             app.update(Msg::ExpandRow);
         }
     }
@@ -363,7 +363,7 @@ fn a_session_past_the_first_few_is_read_when_it_is_opened_not_before() {
         .tree()
         .rows
         .iter()
-        .filter(|row| row.expandable && !app.expanded.contains(&row.id))
+        .filter(|row| row.expandable && !app.is_expanded(&row.id))
         .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
         .map(|row| row.id.clone())
         .collect();

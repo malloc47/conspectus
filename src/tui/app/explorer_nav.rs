@@ -8,7 +8,7 @@ impl App {
     /// clear it when the selection names no node.
     pub(super) fn recompute_explorer(&mut self) {
         self.reset_preview_scroll();
-        let Some(selection) = self.selection.as_ref() else {
+        let Some(selection) = self.tree_state.selected() else {
             self.explorer = None;
             return;
         };
@@ -113,8 +113,7 @@ impl App {
     /// Snap the explorer cursor to `index`, clamped to the current
     /// row count. `usize::MAX` is the convention for "last row" so
     /// callers can ask for End without needing to recompute row
-    /// counts themselves; this mirrors how `move_selection_to` on
-    /// the left-pane tree handles `Msg::End`.
+    /// counts themselves.
     pub(super) fn explorer_jump_cursor_to(&mut self, index: usize) {
         let Some(state) = self.explorer.as_mut() else {
             return;
@@ -221,7 +220,7 @@ impl App {
         let prev_cursor_key = state.selected_row().map(|row| row.key(&state.view));
         let prev_other_expanded = state.other_expanded;
         let prev_full_detail_expanded = state.full_detail_expanded;
-        let prev_left_pane_selection = self.selection.clone();
+        let prev_left_pane_selection = self.tree_state.selected().cloned();
         let hop = BreadcrumbHop {
             focused: prev_focused,
             short_label: prev_short_label,
@@ -281,26 +280,13 @@ impl App {
         else {
             return;
         };
-        let target_id = self.tree.rows[row_index].id.clone();
-        let target_depth = self.tree.rows[row_index].depth;
-        // Walk back through the flat tree expanding any ancestor
-        // group rows at lower depths so the target row is
-        // materialized in the rendered visible-rows pass.
-        let mut current_depth = target_depth;
-        for ancestor_idx in (0..row_index).rev() {
-            if current_depth == 0 {
-                break;
-            }
-            let ancestor = &self.tree.rows[ancestor_idx];
-            if ancestor.depth < current_depth && ancestor.expandable {
-                self.expanded.insert(ancestor.id.clone());
-                current_depth = ancestor.depth;
-            }
-        }
+        // Expand the ancestor group rows so the target row shows.
+        self.tree_state.reveal(&self.tree.rows, row_index);
         // Bypass `set_selection` so we don't trigger the
         // recompute_explorer path — the explorer was just rebuilt for
         // the drilled neighbor and that's what we want to keep.
-        self.selection = Some(target_id);
+        let target_id = self.tree.rows[row_index].id.clone();
+        self.tree_state.select(&self.tree.rows, target_id);
     }
 
     pub(super) fn explorer_back(&mut self) {
@@ -362,10 +348,8 @@ impl App {
         // at the time of the drill, so Backspace unwinds both panes
         // together. Bypasses `set_selection` to avoid rebuilding
         // the explorer we just restored.
-        if let Some(prev_selection) = hop.left_pane_selection
-            && self.tree.rows.iter().any(|row| row.id == prev_selection)
-        {
-            self.selection = Some(prev_selection);
+        if let Some(prev_selection) = hop.left_pane_selection {
+            self.tree_state.select(&self.tree.rows, prev_selection);
         }
     }
 }

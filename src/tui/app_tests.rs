@@ -385,19 +385,70 @@ fn nav_down_past_duplicate_row_id_advances_to_the_following_row() {
     // Step onto the first duplicate, then the second.
     app.update(Msg::NavDown);
     app.update(Msg::NavDown);
-    assert_eq!(app.last_visible_index, Some(2));
-    assert_eq!(app.selection.as_ref(), Some(&RowId::Group(dup_id)));
+    assert_eq!(app.tree_state.position(), Some(2));
+    assert_eq!(app.selection(), Some(&RowId::Group(dup_id)));
 
     // From the second duplicate, NavDown must advance to the
     // row *after* it, not snap back to the row after the first
     // copy.
     app.update(Msg::NavDown);
-    assert_eq!(app.last_visible_index, Some(3));
+    assert_eq!(app.tree_state.position(), Some(3));
     assert_eq!(
-        app.selection.as_ref(),
+        app.selection(),
         Some(&RowId::Group(workspace("c"))),
         "NavDown from the second duplicate must land on the next row, not snap to the row after the first copy",
     );
+}
+
+#[test]
+fn a_rebuild_keeps_the_cursor_on_the_copy_of_a_duplicated_row_it_was_on() {
+    // The tree's one retention routine finds the selected row again by
+    // the copy the cursor was on, not the first copy in the tree, so a
+    // refresh or a projection change doesn't move the cursor up.
+    use crate::tui::rows::{GroupRow, Row, RowId, RowKind};
+
+    let workspace = |key: &str| NodeId::Workspace(WorkspaceId::new(key));
+    let group_row = |id: NodeId, label: &str| Row {
+        id: RowId::Group(id.clone()),
+        depth: 0,
+        expandable: false,
+        kind: RowKind::Group(GroupRow {
+            display_path: label.to_string(),
+            primary_node: Some(id),
+            is_launch_context: false,
+        }),
+    };
+    let tree = crate::tui::rows::RowTree {
+        view: crate::tui::rows::ViewLabel::Mux,
+        rows: vec![
+            group_row(workspace("a"), "a"),
+            group_row(workspace("dup"), "dup-first"),
+            group_row(workspace("dup"), "dup-second"),
+            group_row(workspace("c"), "c"),
+        ],
+    };
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&GraphSnapshot::empty()),
+        tree: tree.clone(),
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app.update(Msg::NavDown);
+    app.update(Msg::NavDown);
+    assert_eq!(app.tree_state.position(), Some(2));
+
+    app.update(Msg::SetTree(tree.clone()));
+    assert_eq!(app.tree_state.position(), Some(2), "a rebuild");
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&GraphSnapshot::empty()),
+        tree,
+        loaded_at_epoch: 1_700_000_010,
+        initial_selection_hint: None,
+    });
+    assert_eq!(app.tree_state.position(), Some(2), "a refresh");
+    app.update(Msg::NavDown);
+    assert_eq!(app.selection(), Some(&RowId::Group(workspace("c"))));
 }
 
 #[test]
@@ -1853,7 +1904,7 @@ fn selected_session_id_is_none_on_non_session_selection() {
     // Drop the selection so we cover the "nothing selected" arm
     // (which is the same as a non-session selection from the
     // runtime's perspective).
-    app.selection = None;
+    app.tree_state.deselect();
     assert!(app.selected_session_id().is_none());
 }
 

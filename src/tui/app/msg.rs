@@ -47,11 +47,10 @@ pub enum Msg {
     /// Left panel: move selection down/up one visible row.
     NavDown,
     NavUp,
-    /// Left panel: page through visible rows. The runtime passes
-    /// the rendered viewport height so the reducer can decide how
-    /// many rows constitute one page. Pass 1 if unknown.
-    PageDown(u16),
-    PageUp(u16),
+    /// Left panel: page through visible rows, by the rows the tree
+    /// showed in the last frame (one row before the first frame).
+    PageDown,
+    PageUp,
     /// Left panel: first/last visible row.
     Home,
     End,

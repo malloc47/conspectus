@@ -61,8 +61,8 @@ impl App {
             .as_ref()
             .map(|state| state.view.focused.clone())
             .or_else(|| {
-                self.selection
-                    .as_ref()
+                self.tree_state
+                    .selected()
                     .and_then(|id| crate::tui::rows::row_node(id).cloned())
             })
     }

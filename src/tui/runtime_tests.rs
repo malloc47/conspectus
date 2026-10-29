@@ -15,10 +15,10 @@ fn msg(action: Option<Action>) -> Option<Msg> {
 #[test]
 fn translate_q_quits() {
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('q'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('q')
+        )))),
         Some(Msg::Quit)
     );
 }
@@ -26,10 +26,10 @@ fn translate_q_quits() {
 #[test]
 fn translate_ctrl_c_quits() {
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('c'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::CONTROL,
+            KeyCode::Char('c')
+        )))),
         Some(Msg::Quit)
     );
 }
@@ -37,10 +37,7 @@ fn translate_ctrl_c_quits() {
 #[test]
 fn translate_r_requests_refresh() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('r'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('r')))),
         Some(Action::Refresh)
     );
 }
@@ -48,17 +45,11 @@ fn translate_r_requests_refresh() {
 #[test]
 fn translate_shift_r_opens_rename_overlay() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('R'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('R')))),
         Some(Action::OpenRename)
     );
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('R'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('R')))),
         Some(Action::OpenRename)
     );
 }
@@ -66,10 +57,7 @@ fn translate_shift_r_opens_rename_overlay() {
 #[test]
 fn translate_lowercase_r_still_refreshes() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('r'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('r')))),
         Some(Action::Refresh)
     );
 }
@@ -94,10 +82,7 @@ fn a_refresh_after_an_action_reads_the_daemons_snapshot() {
 #[test]
 fn translate_a_requests_attach() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('a'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('a')))),
         Some(Action::Attach)
     );
 }
@@ -108,19 +93,13 @@ fn translate_i_requests_copy_session_id() {
     // full id and routes it through the OSC 52 clipboard
     // primitive (ADR 0056) at the main-loop boundary.
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('i'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('i')))),
         Some(Action::CopySessionId)
     );
     // Ctrl-I is the terminal alias for Tab; the binding must not
     // claim it.
     assert_ne!(
-        translate(
-            Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('i'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('i')))),
         Some(Action::CopySessionId)
     );
 }
@@ -128,11 +107,8 @@ fn translate_i_requests_copy_session_id() {
 #[test]
 fn translate_e_toggles_the_explorer_other_zone_on_the_right_pane_only() {
     use crate::tui::app::Focus;
-    let key = translate(
-        Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('e'))),
-        24,
-    )
-    .expect("`e` is bound in the keymap");
+    let key = translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('e'))))
+        .expect("`e` is bound in the keymap");
     assert_eq!(
         key,
         Action::Msg(Box::new(Msg::ExplorerToggleGroup)),
@@ -152,10 +128,7 @@ fn translate_e_toggles_the_explorer_other_zone_on_the_right_pane_only() {
 #[test]
 fn translate_v_opens_viewer() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('v'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('v')))),
         Some(Action::View)
     );
 }
@@ -163,10 +136,7 @@ fn translate_v_opens_viewer() {
 #[test]
 fn translate_f_opens_controls_overlay() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('f'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('f')))),
         Some(Action::OpenControls)
     );
 }
@@ -175,17 +145,11 @@ fn translate_f_opens_controls_overlay() {
 fn translate_upper_t_no_longer_bound_to_view() {
     // `v` owns View; `T` is unbound and falls through to None.
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('T'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('T')))),
         None,
     );
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('T'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('T')))),
         None,
     );
 }
@@ -196,17 +160,11 @@ fn translate_upper_t_no_longer_bound_to_view() {
 #[test]
 fn translate_shift_f_clears_filters() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('F'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('F')))),
         Some(Action::ClearFilters)
     );
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('F'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('F')))),
         Some(Action::ClearFilters)
     );
 }
@@ -217,17 +175,11 @@ fn translate_shift_e_toggles_edge_meta() {
     // Focus-agnostic — the binding is global so the operator
     // can flip it without first tabbing into the right pane.
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('E'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('E')))),
         Some(Action::Msg(Box::new(Msg::ToggleEdgeMeta)))
     );
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('E'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('E')))),
         Some(Action::Msg(Box::new(Msg::ToggleEdgeMeta)))
     );
 }
@@ -235,10 +187,7 @@ fn translate_shift_e_toggles_edge_meta() {
 #[test]
 fn translate_ctrl_g_cycles_grouping() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('g'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('g')))),
         Some(Action::CycleGrouping(1))
     );
 }
@@ -256,14 +205,14 @@ fn translate_digits_switch_views_directly() {
     ];
     for (ch, view) in cases {
         assert_eq!(
-            translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char(ch))), 24),
+            translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char(ch)))),
             Some(Action::SwitchView(view)),
             "char {ch}"
         );
     }
     for ch in ['7', '8'] {
         assert_eq!(
-            translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char(ch))), 24),
+            translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char(ch)))),
             None,
             "no view on char {ch}"
         );
@@ -273,17 +222,11 @@ fn translate_digits_switch_views_directly() {
 #[test]
 fn translate_brackets_cycle_views() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char(']'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char(']')))),
         Some(Action::CycleView(1))
     );
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('['))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('[')))),
         Some(Action::CycleView(-1))
     );
 }
@@ -305,10 +248,7 @@ fn cycle_view_wraps_in_both_directions() {
 #[test]
 fn translate_ignores_control_a() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('a'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('a')))),
         None
     );
 }
@@ -316,17 +256,11 @@ fn translate_ignores_control_a() {
 #[test]
 fn control_r_is_a_hard_refresh_and_r_a_plain_one() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('r'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('r')))),
         Some(Action::HardRefresh)
     );
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('r'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('r')))),
         Some(Action::Refresh)
     );
 }
@@ -334,31 +268,31 @@ fn control_r_is_a_hard_refresh_and_r_a_plain_one() {
 #[test]
 fn translate_maps_navigation_keys() {
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('j'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('j')
+        )))),
         Some(Msg::NavDown)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('k'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('k')
+        )))),
         Some(Msg::NavUp)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Down)),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Down
+        )))),
         Some(Msg::NavDown)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Up)),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Up
+        )))),
         Some(Msg::NavUp)
     );
     // Enter no longer maps to a Msg directly. It is
@@ -366,86 +300,86 @@ fn translate_maps_navigation_keys() {
     // at the call site (and remapped to ExplorerActivate when
     // the right pane has focus).
     assert_eq!(
-        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Enter)), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Enter))),
         Some(Action::DefaultAction)
     );
     // Vi-style tree fold keys: `l` / `→` expand, `h` / `←`
     // collapse the selected left-tree row.
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('l'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('l')
+        )))),
         Some(Msg::ExpandRow)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Right)),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Right
+        )))),
         Some(Msg::ExpandRow)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('h'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('h')
+        )))),
         Some(Msg::CollapseRow)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Left)),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Left
+        )))),
         Some(Msg::CollapseRow)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Tab)),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Tab
+        )))),
         Some(Msg::CycleFocus)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('g'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('g')
+        )))),
         Some(Msg::Home)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('G'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('G')
+        )))),
         Some(Msg::End)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::PageDown)),
-            20
-        )),
-        Some(Msg::PageDown(20))
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::PageDown
+        )))),
+        Some(Msg::PageDown)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::PageUp)),
-            20
-        )),
-        Some(Msg::PageUp(20))
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::PageUp
+        )))),
+        Some(Msg::PageUp)
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('J'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('J')
+        )))),
         Some(Msg::ScrollPreviewBy(1))
     );
     assert_eq!(
-        msg(translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('K'))),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('K')
+        )))),
         Some(Msg::ScrollPreviewBy(-1))
     );
 }
@@ -455,7 +389,7 @@ fn remap_for_focus_left_is_identity() {
     use crate::tui::app::Focus;
     let action = Action::Msg(Box::new(Msg::NavDown));
     assert_eq!(remap_for_focus(action.clone(), Focus::Left), Some(action));
-    let action = Action::Msg(Box::new(Msg::PageDown(20)));
+    let action = Action::Msg(Box::new(Msg::PageDown));
     assert_eq!(remap_for_focus(action.clone(), Focus::Left), Some(action));
 }
 
@@ -475,11 +409,11 @@ fn remap_for_focus_right_routes_nav_keys_into_the_explorer() {
         Some(Action::Msg(Box::new(Msg::ExplorerNavUp)))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::PageDown(20))), Focus::Right),
+        remap_for_focus(Action::Msg(Box::new(Msg::PageDown)), Focus::Right),
         Some(Action::Msg(Box::new(Msg::ExplorerNavDown)))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::PageUp(20))), Focus::Right),
+        remap_for_focus(Action::Msg(Box::new(Msg::PageUp)), Focus::Right),
         Some(Action::Msg(Box::new(Msg::ExplorerNavUp)))
     );
 }
@@ -814,17 +748,11 @@ mod selected_default_action_tests {
 #[test]
 fn translate_ignores_unbound_keys() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('z'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('z')))),
         None
     );
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('a'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('a')))),
         None
     );
 }
@@ -833,7 +761,7 @@ fn translate_ignores_unbound_keys() {
 fn translate_ignores_release_kind_keys() {
     let mut key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
     key.kind = KeyEventKind::Release;
-    assert_eq!(translate(Event::Key(key), 24), None);
+    assert_eq!(translate(Event::Key(key)), None);
 }
 
 /// ADR 0085 contract 4: view / grouping / filter /
@@ -1166,10 +1094,7 @@ mod mux_launch_argv {
 #[test]
 fn translate_bang_opens_messages() {
     assert_eq!(
-        translate(
-            Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('!'))),
-            24
-        ),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('!')))),
         Some(Action::OpenMessages)
     );
 }
@@ -1771,22 +1696,18 @@ fn keys_of_the_retired_pin_surfaces_are_unbound() {
         (KeyCode::Char('b'), KeyModifiers::NONE),
         (KeyCode::Delete, KeyModifiers::NONE),
     ] {
-        assert_eq!(
-            translate(Event::Key(chord(mods, code)), 24),
-            None,
-            "{code:?}"
-        );
+        assert_eq!(translate(Event::Key(chord(mods, code))), None, "{code:?}");
     }
 }
 
 #[test]
 fn p_pins_and_capital_n_launches_with_a_worktree() {
     assert!(matches!(
-        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('p'))), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('p')))),
         Some(Action::Msg(msg)) if *msg == Msg::TogglePin
     ));
     assert!(matches!(
-        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('N'))), 24),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('N')))),
         Some(Action::Msg(msg)) if *msg == Msg::OpenMuxLaunchForm
     ));
 }

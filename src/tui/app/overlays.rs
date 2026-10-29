@@ -196,7 +196,7 @@ impl App {
     pub(crate) fn nav_origin(&self) -> NavEntry {
         NavEntry {
             view: self.active_view,
-            selection: self.selection.clone(),
+            selection: self.tree_state.selected().cloned(),
         }
     }
 
@@ -298,20 +298,7 @@ impl App {
 
     /// Expand the ancestors of the row at `index` and select it.
     pub(super) fn expand_to_and_select(&mut self, index: usize) {
-        let mut wanted = self.tree.rows[index].depth;
-        let ancestors: Vec<RowId> = self.tree.rows[..index]
-            .iter()
-            .rev()
-            .filter(|row| {
-                let keep = row.depth < wanted;
-                if keep {
-                    wanted = row.depth;
-                }
-                keep
-            })
-            .map(|row| row.id.clone())
-            .collect();
-        self.expanded.extend(ancestors);
+        self.tree_state.reveal(&self.tree.rows, index);
         let id = self.tree.rows[index].id.clone();
         self.set_selection(id);
     }

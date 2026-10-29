@@ -819,11 +819,10 @@ pub(super) fn draw_screen(app: &mut App, frame: &mut ratatui::Frame<'_>) {
 /// focused pane. The interactive loop and the `--snapshot-keys`
 /// driver both go through here so they can't disagree about what a
 /// key does. Page keys move the tree by the rows it drew in the last
-/// frame.
+/// frame, which its state keeps.
 pub(super) fn action_for_event(app: &App, event: Event) -> Option<Action> {
-    overlay_key_from_event(app, &event).or_else(|| {
-        translate(event, app.left_viewport()).and_then(|a| remap_for_focus(a, app.focus()))
-    })
+    overlay_key_from_event(app, &event)
+        .or_else(|| translate(event).and_then(|a| remap_for_focus(a, app.focus())))
 }
 
 /// Type a bracketed paste into the text field that has the keys, one key

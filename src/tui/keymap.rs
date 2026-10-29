@@ -143,8 +143,8 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
             // remap. Uppercase J/K still scroll the preview.
             Msg::NavDown => Some(Action::Msg(Box::new(Msg::ExplorerNavDown))),
             Msg::NavUp => Some(Action::Msg(Box::new(Msg::ExplorerNavUp))),
-            Msg::PageDown(_) => Some(Action::Msg(Box::new(Msg::ExplorerNavDown))),
-            Msg::PageUp(_) => Some(Action::Msg(Box::new(Msg::ExplorerNavUp))),
+            Msg::PageDown => Some(Action::Msg(Box::new(Msg::ExplorerNavDown))),
+            Msg::PageUp => Some(Action::Msg(Box::new(Msg::ExplorerNavUp))),
             // `h`/`l`/`←`/`→` are left-tree expand/collapse keys.
             // When the right pane has focus, drop them so they
             // don't reach across panes and mutate the tree the
@@ -185,10 +185,7 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
 /// Focus-aware remapping (j/k driving the focused pane) happens in
 /// a separate pass via [`remap_for_focus`] so the keymap stays
 /// pure with respect to terminal state.
-///
-/// `viewport_height` is the rendered height of the row tree in
-/// rows, used to size PageUp/PageDown jumps. Pass 1 if unknown.
-pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
+pub fn translate(event: Event) -> Option<Action> {
     // Consult the declarative KEYBINDINGS table first; keys it
     // doesn't hold fall through to the match below.
     if let Event::Key(key) = &event
@@ -207,11 +204,11 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             // Dispatched via `translate_via_table` above.
             //
             // Remaining hand-matched:
-            // - `PageDown` / `PageUp` — need `viewport_height` in
-            //   the action payload, which the table's
-            //   `fn() -> Action` signature doesn't carry.
-            (_, KeyCode::PageDown) => Some(Action::Msg(Box::new(Msg::PageDown(viewport_height)))),
-            (_, KeyCode::PageUp) => Some(Action::Msg(Box::new(Msg::PageUp(viewport_height)))),
+            // - `PageDown` / `PageUp` — the help page documents the
+            //   pair on one line, and the tree pages by the rows its
+            //   state kept from the last frame.
+            (_, KeyCode::PageDown) => Some(Action::Msg(Box::new(Msg::PageDown))),
+            (_, KeyCode::PageUp) => Some(Action::Msg(Box::new(Msg::PageUp))),
             // `o` opens the full-value modal on the cursor
             // row. The reducer no-ops gracefully if the cursor isn't
             // on a row with a truncated value.

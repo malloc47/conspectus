@@ -33,7 +33,7 @@ impl App {
     /// frame took back inside its content stays taken back.
     pub fn keep_viewports(&mut self, report: ViewportReport) {
         if let Some(window) = report.tree {
-            self.left_window = window;
+            self.tree_state.set_viewport(window);
         }
         if let Some(window) = report.explorer {
             self.explorer_window = window;
@@ -49,18 +49,18 @@ impl App {
     /// The window the tree drew in the last frame, which the next frame
     /// starts from. Empty before the first frame.
     pub fn left_window(&self) -> ScrollWindow {
-        self.left_window
+        self.tree_state.window()
     }
 
     /// The first tree row the last frame showed.
     pub fn left_scroll(&self) -> usize {
-        self.left_window.offset()
+        self.tree_state.window().offset()
     }
 
     /// Rows the tree drew in the last frame, which a page key moves the
     /// selection by. Zero before the first frame.
     pub fn left_viewport(&self) -> u16 {
-        u16::try_from(self.left_window.viewport()).unwrap_or(u16::MAX)
+        u16::try_from(self.tree_state.window().viewport()).unwrap_or(u16::MAX)
     }
 
     /// The window the explorer zone drew in the last frame, over its
