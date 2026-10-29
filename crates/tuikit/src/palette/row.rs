@@ -15,15 +15,16 @@ use crate::theme::Theme;
 ///
 /// The palette draws the cursor gutter and the highlight itself
 /// ([`selection::row`](crate::selection::row)), so a row only lays out
-/// its own cells. More may be told later (a plan of columns shared by
-/// every row), which is why the struct is built with
-/// [`RowContext::new`] outside the crate.
+/// its own cells; a row of several cells lays a
+/// [`ColumnPlan`](super::ColumnPlan) out for the width. More may be told
+/// later, which is why the struct is built with [`RowContext::new`]
+/// outside the crate.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct RowContext<'a> {
     /// The cells the row has after the cursor gutter, and after the
-    /// scrollbar's column when the list overflows. Cells past it are cut
-    /// with `…`.
+    /// scrollbar's column when the list overflows (or always, in a
+    /// palette that reserves it). Cells past it are cut with `…`.
     pub width: usize,
     /// Whether the cursor is on the row, and whether the list has the
     /// keys. The highlight is the palette's; a row may still want to

@@ -37,7 +37,11 @@
 //! - **An options pane** ([`Options`]): named settings that change the
 //!   results, opened over the list.
 //! - **A debounce** ([`Debounce`]) for a slow provider: the palette marks
-//!   every edit and the host polls when a search is due.
+//!   every edit and the host polls when a search is due; [`Progress`]
+//!   puts how far the provider has got in words for the status row.
+//! - **A plan of columns** ([`ColumnPlan`]) for rows of several cells:
+//!   the columns' widths, gaps, and the order they give way in, laid out
+//!   once per width so every row lines up.
 //! - **The outcome.** `Enter` asks the host's `on_pick` about the row
 //!   under the cursor and reports its answer (a commit of the host's
 //!   message); `Enter` with nothing listed closes. `Esc` closes and
@@ -108,16 +112,18 @@
 //! - **A row preview**: a pane beside the results showing the cursor's
 //!   row; the body lays the list out in one place, so a split would go
 //!   there, and [`PaletteRow`] would gain a method that says what to show.
-//! - **A plan of columns** shared by every row: [`RowContext`] is built
-//!   by the palette and can carry it.
 
 mod body;
+mod columns;
 mod debounce;
 mod options;
+mod progress;
 mod row;
 
+pub use columns::{Column, ColumnLayout, ColumnPlan};
 pub use debounce::Debounce;
 pub use options::Options;
+pub use progress::Progress;
 pub use row::{Item, PaletteRow, RowContext, every_word};
 
 use std::fmt;
@@ -271,6 +277,8 @@ pub struct Palette<R, M, A: 'static = PaletteKey> {
     no_match_note: String,
     keys: &'static [KeyRow<A>],
     size: ModalSize,
+    /// Whether the results keep the scrollbar's column while they fit.
+    reserve_scrollbar: bool,
     options: Option<Options>,
     debounce: Option<Debounce>,
     on_pick: OnPick<R, M>,
@@ -306,6 +314,7 @@ impl<R, M> Palette<R, M> {
             no_match_note: NO_MATCH_NOTE.to_string(),
             keys: PALETTE_KEYS,
             size: PALETTE_SIZE,
+            reserve_scrollbar: false,
             options: None,
             debounce: None,
             on_pick: Arc::new(on_pick),
@@ -336,6 +345,7 @@ impl<R, M, A: PaletteAction> Palette<R, M, A> {
             no_match_note: self.no_match_note,
             keys,
             size: self.size,
+            reserve_scrollbar: self.reserve_scrollbar,
             options: self.options,
             debounce: self.debounce,
             on_pick: self.on_pick,
@@ -432,13 +442,22 @@ impl<R, M, A: PaletteAction> Palette<R, M, A> {
         self
     }
 
+    /// Keeps the scrollbar's column beside the results while they fit,
+    /// blank, so every row has one width whether or not the list
+    /// overflows: a list a provider streams into does not shift its
+    /// columns when it grows past the frame, and every row ends a cell
+    /// before the frame.
+    #[must_use]
+    pub fn reserve_scrollbar(mut self) -> Self {
+        self.reserve_scrollbar = true;
+        self
+    }
+
     /// Puts the cursor on row `index` (an index into the rows the palette
     /// was given) when it is listed.
     #[must_use]
     pub fn at(mut self, index: usize) -> Self {
-        if let Some(position) = self.ranked.iter().position(|&listed| listed == index) {
-            self.cursor = position;
-        }
+        self.select(index);
         self
     }
 }
@@ -568,6 +587,17 @@ impl<R, M, A: PaletteAction> Palette<R, M, A> {
         }
     }
 
+    /// Puts the cursor on row `index` (an index into
+    /// [`rows`](Self::rows)) when it is listed, and leaves it where it is
+    /// otherwise: for a host that keeps a cursor rule of its own across an
+    /// edit (the position it had), or lists the same results another way
+    /// (back to the first).
+    pub fn select(&mut self, index: usize) {
+        if let Some(position) = self.ranked.iter().position(|&listed| listed == index) {
+            self.cursor = position;
+        }
+    }
+
     /// Sets the status row under the query, or removes it.
     pub fn set_status(&mut self, status: Option<String>) {
         self.status = status;
@@ -684,6 +714,26 @@ impl<R, M, A: PaletteAction> Palette<R, M, A> {
         Outcome::Consumed
     }
 
+    /// What the palette does with `key`, as its overlay's
+    /// [`handle`](Overlay::handle) does: for a host that routes keys to
+    /// the palette itself, as one whose rows it draws with
+    /// [`draw_with`](Self::draw_with) (rows that are no [`PaletteRow`])
+    /// does.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<M> {
+        if self.options_open() {
+            return self.handle_option(key);
+        }
+        let Some(action) = resolve(self.keys, key) else {
+            if self.query.handle(key).changed {
+                self.edited();
+            }
+            return Outcome::Consumed;
+        };
+        action
+            .palette_key()
+            .map_or(Outcome::Consumed, |own| self.act(own))
+    }
+
     /// One key while the options pane is open.
     fn handle_option(&mut self, key: KeyEvent) -> Outcome<M> {
         let Some(options) = self.options.as_mut() else {
@@ -744,6 +794,26 @@ impl<R: PaletteRow, M, A: PaletteAction> Palette<R, M, A> {
     /// and keeps the results' window. A host whose overlay holds the
     /// palette draws it with this; on a stack, [`Overlay::render`] does.
     pub fn draw(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        self.draw_with(area, buf, theme, R::cells);
+    }
+}
+
+impl<R, M, A: PaletteAction> Palette<R, M, A> {
+    /// Draws the palette as [`draw`](Self::draw) does, laying each result
+    /// on screen out with `cells` instead of its own
+    /// [`PaletteRow::cells`]: for rows whose look depends on what the host
+    /// holds only while it draws (a word it looks up for each row shown,
+    /// too costly to work out for every result, or styles of its own
+    /// theme). Only the rows on screen are laid out. Rows drawn only this
+    /// way need not be [`PaletteRow`]s; the host routes their keys with
+    /// [`handle_key`](Self::handle_key).
+    pub fn draw_with(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        theme: &Theme,
+        cells: impl Fn(&R, &RowContext<'_>) -> Vec<Span<'static>>,
+    ) {
         let frame = ModalFrame::new(theme, self.size).title(self.title_line(theme));
         let note = if self.query.is_empty() {
             &self.empty_note
@@ -762,6 +832,8 @@ impl<R: PaletteRow, M, A: PaletteAction> Palette<R, M, A> {
                 options: self.options.as_ref().filter(|options| options.is_open()),
                 footer: self.footer(),
                 theme,
+                cells: &cells,
+                reserve_scrollbar: self.reserve_scrollbar,
             },
             window: self.window,
         };
@@ -779,6 +851,7 @@ impl<R, M, A: 'static> fmt::Debug for Palette<R, M, A> {
             .field("cursor", &self.cursor)
             .field("strips", &self.strips)
             .field("status", &self.status)
+            .field("reserve_scrollbar", &self.reserve_scrollbar)
             .field("options", &self.options)
             .field("debounce", &self.debounce)
             .finish_non_exhaustive()
@@ -795,18 +868,7 @@ impl<R: PaletteRow, M, A: PaletteAction, Cx: ?Sized> Overlay<M, Cx> for Palette<
     /// bind edit the query; an action that is the host's is swallowed.
     /// While the options pane is open its own table has the keys.
     fn handle(&mut self, key: KeyEvent, _cx: &Cx) -> Outcome<M> {
-        if self.options_open() {
-            return self.handle_option(key);
-        }
-        let Some(action) = resolve(self.keys, key) else {
-            if self.query.handle(key).changed {
-                self.edited();
-            }
-            return Outcome::Consumed;
-        };
-        action
-            .palette_key()
-            .map_or(Outcome::Consumed, |own| self.act(own))
+        self.handle_key(key)
     }
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, _cx: &Cx, theme: &Theme) {

@@ -26,7 +26,9 @@ instances. Its parts:
 - **A status row** under the query, when the host sets one.
 - **The footer**, generated from the palette's key table.
 - **An options pane** of named on/off settings, opened over the results.
-- **A debounce** for a slow provider.
+- **A debounce** for a slow provider, and **progress** in words for the
+  status row.
+- **A plan of columns** for rows of several cells.
 
 It replaces what grows palette by palette: one query line with no caret
 and one with, a picker whose cursor stays at its position as the list
@@ -119,6 +121,56 @@ host's value `T`. It draws the label, two spaces, the separator mark,
 and the detail, receding in the theme's `muted`; the detail is cut before
 the label is. Its haystack is the label and the detail.
 
+A row whose look depends on what the host holds only while it draws (a
+word the host looks up for each row shown, too costly to work out for
+every result, or styles of the host's own theme) is drawn with
+`draw_with(area, buf, theme, cells)`: the closure lays each row on screen
+out instead of its own `cells`, with the same context, and only the rows
+on screen are laid out. Rows drawn only this way need not implement
+`PaletteRow`; the host routes their keys with `handle_key(key)`, which
+is what the palette's overlay `handle` does.
+
+### A plan of columns
+
+A row of several cells (a kind, a label, a count, an age, a snippet)
+lays itself out from a `ColumnPlan`, so every row of the list, and any
+other list drawn from the same plan, lines up. The plan is the row's
+columns in the order they are drawn, each a `Column`:
+
+- its width: `Column::fixed(cells)`; `Column::share(per, of)` (a share
+  of the row's width, rounded down), bounded with `.within(min, max)`;
+  `Column::steps(&[(row_width, cells), ...])` (the first step, widest
+  first, whose row width the row reaches); or `Column::fill(min)`, the
+  one column that takes what the others leave and wants at least `min`;
+- `.gap(cells)`, the blank cells after it while it shows;
+- how it gives way while the fill is short of its minimum: `.drops(order)`
+  (it leaves the row, its gap with it) or `.shrinks(order, to)` (it
+  narrows one cell at a time, down to `to`), lowest order first, stopping
+  as soon as the fill has its minimum;
+- `.end()` for text that keeps to the end of its cells (an age, a count).
+
+`ColumnPlan::layout(width)` gives the `ColumnLayout` for one width:
+`width(column)` (0 for a column that dropped out), `gap(column)`,
+`is_shown(column)`, `fill()`, and `fit(column, text)`, the text cut with
+`…` and padded to the column's cells at the edge it keeps away from,
+then its gap. `lead(cells)` counts cells before the first column that
+the row does not draw (the cursor gutter) in the width the plan shares
+out, so a row's shares and steps can match a grid that counts it. A row
+in a palette lays its plan out for the width `RowContext` gives it; a
+list outside a palette lays the same plan out for its own rows.
+
+```rust
+use tuikit::palette::{Column, ColumnPlan};
+
+let plan = ColumnPlan::new([
+    Column::fixed(6).gap(1).drops(0),
+    Column::share(1, 4).within(8, 20).gap(2).shrinks(1, 4),
+    Column::fill(12),
+]);
+let narrow = plan.layout(24);
+assert_eq!((narrow.width(0), narrow.width(1), narrow.fill()), (0, 8, 14));
+```
+
 ### Ranking
 
 A palette over known candidates takes a ranker with `ranked_by`: a
@@ -136,7 +188,10 @@ search it ran, or with another set of candidates when the scope changes).
 and an option change put the cursor on the first result, the best one. New
 rows from `set_rows` keep the cursor where it was while that is still a
 result, and put it on the first otherwise, so a growing list of streamed
-results does not move it. `at(index)` starts the cursor on a given row.
+results does not move it. `at(index)` starts the cursor on a given row,
+and `select(index)` puts it there later: for a host that keeps a cursor
+rule of its own across an edit (the position it had, while that is still
+a result) or lists the same results another way (back to the first).
 
 ### Title, status, and notes
 
@@ -185,6 +240,12 @@ see an edit for (a palette opened with a query). The framework keeps only
 the timer; what runs the search, and on which thread, is the host's. A
 palette without a debounce is never due.
 
+`Progress { scanned, total, skipped, done }` is how far such a provider
+has got; `status(noun)` puts it in words for the status row (`34/77
+files` while it runs, `77 files searched` once done, then `· 2 skipped`),
+and says nothing while the total is not known. The host keeps the counts
+and the noun, and sets the status row with the rest of its words.
+
 ### Size and scrolling
 
 A palette is the palette frame (`PALETTE_SIZE`, which is
@@ -203,8 +264,11 @@ status row, and one row of results above it. The results scroll in a
 cursor needs (so the cursor rides the bottom row as it moves down, and
 moving back up stays in the window). Results that overflow give the last
 column to the shared scrollbar (`ScrollGutter`) and are laid out one cell
-narrower. `window()` is the window of the last draw; `PgUp` and `PgDn`
-move the cursor by its rows.
+narrower. A palette built with `reserve_scrollbar()` keeps that column
+while they fit too, blank, so its rows have one width whether or not the
+list overflows: a list a provider streams into does not shift its
+columns as it grows past the frame. `window()` is the window of the last
+draw; `PgUp` and `PgDn` move the cursor by its rows.
 
 ### Keys of the host's own
 
@@ -321,14 +385,11 @@ copy), and 18 (pagers).
   results out in one place, so a split of the list's area would go there,
   and `PaletteRow` would gain a method with a default that says what to
   show. Not built.
-- **A plan of columns.** Rows with several cells (a kind, a label, a
-  context, a word at the right edge) lay themselves out from the width
-  they are told. A plan shared by every row (ordered cells with minimum
-  and maximum widths and a drop order) would travel in `RowContext`,
-  which only the palette builds.
-- **A progress status.** The status row is the host's text; a formatter
-  for a scan's progress (`scanned/total`, skipped, done) would sit beside
-  the debounce.
+- **More width rules.** A column's share is of the whole row; a share of
+  what the fixed columns leave, or a fill that drops out below its
+  minimum and hands its room to a neighbor (a context dropped so a label
+  can take the row), is not a rule yet, so a grid that needs either lays
+  itself out by hand. Both would be `Column` constructors.
 - **Match highlights.** A row gets the query and paints what matched
   itself (`text::paint` with the theme's `match_style`); a ranker that
   answers ranges with its indices would save the second search.

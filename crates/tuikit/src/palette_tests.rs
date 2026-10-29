@@ -923,6 +923,155 @@ fn a_row_is_told_its_width_cursor_and_query() {
     assert_eq!(Probe.haystack(), "", "a row need not say what to match");
 }
 
+// ---- hosts that steer the cursor and draw the rows --------------------------------
+
+#[test]
+fn select_puts_the_cursor_on_a_listed_row_and_ignores_the_rest() {
+    let mut palette = three();
+    type_in(&mut palette, "alph");
+    assert_eq!(labels(&palette), ["alpha", "alphabet"]);
+    palette.select(2);
+    assert_eq!(
+        current(&palette),
+        Some("alphabet"),
+        "row 2 is listed second"
+    );
+    palette.select(1);
+    assert_eq!(current(&palette), Some("alphabet"), "beta is not listed");
+    palette.select(0);
+    assert_eq!(palette.cursor(), 0);
+}
+
+#[test]
+fn a_host_can_keep_its_own_cursor_rule_across_an_edit() {
+    let mut palette = many(10);
+    for _ in 0..3 {
+        key_in(&mut palette, press(KeyCode::Down));
+    }
+    let before = palette.cursor();
+    type_in(&mut palette, "Item");
+    assert_eq!(palette.cursor(), 0, "the palette's rule: the best result");
+    palette.select(palette.ranked()[before]);
+    assert_eq!(
+        current(&palette),
+        Some("Item 3"),
+        "the host kept its position"
+    );
+}
+
+#[test]
+fn draw_with_lays_out_only_the_rows_on_screen_with_the_hosts_cells() {
+    let mut palette = many(40);
+    let laid_out = std::cell::Cell::new(0);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 60, 16));
+    palette.draw_with(buf.area, &mut buf, &Theme::default(), |row, context| {
+        laid_out.set(laid_out.get() + 1);
+        vec![ratatui::text::Span::raw(format!(
+            "{} of the host's, {} wide",
+            row.label, context.width
+        ))]
+    });
+    let all = text(&buf);
+    assert!(all.contains("► Item 0 of the host's, 55 wide"), "{all}");
+    assert!(
+        !all.contains("Item 0  · n"),
+        "the row's own cells are not drawn"
+    );
+    assert_eq!(
+        laid_out.get(),
+        palette.window().viewport(),
+        "only the rows shown"
+    );
+}
+
+#[test]
+fn rows_the_host_draws_need_not_lay_themselves_out() {
+    // Plain numbers: the host routes the keys and draws every row.
+    let mut palette: Palette<u32, u32> =
+        Palette::new("Numbers", vec![10, 20, 30], |n: &u32| Outcome::Commit(*n));
+    assert_eq!(palette.handle_key(press(KeyCode::Down)), Outcome::Consumed);
+    assert_eq!(
+        palette.handle_key(press(KeyCode::Enter)),
+        Outcome::Commit(20)
+    );
+    assert_eq!(palette.handle_key(typed('x')), Outcome::Consumed);
+    assert_eq!(palette.query(), "x");
+    let mut buf = Buffer::empty(Rect::new(0, 0, 60, 16));
+    palette.draw_with(buf.area, &mut buf, &Theme::default(), |n, _| {
+        vec![ratatui::text::Span::raw(format!("number {n}"))]
+    });
+    assert!(text(&buf).contains("► number 10"), "{}", text(&buf));
+}
+
+/// A row that says how wide it was told it is and fills that width.
+struct Told;
+
+impl PaletteRow for Told {
+    fn cells(&self, row: &RowContext<'_>) -> Vec<ratatui::text::Span<'static>> {
+        let said = format!("w{}", row.width);
+        vec![ratatui::text::Span::raw(format!(
+            "{said:=<width$}",
+            width = row.width
+        ))]
+    }
+}
+
+fn told(count: usize) -> Palette<Told, Msg> {
+    let rows = (0..count).map(|_| Told).collect();
+    Palette::new("Told", rows, |_: &Told| Outcome::Close)
+}
+
+/// The cell just inside the frame's right border on the cursor's row.
+fn last_inside(buf: &Buffer) -> String {
+    let at = find(buf, marks::POINTER).expect("the cursor row");
+    let corner = find(buf, "┐").expect("the frame's corner");
+    buf[(corner.x - 1, at.y)].symbol().to_string()
+}
+
+#[test]
+fn a_reserved_scrollbar_keeps_one_row_width_whether_or_not_the_list_overflows() {
+    // The palette frame is 60 wide at 64 columns: 58 inside, less the
+    // gutter, less the scrollbar's column.
+    let fits = drawn(&mut told(2).reserve_scrollbar(), 64, 16);
+    let overflows = drawn(&mut told(40).reserve_scrollbar(), 64, 16);
+    assert!(text(&fits).contains("► w55="), "{}", text(&fits));
+    assert!(text(&overflows).contains("► w55="), "{}", text(&overflows));
+    assert_eq!(
+        last_inside(&fits),
+        " ",
+        "the column stays blank while they fit"
+    );
+    assert!(!text(&fits).contains('█'), "no bar while the rows fit");
+    assert!(text(&overflows).contains('█'), "the bar once they overflow");
+    // Without the reservation the rows take the column while they fit.
+    let plain = drawn(&mut told(2), 64, 16);
+    assert!(text(&plain).contains("► w56="), "{}", text(&plain));
+    assert_eq!(last_inside(&plain), "=");
+}
+
+#[test]
+fn progress_says_how_far_a_provider_has_got() {
+    let progress = |scanned, total, skipped, done| Progress {
+        scanned,
+        total,
+        skipped,
+        done,
+    };
+    assert_eq!(
+        progress(0, 5, 0, false).status("pages").as_deref(),
+        Some("0/5 pages")
+    );
+    assert_eq!(
+        progress(77, 77, 3, true).status("files").as_deref(),
+        Some("77 files searched · 3 skipped")
+    );
+    assert_eq!(
+        progress(0, 0, 2, true).status("files"),
+        None,
+        "nothing until the total is known"
+    );
+}
+
 // ---- goldens --------------------------------------------------------------------
 
 fn golden_path(name: &str) -> PathBuf {

@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
 use super::options::Options;
-use super::row::{PaletteRow, RowContext};
+use super::row::RowContext;
 use crate::frame::ModalBody;
 use crate::keys::Footer;
 use crate::scroll::{ScrollGutter, ScrollWindow};
@@ -34,9 +34,14 @@ pub(super) struct View<'a, R> {
     pub options: Option<&'a Options>,
     pub footer: Footer,
     pub theme: &'a Theme,
+    /// Lays a result out: the row's own cells, or the host's while it
+    /// draws.
+    pub cells: &'a dyn Fn(&R, &RowContext<'_>) -> Vec<Span<'static>>,
+    /// Whether the scrollbar's column stays while the results fit.
+    pub reserve_scrollbar: bool,
 }
 
-impl<'a, R: PaletteRow> View<'a, R> {
+impl<R> View<'_, R> {
     /// Rows above the list: the query, then the status row when there is
     /// one.
     fn lead(&self) -> usize {
@@ -76,7 +81,7 @@ impl<'a, R: PaletteRow> View<'a, R> {
                 let row = self.rows.get(*self.ranked.get(position)?)?;
                 let cursor = Cursor::of(position == self.cursor, true);
                 let context = RowContext::new(room, cursor, query, self.theme);
-                let cells = text::fit_spans(row.cells(&context), room);
+                let cells = text::fit_spans((self.cells)(row, &context), room);
                 Some(selection::row(cells, cursor, self.theme))
             })
             .collect()
@@ -90,7 +95,7 @@ pub(super) struct Body<'a, R> {
     pub window: ScrollWindow,
 }
 
-impl<R: PaletteRow> ModalBody for Body<'_, R> {
+impl<R> ModalBody for Body<'_, R> {
     type Output = ScrollWindow;
 
     /// The rows a palette wants when its frame follows its body: the
@@ -159,9 +164,14 @@ impl<R: PaletteRow> ModalBody for Body<'_, R> {
             return window;
         }
         // Results that overflow give the list's last column to the shared
-        // scrollbar, and the window follows the cursor by the one rule.
+        // scrollbar (a palette that reserves it keeps the column blank
+        // while they fit), and the window follows the cursor by the one
+        // rule.
         let gutter = ScrollGutter::layout(list, view.ranked.len());
-        let content = gutter.content();
+        let mut content = gutter.content();
+        if view.reserve_scrollbar && gutter.bar().is_none() && content.width >= 2 {
+            content.width -= 1;
+        }
         window.resize(usize::from(content.height), view.ranked.len());
         window.follow(view.cursor..view.cursor + 1);
         let lines = view.result_lines(window.visible(), usize::from(content.width));
