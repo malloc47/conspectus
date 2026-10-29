@@ -15,7 +15,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use super::layout::{builders, framed_and_bare, modal_rect};
 use super::*;
 use crate::tui::keymap::Action;
-use crate::tui::messages::LogEntry;
+use crate::tui::messages::{LogEntry, LogEntryExt};
 use crate::tui::widgets::value_modal::ValueModalState;
 
 /// The sizes every check runs at: a common terminal and a small one.

@@ -143,10 +143,9 @@ impl App {
             return;
         };
         if !row.is_other_header() {
-            self.status_message = Some(
-                "explorer: nothing to expand here — select the `Other` header to toggle alternates"
-                    .to_string(),
-            );
+            self.status_message = Some(Feedback::warning(
+                "explorer: nothing to expand here — select the `Other` header to toggle alternates",
+            ));
             return;
         }
         let prev_key = state.selected_row().map(|row| row.key(&state.view));
@@ -157,14 +156,11 @@ impl App {
 
     pub(super) fn toggle_edge_meta(&mut self) {
         self.edge_meta_visible = !self.edge_meta_visible;
-        self.status_message = Some(
-            if self.edge_meta_visible {
-                "explorer: edge meta visible (provenance · confidence · state)"
-            } else {
-                "explorer: edge meta hidden"
-            }
-            .to_string(),
-        );
+        self.status_message = Some(Feedback::success(if self.edge_meta_visible {
+            "explorer: edge meta visible (provenance · confidence · state)"
+        } else {
+            "explorer: edge meta hidden"
+        }));
     }
 
     pub(super) fn explorer_toggle_full_detail(&mut self) {
@@ -180,9 +176,9 @@ impl App {
         // operator knows their toggle was received but the node
         // kind doesn't carry extras to expand.
         if core_len == all_len {
-            self.status_message = Some(format!(
+            self.status_message = Some(Feedback::warning(format!(
                 "explorer: this node kind has no extra fields ({core_len} total)"
-            ));
+            )));
         } else {
             self.status_message = None;
         }
@@ -206,8 +202,9 @@ impl App {
                 }
             }
             ExplorerRow::OtherUnresolved { .. } => {
-                self.status_message =
-                    Some("explorer: unresolved evidence — `o` opens detail".to_string());
+                self.status_message = Some(Feedback::warning(
+                    "explorer: unresolved evidence — `o` opens detail",
+                ));
             }
             ExplorerRow::NodeField { .. } => {
                 self.status_message = None;
@@ -248,9 +245,9 @@ impl App {
         });
         match next {
             None => {
-                self.status_message = Some(format!(
+                self.status_message = Some(Feedback::warning(format!(
                     "explorer: drill target {target:?} not in current snapshot"
-                ));
+                )));
             }
             Some(view) => {
                 let mut new_state = ExplorerState::new(view);
@@ -323,14 +320,15 @@ impl App {
                     self.explorer_back_armed = false;
                     self.status_message = None;
                 } else {
-                    self.status_message = Some(
-                        "explorer: no drill history — press Backspace again to return to the left pane"
-                            .to_string(),
-                    );
+                    self.status_message = Some(Feedback::info(
+                        "explorer: no drill history — press Backspace again to return to the left pane",
+                    ));
                     self.explorer_back_armed = true;
                 }
             } else {
-                self.status_message = Some("explorer: no drill history to back out of".to_string());
+                self.status_message = Some(Feedback::warning(
+                    "explorer: no drill history to back out of",
+                ));
             }
             return;
         };
@@ -346,9 +344,9 @@ impl App {
             now: Some(crate::tui::rows::tree_current_unix_epoch()),
         });
         let Some(view) = view else {
-            self.status_message = Some(
-                "explorer: cannot restore breadcrumb hop — node missing from snapshot".to_string(),
-            );
+            self.status_message = Some(Feedback::warning(
+                "explorer: cannot restore breadcrumb hop — node missing from snapshot",
+            ));
             return;
         };
         let breadcrumb_remaining = state.breadcrumb.clone();

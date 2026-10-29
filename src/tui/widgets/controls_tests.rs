@@ -315,9 +315,9 @@ fn max_age_invalid_value_keeps_editor_open() {
     let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
     assert_eq!(
         outcome,
-        ControlsOutcome::ApplyAndStay(crate::tui::Msg::Toast(
-            "max age: not a non-negative integer: ``".to_string()
-        ))
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::Toast(tuikit::feedback::Feedback::warning(
+            "max age: not a non-negative integer: ``"
+        )))
     );
     assert!(matches!(state.sub_editor(), Some(SubEditor::MaxAge(_))));
 }

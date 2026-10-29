@@ -17,7 +17,7 @@ fn menu() -> RowMenuState {
             RowMenuEntry::new(
                 "Forget",
                 "remove the record",
-                Msg::SetStatus(Some("x".into())),
+                Msg::SetStatus(Some(tuikit::feedback::Feedback::info("x"))),
             )
             .confirming(),
         ],
@@ -38,7 +38,10 @@ fn a_confirming_entry_needs_a_second_enter() {
     assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Consumed);
     assert_eq!(state.armed(), Some(1));
     let outcome = state.handle_key(key(KeyCode::Enter));
-    assert_eq!(outcome, Outcome::Commit(Msg::SetStatus(Some("x".into()))));
+    assert_eq!(
+        outcome,
+        Outcome::Commit(Msg::SetStatus(Some(tuikit::feedback::Feedback::info("x"))))
+    );
 }
 
 #[test]

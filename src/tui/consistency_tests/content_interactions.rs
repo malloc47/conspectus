@@ -279,7 +279,7 @@ fn a_startup_search_with_live_preview_off_says_it_cannot_run() {
     let app = App::new(config);
 
     assert!(app.content().is_none(), "nothing is searched");
-    assert!(app.toast().has_toast(), "the operator is told why");
+    assert!(!app.toasts().is_empty(), "the operator is told why");
 }
 
 #[test]
@@ -313,7 +313,7 @@ fn the_controls_content_row_refuses_with_the_shared_notice_when_live_preview_is_
     press(&mut app, KeyCode::Enter);
 
     assert!(app.content().is_none(), "no search starts");
-    assert!(app.toast().has_toast(), "the shared notice is shown");
+    assert!(!app.toasts().is_empty(), "the shared notice is shown");
 }
 
 #[test]

@@ -93,7 +93,11 @@ impl NewMuxFormState {
     /// keeps the form open on that field and a toast names it. The cwd
     /// is committed with `~` expanded, since `mux new` takes it as given.
     fn try_commit(&mut self) -> Outcome<Msg> {
-        let missing = |field: &str| Outcome::Stay(Msg::Toast(format!("mux: {field} is required")));
+        let missing = |field: &str| {
+            Outcome::Stay(Msg::Toast(tuikit::feedback::Feedback::warning(format!(
+                "mux: {field} is required"
+            ))))
+        };
         match self.focus {
             NewMuxField::Name => {
                 if self.name.value().trim().is_empty() {

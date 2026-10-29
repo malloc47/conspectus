@@ -24,7 +24,7 @@ const SIZE: (u16, u16) = (120, 40);
 /// included.
 fn screen(app: &mut App) -> String {
     let (width, height) = SIZE;
-    app.prepare_toast_for_render(Rect::new(0, 0, width, height));
+    app.prepare_toast_for_render();
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
     terminal
         .draw(|frame| crate::tui::runtime::draw_screen(app, frame))

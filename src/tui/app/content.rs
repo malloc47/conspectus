@@ -817,7 +817,7 @@ impl App {
                     with_panes: false,
                     draft: false,
                 }) {
-                    effects.push(Effect::Toast(note));
+                    effects.push(Effect::Toast(Feedback::warning(note)));
                     return effects;
                 }
                 self.content_stash = None;
@@ -848,7 +848,7 @@ impl App {
                 }) {
                     // Nothing started: the search that was active stays.
                     self.content = displaced;
-                    effects.push(Effect::Toast(note));
+                    effects.push(Effect::Toast(Feedback::warning(note)));
                 } else {
                     self.content_stash = displaced;
                 }
@@ -885,7 +885,7 @@ impl App {
                     with_panes: self.modal_panes(),
                     draft: false,
                 }) {
-                    effects.push(Effect::Toast(note));
+                    effects.push(Effect::Toast(Feedback::warning(note)));
                     return effects;
                 } else {
                     self.content_stash = None;
@@ -972,7 +972,8 @@ impl App {
                     let mux =
                         NodeId::MuxSession(crate::model::MuxSessionId::new(pane.mux.native_id()));
                     if let Err(why) = self.reveal_node(&mux, None) {
-                        self.status_message = Some(format!("{} {why}", pane.mux.session));
+                        self.status_message =
+                            Some(Feedback::warning(format!("{} {why}", pane.mux.session)));
                     }
                 }
                 effects.push(Effect::Exec(crate::tui::effect::ExecSpec::PaneScrollback {
@@ -1063,7 +1064,7 @@ impl App {
             }
             Msg::OpenSearchOptions => {
                 if !self.config.live_preview_enabled {
-                    effects.push(Effect::Toast(CONTENT_OFF_NOTICE.to_string()));
+                    effects.push(Effect::Toast(Feedback::warning(CONTENT_OFF_NOTICE)));
                     return effects;
                 }
                 self.open_content_search_overlay();
@@ -1090,7 +1091,7 @@ impl App {
             }
             Msg::OpenSearchHistory => {
                 if self.search_history.is_empty() {
-                    effects.push(Effect::Toast("No searches yet".to_string()));
+                    effects.push(Effect::Toast(Feedback::warning("No searches yet")));
                     return effects;
                 }
                 let now = Instant::now();
@@ -1121,13 +1122,13 @@ impl App {
                 self.open_picker(picker);
             }
             Msg::ApplySearchEntry if self.active_view != View::Search => {
-                effects.push(Effect::Toast(
-                    "Ctrl-F filters by the search the Search view shows (6)".to_string(),
-                ));
+                effects.push(Effect::Toast(Feedback::warning(
+                    "Ctrl-F filters by the search the Search view shows (6)",
+                )));
             }
             Msg::ApplySearchEntry => {
                 let Some(viewed) = self.viewed_search().cloned() else {
-                    effects.push(Effect::Toast("No search to filter by".to_string()));
+                    effects.push(Effect::Toast(Feedback::warning("No search to filter by")));
                     return effects;
                 };
                 if self.viewed_is_filter() {
@@ -1153,10 +1154,10 @@ impl App {
                 self.scan_new_sessions();
                 self.rebuild_tree_in_place();
                 if let Some(content) = self.content() {
-                    effects.push(Effect::Toast(format!(
+                    effects.push(Effect::Toast(Feedback::success(format!(
                         "Filtering the lists by \"{}\"",
                         content.text
-                    )));
+                    ))));
                 }
             }
             Msg::ContentDetails { generation, batch } => {

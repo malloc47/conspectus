@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
-use ratatui::layout::Rect;
+use tuikit::feedback::Feedback;
 
 use crate::discovery::tmux::{MuxBackend, SystemTmux};
 use crate::model::MuxSessionId;
@@ -28,6 +28,7 @@ use crate::tui::actions::AttachTarget;
 use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::effect::Effect;
 use crate::tui::keybindings::overlay as overlay_keymap;
+use crate::tui::messages::{LogEntry, LogEntryExt};
 use crate::tui::preview::{
     PreviewContent, PreviewSource, capture_via, load_offline_preview, pane_native_id,
     preview_source,
@@ -410,7 +411,7 @@ impl LoopMode for LiveMode {
                 ));
             }
             if let Some(warning) = warning {
-                app.report(crate::tui::messages::LogEntry::warning(warning));
+                app.report(LogEntry::warning(warning));
             }
             if !verdict.apply {
                 continue;
@@ -481,9 +482,9 @@ impl LoopMode for LiveMode {
         if action.as_ref().is_some_and(acts_on_selected_row) && app.selected_row_awaits_handoff() {
             // The row shows pre-hand-off values: its mux or session may
             // be gone, so an action on it could fail (ADR 0132).
-            app.update(Msg::SetStatus(Some(
-                crate::tui::app::HANDOFF_PENDING_HINT.to_string(),
-            )));
+            app.update(Msg::SetStatus(Some(Feedback::warning(
+                crate::tui::app::HANDOFF_PENDING_HINT,
+            ))));
             return Ok(());
         }
         match action {
@@ -534,10 +535,10 @@ impl LoopMode for LiveMode {
             Some(Action::OpenMuxMenu) => open_mux_menu_action(app),
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
-                app.update(Msg::SetStatus(Some(format!(
+                app.update(Msg::SetStatus(Some(Feedback::info(format!(
                     "controls: {}",
                     tuikit::keys::footer(overlay_keymap::CONTROLS_KEYS)
-                ))));
+                )))));
             }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
@@ -554,7 +555,7 @@ impl LoopMode for LiveMode {
             }
             Some(Action::ClearFilters) => {
                 dispatch(app, Msg::ClearFilters);
-                app.update(Msg::SetStatus(Some("filters cleared".to_string())));
+                app.update(Msg::SetStatus(Some(Feedback::success("filters cleared"))));
             }
             Some(Action::OpenSearch) => {
                 let hint = app.open_search_entry();
@@ -644,10 +645,10 @@ impl StaticMode {
             }
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
-                app.update(Msg::SetStatus(Some(format!(
+                app.update(Msg::SetStatus(Some(Feedback::info(format!(
                     "controls: {}",
                     tuikit::keys::footer(overlay_keymap::CONTROLS_KEYS)
-                ))));
+                )))));
             }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
@@ -670,52 +671,52 @@ impl StaticMode {
                         Ok(fresh) => {
                             self.snapshot = fresh;
                             set_static_data(app, config, &self.snapshot);
-                            app.update(Msg::SetStatus(Some(format!(
+                            app.update(Msg::SetStatus(Some(Feedback::success(format!(
                                 "fixture reloaded from {}",
                                 path.display()
-                            ))));
+                            )))));
                         }
                         Err(err) => {
-                            app.update(Msg::SetStatus(Some(format!(
+                            app.update(Msg::SetStatus(Some(Feedback::error(format!(
                                 "fixture reload failed ({}): {err}",
                                 path.display()
-                            ))));
+                            )))));
                         }
                     }
                 } else {
                     set_static_data(app, config, &self.snapshot);
-                    app.update(Msg::SetStatus(Some(
-                        "scenario snapshot reloaded".to_string(),
-                    )));
+                    app.update(Msg::SetStatus(Some(Feedback::success(
+                        "scenario snapshot reloaded",
+                    ))));
                 }
             }
             Some(Action::Attach) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI is static; attach is disabled".to_string(),
-                )));
+                app.update(Msg::SetStatus(Some(Feedback::warning(
+                    "scenario TUI is static; attach is disabled",
+                ))));
             }
             Some(Action::Resume) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI is static; resume is disabled".to_string(),
-                )));
+                app.update(Msg::SetStatus(Some(Feedback::warning(
+                    "scenario TUI is static; resume is disabled",
+                ))));
             }
             Some(Action::View) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI is static; view is disabled".to_string(),
-                )));
+                app.update(Msg::SetStatus(Some(Feedback::warning(
+                    "scenario TUI is static; view is disabled",
+                ))));
             }
             Some(Action::DefaultAction) => {
                 let msg = match selected_default_action(app) {
                     SelectedDefault::ToggleExpand => Msg::ToggleExpand,
-                    SelectedDefault::Attach => Msg::SetStatus(Some(
-                        "scenario TUI is static; attach is disabled".to_string(),
-                    )),
-                    SelectedDefault::View => {
-                        Msg::SetStatus(Some("scenario TUI is static; view is disabled".to_string()))
-                    }
-                    SelectedDefault::Scrollback => Msg::SetStatus(Some(
-                        "scenario TUI is static; scrollback is disabled".to_string(),
-                    )),
+                    SelectedDefault::Attach => Msg::SetStatus(Some(Feedback::warning(
+                        "scenario TUI is static; attach is disabled",
+                    ))),
+                    SelectedDefault::View => Msg::SetStatus(Some(Feedback::warning(
+                        "scenario TUI is static; view is disabled",
+                    ))),
+                    SelectedDefault::Scrollback => Msg::SetStatus(Some(Feedback::warning(
+                        "scenario TUI is static; scrollback is disabled",
+                    ))),
                 };
                 dispatch(app, msg);
             }
@@ -729,7 +730,7 @@ impl StaticMode {
             }
             Some(Action::ClearFilters) => {
                 dispatch(app, Msg::ClearFilters);
-                app.update(Msg::SetStatus(Some("filters cleared".to_string())));
+                app.update(Msg::SetStatus(Some(Feedback::success("filters cleared"))));
             }
             Some(
                 Action::OpenRename
@@ -738,9 +739,9 @@ impl StaticMode {
                 | Action::OpenNewMuxForm
                 | Action::OpenMuxMenu,
             ) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI keeps mutating actions disabled".to_string(),
-                )));
+                app.update(Msg::SetStatus(Some(Feedback::warning(
+                    "scenario TUI keeps mutating actions disabled",
+                ))));
             }
             Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
@@ -797,13 +798,10 @@ impl LoopMode for StaticMode {
     }
 }
 
-/// Prepare the toast area and render one frame. Shared between
-/// [`event_loop`] and [`static_event_loop`] —
-/// the toast prep + viewer-or-ui draw block was byte-identical
-/// in both loops.
+/// Retire an expired toast and render one frame. Shared between
+/// [`event_loop`] and [`static_event_loop`].
 fn draw_frame(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
-    let size = terminal.size()?;
-    app.prepare_toast_for_render(Rect::new(0, 0, size.width, size.height));
+    app.prepare_toast_for_render();
     terminal.draw(|frame| draw_screen(app, frame))?;
     Ok(())
 }
@@ -1275,7 +1273,7 @@ fn apply_handoff_refresh(app: &mut App, fetched: HandoffRefresh) {
     let config = app.config().clone();
     apply_discovery(app, &config, fetched.snapshot);
     if let Some(message) = fetched.warning {
-        app.report(crate::tui::messages::LogEntry::warning(message));
+        app.report(LogEntry::warning(message));
     }
 }
 
@@ -1442,32 +1440,32 @@ fn try_daemon_snapshot() -> Option<crate::model::GraphSnapshot> {
 pub(super) fn open_worktree_menu_action(app: &mut App) {
     use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
     let Some(node) = crate::tui::actions::action_subject(app).node else {
-        app.update(Msg::SetStatus(Some(
-            "worktree: nothing selected".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "worktree: nothing selected",
+        ))));
         return;
     };
     let can_mutate = worktree_mutation_available();
     let ctx = if let Some(db) = app.snapshot_handle() {
         context_for_node(db.snapshot(), &node, can_mutate)
     } else {
-        app.update(Msg::SetStatus(Some(
-            "worktree: no graph loaded".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "worktree: no graph loaded",
+        ))));
         return;
     };
     if let Some(state) = WorktreeMenuState::new(ctx) {
         app.open_worktree_menu(state);
-        app.update(Msg::SetStatus(Some(
-            "worktree: ↑/↓ move · Enter pick · Esc close".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::info(
+            "worktree: ↑/↓ move · Enter pick · Esc close",
+        ))));
     } else {
         let hint = if can_mutate {
             "worktree: no actions for this selection"
         } else {
             "worktree: read-only — install worktrunk or set `[worktree] backend`"
         };
-        app.update(Msg::SetStatus(Some(hint.to_string())));
+        app.update(Msg::SetStatus(Some(Feedback::warning(hint))));
     }
 }
 
@@ -1476,32 +1474,32 @@ pub(super) fn open_worktree_menu_action(app: &mut App) {
 pub(super) fn open_worktree_close_down_action(app: &mut App) {
     use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
     let Some(node) = crate::tui::actions::action_subject(app).node else {
-        app.update(Msg::SetStatus(Some(
-            "worktree: nothing selected".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "worktree: nothing selected",
+        ))));
         return;
     };
     let can_mutate = worktree_mutation_available();
     let ctx = if let Some(db) = app.snapshot_handle() {
         context_for_node(db.snapshot(), &node, can_mutate)
     } else {
-        app.update(Msg::SetStatus(Some(
-            "worktree: no graph loaded".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "worktree: no graph loaded",
+        ))));
         return;
     };
     if let Some(state) = WorktreeMenuState::new_close_down(ctx) {
         app.open_worktree_menu(state);
-        app.update(Msg::SetStatus(Some(
-            "close down: m merge · d discard · Esc cancel".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::info(
+            "close down: m merge · d discard · Esc cancel",
+        ))));
     } else {
         let hint = if can_mutate {
             "close down: select a worktree, mux, or checkout with a branch"
         } else {
             "worktree: read-only — install worktrunk or set `[worktree] backend`"
         };
-        app.update(Msg::SetStatus(Some(hint.to_string())));
+        app.update(Msg::SetStatus(Some(Feedback::warning(hint))));
     }
 }
 
@@ -1531,9 +1529,9 @@ pub(super) fn open_new_mux_form_action(app: &mut App) {
     app.open_new_mux_form(
         NewMuxFormState::new(seeded_name, seeded_cwd).with_cwd_candidates(candidates),
     );
-    app.update(Msg::SetStatus(Some(
-        "mux: ↑/↓ move · Tab complete/next · Enter next/commit · Esc cancel".to_string(),
-    )));
+    app.update(Msg::SetStatus(Some(Feedback::info(
+        "mux: ↑/↓ move · Tab complete/next · Enter next/commit · Esc cancel",
+    ))));
 }
 
 /// Public alias for [`derive_new_mux_cwd`] so the reducer's
@@ -1733,9 +1731,9 @@ fn derive_new_mux_name(_app: &App) -> String {
 pub(super) fn open_mux_menu_action(app: &mut App) {
     use crate::tui::widgets::mux_menu::MuxMenuState;
     app.open_mux_menu(MuxMenuState::new());
-    app.update(Msg::SetStatus(Some(
-        "mux: ↑/↓ move · Enter pick · Esc close".to_string(),
-    )));
+    app.update(Msg::SetStatus(Some(Feedback::info(
+        "mux: ↑/↓ move · Enter pick · Esc close",
+    ))));
 }
 
 /// Append an informational advisory when the rename target is a
@@ -2122,9 +2120,7 @@ fn report_refresh_failure(app: &mut App, err: &anyhow::Error) {
     app.update(Msg::SetRefreshFailure(format!(
         "last refresh failed; {err}"
     )));
-    app.report(crate::tui::messages::LogEntry::error(format!(
-        "refresh failed: {err:#}"
-    )));
+    app.report(LogEntry::error(format!("refresh failed: {err:#}")));
 }
 
 /// Populate `App::provider_status` from the run config and (in a
@@ -2247,18 +2243,19 @@ fn default_action(
 /// dispatch the normal `Msg::ExplorerActivate` so group expansion and
 /// link drill still work.
 fn explorer_enter_action(app: &mut App) {
-    explorer_enter(app, |value| {
-        let _ = crate::tui::clipboard::copy_to_clipboard(value);
-    });
+    explorer_enter(app, crate::tui::clipboard::copy_to_clipboard);
 }
 
 /// [`explorer_enter_action`] with the clipboard write supplied by the
 /// caller, so the snapshot driver can run the same branch without
 /// emitting OSC 52 into its frame output.
-pub(super) fn explorer_enter(app: &mut App, write_clipboard: impl FnOnce(&str)) {
+pub(super) fn explorer_enter(
+    app: &mut App,
+    write_clipboard: impl FnOnce(&str) -> std::io::Result<()>,
+) {
     if let Some((label, value)) = app.explorer_copy_target() {
-        write_clipboard(&value);
-        app.post_toast(format!("copied: {label}"));
+        let written = write_clipboard(&value);
+        post_copy_toast(app, written, format!("copied: {label}"));
         return;
     }
     app.update(Msg::ExplorerActivate);
@@ -2271,20 +2268,29 @@ fn copy_session_id_action(app: &mut App) {
     match app.selected_session_id() {
         Some((label, value)) => copy_and_toast(app, label, value),
         None => {
-            app.update(Msg::SetStatus(Some(
-                "i: select an agent or mux session row to copy its id".to_string(),
-            )));
+            app.update(Msg::SetStatus(Some(Feedback::warning(
+                "i: select an agent or mux session row to copy its id",
+            ))));
         }
     }
 }
 
 /// Shared copy-side-effect: write `value` to the clipboard via OSC 52
-/// and post the `label` as a toast. Clipboard errors are silenced —
-/// OSC 52 is fire-and-forget per ADR 0056, and the toast is the
-/// operator-facing signal.
+/// and post the `label` as a toast. OSC 52 is fire-and-forget per ADR
+/// 0056, so a terminal that ignores the sequence still reads as copied;
+/// a write that fails says so.
 fn copy_and_toast(app: &mut App, label: String, value: String) {
-    let _ = crate::tui::clipboard::copy_to_clipboard(&value);
-    app.post_toast(label);
+    let written = crate::tui::clipboard::copy_to_clipboard(&value);
+    post_copy_toast(app, written, label);
+}
+
+/// `done` as a success toast when the clipboard write went out, or an
+/// error toast saying why it did not, as the executor's copy does.
+fn post_copy_toast(app: &mut App, written: std::io::Result<()>, done: String) {
+    app.post_toast(match written {
+        Ok(()) => Feedback::success(done),
+        Err(err) => Feedback::error(format!("copy failed: {err}")),
+    });
 }
 
 pub(super) use crate::tui::keymap::{remap_for_focus, translate};

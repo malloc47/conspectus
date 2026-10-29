@@ -58,7 +58,6 @@ memmap2 = "0.9"
 # upgrade if snapshots ever push past the 16 MiB frame cap.
 base64 = "0.22"
 ratatui-cheese = "0.7"
-ratatui-comfy-toaster = { version = "0.4", default-features = false }
 rusqlite = { version = "0.39", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -189,7 +188,6 @@ rkyv = { workspace = true }
 memmap2 = { workspace = true }
 base64 = { workspace = true }
 ratatui-cheese = { workspace = true }
-ratatui-comfy-toaster = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

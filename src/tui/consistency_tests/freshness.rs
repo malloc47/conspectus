@@ -41,7 +41,7 @@ fn every_sampled_effect() -> Vec<Effect> {
             crate::model::AgentSessionId::new("claude-code", "global", "s1"),
             None,
         )),
-        Effect::Toast("x".into()),
+        Effect::Toast(Feedback::info("x")),
         Effect::Persist,
     ]);
     effects

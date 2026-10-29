@@ -274,9 +274,30 @@ fn key_prelude_o_and_enter_reach_a_truncated_field_past_the_core_rows() {
     drive(&mut app, &config, "o<Enter>");
     assert!(app.value_modal().is_none(), "o closes the modal again");
     assert_eq!(
-        app.toast().current_message(),
+        app.toasts().iter().last().map(|toast| toast.text.as_str()),
         Some("copied: last_message_preview"),
         "Enter copies the same field"
+    );
+}
+
+#[test]
+fn a_feedback_flag_names_its_severity_or_takes_the_default() {
+    assert_eq!(
+        parse_feedback("error:copy failed: broken pipe", Severity::Success),
+        Feedback::error("copy failed: broken pipe")
+    );
+    assert_eq!(
+        parse_feedback("warning:nothing to undo", Severity::Info),
+        Feedback::warning("nothing to undo")
+    );
+    assert_eq!(
+        parse_feedback("copied: cwd", Severity::Success),
+        Feedback::success("copied: cwd")
+    );
+    assert_eq!(
+        parse_feedback("note: not a severity", Severity::Info),
+        Feedback::info("note: not a severity"),
+        "only the four names are prefixes"
     );
 }
 

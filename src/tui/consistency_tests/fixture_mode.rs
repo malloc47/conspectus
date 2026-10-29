@@ -25,7 +25,7 @@ fn key(app: &mut App, code: KeyCode) {
 
 /// The whole screen with any toast drawn.
 fn screen(app: &mut App) -> String {
-    app.prepare_toast_for_render(Rect::new(0, 0, 120, 30));
+    app.prepare_toast_for_render();
     frame(app, 120, 30)
 }
 
@@ -67,14 +67,16 @@ fn closing_an_overlay_says_nothing() {
     for (code, modifiers, what) in leaves {
         for (name, view, open) in builders() {
             let mut app = app_with(view, open);
-            app.update(Msg::SetStatus(Some("a hint the overlay set".into())));
+            app.update(Msg::SetStatus(Some(Feedback::info(
+                "a hint the overlay set",
+            ))));
             press(&mut app, code, modifiers);
             assert_eq!(
                 app.status_message(),
                 None,
                 "{name}: {what} left a message on the status line"
             );
-            assert!(!app.toast().has_toast(), "{name}: {what} posted a toast");
+            assert!(app.toasts().is_empty(), "{name}: {what} posted a toast");
         }
     }
 }

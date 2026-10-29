@@ -53,7 +53,7 @@ impl Cli {
 }
 
 fn default_command() -> Command {
-    Command::Tui(TuiArgs::default())
+    Command::Tui(Box::default())
 }
 
 #[derive(Debug, Subcommand)]
@@ -69,7 +69,7 @@ enum Command {
     /// List registered columns for a `conspectus table <ROWS>` row-type.
     Columns(ColumnsArgs),
     /// Open the interactive terminal UI.
-    Tui(TuiArgs),
+    Tui(Box<TuiArgs>),
     /// Write or install harness hook integrations.
     Hook(HookArgs),
     /// Rename an agent session or a tmux session.

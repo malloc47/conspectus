@@ -203,7 +203,7 @@ fn rows_with_nothing_to_pin_say_why_instead_of_doing_nothing() {
     app.set_selection(bucket);
     let effects = app.update(Msg::TogglePin);
     assert!(
-        matches!(effects.as_slice(), [Effect::Toast(text)] if !text.is_empty()),
+        matches!(effects.as_slice(), [Effect::Toast(note)] if !note.text.is_empty()),
         "{effects:?}"
     );
 }

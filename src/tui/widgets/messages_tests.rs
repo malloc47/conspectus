@@ -1,5 +1,6 @@
 use super::*;
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use tuikit::feedback::Severity;
 use tuikit::overlay::Outcome;
 
 fn press(code: KeyCode) -> KeyEvent {
@@ -9,7 +10,7 @@ fn press(code: KeyCode) -> KeyEvent {
 fn log_with(n: usize) -> MessageLog {
     let mut log = MessageLog::default();
     for i in 0..n {
-        log.push(LogEntry::info(format!("entry {i}")));
+        log.push(LogEntry::success(format!("entry {i}")));
     }
     log
 }
@@ -54,7 +55,7 @@ fn close_keys_close() {
 #[test]
 fn renders_list_and_selected_detail() {
     let mut log = MessageLog::default();
-    log.push(LogEntry::info("attached tmux:w2"));
+    log.push(LogEntry::success("attached tmux:w2"));
     log.push(LogEntry::error("pin `w1` launch failed").with_command(
         crate::tui::messages::CommandRecord {
             argv: vec!["conspectus".into(), "pin".into()],
@@ -68,13 +69,8 @@ fn renders_list_and_selected_detail() {
     let area = Rect::new(0, 0, 80, 24);
     let mut buf = Buffer::empty(area);
 
-    MessagesWidget::new(
-        &state,
-        &log,
-        &theme,
-        log.newest_first().next().unwrap().at_epoch,
-    )
-    .render(area, &mut buf);
+    MessagesWidget::new(&state, &log, &theme, log.newest_first().next().unwrap().at)
+        .render(area, &mut buf);
 
     let text: String = (0..area.height)
         .map(|y| {
@@ -95,26 +91,34 @@ fn renders_list_and_selected_detail() {
 }
 
 #[test]
-fn each_level_takes_its_own_theme_color() {
+fn each_severity_takes_its_own_theme_color() {
     use crate::tui::theme::OverrideValue::Text;
     let mut theme = Theme::default();
     let problems = theme.apply_overrides([("info", Text("blue")), ("success", Text("magenta"))]);
     assert_eq!(problems, []);
-    assert_eq!(
-        level_style(LogLevel::Info, &theme).fg,
-        Some(ratatui::style::Color::Blue),
-        "info follows `info`, not `success`"
-    );
-    assert_eq!(
-        level_style(LogLevel::Warning, &theme).fg,
-        Some(theme.warning)
-    );
-    assert_eq!(level_style(LogLevel::Error, &theme).fg, Some(theme.error));
+    let mut log = MessageLog::default();
+    for severity in Severity::ALL {
+        log.push(LogEntry::of(severity, format!("{severity:?} entry")));
+    }
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buf = Buffer::empty(area);
+    let state = MessagesOverlayState::new();
+    let now = log.newest_first().next().unwrap().at;
+    MessagesWidget::new(&state, &log, &theme, now).render(area, &mut buf);
+    for severity in Severity::ALL {
+        let (x, y) = (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .find(|(x, y)| buf[(*x, *y)].symbol() == severity.mark())
+            .unwrap_or_else(|| panic!("{severity:?}: its mark is drawn"));
+        let row: String = (x..area.width).map(|x| buf[(x, y)].symbol()).collect();
+        assert!(row.contains(&format!("{severity:?} entry")), "{row}");
+        assert_eq!(buf[(x, y)].fg, severity.color(&theme), "{severity:?}");
+    }
     let default = Theme::default();
     assert_eq!(
-        level_style(LogLevel::Info, &default).fg,
-        Some(default.success),
-        "the default info color is the success green it always was"
+        Severity::Success.color(&default),
+        Severity::Info.color(&default),
+        "by default a success is the green an info entry always was"
     );
 }
 
@@ -126,7 +130,7 @@ fn the_selected_entry_shows_the_marker_and_the_highlight() {
     let theme = Theme::default();
     let area = Rect::new(0, 0, 80, 24);
     let mut buf = Buffer::empty(area);
-    let now = log.newest_first().next().unwrap().at_epoch;
+    let now = log.newest_first().next().unwrap().at;
     MessagesWidget::new(&state, &log, &theme, now).render(area, &mut buf);
     let marked: Vec<(u16, u16)> = (0..area.height)
         .flat_map(|y| (0..area.width).map(move |x| (x, y)))

@@ -1483,7 +1483,10 @@ fn put_cursor_on_field(app: &mut App, label: &str) {
 /// Enter on the focused explorer row, with the clipboard write captured.
 fn press_enter_capturing_clipboard(app: &mut App) -> Option<String> {
     let mut clipboard = None;
-    crate::tui::runtime::explorer_enter(app, |text| clipboard = Some(text.to_string()));
+    crate::tui::runtime::explorer_enter(app, |text| {
+        clipboard = Some(text.to_string());
+        Ok(())
+    });
     clipboard
 }
 
@@ -1512,6 +1515,21 @@ fn o_opens_a_truncated_field_past_the_core_rows_when_the_node_detail_is_expanded
 }
 
 #[test]
+fn a_failed_clipboard_write_on_enter_says_so_as_an_error() {
+    let mut app = app_with_truncated_fields();
+    app.update(Msg::ExplorerToggleFullDetail);
+    put_cursor_on_field(&mut app, "last_message_preview");
+
+    crate::tui::runtime::explorer_enter(&mut app, |_| {
+        Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+    });
+
+    let toast = app.toasts().iter().last().expect("a toast");
+    assert_eq!(toast.severity, tuikit::feedback::Severity::Error);
+    assert!(toast.text.starts_with("copy failed: "), "{toast:?}");
+}
+
+#[test]
 fn enter_copies_a_field_past_the_core_rows_when_the_node_detail_is_expanded() {
     let mut app = app_with_truncated_fields();
     app.update(Msg::ExplorerToggleFullDetail);
@@ -1521,8 +1539,8 @@ fn enter_copies_a_field_past_the_core_rows_when_the_node_detail_is_expanded() {
 
     assert_eq!(clipboard.as_deref(), Some(LONG_PREVIEW));
     assert_eq!(
-        app.toast().current_message(),
-        Some("copied: last_message_preview"),
+        app.toasts().iter().last(),
+        Some(&Feedback::success("copied: last_message_preview")),
     );
     // A field with nothing cut copies what it shows.
     put_cursor_on_field(&mut app, "session_key");
@@ -1560,7 +1578,7 @@ fn enter_copies_the_field_under_the_cursor_with_the_node_detail_collapsed_and_ex
                 field.label,
             );
             assert_eq!(
-                app.toast().current_message(),
+                app.toasts().iter().last().map(|toast| toast.text.as_str()),
                 Some(format!("copied: {}", field.label).as_str()),
             );
         }
@@ -1840,23 +1858,18 @@ fn selected_session_id_is_none_on_non_session_selection() {
 
 #[test]
 fn post_toast_supersedes_prior_toast() {
-    // Posting a new toast drains any prior
-    // queued toast so the newer feedback is the one rendered.
-    // Under the upstream engine the queue length stays at 1
-    // after a second post even though the engine itself supports
-    // queueing — `engine_dismiss_all` runs before each show.
+    // Posting a new toast replaces the one showing, so the newer
+    // feedback is the one rendered, whatever its severity.
     let mut app = app_for_explorer();
-    assert!(!app.toast().has_toast());
-    app.post_toast("copied: cwd");
-    assert!(app.toast().has_toast());
-    assert_eq!(app.toast().queue_len(), 1);
-    app.post_toast("copied: id");
+    assert!(app.toasts().is_empty());
+    app.post_toast(Feedback::success("copied: cwd"));
+    assert_eq!(app.toasts().len(), 1);
+    app.post_toast(Feedback::error("copy failed: broken pipe"));
+    assert_eq!(app.toasts().len(), 1, "a newer toast replaces the older");
     assert_eq!(
-        app.toast().queue_len(),
-        1,
-        "newer toast must drain the queue"
+        app.toasts().iter().last(),
+        Some(&Feedback::error("copy failed: broken pipe"))
     );
-    assert_eq!(app.toast().current_message(), Some("copied: id"));
 }
 
 #[test]
@@ -2411,7 +2424,7 @@ mod reducer_effects {
     #[test]
     fn set_status_emits_no_effects() {
         let mut app = App::new(RunConfig::defaults());
-        let effects = app.update(Msg::SetStatus(Some("hi".to_string())));
+        let effects = app.update(Msg::SetStatus(Some(Feedback::info("hi"))));
         assert!(effects.is_empty());
     }
 
@@ -2427,10 +2440,13 @@ mod reducer_effects {
         let effects = app.update(Msg::AttachSelected);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
-            Effect::Toast(reason) => assert!(
-                reason.starts_with("attach: "),
-                "expected attach disabled reason, got {reason:?}",
-            ),
+            Effect::Toast(reason) => {
+                assert!(
+                    reason.text.starts_with("attach: "),
+                    "expected attach disabled reason, got {reason:?}",
+                );
+                assert_eq!(reason.severity, tuikit::feedback::Severity::Warning);
+            }
             other => panic!("expected Toast, got {other:?}"),
         }
     }
@@ -2441,7 +2457,7 @@ mod reducer_effects {
         let effects = app.update(Msg::ResumeSelected);
         assert_eq!(
             effects,
-            vec![Effect::Toast("resume: nothing selected".to_string())]
+            vec![Effect::Toast(Feedback::warning("resume: nothing selected"))]
         );
     }
 
@@ -2477,7 +2493,7 @@ mod reducer_effects {
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             Effect::Toast(reason) => assert!(
-                reason.contains("aider"),
+                reason.text.contains("aider"),
                 "expected aider-unsupported reason, got {reason:?}",
             ),
             other => panic!("expected Toast, got {other:?}"),
@@ -2549,9 +2565,9 @@ mod reducer_effects {
         let effects = app.update(Msg::CommitRename("value".to_string()));
         assert_eq!(
             effects,
-            vec![Effect::Toast(
-                "rename: lost selection before commit".to_string()
-            )]
+            vec![Effect::Toast(Feedback::error(
+                "rename: lost selection before commit"
+            ))]
         );
     }
 
@@ -2608,9 +2624,9 @@ mod reducer_effects {
         let effects = app.update(Msg::CommitRename("   ".to_string()));
         assert_eq!(
             effects,
-            vec![Effect::Toast(
-                "mux rename: name cannot be empty".to_string()
-            )]
+            vec![Effect::Toast(Feedback::warning(
+                "mux rename: name cannot be empty"
+            ))]
         );
     }
 
@@ -2939,9 +2955,9 @@ fn actions_on_a_row_awaiting_the_handoff_refresh_are_refused_until_it_settles() 
         "work",
     )));
     assert!(app.selected_row_awaits_handoff());
-    let toast = vec![crate::tui::Effect::Toast(
-        crate::tui::app::HANDOFF_PENDING_HINT.to_string(),
-    )];
+    let toast = vec![crate::tui::Effect::Toast(Feedback::warning(
+        crate::tui::app::HANDOFF_PENDING_HINT,
+    ))];
     for msg in [Msg::AttachSelected, Msg::ResumeSelected] {
         assert_eq!(app.update(msg), toast);
     }

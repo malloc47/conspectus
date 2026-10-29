@@ -382,7 +382,9 @@ impl App {
             return;
         }
         if let Err(why) = self.reveal_node_quiet(&node, None) {
-            self.post_toast(format!("couldn't find the entity: it {why}"));
+            self.post_toast(Feedback::warning(format!(
+                "couldn't find the entity: it {why}"
+            )));
         }
     }
 
@@ -724,26 +726,30 @@ impl App {
 
     /// What `/` opens: quick select, on the current view's rows. Returns
     /// the status hint to show.
-    pub fn open_search_entry(&mut self) -> String {
+    pub fn open_search_entry(&mut self) -> Feedback {
         use crate::tui::keybindings::overlay::SEARCH_KEYS;
         use tuikit::keys::footer;
         self.open_search_overlay();
-        format!("quick select: type to find · {}", footer(SEARCH_KEYS))
+        Feedback::info(format!(
+            "quick select: type to find · {}",
+            footer(SEARCH_KEYS)
+        ))
     }
 
     /// What `s` opens: content search, with the query filled in when a
-    /// search is active. Returns the status hint to show.
-    pub fn open_content_search_entry(&mut self) -> String {
+    /// search is active. Returns the status hint to show, or why it did
+    /// not open.
+    pub fn open_content_search_entry(&mut self) -> Feedback {
         use crate::tui::keybindings::overlay::SEARCH_CONTENT_KEYS;
         use tuikit::keys::footer;
         if !self.config.live_preview_enabled {
-            return crate::tui::widgets::search::CONTENT_SEARCH_OFF.to_string();
+            return Feedback::warning(crate::tui::widgets::search::CONTENT_SEARCH_OFF);
         }
         self.open_content_search_overlay();
-        format!(
+        Feedback::info(format!(
             "search contents: type a query · {}",
             footer(SEARCH_CONTENT_KEYS)
-        )
+        ))
     }
 
     /// Push a quick-select overlay onto the modal stack, on the current
@@ -984,32 +990,22 @@ impl App {
         }
     }
 
-    /// Read accessor for the toast engine.
-    /// Returns the engine itself so the renderer can call
-    /// `(&engine).render_ref(...)` directly; `has_toast()` reports
-    /// whether anything is queued.
-    pub fn toast(&self) -> &ratatui_comfy_toaster::ToastEngine<()> {
-        &self.toast
+    /// The toasts on screen, for the renderer.
+    pub fn toasts(&self) -> &Toasts {
+        &self.toasts
     }
 
-    /// Post a transient toast that auto-dismisses after the widget's
-    /// `TOAST_DURATION` window. Called from the runtime side (the
-    /// `Cmd` boundary per ADR 0024). Drains any prior queued toast
-    /// first so the newer feedback supersedes — matches the in-tree
-    /// "replacement" contract the reducer test pins.
-    pub fn post_toast(&mut self, label: impl Into<String>) {
-        let label = label.into();
-        crate::tui::widgets::toast::engine_dismiss_all(&mut self.toast);
-        let toast = crate::tui::widgets::toast::builder_for(label, self.theme());
-        self.toast.show_toast(toast);
+    /// Post a transient toast that goes when its severity's lifetime is
+    /// up. Called from the runtime side (the `Cmd` boundary per ADR
+    /// 0024). It replaces any toast on screen, so the newest feedback is
+    /// the one shown.
+    pub fn post_toast(&mut self, feedback: Feedback) {
+        self.toasts.show(feedback, Instant::now());
     }
 
-    /// Update the engine's frame area and retire expired toasts.
-    /// Called by the runtime once per draw — handles terminal
-    /// resize and drives the polled expiry that replaces the prior
-    /// in-tree `is_expired()` check.
-    pub fn prepare_toast_for_render(&mut self, area: ratatui::layout::Rect) {
-        self.toast.set_area(area);
-        self.toast.tick();
+    /// Retire a toast whose time is up. Called by the runtime once per
+    /// draw.
+    pub fn prepare_toast_for_render(&mut self) {
+        self.toasts.tick(Instant::now());
     }
 }

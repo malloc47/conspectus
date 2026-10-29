@@ -100,12 +100,12 @@ enum After {
 fn after(view: View, open: Open, key: KeyEvent, name: &str) -> After {
     let mut app = app_with(view, open);
     // A hint the modal set when it opened, which closing must not leave.
-    app.update(Msg::SetStatus(Some("a hint".into())));
+    app.update(Msg::SetStatus(Some(Feedback::info("a hint"))));
     let depth = app.modal_stack().len();
     assert!(press(&mut app, key), "{name}: {key:?} was not the modal's");
     if app.modal_stack().len() < depth {
         assert_eq!(app.status_message(), None, "{name}: {key:?} said something");
-        assert!(!app.toast().has_toast(), "{name}: {key:?} posted a toast");
+        assert!(app.toasts().is_empty(), "{name}: {key:?} posted a toast");
         After::Closed
     } else {
         assert_eq!(app.top_modal_name(), Some(name), "{name}: {key:?}");

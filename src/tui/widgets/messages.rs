@@ -24,7 +24,7 @@ use tuikit::scroll::ScrollWindow;
 use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Theme;
-use crate::tui::messages::{LogEntry, LogLevel, MessageLog};
+use crate::tui::messages::{LogEntry, LogEntryExt, MessageLog};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessagesOverlayState {
@@ -131,15 +131,6 @@ impl<'a> MessagesWidget<'a> {
             theme,
             now,
         }
-    }
-}
-
-/// Style for an entry's level glyph and summary.
-pub fn level_style(level: LogLevel, theme: &Theme) -> Style {
-    match level {
-        LogLevel::Info => Style::default().fg(theme.info),
-        LogLevel::Warning => Style::default().fg(theme.warning),
-        LogLevel::Error => Style::default().fg(theme.error),
     }
 }
 
@@ -259,11 +250,11 @@ impl ModalBody for MessagesBody<'_, '_> {
 }
 
 fn list_line(entry: &LogEntry, selected: bool, theme: &Theme, now: i64) -> Line<'static> {
-    let age = tuikit::age::Age::between(entry.at_epoch, now).label();
+    let age = tuikit::age::Age::between(entry.at, now).label();
     let spans = [
         Span::styled(
-            format!("{} ", entry.level.glyph()),
-            level_style(entry.level, theme),
+            format!("{} ", entry.severity.mark()),
+            entry.severity.style(theme),
         ),
         Span::styled(format!("{age:>4} ago  "), Style::default().fg(theme.inert)),
         Span::raw(entry.summary_with_repeats()),

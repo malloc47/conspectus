@@ -38,6 +38,7 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
+use tuikit::feedback::{Feedback, Severity};
 
 use crate::model::GraphSnapshot;
 use crate::tui::Msg;
@@ -73,11 +74,14 @@ pub struct SnapshotConfig {
     /// Unix time to render ages against instead of the clock.
     pub now: Option<i64>,
     /// Entries put in the Messages log before the keys run, oldest
-    /// first, dated `now` when it is set.
+    /// first, dated `now` when it is set: `[SEVERITY:]TEXT`, a success
+    /// unless it names a severity.
     pub messages: Vec<String>,
-    /// A toast posted after the keys run, so the frame shows it.
+    /// A toast posted after the keys run, so the frame shows it:
+    /// `[SEVERITY:]TEXT`, a success unless it names a severity.
     pub toast: Option<String>,
-    /// A status-line message set after the keys run.
+    /// A status-line message set after the keys run: `[SEVERITY:]TEXT`,
+    /// a note (info) unless it names a severity.
     pub status: Option<String>,
 }
 
@@ -161,11 +165,9 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
 
     let backend = TestBackend::new(snap.width, snap.height);
     let mut terminal = Terminal::new(backend)?;
-    // Mirror the interactive runtime's pre-draw setup so the toast
-    // engine knows where to render. Without this, set_area stays
-    // Rect::default() and any toast queued by `--snapshot-keys`
-    // never paints.
-    app.prepare_toast_for_render(Rect::new(0, 0, snap.width, snap.height));
+    // Mirror the interactive runtime's pre-draw step, which retires a
+    // toast whose time is up.
+    app.prepare_toast_for_render();
     terminal.draw(|frame| runtime::draw_screen(&mut app, frame))?;
     let buffer = terminal.backend().buffer();
 
@@ -180,15 +182,17 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     Ok(())
 }
 
-/// Put `messages` in the Messages log as information, oldest first, so
-/// the log can be drawn with entries. Reporting an entry also sets the
-/// status line; that is cleared again so the frame shows what the keys
-/// leave there.
+/// Put `messages` in the Messages log, oldest first, so the log can be
+/// drawn with entries. Each is `[SEVERITY:]TEXT`, a success when it
+/// names no severity. Reporting an entry also sets the status line;
+/// that is cleared again so the frame shows what the keys leave there.
 fn seed_messages(app: &mut App, messages: &[String], now: Option<i64>) {
-    for text in messages {
-        let mut entry = crate::tui::messages::LogEntry::info(text.clone());
+    use crate::tui::messages::{LogEntry, LogEntryExt};
+    for value in messages {
+        let feedback = parse_feedback(value, Severity::Success);
+        let mut entry = LogEntry::of(feedback.severity, feedback.text);
         if let Some(now) = now {
-            entry.at_epoch = now;
+            entry.at = now;
         }
         app.update(Msg::Report(Box::new(entry)));
     }
@@ -198,14 +202,35 @@ fn seed_messages(app: &mut App, messages: &[String], now: Option<i64>) {
 }
 
 /// Post the toast and set the status line the flags ask for, after the
-/// keys (which clear the status line as they move) have run.
+/// keys (which clear the status line as they move) have run. A toast
+/// that names no severity is a success, a status message a note.
 fn show_feedback(app: &mut App, snap: &SnapshotConfig) {
-    if let Some(text) = &snap.status {
-        app.update(Msg::SetStatus(Some(text.clone())));
+    if let Some(value) = &snap.status {
+        app.update(Msg::SetStatus(Some(parse_feedback(value, Severity::Info))));
     }
-    if let Some(text) = &snap.toast {
-        app.post_toast(text.clone());
+    if let Some(value) = &snap.toast {
+        app.post_toast(parse_feedback(value, Severity::Success));
     }
+}
+
+/// A `[SEVERITY:]TEXT` flag value: a leading `info:`, `success:`,
+/// `warning:`, or `error:` names the severity; without one the text has
+/// `default`.
+fn parse_feedback(value: &str, default: Severity) -> Feedback {
+    let named = [
+        ("info:", Severity::Info),
+        ("success:", Severity::Success),
+        ("warning:", Severity::Warning),
+        ("error:", Severity::Error),
+    ];
+    named
+        .into_iter()
+        .find_map(|(prefix, severity)| {
+            value
+                .strip_prefix(prefix)
+                .map(|text| Feedback::new(severity, text))
+        })
+        .unwrap_or_else(|| Feedback::new(default, value))
 }
 
 /// Read and deserialize a `GraphSnapshot` from a JSON fixture.
@@ -243,7 +268,7 @@ fn drive_keys(
 ) -> Result<()> {
     let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))?;
     for key in keys {
-        app.prepare_toast_for_render(area);
+        app.prepare_toast_for_render();
         terminal.draw(|frame| runtime::draw_screen(app, frame))?;
         if let Some(action) = runtime::action_for_event(app, Event::Key(key)) {
             apply_action(app, config, action, rebase);
@@ -359,7 +384,7 @@ fn apply_action(
         }
         // The clipboard write is skipped: OSC 52 would land in the
         // frame output. The toast still renders.
-        Action::ExplorerEnter => runtime::explorer_enter(app, |_| {}),
+        Action::ExplorerEnter => runtime::explorer_enter(app, |_| Ok(())),
         other => {
             eprintln!(
                 "conspectus: snapshot mode skipped unsupported action: {}",

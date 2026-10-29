@@ -73,7 +73,9 @@ fn enter_on_empty_cwd_stays_on_cwd() {
 
 /// The form stays open and a toast names the empty field.
 fn missing(field: &str) -> Outcome<Msg> {
-    Outcome::Stay(Msg::Toast(format!("mux: {field} is required")))
+    Outcome::Stay(Msg::Toast(tuikit::feedback::Feedback::warning(format!(
+        "mux: {field} is required"
+    ))))
 }
 
 #[test]

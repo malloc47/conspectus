@@ -3824,7 +3824,7 @@ fn mux_view_header_counts_sessions_in_visible_muxes() {
 
 #[test]
 fn reported_failure_leads_the_rows_preview_until_a_later_success() {
-    use crate::tui::messages::{CommandRecord, LogEntry, LogTarget};
+    use crate::tui::messages::{CommandRecord, LogEntry, LogEntryExt, LogTarget};
     let mut app = pinned_app(None);
     app.report(
         LogEntry::error("pin `ingest` launch failed: exited with status 1")
@@ -3853,7 +3853,8 @@ fn reported_failure_leads_the_rows_preview_until_a_later_success() {
     );
 
     app.report(
-        LogEntry::info("pin `ingest` launched").with_target(LogTarget::Pin("ingest".to_string())),
+        LogEntry::success("pin `ingest` launched")
+            .with_target(LogTarget::Pin("ingest".to_string())),
     );
     let preview = preview_text_for_selection(&app, 80, 20).to_string();
     assert!(!preview.contains("launch failed"), "{preview}");
@@ -3861,7 +3862,7 @@ fn reported_failure_leads_the_rows_preview_until_a_later_success() {
 
 #[test]
 fn unseen_failures_keep_a_status_bar_chip_until_the_log_is_opened() {
-    use crate::tui::messages::LogEntry;
+    use crate::tui::messages::{LogEntry, LogEntryExt};
     let mut app = pinned_app(None);
     app.report(LogEntry::error("mux `w1` attach failed"));
     assert_eq!(
@@ -3882,10 +3883,15 @@ fn unseen_failures_keep_a_status_bar_chip_until_the_log_is_opened() {
 }
 
 #[test]
-fn info_report_sets_a_plain_status_message() {
+fn success_report_sets_a_plain_status_message() {
+    use crate::tui::messages::{LogEntry, LogEntryExt};
     let mut app = pinned_app(None);
-    app.report(crate::tui::messages::LogEntry::info("renamed: w1"));
+    app.report(LogEntry::success("renamed: w1"));
     assert_eq!(app.status_message(), Some("renamed: w1"));
+    assert_eq!(
+        app.status().map(|status| status.severity),
+        Some(tuikit::feedback::Severity::Success)
+    );
     assert_eq!(app.messages().unseen(), 0);
     assert_eq!(app.messages().len(), 1);
 }
@@ -5009,7 +5015,9 @@ fn launch_chip_shows_alongside_a_status_message() {
         kind: crate::tui::app::InFlightKind::Launch,
         label: "Launching dek-serve".to_string(),
     });
-    app.update(Msg::SetStatus(Some("pin `dek-serve` queued".to_string())));
+    app.update(Msg::SetStatus(Some(tuikit::feedback::Feedback::info(
+        "pin `dek-serve` queued",
+    ))));
     let buffer = render_to_buffer(&mut app, Rect::new(0, 0, 100, 24));
     let text = buffer_to_string(&buffer);
     let status_line = text.lines().last().unwrap_or("");
@@ -5465,7 +5473,7 @@ fn enter_on_a_gone_slot_rebuilds_it_and_on_a_live_mux_slot_attaches() {
     });
     let effects = app.update(Msg::AttachSelected);
     assert!(
-        matches!(effects.as_slice(), [Effect::Toast(text)] if text.contains("ledger-pr")),
+        matches!(effects.as_slice(), [Effect::Toast(note)] if note.text.contains("ledger-pr")),
         "{effects:?}"
     );
 }
@@ -6042,7 +6050,7 @@ fn a_row_with_no_pinnable_entity_says_why() {
     app.set_selection(first_bucket(&app));
     let effects = app.update(Msg::TogglePin);
     assert!(
-        matches!(effects.as_slice(), [Effect::Toast(text)] if text.starts_with("pin:")),
+        matches!(effects.as_slice(), [Effect::Toast(note)] if note.text.starts_with("pin:")),
         "{effects:?}"
     );
 }
@@ -6227,7 +6235,7 @@ fn going_back_to_a_row_that_vanished_says_so() {
     assert!(
         effects
             .iter()
-            .any(|e| matches!(e, Effect::Toast(t) if t == "that row is gone")),
+            .any(|e| matches!(e, Effect::Toast(t) if t.text == "that row is gone")),
         "{effects:?}"
     );
     assert_eq!(app.active_view(), View::Pinned);

@@ -95,15 +95,10 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) -> ViewportReport {
     report
 }
 
+/// The toast on screen, over everything else. An expired one was
+/// retired by `prepare_toast_for_render` before the draw.
 fn draw_toast(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    if !app.toast().has_toast() {
-        return;
-    }
-    // The upstream engine impls `Widget for &ToastEngine`, so we
-    // render through the shared borrow without any wrapper widget.
-    // `set_area` + `tick` already ran via `prepare_toast_for_render`
-    // before `terminal.draw` was called.
-    frame.render_widget(app.toast(), area);
+    app.toasts().render(area, frame.buffer_mut(), app.theme());
 }
 
 // Render clock: wall time in production, a settable clock in tests.

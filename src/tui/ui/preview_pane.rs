@@ -134,16 +134,17 @@ fn latest_failure_for_selection(app: &App) -> Option<&crate::tui::messages::LogE
     if let Ok(target) = resolve_attach_target(app) {
         targets.push(LogTarget::Mux(target.mux));
     }
-    app.messages().latest_failure_for(&targets)
+    crate::tui::messages::latest_failure_for(app.messages(), &targets)
 }
 
 fn failure_banner(entry: &crate::tui::messages::LogEntry, theme: &Theme) -> Text<'static> {
-    let style = crate::tui::widgets::messages::level_style(entry.level, theme);
+    use crate::tui::messages::LogEntryExt;
+    let style = entry.severity.style(theme);
     let mut lines = vec![Line::from(Span::styled(
-        format!("{} {}", entry.level.glyph(), entry.summary),
+        format!("{} {}", entry.severity.mark(), entry.summary),
         style.add_modifier(Modifier::BOLD),
     ))];
-    if let Some(code) = entry.command.as_ref().and_then(|c| c.exit_code) {
+    if let Some(code) = entry.item.command.as_ref().and_then(|c| c.exit_code) {
         lines.push(Line::styled(format!("exit status {code}"), style));
     }
     for line in entry.output_tail(FAILURE_BANNER_LINES) {

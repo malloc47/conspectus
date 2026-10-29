@@ -31,6 +31,9 @@
 //!   active view lists (`chrome`).
 //! - **No overlay shuts the operator in**: the fixture and scenario TUI
 //!   close every overlay with the keys the live TUI uses (`fixture_mode`).
+//! - **Feedback says how much it matters**: the status line, toasts, and
+//!   the Messages log style each report by its severity, and a refused or
+//!   failed gesture never reports like a success (`feedback`).
 //!
 //! # Diagnosis of the reported defects
 //!
@@ -61,6 +64,7 @@
 use std::path::{Path, PathBuf};
 
 use ratatui::layout::Rect;
+use tuikit::feedback::Feedback;
 
 use super::*;
 use crate::filter::RowFilter;
@@ -84,6 +88,7 @@ mod chrome;
 mod content_filter;
 mod content_interactions;
 mod docs;
+mod feedback;
 mod fixture_mode;
 mod fixtures;
 mod focus;

@@ -302,8 +302,8 @@ pub(super) fn menu_toasts(app: &mut App) -> Vec<String> {
     let mut out = Vec::new();
     for msg in [Msg::TogglePin, Msg::AttachSelected, Msg::ViewSelected] {
         for effect in app.update(msg) {
-            if let crate::tui::Effect::Toast(text) = effect {
-                out.push(text);
+            if let crate::tui::Effect::Toast(note) = effect {
+                out.push(note.text);
             }
         }
     }

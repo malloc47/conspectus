@@ -41,9 +41,11 @@ fn list_builders() -> Vec<(&'static str, View, Open)> {
         .collect();
     out.push(("Messages", View::Pinned, |app| {
         for text in ["attached tmux:a", "renamed tmux:b", "launched tmux:c"] {
-            app.update(Msg::Report(Box::new(crate::tui::messages::LogEntry::info(
-                text,
-            ))));
+            app.update(Msg::Report(Box::new(
+                <crate::tui::messages::LogEntry as crate::tui::messages::LogEntryExt>::success(
+                    text,
+                ),
+            )));
         }
         app.open_messages_overlay();
     }));

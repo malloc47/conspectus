@@ -414,9 +414,9 @@ impl WorktreeMenuState {
                 let branch = branch.trim().to_string();
                 if branch.is_empty() {
                     // Keep the input open for a real value, and say so.
-                    return Outcome::Stay(Msg::Toast(
-                        "worktree: branch name is required".to_string(),
-                    ));
+                    return Outcome::Stay(Msg::Toast(tuikit::feedback::Feedback::warning(
+                        "worktree: branch name is required",
+                    )));
                 }
                 let Some(repo_root) = self.ctx.repo_root.clone() else {
                     return Outcome::Close;

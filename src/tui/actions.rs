@@ -869,6 +869,7 @@ pub fn default_effect(app: &App) -> Option<crate::tui::Effect> {
     use crate::model::{PinKind, SlotStatus};
     use crate::tui::Effect;
     use crate::tui::effect::ExecSpec;
+    use tuikit::feedback::Feedback;
     let snapshot = app.snapshot_handle()?.snapshot();
     let subject = action_subject(app);
     let rebuild = |reference: String, kind: PinKind| {
@@ -886,9 +887,9 @@ pub fn default_effect(app: &App) -> Option<crate::tui::Effect> {
     if let Some(name) = &pin_name {
         let pin = pin_named(snapshot, name)?;
         return match (pin.status, pin.kind) {
-            (SlotStatus::Unknown, _) => Some(Effect::Toast(format!(
+            (SlotStatus::Unknown, _) => Some(Effect::Toast(Feedback::warning(format!(
                 "pin `{name}`: couldn't check whether its target exists; refresh and try again"
-            ))),
+            )))),
             (SlotStatus::Live, PinKind::Mux) => None,
             (SlotStatus::Live, PinKind::Session) => {
                 // A session in a mux attaches; one outside any mux is
@@ -902,30 +903,30 @@ pub fn default_effect(app: &App) -> Option<crate::tui::Effect> {
                 }
             }
             (SlotStatus::Live, PinKind::Pr) => Some(Effect::Toast(match pin.text("url") {
-                Some(url) => format!("pin `{name}`: {url}"),
-                None => format!("pin `{name}`: this PR has no URL on record"),
+                Some(url) => Feedback::info(format!("pin `{name}`: {url}")),
+                None => Feedback::warning(format!("pin `{name}`: this PR has no URL on record")),
             })),
-            (SlotStatus::Live, kind) => Some(Effect::Toast(format!(
+            (SlotStatus::Live, kind) => Some(Effect::Toast(Feedback::warning(format!(
                 "pin `{name}` is a live {}; nothing to rebuild",
                 kind.as_str()
-            ))),
+            )))),
             (
                 SlotStatus::Gone | SlotStatus::Missing | SlotStatus::Planned,
                 kind @ (PinKind::Mux | PinKind::Session | PinKind::Checkout | PinKind::Repo),
             ) => rebuild(name.clone(), kind),
-            (_, kind) => Some(Effect::Toast(format!(
+            (_, kind) => Some(Effect::Toast(Feedback::warning(format!(
                 "pin `{name}`: a {} can't be rebuilt",
                 kind.as_str()
-            ))),
+            )))),
         };
     }
     let kind = subject_kind(snapshot, &subject);
     let record = subject.record?;
     match kind {
         Some(kind @ (PinKind::Mux | PinKind::Checkout | PinKind::Repo)) => rebuild(record, kind),
-        _ => Some(Effect::Toast(
-            "a PR record can't be rebuilt; it only remembers the PR".to_string(),
-        )),
+        _ => Some(Effect::Toast(Feedback::warning(
+            "a PR record can't be rebuilt; it only remembers the PR",
+        ))),
     }
 }
 

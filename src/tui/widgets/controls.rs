@@ -537,9 +537,9 @@ impl ControlsOverlayState {
                         Err(why) => {
                             // Keep the editor open so the operator can
                             // fix the value, and say what is wrong.
-                            ControlsOutcome::ApplyAndStay(crate::tui::Msg::Toast(format!(
-                                "max age: {why}"
-                            )))
+                            ControlsOutcome::ApplyAndStay(crate::tui::Msg::Toast(
+                                tuikit::feedback::Feedback::warning(format!("max age: {why}")),
+                            ))
                         }
                     }
                 }

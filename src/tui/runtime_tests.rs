@@ -1053,7 +1053,8 @@ fn translate_bang_opens_messages() {
 
 #[test]
 fn launch_entry_level_follows_outcome_and_stderr() {
-    use crate::tui::messages::{CommandRecord, LogLevel, LogTarget};
+    use crate::tui::messages::{CommandRecord, LogTarget};
+    use tuikit::feedback::Severity;
     let summary = |success| LaunchSummary {
         success,
         message: "pin `w1` launched".to_string(),
@@ -1067,8 +1068,8 @@ fn launch_entry_level_follows_outcome_and_stderr() {
     let target = || LogTarget::Pin("w1".to_string());
 
     assert_eq!(
-        launch_entry(&summary(true), record(""), target()).level,
-        LogLevel::Info
+        launch_entry(&summary(true), record(""), target()).severity,
+        Severity::Success
     );
     assert_eq!(
         launch_entry(
@@ -1076,12 +1077,15 @@ fn launch_entry_level_follows_outcome_and_stderr() {
             record("resume failed; launched fresh"),
             target()
         )
-        .level,
-        LogLevel::Warning
+        .severity,
+        Severity::Warning
     );
     let failed = launch_entry(&summary(false), record("boom"), target());
-    assert_eq!(failed.level, LogLevel::Error);
-    assert_eq!(failed.command.map(|c| c.stderr), Some("boom".to_string()));
+    assert_eq!(failed.severity, Severity::Error);
+    assert_eq!(
+        failed.item.command.map(|c| c.stderr),
+        Some("boom".to_string())
+    );
 }
 
 mod worker_ledger {

@@ -214,7 +214,7 @@ fn without_live_preview_a_preview_does_not_start_and_keeps_the_active_search() {
     assert!(
         effects
             .iter()
-            .any(|e| matches!(e, Effect::Toast(note) if note.contains("live preview")))
+            .any(|e| matches!(e, Effect::Toast(note) if note.text.contains("live preview")))
     );
 }
 
@@ -319,7 +319,8 @@ fn content_search_is_refused_while_live_preview_is_off() {
     let mut app = app_with(&[("a", "alpha")]);
     app.config_mut().live_preview_enabled = false;
     let hint = app.open_content_search_entry();
-    assert!(hint.contains("live preview"), "{hint}");
+    assert!(hint.text.contains("live preview"), "{hint:?}");
+    assert_eq!(hint.severity, tuikit::feedback::Severity::Warning);
     assert!(app.search_overlay().is_none());
 }
 

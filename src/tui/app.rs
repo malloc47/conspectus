@@ -12,6 +12,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::Instant;
 
+use tuikit::feedback::{Feedback, Toasts};
 use tuikit::scroll::ScrollWindow;
 
 use crate::model::{AgentSessionId, GraphSnapshot, MuxSessionId, NodeId, PinId};
@@ -164,9 +165,10 @@ pub struct App {
     /// turns this into the header's `updated Ns ago` indicator.
     loaded_at_epoch: Option<i64>,
     /// Transient status-bar message, e.g. the "disabled because…"
-    /// reason for a key that didn't apply to the current selection.
-    /// Cleared on the next selection / focus change.
-    status_message: Option<String>,
+    /// reason for a key that didn't apply to the current selection,
+    /// drawn in its severity's color. Cleared on the next selection /
+    /// focus change.
+    status_message: Option<Feedback>,
     /// Outcomes of operations run from this TUI (ADR 0105). In memory
     /// only.
     messages: crate::tui::messages::MessageLog,
@@ -265,17 +267,12 @@ pub struct App {
     /// The entity the open rename prompt renames, fixed when it opened
     /// so a later focus change can't redirect the commit.
     rename_node: Option<NodeId>,
-    /// Active transient toast. The
-    /// `ratatui_comfy_toaster::ToastEngine` owns the per-toast
-    /// lifetime + bordered rendering; the runtime calls
-    /// [`Self::prepare_toast_for_render`] before each draw so
-    /// `tick` retires expired entries and `set_area` follows the
-    /// frame on resize. Wrapped in [`ToastEngineHolder`] because
-    /// the upstream engine does not derive `Debug` — the holder
-    /// satisfies the App-wide `#[derive(Debug)]` with a placeholder
-    /// while transparently delegating via `Deref`/`DerefMut`.
-    /// Non-blocking: input continues to flow to the underlying view.
-    toast: crate::tui::widgets::toast::ToastEngineHolder,
+    /// The toast on screen, if any. A new toast replaces the one
+    /// showing, and each goes when its severity's lifetime is up; the
+    /// runtime calls [`Self::prepare_toast_for_render`] before each draw
+    /// to retire an expired one. Non-blocking: input continues to flow
+    /// to the underlying view.
+    toasts: Toasts,
     /// Currently active view (ADR 0085 contract 4). Seeded from
     /// [`RunConfig::default_view`] at startup; after that, the
     /// reducer is the sole owner. `RunConfig` remains as an
@@ -564,7 +561,7 @@ impl App {
             preview_match_offset: 0,
             loaded_at_epoch: None,
             status_message: None,
-            messages: crate::tui::messages::MessageLog::default(),
+            messages: crate::tui::messages::message_log(),
             provider_status: ProviderStatus::default(),
             refresh_failure: None,
             in_flight_ops: Vec::new(),
@@ -593,9 +590,7 @@ impl App {
             modal_stack: crate::tui::modal::ModalStack::new(),
             slot_prompt: None,
             rename_node: None,
-            toast: crate::tui::widgets::toast::ToastEngineHolder(
-                crate::tui::widgets::toast::engine(),
-            ),
+            toasts: Toasts::new(),
             sort,
             mux_recency,
             preview_wrap,
@@ -737,10 +732,9 @@ impl App {
     pub fn open_value_modal_for_cursor(&mut self) {
         // Skip if nothing's mounted.
         let Some(state) = self.explorer.as_ref() else {
-            self.status_message = Some(
-                "explorer: nothing to open here — `o` opens long values on the cursor row"
-                    .to_string(),
-            );
+            self.status_message = Some(Feedback::warning(
+                "explorer: nothing to open here — `o` opens long values on the cursor row",
+            ));
             return;
         };
         let Some(row) = state.selected_row() else {
@@ -762,8 +756,9 @@ impl App {
                 self.status_message = None;
             }
             None => {
-                self.status_message =
-                    Some("explorer: row has no truncated value to open".to_string());
+                self.status_message = Some(Feedback::warning(
+                    "explorer: row has no truncated value to open",
+                ));
             }
         }
     }
@@ -1052,7 +1047,14 @@ impl App {
     /// the status zone; the reducer clears it on the next
     /// selection / focus change so messages don't linger.
     pub fn status_message(&self) -> Option<&str> {
-        self.status_message.as_deref()
+        self.status_message
+            .as_ref()
+            .map(|status| status.text.as_str())
+    }
+
+    /// The status-bar message with its severity, which colors it.
+    pub fn status(&self) -> Option<&Feedback> {
+        self.status_message.as_ref()
     }
 
     /// Operation outcomes logged this session (ADR 0105).
@@ -1350,7 +1352,7 @@ impl App {
             Msg::ToggleEdgeMeta => self.toggle_edge_meta(),
             Msg::ExplorerBack if self.focus == Focus::Left && self.can_nav_back() => {
                 if let Some(why) = self.nav_pop() {
-                    effects.push(Effect::Toast(why));
+                    effects.push(Effect::Toast(Feedback::warning(why)));
                 }
                 effects.push(Effect::Persist);
             }
@@ -1380,14 +1382,15 @@ impl App {
             Msg::SetStatus(message) => {
                 self.status_message = message;
             }
-            Msg::Toast(text) => effects.push(Effect::Toast(text)),
+            Msg::Toast(feedback) => effects.push(Effect::Toast(feedback)),
             Msg::Copy { text, done } => effects.push(Effect::Copy { text, done }),
             Msg::Report(entry) => {
-                self.status_message = Some(if entry.level.needs_attention() {
+                let text = if entry.severity.needs_attention() {
                     format!("{} · ! details", entry.summary)
                 } else {
                     entry.summary.clone()
-                });
+                };
+                self.status_message = Some(Feedback::new(entry.severity, text));
                 self.messages.push(*entry);
             }
             Msg::SetPreview { source, content } => {
@@ -1515,7 +1518,7 @@ impl App {
             Msg::AttachSelected => {
                 use crate::tui::effect::ExecSpec;
                 if self.selected_row_awaits_handoff() {
-                    effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
+                    effects.push(Effect::Toast(Feedback::warning(HANDOFF_PENDING_HINT)));
                     return effects;
                 }
                 if let Some((session, open)) = crate::tui::actions::viewer_open_target(self) {
@@ -1528,28 +1531,32 @@ impl App {
                 }
                 match crate::tui::actions::resolve_attach_target(self) {
                     Ok(target) => effects.push(Effect::Exec(ExecSpec::AttachMux(target))),
-                    Err(reason) => effects.push(Effect::Toast(
+                    Err(reason) => effects.push(Effect::Toast(Feedback::warning(
                         crate::tui::actions::attach_disabled_reason(&reason),
-                    )),
+                    ))),
                 }
             }
             Msg::ResumeSelected => {
                 use crate::tui::effect::ExecSpec;
                 if self.selected_row_awaits_handoff() {
-                    effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
+                    effects.push(Effect::Toast(Feedback::warning(HANDOFF_PENDING_HINT)));
                     return effects;
                 }
                 let subject = crate::tui::actions::action_subject(self);
                 if subject == crate::tui::actions::Subject::default() {
-                    effects.push(Effect::Toast("resume: nothing selected".to_string()));
+                    effects.push(Effect::Toast(Feedback::warning("resume: nothing selected")));
                     return effects;
                 }
                 let Some(crate::model::NodeId::AgentSession(session_id)) = subject.node else {
-                    effects.push(Effect::Toast("resume: select an agent session".to_string()));
+                    effects.push(Effect::Toast(Feedback::warning(
+                        "resume: select an agent session",
+                    )));
                     return effects;
                 };
                 let Some(handle) = self.snapshot_handle() else {
-                    effects.push(Effect::Toast("resume: no snapshot loaded".to_string()));
+                    effects.push(Effect::Toast(Feedback::warning(
+                        "resume: no snapshot loaded",
+                    )));
                     return effects;
                 };
                 let target =
@@ -1558,8 +1565,8 @@ impl App {
                     crate::tui::resume::ResumeTarget::Launch { .. } => {
                         effects.push(Effect::Exec(ExecSpec::Resume(target)));
                     }
-                    _ => effects.push(Effect::Toast(crate::tui::resume::resume_disabled_reason(
-                        &target,
+                    _ => effects.push(Effect::Toast(Feedback::warning(
+                        crate::tui::resume::resume_disabled_reason(&target),
                     ))),
                 }
             }
@@ -1573,9 +1580,9 @@ impl App {
                     Ok(session_id) => {
                         effects.push(Effect::Exec(ExecSpec::ViewSession(session_id, None)));
                     }
-                    Err(reason) => effects.push(Effect::Toast(
+                    Err(reason) => effects.push(Effect::Toast(Feedback::warning(
                         crate::tui::viewer::viewer_disabled_reason(&reason),
-                    )),
+                    ))),
                 }
             }
             Msg::SwitchView(view) => {
@@ -1725,7 +1732,7 @@ impl App {
             }
             Msg::OpenRowMenu => match crate::tui::actions::row_menu_for(self) {
                 Some(menu) => self.open_row_menu(menu),
-                None => effects.push(Effect::Toast("no row actions here yet".to_string())),
+                None => effects.push(Effect::Toast(Feedback::warning("no row actions here yet"))),
             },
             Msg::PinNode(node) => {
                 effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinNode {
@@ -1733,7 +1740,7 @@ impl App {
                 }));
             }
             Msg::Undo => match self.undo.pop() {
-                None => effects.push(Effect::Toast("nothing to undo".to_string())),
+                None => effects.push(Effect::Toast(Feedback::warning("nothing to undo"))),
                 Some(entry) => {
                     self.pending_restore_focus = entry.focus(self.active_view() == View::Pinned);
                     effects.push(Effect::WriteStore(entry.into_op()));
@@ -1752,7 +1759,9 @@ impl App {
                 });
                 if pins.is_empty() {
                     match crate::tui::actions::pin_subject(self) {
-                        Err(why) => effects.push(Effect::Toast(format!("pin: {why}"))),
+                        Err(why) => {
+                            effects.push(Effect::Toast(Feedback::warning(format!("pin: {why}"))));
+                        }
                         Ok(crate::tui::actions::PinSubject::Node(node)) => {
                             effects.push(Effect::WriteStore(
                                 crate::tui::effect::StoreOp::PinNode { node },
@@ -1780,7 +1789,9 @@ impl App {
             Msg::OpenSlotEdit(slot) => match self.pin_edit_init(&slot) {
                 Some(init) => self
                     .open_pin_edit_form(crate::tui::widgets::pin_edit::PinEditFormState::new(init)),
-                None => effects.push(Effect::Toast(format!("no pin named `{slot}`"))),
+                None => effects.push(Effect::Toast(Feedback::warning(format!(
+                    "no pin named `{slot}`"
+                )))),
             },
             Msg::CommitPinEdit(request) => {
                 effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::SavePin {
@@ -1797,9 +1808,9 @@ impl App {
                     .map(|handle| crate::tui::actions::retarget_candidates(handle.snapshot(), &pin))
                     .unwrap_or_default();
                 if candidates.is_empty() {
-                    effects.push(Effect::Toast(format!(
+                    effects.push(Effect::Toast(Feedback::warning(format!(
                         "pin `{pin}`: there is nothing else of its kind to point it at"
-                    )));
+                    ))));
                 } else {
                     self.open_picker(crate::tui::widgets::picker::PickerState::new(
                         format!("Retarget {pin}"),
@@ -1820,7 +1831,7 @@ impl App {
             }
             Msg::RevealSlot(slot) => {
                 if let Err(why) = self.reveal_slot(&slot) {
-                    effects.push(Effect::Toast(why));
+                    effects.push(Effect::Toast(Feedback::warning(why)));
                 } else {
                     effects.push(Effect::Persist);
                 }
@@ -1856,7 +1867,7 @@ impl App {
                 };
                 match result {
                     Ok(()) => effects.push(Effect::Persist),
-                    Err(why) => effects.push(Effect::Toast(why)),
+                    Err(why) => effects.push(Effect::Toast(Feedback::warning(why))),
                 }
             }
             Msg::PinRecord(record_id) => {
@@ -1963,21 +1974,21 @@ impl App {
                     new_display_name,
                 })
             }
-            Some(RowId::Pin { pin_id }) => Effect::Toast(format!(
+            Some(RowId::Pin { pin_id }) => Effect::Toast(Feedback::warning(format!(
                 "rename the pin with `{} pin rename {pin_id} <new name>`",
                 crate::invocation::invoked_name()
-            )),
+            ))),
             Some(RowId::MuxSession(NodeId::MuxSession(mux_id))) => {
                 let new_name = value.trim().to_string();
                 if new_name.is_empty() {
-                    return Effect::Toast("mux rename: name cannot be empty".to_string());
+                    return Effect::Toast(Feedback::warning("mux rename: name cannot be empty"));
                 }
                 Effect::WriteStore(crate::tui::effect::StoreOp::CommitMuxRename {
                     mux_id,
                     new_name,
                 })
             }
-            _ => Effect::Toast("rename: lost selection before commit".to_string()),
+            _ => Effect::Toast(Feedback::error("rename: lost selection before commit")),
         }
     }
 }
@@ -2023,7 +2034,7 @@ fn slot_prompt_effect(prompt: SlotPrompt, value: &str) -> super::Effect {
     use crate::tui::effect::StoreOp;
     let value = value.trim().to_string();
     if value.is_empty() {
-        return Effect::Toast("pin: nothing entered".to_string());
+        return Effect::Toast(Feedback::warning("pin: nothing entered"));
     }
     Effect::WriteStore(match prompt {
         SlotPrompt::Rename(slot) => StoreOp::RenameSlot {

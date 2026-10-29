@@ -76,7 +76,10 @@ fn undo_steps_back_through_operations_newest_first_then_says_so() {
         })]
     );
     let effects = app.update(Msg::Undo);
-    assert_eq!(effects, vec![Effect::Toast("nothing to undo".into())]);
+    assert_eq!(
+        effects,
+        vec![Effect::Toast(Feedback::warning("nothing to undo"))]
+    );
     assert!(app.undo_stack().is_empty());
 }
 

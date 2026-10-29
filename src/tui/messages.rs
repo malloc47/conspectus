@@ -4,39 +4,22 @@
 //! instead of only flashing a status message. The log lives for the
 //! life of the TUI process and is never written to disk: pane output
 //! and harness stderr can carry conversation content (ADR 0086).
+//!
+//! The log itself (bounded, repeat-collapsing, counting unseen
+//! failures) is the framework's `tuikit::feedback::Log`. What stays
+//! here is Conspectus's payload for each entry, a [`Report`]: which
+//! pin or mux the outcome concerns, the subprocess that ran, and any
+//! detail text, plus the [`LogEntryExt`] builders and the plain-text
+//! rendering the Messages overlay and the clipboard use.
 
-use std::collections::VecDeque;
 use std::process::Output;
 
-use tuikit::glyphs::marks;
+use tuikit::feedback::{Entry, Log, Severity};
 
 use crate::model::MuxSessionId;
 
 /// Entries kept before the oldest is dropped.
 pub const MESSAGE_LOG_CAPACITY: usize = 200;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub enum LogLevel {
-    Info,
-    Warning,
-    Error,
-}
-
-impl LogLevel {
-    pub fn glyph(self) -> &'static str {
-        match self {
-            Self::Info => marks::OK,
-            Self::Warning => marks::WARNING,
-            Self::Error => marks::FAIL,
-        }
-    }
-
-    /// Whether the operator should be told about the entry until
-    /// they look at it.
-    pub fn needs_attention(self) -> bool {
-        self >= Self::Warning
-    }
-}
 
 /// What an entry is about, so a row can show its own failures.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,37 +50,97 @@ impl CommandRecord {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LogEntry {
-    pub at_epoch: i64,
-    pub level: LogLevel,
-    /// One line, shown in the status bar and the overlay list.
-    pub summary: String,
+/// Conspectus's part of a log entry: what it concerns and what ran.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Report {
     pub target: Option<LogTarget>,
     pub command: Option<CommandRecord>,
     /// Free text beyond the command record, such as a dead pane's
     /// output.
     pub detail: Option<String>,
-    /// How many times this entry was logged back to back; see
-    /// [`MessageLog::push`].
-    pub repeats: u32,
 }
 
-impl LogEntry {
-    pub fn new(level: LogLevel, summary: impl Into<String>) -> Self {
-        Self {
-            at_epoch: crate::discovery::current_epoch(),
-            level,
-            summary: summary.into(),
-            target: None,
-            command: None,
-            detail: None,
-            repeats: 1,
-        }
+/// One logged outcome: the framework's entry over a [`Report`].
+pub type LogEntry = Entry<Report>;
+
+/// The Messages log.
+pub type MessageLog = Log<Report>;
+
+/// A new, empty Messages log.
+pub fn message_log() -> MessageLog {
+    Log::new(MESSAGE_LOG_CAPACITY)
+}
+
+/// Builders and renderings for Conspectus's log entries. An entry is
+/// dated by the wall clock when it is built.
+pub trait LogEntryExt: Sized {
+    fn of(severity: Severity, summary: impl Into<String>) -> Self;
+
+    /// Something worth noting that is neither a success nor a failure.
+    fn info(summary: impl Into<String>) -> Self {
+        Self::of(Severity::Info, summary)
     }
 
+    /// An operation that worked.
+    fn success(summary: impl Into<String>) -> Self {
+        Self::of(Severity::Success, summary)
+    }
+
+    /// An operation that fell back or was refused.
+    fn warning(summary: impl Into<String>) -> Self {
+        Self::of(Severity::Warning, summary)
+    }
+
+    /// An operation that failed.
+    fn error(summary: impl Into<String>) -> Self {
+        Self::of(Severity::Error, summary)
+    }
+
+    fn with_target(self, target: LogTarget) -> Self;
+    fn with_command(self, command: CommandRecord) -> Self;
+    fn with_detail(self, detail: impl Into<String>) -> Self;
+
     /// The summary, with a `(×N)` suffix once it repeated.
-    pub fn summary_with_repeats(&self) -> String {
+    fn summary_with_repeats(&self) -> String;
+
+    /// Full plain-text rendering for the overlay's detail pane and
+    /// the clipboard.
+    fn full_text(&self) -> String;
+
+    /// The last `max_lines` lines of the most useful output: the
+    /// detail text, else stderr, else stdout.
+    fn output_tail(&self, max_lines: usize) -> Vec<String>;
+}
+
+impl LogEntryExt for LogEntry {
+    fn of(severity: Severity, summary: impl Into<String>) -> Self {
+        Entry::new(
+            crate::discovery::current_epoch(),
+            severity,
+            summary,
+            Report::default(),
+        )
+    }
+
+    fn with_target(mut self, target: LogTarget) -> Self {
+        self.item.target = Some(target);
+        self
+    }
+
+    fn with_command(mut self, command: CommandRecord) -> Self {
+        self.item.command = Some(command);
+        self
+    }
+
+    fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        if !detail.trim().is_empty() {
+            self.item.detail = Some(detail);
+        }
+        self
+    }
+
+    fn summary_with_repeats(&self) -> String {
         if self.repeats > 1 {
             format!("{} (×{})", self.summary, self.repeats)
         } else {
@@ -105,51 +148,20 @@ impl LogEntry {
         }
     }
 
-    pub fn info(summary: impl Into<String>) -> Self {
-        Self::new(LogLevel::Info, summary)
-    }
-
-    pub fn warning(summary: impl Into<String>) -> Self {
-        Self::new(LogLevel::Warning, summary)
-    }
-
-    pub fn error(summary: impl Into<String>) -> Self {
-        Self::new(LogLevel::Error, summary)
-    }
-
-    pub fn with_target(mut self, target: LogTarget) -> Self {
-        self.target = Some(target);
-        self
-    }
-
-    pub fn with_command(mut self, command: CommandRecord) -> Self {
-        self.command = Some(command);
-        self
-    }
-
-    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
-        let detail = detail.into();
-        if !detail.trim().is_empty() {
-            self.detail = Some(detail);
-        }
-        self
-    }
-
-    /// Full plain-text rendering for the overlay's detail pane and
-    /// the clipboard.
-    pub fn full_text(&self) -> String {
+    fn full_text(&self) -> String {
         let mut out = format!(
             "{} {} {}\n",
-            clock(self.at_epoch),
-            self.level.glyph(),
+            clock(self.at),
+            self.severity.mark(),
             self.summary_with_repeats()
         );
-        match &self.target {
+        let report = &self.item;
+        match &report.target {
             Some(LogTarget::Pin(id)) => out.push_str(&format!("target: pin {id}\n")),
             Some(LogTarget::Mux(mux)) => out.push_str(&format!("target: {}\n", mux.native_id)),
             None => {}
         }
-        if let Some(command) = &self.command {
+        if let Some(command) = &report.command {
             out.push_str(&format!("argv: {}\n", command.argv.join(" ")));
             match command.exit_code {
                 Some(code) => out.push_str(&format!("exit: {code}\n")),
@@ -158,7 +170,7 @@ impl LogEntry {
             push_stream(&mut out, "stderr", &command.stderr);
             push_stream(&mut out, "stdout", &command.stdout);
         }
-        if let Some(detail) = &self.detail {
+        if let Some(detail) = &report.detail {
             out.push('\n');
             out.push_str(detail.trim_end());
             out.push('\n');
@@ -166,24 +178,37 @@ impl LogEntry {
         out
     }
 
-    /// The last `max_lines` lines of the most useful output: the
-    /// detail text, else stderr, else stdout.
-    pub fn output_tail(&self, max_lines: usize) -> Vec<String> {
-        let source = self
+    fn output_tail(&self, max_lines: usize) -> Vec<String> {
+        let report = &self.item;
+        let source = report
             .detail
             .as_deref()
             .or_else(|| {
-                self.command
+                report
+                    .command
                     .as_ref()
                     .map(|c| c.stderr.as_str())
                     .filter(|s| !s.trim().is_empty())
             })
-            .or_else(|| self.command.as_ref().map(|c| c.stdout.as_str()))
+            .or_else(|| report.command.as_ref().map(|c| c.stdout.as_str()))
             .unwrap_or("");
         let lines: Vec<&str> = source.lines().filter(|l| !l.trim().is_empty()).collect();
         let start = lines.len().saturating_sub(max_lines);
         lines[start..].iter().map(|l| (*l).to_string()).collect()
     }
+}
+
+/// The newest entry about any of `targets`, when it is a warning or
+/// error. A later success on the same target hides an older failure.
+pub fn latest_failure_for<'a>(log: &'a MessageLog, targets: &[LogTarget]) -> Option<&'a LogEntry> {
+    log.newest_where(|entry| {
+        entry
+            .item
+            .target
+            .as_ref()
+            .is_some_and(|target| targets.contains(target))
+    })
+    .filter(|entry| entry.severity.needs_attention())
 }
 
 fn push_stream(out: &mut String, label: &str, text: &str) {
@@ -205,77 +230,6 @@ pub fn clock(epoch: i64) -> String {
         (secs / 60) % 60,
         secs % 60
     )
-}
-
-/// Bounded, newest-last log plus a count of attention-worthy entries
-/// the operator hasn't opened the overlay for yet.
-#[derive(Clone, Debug, Default)]
-pub struct MessageLog {
-    entries: VecDeque<LogEntry>,
-    unseen: usize,
-}
-
-impl MessageLog {
-    /// Append `entry`. An entry identical to the newest one apart
-    /// from its time (a refresh that keeps failing the same way) bumps
-    /// that entry's repeat count instead of flooding the log, and
-    /// doesn't count as a new unseen failure.
-    pub fn push(&mut self, entry: LogEntry) {
-        if let Some(last) = self.entries.back_mut()
-            && last.level == entry.level
-            && last.summary == entry.summary
-            && last.target == entry.target
-            && last.command == entry.command
-            && last.detail == entry.detail
-        {
-            last.at_epoch = entry.at_epoch;
-            last.repeats = last.repeats.saturating_add(1);
-            return;
-        }
-        if entry.level.needs_attention() {
-            self.unseen += 1;
-        }
-        if self.entries.len() == MESSAGE_LOG_CAPACITY {
-            self.entries.pop_front();
-        }
-        self.entries.push_back(entry);
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    /// Entries newest first.
-    pub fn newest_first(&self) -> impl Iterator<Item = &LogEntry> {
-        self.entries.iter().rev()
-    }
-
-    /// Warnings and errors logged since the overlay was last opened.
-    pub fn unseen(&self) -> usize {
-        self.unseen
-    }
-
-    pub fn mark_seen(&mut self) {
-        self.unseen = 0;
-    }
-
-    /// The newest entry about any of `targets`, when it is a warning
-    /// or error. A later success on the same target hides an older
-    /// failure.
-    pub fn latest_failure_for(&self, targets: &[LogTarget]) -> Option<&LogEntry> {
-        self.newest_first()
-            .find(|entry| {
-                entry
-                    .target
-                    .as_ref()
-                    .is_some_and(|target| targets.contains(target))
-            })
-            .filter(|entry| entry.level.needs_attention())
-    }
 }
 
 #[cfg(test)]

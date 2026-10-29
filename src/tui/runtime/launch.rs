@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::model::NodeId;
-use crate::tui::messages::{CommandRecord, LogEntry, LogTarget};
+use crate::tui::messages::{CommandRecord, LogEntry, LogEntryExt, LogTarget};
 
 /// Run `conspectus <args>` and capture its full output, both for the
 /// caller's summary and as the command record of the message log entry
@@ -51,7 +51,7 @@ pub(super) fn launch_entry(
     let entry = if !summary.success {
         LogEntry::error(&summary.message)
     } else if record.stderr.trim().is_empty() {
-        LogEntry::info(&summary.message)
+        LogEntry::success(&summary.message)
     } else {
         LogEntry::warning(&summary.message)
     };
@@ -71,7 +71,8 @@ pub(super) fn attach_return_entry(
     if let AttachOutcome::Failed(reason) = outcome {
         return LogEntry::error(format!("{what} attach failed: {reason}")).with_target(target);
     }
-    let attached = LogEntry::info(format!("{what} attached/detached")).with_target(target.clone());
+    let attached =
+        LogEntry::success(format!("{what} attached/detached")).with_target(target.clone());
     let Some(runner) = crate::discovery::system_mux_backend(&mux.backend) else {
         return attached;
     };
@@ -291,9 +292,9 @@ pub(super) fn execute_rebuild(
     };
     let Some((attach_target, socket)) = target else {
         if attach {
-            app.post_toast(format!(
+            app.post_toast(Feedback::warning(format!(
                 "`{reference}` came back, but there is no mux to attach to"
-            ));
+            )));
         }
         return;
     };

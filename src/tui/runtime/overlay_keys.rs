@@ -53,9 +53,9 @@ pub(in crate::tui) fn open_rename_overlay(app: &mut App) {
         return;
     }
     let Some(node) = subject.node else {
-        app.update(Msg::SetStatus(Some(
-            "rename: select an agent session or mux first".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "rename: select an agent session or mux first",
+        ))));
         return;
     };
     let Some(handle) = app.snapshot_handle().cloned() else {
@@ -82,24 +82,23 @@ pub(in crate::tui) fn open_rename_overlay(app: &mut App) {
             (" rename mux ", bare.to_string())
         }
         NodeId::MuxSession(_) => {
-            app.update(Msg::SetStatus(Some(
-                "rename: that mux is stopped; rebuild it first (Enter, or . for the menu)"
-                    .to_string(),
-            )));
+            app.update(Msg::SetStatus(Some(Feedback::warning(
+                "rename: that mux is stopped; rebuild it first (Enter, or . for the menu)",
+            ))));
             return;
         }
         _ => {
-            app.update(Msg::SetStatus(Some(
-                "rename: select an agent session or mux first".to_string(),
-            )));
+            app.update(Msg::SetStatus(Some(Feedback::warning(
+                "rename: select an agent session or mux first",
+            ))));
             return;
         }
     };
     let state = crate::tui::widgets::input::TextInputState::new(title, initial);
     app.open_rename_overlay(state);
     app.set_rename_node(node);
-    app.update(Msg::SetStatus(Some(format!(
+    app.update(Msg::SetStatus(Some(Feedback::info(format!(
         "rename: {}",
         tuikit::keys::footer(tuikit::keys::TEXT_INPUT_KEYS)
-    ))));
+    )))));
 }

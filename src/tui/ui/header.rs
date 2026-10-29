@@ -220,11 +220,13 @@ pub(super) fn header_freshness(app: &App) -> String {
 
 pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let theme = app.theme();
-    if let Some(message) = app.status_message() {
+    if let Some(status) = app.status() {
         let mut spans = Vec::new();
         push_unseen_messages_chip(app, theme, &mut spans);
         push_in_flight_chips(app, theme, &mut spans);
-        spans.push(span!(Style::default().fg(theme.warning); "{message}"));
+        // In its severity's color: a hint, a confirmation, a refusal,
+        // and a failure each look like what they are.
+        spans.push(status.span(theme));
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
         return;
     }

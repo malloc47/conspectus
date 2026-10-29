@@ -151,19 +151,24 @@ pub(super) struct TuiArgs {
 
     /// Put an entry in the Messages log before the keys run, so the
     /// log can be drawn with something in it. Repeat for more entries;
-    /// the last one given is the newest.
+    /// the last one given is the newest. A leading `info:`, `warning:`,
+    /// or `error:` sets the entry's severity; it is a success otherwise.
     #[cfg(feature = "snapshot")]
-    #[arg(long = "snapshot-message", value_name = "TEXT")]
+    #[arg(long = "snapshot-message", value_name = "[SEVERITY:]TEXT")]
     snapshot_messages: Vec<String>,
 
-    /// Post a toast after the keys run, so the frame shows it.
+    /// Post a toast after the keys run, so the frame shows it. A leading
+    /// `info:`, `warning:`, or `error:` sets its severity; it is a
+    /// success otherwise.
     #[cfg(feature = "snapshot")]
-    #[arg(long = "snapshot-toast", value_name = "TEXT")]
+    #[arg(long = "snapshot-toast", value_name = "[SEVERITY:]TEXT")]
     snapshot_toast: Option<String>,
 
-    /// Show a message on the status line after the keys run.
+    /// Show a message on the status line after the keys run. A leading
+    /// `success:`, `warning:`, or `error:` sets its severity; it is a
+    /// note (info) otherwise.
     #[cfg(feature = "snapshot")]
-    #[arg(long = "snapshot-status", value_name = "TEXT")]
+    #[arg(long = "snapshot-status", value_name = "[SEVERITY:]TEXT")]
     snapshot_status: Option<String>,
 
     /// Launch the interactive TUI against a fixture JSON instead

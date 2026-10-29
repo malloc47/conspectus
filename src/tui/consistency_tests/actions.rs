@@ -183,7 +183,11 @@ fn enter_on_a_gone_worktree_rebuilds_it_without_attaching() {
 fn enter_on_a_pin_whose_target_could_not_be_checked_says_so() {
     let effects = enter_effect(View::Pinned, "ledger-worktree");
     assert!(
-        matches!(effects.as_slice(), [Effect::Toast(text)] if text.contains("couldn't check")),
+        matches!(
+            effects.as_slice(),
+            [Effect::Toast(note)] if note.text.contains("couldn't check")
+                && note.severity == tuikit::feedback::Severity::Warning
+        ),
         "{effects:?}"
     );
 }
@@ -377,7 +381,7 @@ fn an_entity_that_cannot_be_found_leaves_the_operator_in_place_with_a_note() {
     app.forget_follow_row();
     app.update(Msg::HandoffSettled);
     assert_eq!(app.active_view(), View::Pinned);
-    assert!(app.toast().has_toast(), "the operator is told");
+    assert!(!app.toasts().is_empty(), "the operator is told");
 }
 
 #[test]

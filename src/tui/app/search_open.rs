@@ -138,7 +138,7 @@ impl App {
                         .map(|found| crate::tui::explorer::title_line(snapshot, found))
                 })
                 .unwrap_or_else(|| node.to_string());
-            self.status_message = Some(format!("{label} {why}"));
+            self.status_message = Some(Feedback::warning(format!("{label} {why}")));
         }
     }
 

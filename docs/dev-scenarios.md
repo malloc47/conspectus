@@ -169,12 +169,15 @@ conspectus tui --snapshot --snapshot-keys 'jjj<Enter>'  # navigate, expand
 conspectus tui --snapshot --snapshot-pane right --snapshot-keys 'j<Tab>jjjjj<Enter>'
 
 # Draw the Messages log with entries in it (repeat for more; the last is
-# the newest)
-conspectus tui --snapshot --snapshot-message 'attached tmux:a' --snapshot-message 'renamed tmux:b' --snapshot-keys '!'
+# the newest). A leading `info:`, `warning:`, or `error:` sets an entry's
+# severity; it is a success otherwise.
+conspectus tui --snapshot --snapshot-message 'attached tmux:a' --snapshot-message 'error:launch failed' --snapshot-keys '!'
 
-# Draw a toast, or a status-line message, after the keys run
+# Draw a toast (a success unless it names a severity), or a status-line
+# message (a note unless it names one), after the keys run
 conspectus tui --snapshot --snapshot-toast 'copied: cwd'
-conspectus tui --snapshot --snapshot-status 'rename: lost selection before commit'
+conspectus tui --snapshot --snapshot-toast 'error:copy failed: broken pipe'
+conspectus tui --snapshot --snapshot-status 'warning:rename: select an agent session or mux first'
 
 # Capture the live world to a fixture JSON for later iteration
 conspectus tui --snapshot --snapshot-export-fixture world.json
