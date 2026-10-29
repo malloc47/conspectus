@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use tuikit::feedback::{Feedback, Toasts};
-use tuikit::scroll::ScrollWindow;
+use tuikit::scroll::{Anchor, ScrollRegion, ScrollWindow};
 
 use crate::model::{AgentSessionId, GraphSnapshot, MuxSessionId, NodeId, PinId};
 use crate::tui::explorer::{
@@ -148,12 +148,11 @@ pub struct App {
     /// focus shift. Cleared by any other message so the arming only
     /// survives across consecutive Backspace presses.
     explorer_back_armed: bool,
-    /// Vertical scroll offset for the right-panel preview, in
-    /// rendered rows.
-    preview_scroll: u16,
-    /// Rows a scrolled Preview sits below the search match it opened
-    /// on; negative is above it.
-    preview_match_offset: i32,
+    /// The right-panel Preview's scroll region (ADR 0181): the rows it
+    /// has been scrolled from its anchor (the top, a transcript's newest
+    /// rows, or the search match it opened on), as the last frame drew
+    /// it.
+    preview: ScrollRegion,
     /// Unix-epoch seconds at which the current snapshot was
     /// loaded. `None` before the first `SetData`. The renderer
     /// turns this into the header's `updated Ns ago` indicator.
@@ -548,8 +547,7 @@ impl App {
             focus: Focus::Left,
             edge_meta_visible,
             explorer_back_armed: false,
-            preview_scroll: 0,
-            preview_match_offset: 0,
+            preview: ScrollRegion::default(),
             loaded_at_epoch: None,
             status_message: None,
             messages: crate::tui::messages::message_log(),
@@ -1002,22 +1000,21 @@ impl App {
         self.expanded.contains(id)
     }
 
-    /// Preview scroll offset for the right panel.
+    /// Rows the right panel's Preview has been scrolled from its anchor:
+    /// down from the top, or up from a transcript's newest turns.
     pub fn preview_scroll(&self) -> u16 {
-        self.preview_scroll
+        u16::try_from(self.preview.away()).unwrap_or(u16::MAX)
     }
 
-    /// Rows the Preview has been scrolled from the search match it
-    /// opened on.
-    pub fn preview_match_offset(&self) -> i32 {
-        self.preview_match_offset
+    /// The Preview's scroll region, which its body places and draws.
+    pub fn preview_region(&self) -> ScrollRegion {
+        self.preview
     }
 
     /// Return the Preview to its anchor: the top, a transcript's newest
     /// turns, or the search match it opens on.
     fn reset_preview_scroll(&mut self) {
-        self.preview_scroll = 0;
-        self.preview_match_offset = 0;
+        self.preview.reset();
     }
 
     /// Latest graph snapshot, if loaded. Mostly useful to other modules
@@ -1202,21 +1199,21 @@ impl App {
         }
     }
 
-    /// Whether the Preview is positioned on a search match, so scrolling
-    /// moves relative to it instead of the newest turns.
-    fn preview_follows_match(&self) -> bool {
-        self.preview_is_bottom_anchored()
-            && crate::tui::preview::search::preview_search(self)
-                .is_some_and(|search| search.turn.is_some())
-    }
-
-    /// Whether the Preview zone shows a transcript, which sits
-    /// bottom-anchored with its newest turns in view.
-    fn preview_is_bottom_anchored(&self) -> bool {
-        matches!(
+    /// What the Preview's scroll counts from: the search match a
+    /// transcript opens on, a transcript's newest turns, or the top.
+    fn preview_anchor(&self) -> Anchor {
+        if !matches!(
             crate::tui::preview::preview_source(self),
             Some(PreviewSource::Transcript(_))
-        )
+        ) {
+            Anchor::Top
+        } else if crate::tui::preview::search::preview_search(self)
+            .is_some_and(|search| search.turn.is_some())
+        {
+            Anchor::Mark
+        } else {
+            Anchor::Bottom
+        }
     }
 
     /// What the Preview zone is pointed at: the left selection and the
@@ -1352,21 +1349,12 @@ impl App {
                     Focus::Right => Focus::Left,
                 };
             }
-            Msg::ScrollPreviewBy(delta) if self.preview_follows_match() => {
-                self.preview_match_offset = self.preview_match_offset.saturating_add(delta);
-            }
             Msg::ScrollPreviewBy(delta) => {
-                // A transcript's offset counts up from its newest
-                // line, so scrolling down moves the offset toward zero.
-                let delta = if self.preview_is_bottom_anchored() {
-                    -delta
-                } else {
-                    delta
-                };
-                let current = i32::from(self.preview_scroll);
-                let next = current.saturating_add(delta).max(0);
-                self.preview_scroll =
-                    u16::try_from(next.min(i32::from(u16::MAX))).unwrap_or(u16::MAX);
+                // The region steps from the anchor the Preview shows now,
+                // so a step toward a transcript's newest line, or above the
+                // top, stops there at once.
+                self.preview.set_anchor(self.preview_anchor());
+                self.preview.scroll_by(delta);
             }
             Msg::SetStatus(message) => {
                 self.status_message = message;

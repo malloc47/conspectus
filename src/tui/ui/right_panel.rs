@@ -10,14 +10,14 @@ use super::*;
 /// rows after the divider).
 const MIN_PREVIEW_HEIGHT: u16 = 6;
 
-/// Draw the right pane and return the windows its explorer zone and its
-/// Preview drew, `None` for a zone the pane did not draw (or a Preview
-/// whose content has not loaded).
+/// Draw the right pane and return the window its explorer zone drew and
+/// the Preview's scroll region as drawn, `None` for a zone the pane did
+/// not draw (or a Preview whose content has not loaded).
 pub(super) fn draw_right_panel(
     app: &mut App,
     frame: &mut Frame<'_>,
     area: Rect,
-) -> (Option<ScrollWindow>, Option<ScrollWindow>) {
+) -> (Option<ScrollWindow>, Option<ScrollRegion>) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(right_panel_title(app, area.width as usize));
@@ -672,14 +672,14 @@ pub(super) fn unresolved_evidence_summary(row: &crate::tui::explorer::Unresolved
 /// lines (ADR 0107), then the neighbor's own preview (ADR 0112 §3), or
 /// its core fields when it has none. Other rows show the focused
 /// node's preview through `draw_detail_preview`.
-/// Draw the Preview for the explorer cursor's row and return the window
-/// its body drew.
+/// Draw the Preview for the explorer cursor's row and return its scroll
+/// region as the body drew it.
 pub(super) fn draw_explorer_preview(
     app: &App,
     state: &crate::tui::app::ExplorerState,
     frame: &mut Frame<'_>,
     area: Rect,
-) -> ScrollWindow {
+) -> ScrollRegion {
     use crate::tui::explorer::RowPreview;
     let Some(row) = state.selected_row() else {
         // Rows that don't carry a neighbor (node fields land here)
@@ -791,8 +791,7 @@ pub(super) fn draw_explorer_preview(
     }
     let view = if let Some(source) = neighbor_source {
         lines.push(Line::raw(""));
-        let header_rows = WrappedRows::new(&lines, usize::from(area.width)).len();
-        let body_height = (area.height as usize).saturating_sub(header_rows).max(1);
+        let body_height = rows_under(&lines, area.width, area.height as usize);
         source_view(app, &source, area.width, body_height).below(Text::from(lines))
     } else {
         let mut text = Text::from(lines);

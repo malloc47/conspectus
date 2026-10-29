@@ -11,7 +11,7 @@
 //! so it is not a reducer transition. A scrolled modal (help, the value
 //! modal, Messages) keeps the window it drew itself, as it draws.
 
-use tuikit::scroll::ScrollWindow;
+use tuikit::scroll::{ScrollRegion, ScrollWindow};
 
 use super::App;
 
@@ -23,8 +23,8 @@ pub struct ViewportReport {
     pub tree: Option<ScrollWindow>,
     /// The explorer zone of the right pane, over its wrapped rows.
     pub explorer: Option<ScrollWindow>,
-    /// The Preview zone's body, when it scrolls by the Preview's offset.
-    pub preview: Option<ScrollWindow>,
+    /// The Preview zone's scroll region as its body drew it.
+    pub preview: Option<ScrollRegion>,
 }
 
 impl App {
@@ -38,11 +38,11 @@ impl App {
         if let Some(window) = report.explorer {
             self.explorer_window = window;
         }
-        if let Some(window) = report.preview {
-            // The Preview counts its offset from its anchor (the top, or a
-            // transcript's newest rows), in the window's rows either way.
-            let last = u16::try_from(window.last_offset()).unwrap_or(u16::MAX);
-            self.preview_scroll = self.preview_scroll.min(last);
+        if let Some(region) = report.preview {
+            // The Preview counts its offset from its anchor (the top, a
+            // transcript's newest rows, or the search match it opened on);
+            // the drawn region has it back inside the rows it showed.
+            self.preview = region;
         }
     }
 

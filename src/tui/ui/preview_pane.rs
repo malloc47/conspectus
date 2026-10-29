@@ -9,16 +9,17 @@ use crate::tui::preview::{
 pub(super) struct PreviewView {
     pub text: Text<'static>,
     /// Set when the body is already cut to the zone, as a transcript
-    /// is: its window onto all of its rows, for the scrollbar. `None`
-    /// scrolls the text by the Preview's offset from the top.
-    pub window: Option<ScrollWindow>,
+    /// is: the Preview's scroll region placed over all of its rows, for
+    /// the scrollbar. `None` scrolls the text by the Preview's offset
+    /// from the top.
+    pub region: Option<ScrollRegion>,
 }
 
 impl PreviewView {
     pub(super) fn text(text: impl Into<Text<'static>>) -> Self {
         Self {
             text: text.into(),
-            window: None,
+            region: None,
         }
     }
 
@@ -29,63 +30,36 @@ impl PreviewView {
         text.extend(self.text);
         Self {
             text,
-            window: self.window,
+            region: self.region,
         }
     }
 }
 
-/// Draw the selected row's Preview and return the window its body drew.
-pub(super) fn draw_detail_preview(app: &App, frame: &mut Frame<'_>, area: Rect) -> ScrollWindow {
+/// Draw the selected row's Preview and return its scroll region as the
+/// body drew it.
+pub(super) fn draw_detail_preview(app: &App, frame: &mut Frame<'_>, area: Rect) -> ScrollRegion {
     let view = preview_view_for_selection(app, area.width, area.height as usize);
     draw_preview_view(app, view, frame, area)
 }
 
-/// Draw a Preview body: scrolled from the top by the Preview's offset,
-/// or, for a view that cut its own window, as is with a scrollbar.
-/// Returns the window the body drew, over the rows the Preview's offset
+/// Draw a Preview body through the Preview's scroll region (ADR 0181):
+/// wrapped and scrolled from the top by its offset, a leading banner
+/// with it, or, for a view that cut its own window, as is under a banner
+/// that stays put. Returns the region as drawn, over the rows its offset
 /// counts.
 pub(super) fn draw_preview_view(
     app: &App,
     view: PreviewView,
     frame: &mut Frame<'_>,
     area: Rect,
-) -> ScrollWindow {
-    match view.window {
-        None => {
-            let rows = WrappedRows::fit(
-                &view.text.lines,
-                usize::from(area.width),
-                usize::from(area.height),
-            );
-            let gutter = ScrollGutter::layout(area, rows.len());
-            let window = ScrollWindow::new(usize::from(area.height), rows.len())
-                .at(usize::from(app.preview_scroll()));
-            let text = Text {
-                lines: rows.into_rows(),
-                style: view.text.style,
-                alignment: view.text.alignment,
-            };
-            let widget = Paragraph::new(text).scroll(window.paragraph_scroll());
-            frame.render_widget(widget, gutter.content());
-            gutter.render(&window, frame.buffer_mut());
-            window
-        }
-        Some(window) => {
-            // The thumb tracks the transcript; a failure banner above
-            // it stays put.
-            let gutter = ScrollGutter::layout(area, window.content().max(view.text.lines.len()));
-            let rows = WrappedRows::new(&view.text.lines, usize::from(gutter.content().width));
-            frame.render_widget(
-                Paragraph::new(Text {
-                    lines: rows.into_rows(),
-                    style: view.text.style,
-                    alignment: view.text.alignment,
-                }),
-                gutter.content(),
-            );
-            gutter.render(&window, frame.buffer_mut());
-            window
-        }
+) -> ScrollRegion {
+    match view.region {
+        None => app
+            .preview_region()
+            .draw_lines(Anchor::Top, area, frame.buffer_mut(), view.text),
+        // The thumb tracks the transcript; a failure banner above it
+        // stays put.
+        Some(placed) => placed.draw_cut(area, frame.buffer_mut(), view.text),
     }
 }
 
@@ -105,8 +79,7 @@ pub(super) fn preview_view_for_selection(app: &App, width: u16, height: usize) -
             // The body gets the rows the banner leaves, so its newest
             // output stays on screen below the banner.
             let banner = failure_banner(entry, app.theme());
-            let banner_rows = WrappedRows::new(&banner.lines, usize::from(width)).len();
-            let body_height = height.saturating_sub(banner_rows).max(1);
+            let body_height = rows_under(&banner.lines, width, height);
             selection_preview_body(app, width, body_height).below(banner)
         }
         None => selection_preview_body(app, width, height),
@@ -311,9 +284,9 @@ fn loaded_view(app: &App, source: &PreviewSource) -> PreviewView {
 }
 
 /// A transcript, rendered by the native viewer (ADR 0052) and
-/// bottom-anchored with its newest turns in view. The Preview's scroll
-/// offset counts rows up from there. One column stays free for the
-/// scrollbar.
+/// bottom-anchored with its newest turns in view, or anchored at the
+/// search match it opens on. The Preview's scroll region counts rows
+/// from that anchor (ADR 0181). One column stays free for the scrollbar.
 fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize) -> PreviewView {
     let Some(entry) = app.previews().get(source) else {
         return PreviewView::text("loading transcript…");
@@ -351,23 +324,23 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
     }
     let total = lines.len();
     let height = height.max(1);
-    let bottom_top = total.saturating_sub(height);
-    let top = match crate::tui::preview::search::match_top(preview) {
-        // Opened on a search match: the offset counts rows down from it.
-        Some(anchor) if search.as_ref().is_some_and(|s| s.turn.is_some()) => {
-            let moved = (anchor as i64).saturating_add(i64::from(app.preview_match_offset()));
-            usize::try_from(moved.max(0)).unwrap_or(0).min(bottom_top)
+    let region = app.preview_region();
+    let placed = match crate::tui::preview::search::match_top(preview) {
+        // Opened on a search match: the offset counts rows from it.
+        Some(row) if search.as_ref().is_some_and(|s| s.turn.is_some()) => {
+            region.marked(row).place(Anchor::Mark, height, total)
         }
-        _ => bottom_top.saturating_sub(app.preview_scroll() as usize),
+        _ => region.place(Anchor::Bottom, height, total),
     };
-    let end = (top + height).min(total);
-    let mut window = lines[top..end].to_vec();
+    let shown = placed.window().visible();
+    let top = shown.start;
+    let mut window = lines[shown].to_vec();
     if search.is_some() {
         preview.marks.paint(&mut window, top, cache, app.theme());
     }
     PreviewView {
         text: Text::from(window),
-        window: Some(ScrollWindow::new(height, total).at(top)),
+        region: Some(placed),
     }
 }
 
