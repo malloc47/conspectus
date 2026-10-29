@@ -192,7 +192,7 @@ fn the_help_page_is_drawn_over_the_viewer_and_scrolls_inside_itself() {
     press(&mut state, KeyCode::Char('?'));
     let screen = render(&mut state, 90, 40);
     assert!(screen.contains("Attach to the pane's mux"), "{screen}");
-    assert!(screen.contains("Esc/q/? close"), "{screen}");
+    assert!(screen.contains("Esc/? back · q close"), "{screen}");
     // The page fits, so a key past its end is taken back by the draw.
     press(&mut state, KeyCode::Char('G'));
     render(&mut state, 90, 40);

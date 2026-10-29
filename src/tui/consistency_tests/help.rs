@@ -1,7 +1,9 @@
 //! The keymap help, the transcript viewer's help, and the pane viewer's
 //! help are three pages of one modal: same frame, same size, same section
-//! headings, same key and description columns, same footer. They are
-//! drawn by one page; these tests keep it that way if any is changed.
+//! headings, same key and description columns, and a footer in one look
+//! generated from the keys of the page's level (the two viewers' alike).
+//! They are drawn by one page; these tests keep it that way if any is
+//! changed.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -147,30 +149,34 @@ fn all_three_helps_style_headings_keys_and_footer_alike_in_one_column_grid() {
     }
 }
 
+/// Each page ends with the footer of the keys its level takes: the
+/// keymap's closes it on `Esc`, `q`, and `?`; a viewer's goes back to the
+/// viewer on `Esc` and `?`, and `q` leaves the viewer. The two viewers'
+/// footer rows are the same cell for cell, and every footer is drawn in
+/// the same receding look on the frame's last row.
 #[test]
-fn all_three_helps_end_with_the_same_footer() {
+fn every_help_ends_with_the_footer_of_its_levels_keys() {
     let theme = Theme::default();
+    let keymap = tuikit::keys::footer(crate::tui::keybindings::overlay::HELP_KEYS);
+    let viewer = tuikit::keys::footer(tuikit::keys::PAGER_HELP_KEYS);
     for (w, h) in SIZES {
         let area = Rect::new(0, 0, w, h);
         let rect = HelpPage::SIZE.rect(area, 0);
         let footer_row = rect.y + rect.height - 2;
-        let a = page_at(PAGES[0], area, &theme, usize::MAX);
         let row = |buf: &Buffer| -> Vec<Cell> {
             (rect.x + 1..rect.x + rect.width - 2)
                 .map(|x| cell(buf, x, footer_row))
                 .collect()
         };
-        let footer: String = row(&a).iter().map(|c| c.0.as_str()).collect();
-        assert!(
-            footer.starts_with(&tuikit::keys::footer(
-                crate::tui::keybindings::overlay::HELP_KEYS
-            )),
-            "{footer:?} at {w}x{h}"
-        );
-        for other in &PAGES[1..] {
-            let b = page_at(other, area, &theme, usize::MAX);
-            assert_eq!(row(&a), row(&b), "{other}: the footer row at {w}x{h}");
-        }
+        let text = |cells: &[Cell]| -> String { cells.iter().map(|c| c.0.as_str()).collect() };
+        let pages: Vec<Vec<Cell>> = PAGES
+            .iter()
+            .map(|page| row(&page_at(page, area, &theme, usize::MAX)))
+            .collect();
+        assert!(text(&pages[0]).starts_with(&keymap), "keymap at {w}x{h}");
+        assert!(text(&pages[1]).starts_with(&viewer), "viewer at {w}x{h}");
+        assert_eq!(pages[1], pages[2], "the viewers' footer rows at {w}x{h}");
+        assert_eq!(pages[0][0].3, pages[1][0].3, "one footer look at {w}x{h}");
     }
 }
 

@@ -2,15 +2,16 @@
 //!
 //! The transcript viewer and the pane viewer each say what their messages
 //! do (`tuikit::help::HelpAction`), and their help page is the framework's
-//! page generated from their key table (`tuikit::help::sections_for`),
-//! drawn as the keymap help draws (`help::page`). So the three help pages
-//! share a frame, a column grid, headings, and a footer, and a key added
-//! to a viewer's table cannot be left out of its help.
+//! page generated from their key table (`tuikit::help::sections_for`), so
+//! it shares the keymap help's frame, column grid, and headings, and a key
+//! added to a viewer's table cannot be left out of its help. Its footer is
+//! a pager help page's (`tuikit::keys::PAGER_HELP_KEYS`): `Esc` and `?` go
+//! back to the viewer and `q` leaves it, which is what those keys do there.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use tuikit::help::{HelpAction, HelpScroll, sections_for};
-use tuikit::keys::KeyRow;
+use tuikit::help::{HelpAction, HelpPage, HelpScroll, sections_for};
+use tuikit::keys::{KeyRow, PAGER_HELP_KEYS};
 use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
@@ -25,7 +26,8 @@ pub fn render<A: HelpAction>(
     scroll: &HelpScroll,
 ) -> ScrollWindow {
     let sections = sections_for(table);
-    super::help::page(theme, &sections)
+    HelpPage::new(theme, &sections)
+        .footer(PAGER_HELP_KEYS)
         .scrolled(scroll)
         .render(area, buf)
 }

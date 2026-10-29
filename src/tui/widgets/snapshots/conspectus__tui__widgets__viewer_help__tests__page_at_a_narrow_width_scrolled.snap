@@ -13,5 +13,5 @@ expression: "render_text(50, 14, 6)"
   │Showing more or less                       ║│
   │  t             Cycle tool detail: hidden, ▼│
   │                summary, truncated, full    │
-  │j/k/PgDn/PgUp scroll · Esc/q/? close        │
+  │j/k/PgDn/PgUp scroll · Esc/? back · q close │
   └────────────────────────────────────────────┘

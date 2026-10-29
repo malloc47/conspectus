@@ -1,13 +1,12 @@
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use tuikit::help::{HelpPage, HelpRow, HelpSection, undescribed};
-use tuikit::keys::{KeyRow, key_label, rows};
+use tuikit::keys::{KeyRow, PAGER_HELP_KEYS, key_label, rows};
 use unicode_width::UnicodeWidthStr;
 
 use super::*;
-use crate::tui::keybindings::overlay::{HELP_KEYS, PANE_VIEWER_KEYS, VIEWER_KEYS};
+use crate::tui::keybindings::overlay::{PANE_VIEWER_KEYS, VIEWER_KEYS};
 use crate::tui::widgets::pane_viewer::PaneViewerMsg;
 use crate::viewer::input::ViewerMsg;
 
@@ -44,7 +43,7 @@ fn help_lines<A: HelpAction>(
     width: usize,
 ) -> Vec<Line<'static>> {
     let sections = sections_for(table);
-    let page = crate::tui::widgets::help::page(theme, &sections);
+    let page = HelpPage::new(theme, &sections).footer(PAGER_HELP_KEYS);
     let mut lines = page.lines(width);
     lines.extend(page.footer_lines(width));
     lines
@@ -192,8 +191,9 @@ fn wrapping_keeps_every_word_of_every_description() {
 }
 
 #[test]
-fn the_footer_comes_from_the_scroll_and_close_key_table() {
-    let footer = tuikit::keys::footer(HELP_KEYS);
+fn the_footer_comes_from_the_viewer_help_levels_table() {
+    let footer = tuikit::keys::footer(PAGER_HELP_KEYS);
+    assert_eq!(footer, "j/k/PgDn/PgUp scroll · Esc/? back · q close");
     for page in [
         help_lines(VIEWER_KEYS, &Theme::default(), usize::MAX),
         help_lines(PANE_VIEWER_KEYS, &Theme::default(), usize::MAX),
@@ -212,12 +212,11 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
     let expect = |event: ratatui::crossterm::event::KeyEvent, viewer: ViewerMsg| {
         assert_eq!(resolve(VIEWER_KEYS, event), Some(viewer), "{event:?}");
     };
-    for row in tuikit::keys::rows(HELP_KEYS) {
+    for row in tuikit::keys::rows(PAGER_HELP_KEYS) {
         let KeyRow::Bind { key, action, .. } = row else {
             continue;
         };
         let event = key.example();
-        let code = event.code;
         let viewer = match action {
             PagerKey::Down => ViewerMsg::ScrollDown,
             PagerKey::Up => ViewerMsg::ScrollUp,
@@ -227,14 +226,13 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
             PagerKey::HalfPageUp => ViewerMsg::HalfPageUp,
             PagerKey::Top => ViewerMsg::JumpToStart,
             PagerKey::Bottom => ViewerMsg::JumpToEnd,
-            // `?` toggles the viewer's help; the rest close it.
-            PagerKey::Close if code == KeyCode::Char('?') => ViewerMsg::ToggleHelp,
-            // Esc steps back; `q` and Ctrl-C leave at once.
-            PagerKey::Abort | PagerKey::Close if code == KeyCode::Esc => ViewerMsg::Close,
-            PagerKey::Abort | PagerKey::Close => ViewerMsg::Quit,
-            PagerKey::Copy => continue,
-            PagerKey::Find | PagerKey::FindNext | PagerKey::FindPrev | PagerKey::Help => {
-                unreachable!("the help table binds no find and no help")
+            // `?` closes the help as it opened it; Esc steps back to the
+            // viewer; `q` and Ctrl-C leave it.
+            PagerKey::Help => ViewerMsg::ToggleHelp,
+            PagerKey::Close => ViewerMsg::Close,
+            PagerKey::Abort => ViewerMsg::Quit,
+            PagerKey::Copy | PagerKey::Find | PagerKey::FindNext | PagerKey::FindPrev => {
+                unreachable!("the help level binds no copy and no find")
             }
         };
         expect(event, viewer);
@@ -305,7 +303,7 @@ fn a_short_terminal_scrolls_and_clamps() {
     assert_ne!(top, bottom);
     assert_eq!(render_text(60, 12, usize::MAX), bottom, "scroll is clamped");
     assert!(
-        bottom.contains("Esc/q/? close"),
+        bottom.contains("Esc/? back · q close"),
         "the footer is reachable:\n{bottom}"
     );
 }

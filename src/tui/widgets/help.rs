@@ -1,11 +1,10 @@
 //! `?` help overlay: the keymap's reference card.
 //!
-//! Every help page of the TUI (this one and the transcript and pane
-//! viewers' pages in `viewer_help`) draws through `page`, the
-//! framework's help page with the footer of the keys that scroll and
-//! close it, so the three share one frame, one column grid, one heading
-//! style, and one footer. The viewers' pages are generated from their key
-//! tables. This one's rows are hand-written prose, kept as annotation
+//! This page draws through `page`, the framework's help page with the
+//! footer of the keys that scroll and close it. The viewers' pages are the
+//! same page generated from their key tables, with the footer of a
+//! viewer's help level (where `q` leaves the viewer), so the three share
+//! one frame, one column grid, and one heading style. This one's rows are hand-written prose, kept as annotation
 //! sections until the program-wide keymap carries help text the page can
 //! be generated from (backlog `CSP-760`), followed by legends of the
 //! marks the screens draw.
