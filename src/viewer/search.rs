@@ -125,6 +125,15 @@ impl Default for ContentKinds {
 }
 
 impl ContentKinds {
+    /// Every kind of turn: what the transcript holds, shown or not.
+    pub const EVERYTHING: Self = Self {
+        messages: true,
+        tools: true,
+        thinking: true,
+        aborted: true,
+        hidden: true,
+    };
+
     /// Whether `turn` is in scope.
     pub fn includes(&self, turn: &TranscriptTurn) -> bool {
         if (turn.aborted && !self.aborted) || (turn.hidden && !self.hidden) {

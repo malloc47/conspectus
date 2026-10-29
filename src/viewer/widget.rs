@@ -1,28 +1,37 @@
-//! Full-screen Ratatui modal for the transcript viewer.
+//! The transcript as rows, and as the framework pager's content.
 //!
-//! Layout (top → bottom):
+//! A [`Transcript`] lays its turns out as rows (`tuikit::pager`'s
+//! [`PagerContent`]): a gutter chip per turn and a thread beside its
+//! body, the bodies rendered from Markdown, tables, and tool output,
+//! and only the turns the toggles show. The pager draws them in its
+//! full-screen chrome:
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────┐
-//! │ <harness>:<key> · <cwd> · N turns                  HH:MM:SS │  header
+//! │ <harness>:<key> · <cwd> · N turns                           │  header
 //! │─────────────────────────────────────────────────────────────│  rule
 //! │                                                             │
 //! │       you │ what's up?                                      │  body
 //! │           │                                                 │
-//! │       ai │ Not much.                                       │
+//! │        ai │ Not much.                                       │
 //! │           │                                                 │
-//! │  Thinking │ <italic dim thinking text>                      │
-//! │      Tool │ Read: /path                                     │
-//! │  ↳ Result │ <dim tool output>                               │
+//! │  thinking │ <italic dim thinking text>                      │
+//! │      tool │ Read: /path                                     │
+//! │  ↳ result │ <dim tool output>                               │
 //! │                                                             │
 //! │─────────────────────────────────────────────────────────────│  rule
-//! │ [ 42/137 ] tools·off Think·on  q close · j/k · g/G · …      │  footer
+//! │ [ 42/137 ] · tools·off (t) · think·off (T) · … · Esc/q close │  footer
 //! └─────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! The widget is the only piece of `src/viewer/` that touches
-//! `ratatui::*` outside the renderer. Per ADR 0052 the renderer
-//! never branches on harness; it consumes only the normalized model.
+//! The pager owns the scrolling, the find prompt, the help page, and the
+//! footer; the content owns the rows, the header, the toggles' chips and
+//! keys, a find whose unit is a turn, and the count of matches the
+//! toggles hide. Per ADR 0052 the renderer never branches on harness; it
+//! consumes only the normalized model.
+
+use std::borrow::Cow;
+use std::ops::Range;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -31,16 +40,452 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tuikit::chip::{PositionChip, StatusChip, ToggleChip, Tone};
 use tuikit::glyphs::marks;
+use tuikit::keys::{KeyRow, PagerKey};
+use tuikit::pager::{Find, PagerContent, PagerEffect};
+use tuikit::theme::Theme;
 
-use crate::viewer::highlight::highlight_matches;
-use crate::viewer::model::{TranscriptDocument, TurnKind};
+use crate::viewer::highlight::{highlight_matches, turn_at};
+use crate::viewer::keys::{TRANSCRIPT_KEYS, TranscriptKey};
+use crate::viewer::model::{TranscriptTurn, TurnKind};
 use crate::viewer::render::{
     ToolCategory, aggregate_tool_phrase, categorize_tool_name, chip_label, chip_label_width,
     into_owned_line, leader_width, render_aggregated_tool_summary, render_turn,
     tool_name_from_body,
 };
-use crate::viewer::state::{RenderCache, ToolDetail, TurnStart, ViewerState};
-use tuikit::theme::Theme;
+use crate::viewer::search::{ContentKinds, ContentQuery, matching_turns};
+use crate::viewer::state::{RenderCache, ToolDetail, Transcript, TurnStart, ViewerState};
+
+impl<M> PagerContent for Transcript<M> {
+    type Message = M;
+    type Action = TranscriptKey;
+    const KEYS: &'static [KeyRow<TranscriptKey>] = TRANSCRIPT_KEYS;
+
+    fn layout(&mut self, width: u16, theme: &Theme) -> usize {
+        self.lines(theme, width).len()
+    }
+
+    fn rows(&self, range: Range<usize>, _theme: &Theme) -> Vec<Line<'static>> {
+        self.rendered
+            .as_ref()
+            .map_or_else(Vec::new, |cache| cache.lines[range].to_vec())
+    }
+
+    /// ` <harness>:<key> · <cwd> · N turns`, the title in the named style
+    /// the opener chose; just the title when the rest does not fit.
+    fn header(&self, width: usize, theme: &Theme) -> Line<'static> {
+        let meta = &self.document.meta;
+        let title = Span::styled(
+            format!("{}:{}", meta.harness, meta.session_key),
+            title_style(&self.title_role, theme),
+        );
+        let count = self.document.turns.len();
+        let turns = if count == 1 { "turn" } else { "turns" };
+        let rest = Tone::Inert.style(theme);
+        let full = vec![
+            Span::raw(" "),
+            title.clone(),
+            Span::styled(" · ", rest),
+            Span::styled(
+                meta.cwd.clone().unwrap_or_else(|| "(no cwd)".to_string()),
+                Style::new().fg(theme.accent).add_modifier(theme.muted),
+            ),
+            Span::styled(format!(" · {count} {turns}"), rest),
+        ];
+        if tuikit::text::spans_width(&full) <= width {
+            Line::from(full)
+        } else {
+            Line::from(vec![Span::raw(" "), title])
+        }
+    }
+
+    /// The toggles' chips, each naming its key (`tools·sum (t)`): tool
+    /// detail, thinking, aborted turns, and, for a transcript whose parser
+    /// marked turns hidden, hidden records. A narrow footer drops them
+    /// from the last.
+    fn chips(&self, theme: &Theme) -> Vec<Span<'static>> {
+        let tool_states = ToolDetail::ALL.map(ToolDetail::footer_label);
+        let mut chips = vec![
+            tool_chip(self.tool_detail, &tool_states).span(theme),
+            think_chip(self.show_thinking).span(theme),
+            abort_chip(self.show_aborted).span(theme),
+        ];
+        // The hidden chip only appears for transcripts whose parser marked
+        // turns hidden; for the rest it would toggle nothing.
+        if self.document.turns.iter().any(|turn| turn.hidden) {
+            chips.push(hidden_chip(self.show_hidden).span(theme));
+        }
+        chips
+    }
+
+    /// The turns the toggles show that hold `query`: a match is a turn.
+    fn find(&self, query: &str) -> Vec<usize> {
+        self.matching(query)
+    }
+
+    fn match_rows(&self, turn: usize) -> Range<usize> {
+        self.rows_of(turn)
+    }
+
+    /// Every match after the gutter in the theme's match look, and the
+    /// current turn's in the current-match look; a tool run collapsed to
+    /// one summary line is a count, not the turns' text, so it is not
+    /// painted.
+    fn paint(&self, rows: &mut [Line<'static>], first: usize, find: &Find, theme: &Theme) {
+        let Some(cache) = self.rendered.as_ref() else {
+            return;
+        };
+        for (row, at) in rows.iter_mut().zip(first..) {
+            if let Some(turn) = turn_at(cache, at).filter(|&turn| find.holds(turn)) {
+                let current = find.current_unit() == Some(turn);
+                *row = find.paint(row, cache.leader, current, theme);
+            }
+        }
+    }
+
+    /// How many turns the toggles hide hold `query` (`2 in hidden
+    /// turns`), when any do.
+    fn find_detail(&self, query: &str) -> Option<String> {
+        let hidden = self.hidden_matches(query);
+        (hidden > 0).then(|| format!("{hidden} in hidden turns"))
+    }
+
+    fn describe(key: PagerKey) -> Option<&'static str> {
+        crate::viewer::help::describe(key)
+    }
+
+    fn empty(&self) -> Cow<'_, str> {
+        Cow::Borrowed(if self.document.is_empty() {
+            "transcript unavailable"
+        } else {
+            "every turn here is hidden"
+        })
+    }
+
+    /// A toggle shows or hides turns, so the rows are laid out again and
+    /// the find stays on its turn while it is still shown.
+    fn apply(&mut self, key: TranscriptKey) -> PagerEffect<M> {
+        match key {
+            TranscriptKey::Tools => self.tool_detail = self.tool_detail.cycle(),
+            TranscriptKey::Thinking => self.show_thinking = !self.show_thinking,
+            TranscriptKey::Aborted => self.show_aborted = !self.show_aborted,
+            TranscriptKey::Hidden => self.show_hidden = !self.show_hidden,
+        }
+        PagerEffect::Relayout
+    }
+}
+
+impl<M> Transcript<M> {
+    /// Compose the transcript body at `width` columns, gutter included,
+    /// and return its lines. The composition is cached and reused while
+    /// the width and the display toggles are unchanged, so a draw that
+    /// only scrolls slices rather than re-renders. The full-screen viewer
+    /// and the inline preview (ADR 0112) both draw from it. An empty
+    /// document composes no lines.
+    pub fn lines(&mut self, theme: &Theme, width: u16) -> &[Line<'static>] {
+        if self.document.is_empty() {
+            return &[];
+        }
+        let gutter_inner_width = self.gutter_inner_width();
+        let content_width = width.saturating_sub(leader_width(gutter_inner_width));
+
+        if !self.cache_is_current(content_width) {
+            let mut turn_starts = Vec::new();
+            let owned: Vec<Line<'static>> = self
+                .build_body_lines(theme, content_width, gutter_inner_width, &mut turn_starts)
+                .into_iter()
+                .map(into_owned_line)
+                .collect();
+            self.rendered = Some(RenderCache {
+                content_width,
+                tool_detail: self.tool_detail,
+                show_thinking: self.show_thinking,
+                show_aborted: self.show_aborted,
+                show_hidden: self.show_hidden,
+                lines: owned,
+                turn_starts,
+                leader: usize::from(leader_width(gutter_inner_width)),
+            });
+        }
+        &self.rendered.as_ref().expect("just populated").lines
+    }
+
+    /// The lines [`Self::lines`] last composed, when they were composed
+    /// at `width` with the current display toggles. Lets a caller that
+    /// only holds `&Transcript` reuse the cache it warmed earlier in the
+    /// frame.
+    pub fn cached_lines(&self, width: u16) -> Option<&[Line<'static>]> {
+        let content_width = width.saturating_sub(leader_width(self.gutter_inner_width()));
+        if !self.cache_is_current(content_width) {
+            return None;
+        }
+        self.rendered.as_ref().map(|cache| cache.lines.as_slice())
+    }
+
+    /// The kinds of turn the toggles show, which is what a find searches.
+    pub fn shown_kinds(&self) -> ContentKinds {
+        ContentKinds {
+            messages: true,
+            tools: self.tool_detail.is_visible(),
+            thinking: self.show_thinking,
+            aborted: self.show_aborted,
+            hidden: self.show_hidden,
+        }
+    }
+
+    /// The shown turns that hold `query`, in order (the shared content
+    /// matcher, so a find agrees with content search about what a match
+    /// is).
+    pub fn matching(&self, query: &str) -> Vec<usize> {
+        matching_turns(
+            &self.document,
+            &ContentQuery::new(query, self.shown_kinds()),
+        )
+        .collect()
+    }
+
+    /// How many turns the toggles hide hold `query`.
+    pub fn hidden_matches(&self, query: &str) -> usize {
+        let everything = ContentQuery::new(query, ContentKinds::EVERYTHING);
+        matching_turns(&self.document, &everything)
+            .count()
+            .saturating_sub(self.matching(query).len())
+    }
+
+    /// The rows turn `turn` takes in the last composition: from its first
+    /// line up to the next turn's (a collapsed tool run's turns share its
+    /// summary line). A turn the toggles hide takes none, where the next
+    /// shown turn starts.
+    pub fn rows_of(&self, turn: usize) -> Range<usize> {
+        let Some(cache) = self.rendered.as_ref() else {
+            return 0..0;
+        };
+        let starts = &cache.turn_starts;
+        let at = starts.partition_point(|start| start.turn_index < turn);
+        let Some(start) = starts.get(at) else {
+            return cache.lines.len()..cache.lines.len();
+        };
+        if start.turn_index != turn {
+            return start.line..start.line;
+        }
+        let end = starts[at..]
+            .iter()
+            .find(|next| next.line > start.line)
+            .map_or(cache.lines.len(), |next| next.line);
+        start.line..end
+    }
+
+    /// The inner gutter chip-label width: the widest label among the
+    /// shown turns, so the gutter shrinks when wider labels (e.g.
+    /// `thinking`) are toggled off.
+    fn gutter_inner_width(&self) -> usize {
+        let mut max_width = 0usize;
+        for turn in &self.document.turns {
+            if !self.passes_turn_filters(turn) || !self.is_visible(turn.kind) {
+                continue;
+            }
+            let label = chip_label(turn);
+            max_width = max_width.max(chip_label_width(label));
+        }
+        max_width.max(1)
+    }
+
+    /// Whether the cached composition matches `content_width` and the
+    /// current display toggles. This is the difference between scrolling
+    /// by keystroke being O(turns × markdown render) and being O(1) on a
+    /// large session with tools shown.
+    fn cache_is_current(&self, content_width: u16) -> bool {
+        self.rendered.as_ref().is_some_and(|cache| {
+            cache.content_width == content_width
+                && cache.tool_detail == self.tool_detail
+                && cache.show_thinking == self.show_thinking
+                && cache.show_aborted == self.show_aborted
+                && cache.show_hidden == self.show_hidden
+        })
+    }
+
+    /// Build the flat body line list. Filters out tool turns at
+    /// `ToolDetail::Hidden` and thinking turns when `show_thinking`
+    /// is off. At `ToolDetail::Summary` consecutive runs of tool
+    /// turns are aggregated into a single claude-history-style line
+    /// ("Read 2 files, ran 4 shell commands, edited 2 files") rather
+    /// than emitting one chip per call. Other tool-detail levels
+    /// affect how each turn renders — that's `render_turn`'s job.
+    fn build_body_lines<'a>(
+        &'a self,
+        theme: &Theme,
+        content_width: u16,
+        gutter_inner_width: usize,
+        turn_starts: &mut Vec<TurnStart>,
+    ) -> Vec<Line<'a>> {
+        let mut lines: Vec<Line<'a>> = Vec::new();
+        let turns = &self.document.turns;
+        let mut i = 0;
+        while i < turns.len() {
+            let turn = &turns[i];
+            if !self.passes_turn_filters(turn) || !self.is_visible(turn.kind) {
+                i += 1;
+                continue;
+            }
+            // Summary mode: walk the contiguous tool-turn run and
+            // emit one aggregated line for the whole run.
+            if self.tool_detail == ToolDetail::Summary && is_tool_kind(turn.kind) {
+                let (counts, run_len) = self.collect_tool_run(&turns[i..]);
+                for offset in 0..run_len.max(1) {
+                    if self.passes_turn_filters(&turns[i + offset]) {
+                        turn_starts.push(TurnStart {
+                            turn_index: i + offset,
+                            line: lines.len(),
+                            collapsed: true,
+                        });
+                    }
+                }
+                if !counts.is_empty() {
+                    let phrase = aggregate_tool_phrase(&counts);
+                    let owned: Vec<Line<'static>> = render_aggregated_tool_summary(
+                        &phrase,
+                        theme,
+                        content_width,
+                        gutter_inner_width,
+                    );
+                    lines.extend(owned);
+                }
+                i += run_len.max(1);
+                continue;
+            }
+            turn_starts.push(TurnStart {
+                turn_index: i,
+                line: lines.len(),
+                collapsed: false,
+            });
+            lines.extend(render_turn(
+                turn,
+                theme,
+                content_width,
+                self.tool_detail,
+                gutter_inner_width,
+            ));
+            i += 1;
+        }
+        lines
+    }
+
+    /// Count consecutive tool turns by category. Only [`TurnKind::ToolUse`]
+    /// turns contribute to the count (one call = one ToolUse in our
+    /// model); the paired ToolResult lives in the same run but isn't
+    /// double-counted.
+    fn collect_tool_run(
+        &self,
+        turns: &[TranscriptTurn],
+    ) -> (std::collections::BTreeMap<ToolCategory, usize>, usize) {
+        let mut counts: std::collections::BTreeMap<ToolCategory, usize> =
+            std::collections::BTreeMap::new();
+        let mut end = 0usize;
+        for turn in turns {
+            if !is_tool_kind(turn.kind) {
+                break;
+            }
+            // Skip aborted tool turns when the filter is on so the
+            // aggregate phrase reflects what the user saw, not the
+            // on-disk count.
+            if !self.passes_turn_filters(turn) {
+                end += 1;
+                continue;
+            }
+            if matches!(turn.kind, TurnKind::ToolUse) {
+                let name = tool_name_from_body(&turn.body);
+                *counts.entry(categorize_tool_name(name)).or_insert(0) += 1;
+            }
+            end += 1;
+        }
+        (counts, end)
+    }
+
+    fn is_visible(&self, kind: TurnKind) -> bool {
+        match kind {
+            TurnKind::Message | TurnKind::CompactionSummary => true,
+            TurnKind::ToolUse | TurnKind::ToolResult => self.tool_detail.is_visible(),
+            TurnKind::Thinking => self.show_thinking,
+        }
+    }
+
+    /// Per-turn filter applied before any kind-based visibility check.
+    /// With `show_aborted` and `show_hidden` off (the default), turns the
+    /// parser tagged `aborted` or `hidden` drop out — matching what the
+    /// agent's UI showed the user. The toggles restore the full on-disk
+    /// transcript.
+    fn passes_turn_filters(&self, turn: &TranscriptTurn) -> bool {
+        (self.show_aborted || !turn.aborted) && (self.show_hidden || !turn.hidden)
+    }
+}
+
+fn is_tool_kind(k: TurnKind) -> bool {
+    matches!(k, TurnKind::ToolUse | TurnKind::ToolResult)
+}
+
+/// Compose `transcript`'s body at `width` columns; see
+/// [`Transcript::lines`].
+pub fn body_lines<'s>(
+    transcript: &'s mut Transcript,
+    theme: &Theme,
+    width: u16,
+) -> &'s [Line<'static>] {
+    transcript.lines(theme, width)
+}
+
+/// The body lines last composed at `width`; see
+/// [`Transcript::cached_lines`].
+pub fn cached_body_lines(transcript: &Transcript, width: u16) -> Option<&[Line<'static>]> {
+    transcript.cached_lines(width)
+}
+
+/// `tools·sum (t)` / `tools·off (t)`: the current tool detail level and
+/// its cycle key, the level padded to the widest of `states` so the chip
+/// keeps its width as it cycles. On while tool turns show any body.
+fn tool_chip<'a>(detail: ToolDetail, states: &'a [&'a str]) -> ToggleChip<'a> {
+    ToggleChip::new("tools", detail.footer_label(), detail.is_visible())
+        .states(states)
+        .key("t")
+}
+
+/// `think·on  (T)` / `think·off (T)`. The key binding is inlined so the
+/// operator doesn't need a separate hint to know how to flip it.
+fn think_chip(on: bool) -> ToggleChip<'static> {
+    ToggleChip::new("think", if on { "on" } else { "off" }, on)
+        .states(&["on", "off"])
+        .key("T")
+}
+
+/// `aborted·hide (I)` / `aborted·show (I)`. Uses `hide`/`show` instead
+/// of `on`/`off` because the operator question isn't "is the flag on"
+/// but "am I looking at the on-disk reality or the harness-faithful
+/// view".
+fn abort_chip(showing: bool) -> ToggleChip<'static> {
+    show_hide_chip("aborted", showing, "I")
+}
+
+/// `hidden·hide (H)` / `hidden·show (H)` for records the harness's UI
+/// never showed (ADR 0122). Same `hide`/`show` wording as the aborted
+/// chip.
+fn hidden_chip(showing: bool) -> ToggleChip<'static> {
+    show_hide_chip("hidden", showing, "H")
+}
+
+fn show_hide_chip(name: &'static str, showing: bool, key: &'static str) -> ToggleChip<'static> {
+    ToggleChip::new(name, if showing { "show" } else { "hide" }, showing)
+        .states(&["show", "hide"])
+        .key(key)
+}
+
+/// The title's look: bold, in the named style the opener chose for it.
+fn title_style(role: &str, theme: &Theme) -> Style {
+    Style::new()
+        .fg(crate::viewer::theme::title(theme, role))
+        .add_modifier(Modifier::BOLD)
+}
+
+// ---------------------------------------------------------------------
+// The viewer's own chrome, until the TUI runs it on the pager.
+// ---------------------------------------------------------------------
 
 /// Draw the transcript viewer onto `area`. Mutates `state` to
 /// record the layout it observed (viewport height, total line
@@ -56,67 +501,12 @@ pub fn draw(state: &mut ViewerState, theme: &Theme, buf: &mut Buffer, area: Rect
     ])
     .split(area);
 
-    draw_header(&state.document, &state.title_role, theme, buf, chunks[0]);
+    let header = state.transcript.header(usize::from(area.width), theme);
+    Widget::render(Paragraph::new(header), chunks[0], buf);
     draw_separator(theme, buf, chunks[1]);
     draw_body(state, theme, buf, chunks[2]);
     draw_separator(theme, buf, chunks[3]);
     draw_footer(state, theme, buf, chunks[4]);
-}
-
-fn draw_header(
-    document: &TranscriptDocument,
-    title_role: &str,
-    theme: &Theme,
-    buf: &mut Buffer,
-    area: Rect,
-) {
-    let title = format!("{}:{}", document.meta.harness, document.meta.session_key);
-    let title_style = title_style(title_role, theme);
-
-    let cwd_text = document.meta.cwd.as_deref().unwrap_or("(no cwd)");
-    let turn_count_text = format!(
-        "{} {}",
-        document.turns.len(),
-        if document.turns.len() == 1 {
-            "turn"
-        } else {
-            "turns"
-        }
-    );
-    let sep = " · ";
-    let sep_style = Tone::Inert.style(theme);
-
-    let spans: Vec<Span<'_>> = vec![
-        Span::raw(" "),
-        Span::styled(title, title_style),
-        Span::styled(sep, sep_style),
-        Span::styled(
-            cwd_text.to_string(),
-            Style::new().fg(theme.accent).add_modifier(theme.muted),
-        ),
-        Span::styled(sep, sep_style),
-        Span::styled(turn_count_text, sep_style),
-    ];
-
-    // Width-aware: if the assembled header would overflow, drop
-    // the lowest-priority pieces (cwd first, then turn count) so
-    // the title always survives. Cheap implementation: build a
-    // single string, measure, and rebuild minimal if needed.
-    let total = tuikit::text::spans_width(&spans);
-    let cap = area.width as usize;
-    let line = if total <= cap {
-        Line::from(spans)
-    } else {
-        // Fall back to just the title + ellipsis.
-        Line::from(vec![
-            Span::raw(" "),
-            Span::styled(
-                format!("{}:{}", document.meta.harness, document.meta.session_key),
-                title_style,
-            ),
-        ])
-    };
-    Widget::render(Paragraph::new(line), area, buf);
 }
 
 fn draw_separator(theme: &Theme, buf: &mut Buffer, area: Rect) {
@@ -144,11 +534,11 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, buf: &mut Buffer, area: Rec
         return;
     }
 
-    let total = body_lines(state, theme, area.width).len();
+    let total = state.transcript.lines(theme, area.width).len();
     // A find that asked to scroll to a turn lands on its first line, one
     // line down so the turn's neighbor above shows.
     if let Some(turn) = state.find.pending_scroll.take()
-        && let Some(cache) = state.rendered.as_ref()
+        && let Some(cache) = state.transcript.rendered.as_ref()
         && let Some(start) = cache.turn_starts.iter().find(|s| s.turn_index == turn)
     {
         state.scroll_offset = start.line.saturating_sub(1);
@@ -169,7 +559,7 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, buf: &mut Buffer, area: Rec
     // `Paragraph::scroll`, whose offset is a u16) keeps transcripts
     // longer than 65,535 lines scrollable and clones only what is shown.
     let visible_end = total.min(scroll_offset + viewport_height as usize);
-    let cache = state.rendered.as_ref().expect("composed above");
+    let cache = state.transcript.rendered.as_ref().expect("composed above");
     let mut visible = cache.lines[scroll_offset..visible_end].to_vec();
     highlight_matches(&mut visible, scroll_offset, cache, &state.find, theme);
     Widget::render(Paragraph::new(visible), area, buf);
@@ -177,75 +567,6 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, buf: &mut Buffer, area: Rec
     state.viewport_height = viewport_height;
     state.total_lines = total;
     state.scroll_offset = scroll_offset;
-}
-
-/// Compose the transcript body at `width` columns, gutter included, and
-/// return its lines. The composition is cached on `state` and reused
-/// while the width and the display toggles are unchanged, so callers
-/// scroll by slicing rather than re-rendering. The full-screen modal
-/// and the inline preview (ADR 0112) both draw from it. An empty
-/// document composes no lines; callers show their own "unavailable"
-/// state.
-pub fn body_lines<'s>(
-    state: &'s mut ViewerState,
-    theme: &Theme,
-    width: u16,
-) -> &'s [Line<'static>] {
-    if state.document.is_empty() {
-        return &[];
-    }
-    let gutter_inner_width = compute_gutter_inner_width(state);
-    let content_width = width.saturating_sub(leader_width(gutter_inner_width));
-
-    if !cache_is_current(state, content_width) {
-        let mut turn_starts = Vec::new();
-        let owned: Vec<Line<'static>> = build_body_lines(
-            state,
-            theme,
-            content_width,
-            gutter_inner_width,
-            &mut turn_starts,
-        )
-        .into_iter()
-        .map(into_owned_line)
-        .collect();
-        state.rendered = Some(RenderCache {
-            content_width,
-            tool_detail: state.tool_detail,
-            show_thinking: state.show_thinking,
-            show_aborted: state.show_aborted,
-            show_hidden: state.show_hidden,
-            lines: owned,
-            turn_starts,
-            leader: usize::from(leader_width(gutter_inner_width)),
-        });
-    }
-    &state.rendered.as_ref().expect("just populated").lines
-}
-
-/// The body lines [`body_lines`] last composed, when they were composed
-/// at `width` with the current display toggles. Lets a caller that only
-/// holds `&ViewerState` reuse the cache it warmed earlier in the frame.
-pub fn cached_body_lines(state: &ViewerState, width: u16) -> Option<&[Line<'static>]> {
-    let content_width = width.saturating_sub(leader_width(compute_gutter_inner_width(state)));
-    if !cache_is_current(state, content_width) {
-        return None;
-    }
-    state.rendered.as_ref().map(|cache| cache.lines.as_slice())
-}
-
-/// Whether the cached composition matches `content_width` and the
-/// current display toggles. This is the difference between scrolling
-/// by keystroke being O(turns × markdown render) and being O(1) on a
-/// large session with tools shown.
-fn cache_is_current(state: &ViewerState, content_width: u16) -> bool {
-    state.rendered.as_ref().is_some_and(|cache| {
-        cache.content_width == content_width
-            && cache.tool_detail == state.tool_detail
-            && cache.show_thinking == state.show_thinking
-            && cache.show_aborted == state.show_aborted
-            && cache.show_hidden == state.show_hidden
-    })
 }
 
 fn draw_footer(state: &ViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
@@ -430,185 +751,6 @@ pub(crate) fn draw_find_prompt(
         .spans(1 + room, theme);
     spans.push(Span::styled(hint_text, Tone::Inert.style(theme)));
     Widget::render(Paragraph::new(Line::from(spans)), area, buf);
-}
-
-/// `tools·sum (t)` / `tools·off (t)`: the current tool detail level and
-/// its cycle key, the level padded to the widest of `states` so the chip
-/// keeps its width as it cycles. On while tool turns show any body.
-fn tool_chip<'a>(detail: ToolDetail, states: &'a [&'a str]) -> ToggleChip<'a> {
-    ToggleChip::new("tools", detail.footer_label(), detail.is_visible())
-        .states(states)
-        .key("t")
-}
-
-/// `think·on  (T)` / `think·off (T)`. The key binding is inlined so the
-/// operator doesn't need a separate hint to know how to flip it.
-fn think_chip(on: bool) -> ToggleChip<'static> {
-    ToggleChip::new("think", if on { "on" } else { "off" }, on)
-        .states(&["on", "off"])
-        .key("T")
-}
-
-/// `aborted·hide (I)` / `aborted·show (I)`. Uses `hide`/`show` instead
-/// of `on`/`off` because the operator question isn't "is the flag on"
-/// but "am I looking at the on-disk reality or the harness-faithful
-/// view".
-fn abort_chip(showing: bool) -> ToggleChip<'static> {
-    show_hide_chip("aborted", showing, "I")
-}
-
-/// `hidden·hide (H)` / `hidden·show (H)` for records the harness's UI
-/// never showed (ADR 0122). Same `hide`/`show` wording as the aborted
-/// chip.
-fn hidden_chip(showing: bool) -> ToggleChip<'static> {
-    show_hide_chip("hidden", showing, "H")
-}
-
-fn show_hide_chip(name: &'static str, showing: bool, key: &'static str) -> ToggleChip<'static> {
-    ToggleChip::new(name, if showing { "show" } else { "hide" }, showing)
-        .states(&["show", "hide"])
-        .key(key)
-}
-
-/// Compute the inner gutter chip-label width from the widest
-/// label among visible turns. This allows the gutter to shrink
-/// when wider labels (e.g. `thinking`) are toggled off.
-fn compute_gutter_inner_width(state: &ViewerState) -> usize {
-    let mut max_width = 0usize;
-    for turn in &state.document.turns {
-        if !passes_turn_filters(turn, state) || !is_visible(turn.kind, state) {
-            continue;
-        }
-        let label = chip_label(turn);
-        max_width = max_width.max(chip_label_width(label));
-    }
-    max_width.max(1)
-}
-
-/// Build the flat body line list. Filters out tool turns at
-/// `ToolDetail::Hidden` and thinking turns when `show_thinking`
-/// is off. At `ToolDetail::Summary` consecutive runs of tool
-/// turns are aggregated into a single claude-history-style line
-/// ("Read 2 files, ran 4 shell commands, edited 2 files") rather
-/// than emitting one chip per call. Other tool-detail levels
-/// affect how each turn renders — that's `render_turn`'s job.
-fn build_body_lines<'a>(
-    state: &'a ViewerState,
-    theme: &Theme,
-    content_width: u16,
-    gutter_inner_width: usize,
-    turn_starts: &mut Vec<TurnStart>,
-) -> Vec<Line<'a>> {
-    let mut lines: Vec<Line<'a>> = Vec::new();
-    let turns = &state.document.turns;
-    let mut i = 0;
-    while i < turns.len() {
-        let turn = &turns[i];
-        if !passes_turn_filters(turn, state) || !is_visible(turn.kind, state) {
-            i += 1;
-            continue;
-        }
-        // Summary mode: walk the contiguous tool-turn run and
-        // emit one aggregated line for the whole run.
-        if state.tool_detail == ToolDetail::Summary && is_tool_kind(turn.kind) {
-            let (counts, run_len) = collect_tool_run(&turns[i..], state);
-            for offset in 0..run_len.max(1) {
-                if passes_turn_filters(&turns[i + offset], state) {
-                    turn_starts.push(TurnStart {
-                        turn_index: i + offset,
-                        line: lines.len(),
-                        collapsed: true,
-                    });
-                }
-            }
-            if !counts.is_empty() {
-                let phrase = aggregate_tool_phrase(&counts);
-                let owned: Vec<Line<'static>> = render_aggregated_tool_summary(
-                    &phrase,
-                    theme,
-                    content_width,
-                    gutter_inner_width,
-                );
-                lines.extend(owned);
-            }
-            i += run_len.max(1);
-            continue;
-        }
-        turn_starts.push(TurnStart {
-            turn_index: i,
-            line: lines.len(),
-            collapsed: false,
-        });
-        lines.extend(render_turn(
-            turn,
-            theme,
-            content_width,
-            state.tool_detail,
-            gutter_inner_width,
-        ));
-        i += 1;
-    }
-    lines
-}
-
-fn is_tool_kind(k: TurnKind) -> bool {
-    matches!(k, TurnKind::ToolUse | TurnKind::ToolResult)
-}
-
-/// Count consecutive tool turns by category. Only [`TurnKind::ToolUse`]
-/// turns contribute to the count (one call = one ToolUse in our
-/// model); the paired ToolResult lives in the same run but isn't
-/// double-counted.
-fn collect_tool_run(
-    turns: &[crate::viewer::model::TranscriptTurn],
-    state: &ViewerState,
-) -> (std::collections::BTreeMap<ToolCategory, usize>, usize) {
-    use crate::viewer::model::TurnKind as TK;
-    let mut counts: std::collections::BTreeMap<ToolCategory, usize> =
-        std::collections::BTreeMap::new();
-    let mut end = 0usize;
-    for turn in turns {
-        if !is_tool_kind(turn.kind) {
-            break;
-        }
-        // Skip aborted tool turns when the filter is on so the
-        // aggregate phrase reflects what the user saw, not the
-        // on-disk count.
-        if !passes_turn_filters(turn, state) {
-            end += 1;
-            continue;
-        }
-        if matches!(turn.kind, TK::ToolUse) {
-            let name = tool_name_from_body(&turn.body);
-            *counts.entry(categorize_tool_name(name)).or_insert(0) += 1;
-        }
-        end += 1;
-    }
-    (counts, end)
-}
-
-fn is_visible(kind: TurnKind, state: &ViewerState) -> bool {
-    match kind {
-        TurnKind::Message | TurnKind::CompactionSummary => true,
-        TurnKind::ToolUse | TurnKind::ToolResult => state.tool_detail.is_visible(),
-        TurnKind::Thinking => state.show_thinking,
-    }
-}
-
-/// Per-turn filter applied before any kind-based visibility check.
-/// With `show_aborted` and `show_hidden` off (the default), turns the
-/// parser tagged `aborted` or `hidden` drop out — matching what the
-/// agent's UI showed the user. The toggles restore the full on-disk
-/// transcript.
-fn passes_turn_filters(turn: &crate::viewer::model::TranscriptTurn, state: &ViewerState) -> bool {
-    (state.show_aborted || !turn.aborted) && (state.show_hidden || !turn.hidden)
-}
-
-/// The title's look: bold, in the named style the opener chose for it.
-fn title_style(role: &str, theme: &Theme) -> Style {
-    Style::new()
-        .fg(crate::viewer::theme::title(theme, role))
-        .add_modifier(Modifier::BOLD)
 }
 
 #[cfg(test)]

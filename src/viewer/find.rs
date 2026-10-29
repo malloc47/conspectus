@@ -19,7 +19,7 @@ use tuikit::text::find_ci;
 use tuikit::text_edit::{EditKey, LineEdit};
 
 use crate::viewer::search::{ContentKinds, ContentQuery, matching_turns};
-use crate::viewer::state::{ToolDetail, ViewerOpen, ViewerState};
+use crate::viewer::state::{ToolDetail, Transcript, ViewerOpen, ViewerState};
 
 /// How far from the remembered turn to look for a match when the
 /// transcript has changed since the search that found it.
@@ -238,44 +238,61 @@ impl ViewerState {
         if needle.is_empty() {
             return;
         }
+        let Some(target) = self.nearest_match(open.turn_index, needle) else {
+            self.find.clear();
+            self.find.query = needle.to_string();
+            self.find.note = Some(gone_note(needle));
+            return;
+        };
+        let mut notes: Vec<&str> = self.reveal(target);
+        if target != open.turn_index {
+            notes.push(CHANGED_NOTE);
+        }
+        self.find.note = (!notes.is_empty()).then(|| notes.join(", "));
+        self.stick_to_end = false;
+        self.run_find(needle, Prefer::Turn(target));
+    }
+}
+
+/// What the note says when a search's match is no longer in the
+/// transcript.
+fn gone_note(needle: &str) -> String {
+    format!("\"{needle}\" is no longer in this transcript")
+}
+
+/// What the note adds when the match was found away from the turn the
+/// search remembered.
+const CHANGED_NOTE: &str = "the transcript changed; nearest match";
+
+impl<M> Transcript<M> {
+    /// The turn nearest `turn` whose body holds `needle`, shown or not:
+    /// `turn` itself, then within [`NEARBY_TURNS`] of it (the earlier of
+    /// two as near first), then the first anywhere. `None` when no turn
+    /// holds it.
+    pub fn nearest_match(&self, turn: usize, needle: &str) -> Option<usize> {
         let turns = &self.document.turns;
         let matches = |index: usize| {
             turns
                 .get(index)
                 .is_some_and(|turn| find_ci(&turn.body, needle).is_some())
         };
-        let target = if matches(open.turn_index) {
-            Some(open.turn_index)
-        } else {
-            (1..=NEARBY_TURNS)
-                .find_map(|distance| {
-                    open.turn_index
-                        .checked_sub(distance)
-                        .filter(|&i| matches(i))
-                        .or_else(|| {
-                            let after = open.turn_index + distance;
-                            matches(after).then_some(after)
-                        })
-                })
-                .or_else(|| (0..turns.len()).find(|&i| matches(i)))
-        };
-        let Some(target) = target else {
-            self.find.clear();
-            self.find.query = needle.to_string();
-            self.find.note = Some(format!("\"{needle}\" is no longer in this transcript"));
-            return;
-        };
-        let mut notes: Vec<&str> = self.reveal_turn(target);
-        if target != open.turn_index {
-            notes.push("the transcript changed; nearest match");
+        if matches(turn) {
+            return Some(turn);
         }
-        self.find.note = (!notes.is_empty()).then(|| notes.join(", "));
-        self.stick_to_end = false;
-        self.run_find(needle, Prefer::Turn(target));
+        (1..=NEARBY_TURNS)
+            .find_map(|distance| {
+                turn.checked_sub(distance)
+                    .filter(|&i| matches(i))
+                    .or_else(|| {
+                        let after = turn + distance;
+                        matches(after).then_some(after)
+                    })
+            })
+            .or_else(|| (0..turns.len()).find(|&i| matches(i)))
     }
 
     /// Switch on whatever hides turn `index`, returning what was shown.
-    fn reveal_turn(&mut self, index: usize) -> Vec<&'static str> {
+    pub fn reveal(&mut self, index: usize) -> Vec<&'static str> {
         let Some(turn) = self.document.turns.get(index) else {
             return Vec::new();
         };

@@ -30,23 +30,28 @@ pub fn highlight_matches(
     }
     let current = find.current_turn();
     for (offset, line) in lines.iter_mut().enumerate() {
-        let absolute = first_line + offset;
-        let at = cache
-            .turn_starts
-            .partition_point(|start| start.line <= absolute);
-        let Some(start) = at.checked_sub(1).and_then(|i| cache.turn_starts.get(i)) else {
+        let Some(turn) = turn_at(cache, first_line + offset) else {
             continue;
         };
-        if start.collapsed || find.matches.binary_search(&start.turn_index).is_err() {
+        if find.matches.binary_search(&turn).is_err() {
             continue;
         }
-        let style = if current == Some(start.turn_index) {
+        let style = if current == Some(turn) {
             Find::current_style(theme)
         } else {
             Find::match_style(theme)
         };
         *line = text::paint_matches(line, cache.leader, &find.query, style);
     }
+}
+
+/// The turn whose text row `row` of the composition shows, or `None`
+/// before the first turn and on a tool run collapsed to one summary line
+/// (a count of calls, not any turn's text, so nothing in it is a match).
+pub fn turn_at(cache: &RenderCache, row: usize) -> Option<usize> {
+    let at = cache.turn_starts.partition_point(|start| start.line <= row);
+    let start = cache.turn_starts.get(at.checked_sub(1)?)?;
+    (!start.collapsed).then_some(start.turn_index)
 }
 
 #[cfg(test)]

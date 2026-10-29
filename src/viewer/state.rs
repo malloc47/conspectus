@@ -11,6 +11,9 @@
 //! over every Message turn. Invalidated whenever `content_width`,
 //! `show_tools`, or `show_thinking` change.
 
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
+
 use ratatui::text::Line;
 
 use crate::viewer::find::FindState;
@@ -105,19 +108,15 @@ pub struct ViewerOpen {
     pub turn_index: usize,
 }
 
-/// Everything the viewer needs to render itself.
+/// A transcript as a pager's content (`tuikit::pager::PagerContent`,
+/// implemented in [`crate::viewer::widget`]): the document, which of its
+/// turns show and how, the rows last laid out from them, and the named
+/// style of the header's title. `M` is the message of the pager it sits
+/// in, which the transcript never sends: its keys only show or hide
+/// turns.
 #[derive(Clone, Debug)]
-pub struct ViewerState {
+pub struct Transcript<M = ()> {
     pub document: TranscriptDocument,
-    /// Current scroll offset (line offset from the rendered body
-    /// top). Clamped on every draw against `total_lines` and
-    /// `viewport_height`.
-    pub scroll_offset: usize,
-    /// When `true`, the next draw pins the scroll offset to the
-    /// bottom of the document. `JumpToEnd` sets it; initial state
-    /// starts with it on so the modal opens on the last turn
-    /// (ADR 0052).
-    pub stick_to_end: bool,
     /// Tool detail level. Cycled by `t`; default `Hidden`.
     pub tool_detail: ToolDetail,
     /// When `true`, `Thinking` turns are rendered. Off by default
@@ -133,6 +132,55 @@ pub struct ViewerState {
     /// the harness's UI never showed) are rendered. Off by default;
     /// toggled by capital-`H` (ADR 0122).
     pub show_hidden: bool,
+    /// The named style the header's title is drawn in, which the opener
+    /// chooses (a harness's identity color); empty for the accent.
+    pub title_role: String,
+    /// Cache of composed body lines, kept while the width and the
+    /// toggles are unchanged (its key holds both). `None` means
+    /// "compose on the next layout".
+    pub rendered: Option<RenderCache>,
+    message: PhantomData<fn() -> M>,
+}
+
+impl<M> Transcript<M> {
+    /// The document with the toggles' defaults: messages and compaction
+    /// summaries shown, tool turns, thinking, aborted, and hidden turns
+    /// hidden.
+    pub fn new(document: TranscriptDocument) -> Self {
+        Self {
+            document,
+            tool_detail: ToolDetail::Hidden,
+            show_thinking: false,
+            show_aborted: false,
+            show_hidden: false,
+            title_role: String::new(),
+            rendered: None,
+            message: PhantomData,
+        }
+    }
+
+    /// Drop the cached body-line composition.
+    pub fn invalidate_render_cache(&mut self) {
+        self.rendered = None;
+    }
+}
+
+/// Everything the viewer needs to render itself.
+#[derive(Clone, Debug)]
+pub struct ViewerState {
+    /// The transcript the viewer shows, and which of its turns. The
+    /// state reads as the transcript (`Deref`), so `state.document`
+    /// and the toggles are its fields.
+    pub transcript: Transcript,
+    /// Current scroll offset (line offset from the rendered body
+    /// top). Clamped on every draw against `total_lines` and
+    /// `viewport_height`.
+    pub scroll_offset: usize,
+    /// When `true`, the next draw pins the scroll offset to the
+    /// bottom of the document. `JumpToEnd` sets it; initial state
+    /// starts with it on so the modal opens on the last turn
+    /// (ADR 0052).
+    pub stick_to_end: bool,
     /// When `true`, the modal renders a centered help-overlay panel
     /// over the body listing every viewer keybinding. Toggled by
     /// `?`; closed by `?` or `Esc`.
@@ -150,20 +198,26 @@ pub struct ViewerState {
     /// Total rendered line count produced by the last draw. Used
     /// by the reducer to clamp scroll offsets.
     pub total_lines: usize,
-    /// Cache of composed body lines. `None` means "rebuild on next
-    /// draw". The widget populates this; the reducer invalidates
-    /// it whenever a flag that affects layout changes (`tool_detail`,
-    /// `show_thinking`).
-    pub rendered: Option<RenderCache>,
     /// Find-in-transcript state: the prompt, the active query, and its
     /// matches.
     pub find: FindState,
     /// Footer hint for the find prompt, generated from the prompt's key
     /// table by whoever opens the viewer. Empty shows no hint.
     pub find_hint: String,
-    /// The named style the header's title is drawn in, which the opener
-    /// chooses (a harness's identity color); empty for the accent.
-    pub title_role: String,
+}
+
+impl Deref for ViewerState {
+    type Target = Transcript;
+
+    fn deref(&self) -> &Transcript {
+        &self.transcript
+    }
+}
+
+impl DerefMut for ViewerState {
+    fn deref_mut(&mut self) -> &mut Transcript {
+        &mut self.transcript
+    }
 }
 
 impl ViewerState {
@@ -171,30 +225,18 @@ impl ViewerState {
     /// last turn (`stick_to_end = true`).
     pub fn new(document: TranscriptDocument) -> Self {
         Self {
-            document,
+            transcript: Transcript::new(document),
             scroll_offset: 0,
             stick_to_end: true,
-            tool_detail: ToolDetail::Hidden,
-            show_thinking: false,
-            show_aborted: false,
-            show_hidden: false,
             show_help: false,
             help: Box::new(
                 tuikit::help::HelpPage::new(Vec::new()).pager(tuikit::keys::PAGER_HELP_KEYS),
             ),
             viewport_height: 0,
             total_lines: 0,
-            rendered: None,
             find: FindState::default(),
             find_hint: String::new(),
-            title_role: String::new(),
         }
-    }
-
-    /// Drop the cached body-line composition. Called by the reducer
-    /// when a flag that affects layout changes.
-    pub fn invalidate_render_cache(&mut self) {
-        self.rendered = None;
     }
 
     /// Maximum scroll offset given the latest layout. Saturating

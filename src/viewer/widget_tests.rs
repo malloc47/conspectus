@@ -383,7 +383,7 @@ fn render_cache_invalidates_on_width_change() {
     let lines_at_80 = state.rendered.as_ref().unwrap().lines.len();
     let _ = render_to_buffer(&mut state, &theme, 40, 12);
     let cache = state.rendered.as_ref().unwrap();
-    let inner = compute_gutter_inner_width(&state);
+    let inner = state.transcript.gutter_inner_width();
     let content_width_at_40 = 40u16 - leader_width(inner);
     assert_eq!(
         cache.content_width, content_width_at_40,
@@ -753,4 +753,288 @@ fn hidden_turns_are_filtered_until_toggled() {
         "revealed after H: {s}"
     );
     assert!(s.contains("hidden·show (H)"), "footer chip: {s}");
+}
+
+// ---------------------------------------------------------------------
+// The transcript as the framework pager's content.
+// ---------------------------------------------------------------------
+
+mod content {
+    use tuikit::pager::Pager;
+    use tuikit::testkit::buffer;
+    use tuikit::testkit::keys::script;
+
+    use super::*;
+
+    fn turn(role: TurnRole, kind: TurnKind, body: &str) -> TranscriptTurn {
+        TranscriptTurn {
+            role,
+            kind,
+            body: body.to_string(),
+            timestamp: None,
+            aborted: false,
+            hidden: false,
+        }
+    }
+
+    /// Twelve messages (turns 2, 5, and 9 mention "needle"), then a tool
+    /// result and a thinking turn that mention it too.
+    fn needles() -> TranscriptDocument {
+        let mut turns: Vec<TranscriptTurn> = (0..12)
+            .map(|i| {
+                let role = if i % 2 == 0 {
+                    TurnRole::User
+                } else {
+                    TurnRole::Assistant
+                };
+                let body = if [2, 5, 9].contains(&i) {
+                    format!("turn {i} has the Needle in it")
+                } else {
+                    format!("turn {i} is plain")
+                };
+                turn(role, TurnKind::Message, &body)
+            })
+            .collect();
+        turns.push(turn(
+            TurnRole::Assistant,
+            TurnKind::ToolResult,
+            "output: a needle in tool output",
+        ));
+        turns.push(turn(
+            TurnRole::Assistant,
+            TurnKind::Thinking,
+            "thinking about the needle",
+        ));
+        TranscriptDocument {
+            meta: TranscriptMeta {
+                harness: "claude-code".to_string(),
+                session_key: "find".to_string(),
+                cwd: Some("/p".to_string()),
+            },
+            turns,
+        }
+    }
+
+    fn pager(document: TranscriptDocument) -> Pager<Transcript> {
+        Pager::new(Transcript::new(document)).at_end()
+    }
+
+    fn draw(pager: &mut Pager<Transcript>, width: u16, height: u16) -> String {
+        let theme = Theme::default();
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        pager.draw(area, &mut buf, &theme);
+        buffer::text(&buf)
+    }
+
+    fn press(pager: &mut Pager<Transcript>, keys: &str) {
+        for key in script(keys) {
+            let _ = pager.handle_key(key);
+        }
+    }
+
+    fn first_line_of(pager: &Pager<Transcript>, turn: usize) -> usize {
+        pager.content().rows_of(turn).start
+    }
+
+    #[test]
+    fn the_pager_draws_the_header_the_rows_and_the_toggle_chips() {
+        let mut viewer = pager(sample_document());
+        let screen = draw(&mut viewer, 100, 12);
+        let rows: Vec<&str> = screen.lines().collect();
+        assert!(
+            rows[0].starts_with(" claude-code:0b34e59c · /p/proj · 2 turns"),
+            "{screen}"
+        );
+        assert!(screen.contains(" you  │ what's up?"), "{screen}");
+        let footer = rows.last().unwrap();
+        for part in [
+            "tools·off   (t)",
+            "think·off (T)",
+            "aborted·hide (I)",
+            "/ find",
+            "? help",
+            "Esc/q close",
+        ] {
+            assert!(footer.contains(part), "{part}: {footer}");
+        }
+        assert!(!footer.contains("hidden·"), "no hidden turns: {footer}");
+    }
+
+    #[test]
+    fn a_header_too_wide_keeps_its_title() {
+        let mut viewer = pager(sample_document());
+        let screen = draw(&mut viewer, 26, 8);
+        assert_eq!(
+            screen.lines().next().unwrap().trim_end(),
+            " claude-code:0b34e59c"
+        );
+    }
+
+    #[test]
+    fn it_opens_at_the_end_and_the_ends_move_it() {
+        let mut viewer = pager(long_document());
+        let screen = draw(&mut viewer, 60, 10);
+        assert!(screen.contains("turn 29"), "{screen}");
+        press(&mut viewer, "g");
+        let screen = draw(&mut viewer, 60, 10);
+        assert!(screen.contains("turn 0"), "{screen}");
+        assert!(!screen.contains("turn 29"), "{screen}");
+    }
+
+    #[test]
+    fn a_toggle_lays_the_rows_out_again() {
+        let mut viewer = pager(document_with_tools());
+        draw(&mut viewer, 60, 16);
+        let before = viewer.content().rendered.as_ref().unwrap().lines.len();
+        press(&mut viewer, "ttt");
+        assert_eq!(viewer.content().tool_detail, ToolDetail::Full);
+        let screen = draw(&mut viewer, 60, 16);
+        let after = viewer.content().rendered.as_ref().unwrap().lines.len();
+        assert!(after > before, "{before} → {after}");
+        assert!(screen.contains("tools·all"), "{screen}");
+        assert!(screen.contains("src/main.rs"), "{screen}");
+        press(&mut viewer, "T");
+        assert!(viewer.content().show_thinking);
+        press(&mut viewer, "IH");
+        assert!(viewer.content().show_aborted && viewer.content().show_hidden);
+    }
+
+    #[test]
+    fn a_find_matches_shown_turns_and_lands_a_row_above_the_turn() {
+        let mut viewer = pager(needles());
+        draw(&mut viewer, 80, 8);
+        press(&mut viewer, "g/needle<Enter>");
+        let screen = draw(&mut viewer, 80, 8);
+        assert_eq!(viewer.find().matches(), [2, 5, 9]);
+        assert_eq!(viewer.find().current_unit(), Some(2));
+        assert_eq!(viewer.window().offset(), first_line_of(&viewer, 2) - 1);
+        assert!(screen.contains("find \"needle\" 1/3"), "{screen}");
+        press(&mut viewer, "n");
+        draw(&mut viewer, 80, 8);
+        assert_eq!(viewer.find().current_unit(), Some(5));
+        assert_eq!(viewer.window().offset(), first_line_of(&viewer, 5) - 1);
+    }
+
+    #[test]
+    fn matches_the_toggles_hide_are_counted_in_the_chip() {
+        let mut viewer = pager(needles());
+        draw(&mut viewer, 120, 8);
+        press(&mut viewer, "/tool output<Enter>");
+        let screen = draw(&mut viewer, 120, 8);
+        assert!(
+            screen.contains("find \"tool output\" no match · 1 in hidden turns"),
+            "{screen}"
+        );
+        assert_eq!(
+            viewer.content().find_detail("needle").as_deref(),
+            Some("2 in hidden turns")
+        );
+    }
+
+    #[test]
+    fn showing_a_kind_brings_its_matches_into_the_find() {
+        let mut viewer = pager(needles());
+        draw(&mut viewer, 80, 8);
+        press(&mut viewer, "g/needle<Enter>T");
+        assert_eq!(viewer.find().matches(), [2, 5, 9, 13]);
+        assert_eq!(viewer.find().current_unit(), Some(2), "stays on its turn");
+        press(&mut viewer, "ttt");
+        assert_eq!(viewer.find().matches(), [2, 5, 9, 12, 13]);
+    }
+
+    #[test]
+    fn the_current_turn_is_painted_in_the_selection_look_after_the_gutter() {
+        let theme = Theme::default();
+        let mut viewer = pager(needles());
+        let area = Rect::new(0, 0, 80, 8);
+        let mut buf = Buffer::empty(area);
+        viewer.draw(area, &mut buf, &theme);
+        press(&mut viewer, "g/needle<Enter>");
+        viewer.draw(area, &mut buf, &theme);
+        let current = buffer::style_at(&buf, "Needle").expect("the match is drawn");
+        assert!(
+            current.add_modifier.contains(theme.selection_active),
+            "{current:?}"
+        );
+        let rows = buffer::rows(&buf);
+        let label = rows.iter().find(|row| row.contains("Needle")).unwrap();
+        assert!(label.contains("│ turn 2"), "{label}");
+    }
+
+    #[test]
+    fn a_collapsed_tool_run_is_one_unit_of_rows_for_all_its_turns() {
+        let mut document = sample_document();
+        document.turns.extend([
+            turn(TurnRole::Assistant, TurnKind::ToolUse, "Read: /a"),
+            turn(TurnRole::Assistant, TurnKind::ToolResult, "ok"),
+            turn(TurnRole::Assistant, TurnKind::Thinking, "hmm"),
+            turn(TurnRole::Assistant, TurnKind::Message, "done"),
+        ]);
+        let mut transcript: Transcript = Transcript::new(document);
+        transcript.tool_detail = ToolDetail::Summary;
+        let lines = transcript.lines(&Theme::default(), 80).len();
+        let run = transcript.rows_of(2);
+        assert!(!run.is_empty());
+        assert_eq!(transcript.rows_of(3), run, "one summary line for the run");
+        assert_eq!(transcript.rows_of(1).end, run.start);
+        // A turn the toggles hide takes no rows, where the next one starts.
+        let hidden = transcript.rows_of(4);
+        assert!(hidden.is_empty(), "{hidden:?}");
+        assert_eq!(hidden.start, transcript.rows_of(5).start);
+        assert_eq!(transcript.rows_of(5).end, lines);
+        assert_eq!(transcript.rows_of(9), lines..lines, "past the last turn");
+    }
+
+    #[test]
+    fn the_hidden_chip_shows_only_for_a_transcript_with_hidden_turns() {
+        let mut document = sample_document();
+        let mut viewer = pager(document.clone());
+        assert_eq!(viewer.content().chips(&Theme::default()).len(), 3);
+        document.turns[0].hidden = true;
+        viewer = pager(document);
+        let screen = draw(&mut viewer, 120, 8);
+        assert!(screen.contains("hidden·hide (H)"), "{screen}");
+    }
+
+    #[test]
+    fn an_empty_body_says_why() {
+        let mut viewer = pager(unavailable_document());
+        let screen = draw(&mut viewer, 60, 8);
+        assert!(screen.contains("transcript unavailable"), "{screen}");
+        let mut only_thinking = sample_document();
+        for turn in &mut only_thinking.turns {
+            turn.kind = TurnKind::Thinking;
+        }
+        let mut viewer = pager(only_thinking);
+        let screen = draw(&mut viewer, 60, 8);
+        assert!(screen.contains("every turn here is hidden"), "{screen}");
+    }
+
+    #[test]
+    fn the_help_page_lists_the_toggles_and_the_viewers_words() {
+        let mut viewer = pager(sample_document());
+        press(&mut viewer, "?");
+        let screen = draw(&mut viewer, 100, 40);
+        for line in [
+            "Showing more or less",
+            "Cycle tool detail: hidden, summary, truncated, full",
+            "Show or hide records the harness's own UI never showed",
+            "Jump to the start of the transcript",
+            "Jump to the end, where the viewer opens, and stay there",
+            "Find in transcript; a match in hidden content turns that content on",
+        ] {
+            assert!(screen.contains(line), "{line}: {screen}");
+        }
+        let sections = viewer.help_sections();
+        let titles: Vec<&str> = sections
+            .iter()
+            .map(|section| section.title.as_ref())
+            .collect();
+        assert_eq!(
+            titles,
+            ["Moving", "Finding", "Showing more or less", "Viewer"]
+        );
+        assert!(tuikit::help::undescribed(crate::viewer::keys::TRANSCRIPT_KEYS).is_empty());
+    }
 }
