@@ -111,6 +111,16 @@ artifacts small and delete the big ones when you finish:
 - Before finishing, run `df -h /tmp`; if usage is above 60%, clear your own
   leftovers (`/tmp/tuifw-baseline/conspectus-*` binaries) and mention it.
 
+The root filesystem needs the same care. Every rebuild of the workspace writes
+new test binaries (about 235 MB each, ten or so per build) under a new hash and
+Cargo never deletes the old ones, so `target/` grew to 101 GB over 24 stories.
+The coordinator runs `cargo clean -p conspectus -p tuikit` between stories
+(third-party dependencies stay cached, so a rebuild costs a few minutes). If
+`df -h /` shows under 30 GB free during your story, run
+`nix develop --command cargo clean -p conspectus -p tuikit` yourself and carry
+on. Never run a bare `cargo clean` (it throws away the dependency cache) and
+never delete anything outside `target/` or `/tmp/tuifw-baseline/`.
+
 ## TUI Changes And Verification
 
 - Visible output is validated with `conspectus tui --snapshot` (dev-only; build
