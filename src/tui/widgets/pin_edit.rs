@@ -22,14 +22,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
 use crate::argv::split_command_line;
-use crate::discovery::harness::{
-    argv_without_fragment, launch_options_for, strip_known_launch_option_fragments,
-};
+use crate::discovery::harness::launch_options_for;
 use crate::model::{FieldSource, FieldValue, PinKind, RecipeField, SlotFields};
 use crate::tui::Msg;
 use crate::tui::theme::Theme;
-use crate::tui::widgets::form::{self, Cols, display_argv, footer_lines, note_row, options_row};
-use tuikit::form::FormBody;
+use crate::tui::widgets::form::{self, Cols, footer_lines, note_row, options_row};
+use crate::tui::widgets::launch_argv::{self, DefaultArgv};
+use tuikit::form::{Choice, FormBody};
 use tuikit::overlay::Outcome;
 use tuikit::path_field::{Candidate, PathField};
 use tuikit::text_edit::LineEdit;
@@ -222,6 +221,9 @@ pub struct PinEditFormState {
     known_pin_names: Vec<String>,
     known_harness_keys: Vec<String>,
     defaults: Option<crate::launch_default::LaunchDefaults>,
+    /// The argv an empty argv row means, decided when the harness or the
+    /// cwd changes, so drawing the options row reads it from here.
+    default: DefaultArgv,
     error: Option<String>,
 }
 
@@ -236,7 +238,7 @@ enum Stop {
 fn text_of(value: &FieldValue) -> String {
     match value {
         FieldValue::Text(text) => text.clone(),
-        FieldValue::List(list) => display_argv(list),
+        FieldValue::List(list) => launch_argv::display(list),
     }
 }
 
@@ -288,7 +290,7 @@ impl PinEditFormState {
                 cleared: false,
             });
         }
-        Self {
+        let mut state = Self {
             pin: init.pin,
             kind: init.kind,
             status: init.status,
@@ -298,8 +300,11 @@ impl PinEditFormState {
             known_pin_names: init.known_pin_names,
             known_harness_keys: init.known_harness_keys,
             defaults: init.defaults,
+            default: DefaultArgv::default(),
             error: None,
-        }
+        };
+        state.default = state.default_for(&state.harness_text());
+        state
     }
 
     pub fn pin(&self) -> &str {
@@ -370,50 +375,56 @@ impl PinEditFormState {
             .position(|row| row.which == Which::Field(field))
     }
 
-    /// The argv a pin with this harness starts from when it has none of
-    /// its own: its inherited argv, else a profile or the harness default.
-    fn default_argv(&self, harness: &str) -> Vec<String> {
-        let cwd = self
-            .row_index("cwd")
+    /// The cwd row's text, which the default argv depends on.
+    fn cwd_text(&self) -> String {
+        self.row_index("cwd")
             .map(|idx| self.rows[idx].control.value().trim().to_string())
-            .unwrap_or_default();
-        form::default_argv(self.defaults.as_ref(), harness, &cwd)
+            .unwrap_or_default()
+    }
+
+    /// The argv a pin with `harness` starts from when it has none of its
+    /// own: a profile, `atelier exec`, or the harness default.
+    fn default_for(&self, harness: &str) -> DefaultArgv {
+        DefaultArgv::resolve(self.defaults.as_ref(), harness, &self.cwd_text())
+    }
+
+    /// Decides the default argv again if the harness or the cwd changed.
+    fn refresh_default(&mut self) {
+        let (harness, cwd) = (self.harness_text(), self.cwd_text());
+        self.default.refresh(self.defaults.as_ref(), &harness, &cwd);
+    }
+
+    /// The argv row's text read as an argv, as far as it goes.
+    fn typed_argv(&self) -> Vec<String> {
+        self.row_index("argv")
+            .map(|idx| split_command_line(self.rows[idx].control.value()))
+            .unwrap_or_default()
     }
 
     fn argv_now(&self) -> Vec<String> {
-        let Some(idx) = self.row_index("argv") else {
+        if self.row_index("argv").is_none() {
             return Vec::new();
-        };
-        let typed = split_command_line(self.rows[idx].control.value());
-        if typed.is_empty() {
-            self.default_argv(&self.harness_text())
-        } else {
-            typed
         }
+        launch_argv::effective(self.typed_argv(), self.default.argv())
     }
 
     fn set_argv(&mut self, argv: &[String]) {
         if let Some(idx) = self.row_index("argv") {
-            self.rows[idx].control.replace(display_argv(argv));
+            self.rows[idx].control.replace(launch_argv::display(argv));
             self.rows[idx].cleared = false;
         }
     }
 
+    /// Flips a launch option on the options row: with one option, that
+    /// one; with several, `delta` steps from the only one that is on.
     fn toggle_option(&mut self, delta: i32) {
-        let harness = self.harness_text();
-        let options = launch_options_for(&harness);
+        let options = launch_options_for(&self.harness_text());
         if options.is_empty() {
             return;
         }
         let argv = self.argv_now();
-        let selected: Vec<usize> = options
-            .iter()
-            .enumerate()
-            .filter(|(_, option)| {
-                crate::discovery::harness::argv_contains_fragment(&argv, option.argv)
-            })
-            .map(|(idx, _)| idx)
-            .collect();
+        let on = launch_argv::options_on(options, &argv);
+        let selected: Vec<usize> = (0..options.len()).filter(|idx| on[*idx]).collect();
         let idx = match (selected.as_slice(), delta) {
             ([only], -1 | 1) if options.len() > 1 => {
                 tuikit::scroll::wrap_step(*only, options.len(), delta)
@@ -421,45 +432,28 @@ impl PinEditFormState {
             ([first, ..], _) => *first,
             ([], _) => 0,
         };
-        let option = options[idx];
-        let next = if crate::discovery::harness::argv_contains_fragment(&argv, option.argv) {
-            argv_without_fragment(argv, option.argv)
-        } else {
-            crate::discovery::harness::argv_with_fragment(argv, option.argv)
-        };
+        let next = launch_argv::with_option(argv, options[idx], !on[idx]);
         self.set_argv(&next);
     }
 
+    /// Steps the harness through the known ones, as a form's choice
+    /// does, and carries a typed argv across (`launch_argv::carried`).
     fn cycle_harness(&mut self, delta: i32) {
-        if self.known_harness_keys.is_empty() {
-            return;
-        }
         let Some(idx) = self.row_index("harness") else {
             return;
         };
-        let old = self.harness_text();
-        let old_default = self.default_argv(&old);
-        let typed = split_command_line(
-            self.row_index("argv")
-                .map_or("", |i| self.rows[i].control.value()),
-        );
-        let keys = &self.known_harness_keys;
-        let next_idx = match keys.iter().position(|key| *key == old) {
-            Some(pos) => tuikit::scroll::wrap_step(pos, keys.len(), delta),
-            None if delta < 0 => keys.len() - 1,
-            None => 0,
-        };
-        let next = keys[next_idx].clone();
-        self.rows[idx].control.replace(next.clone());
+        let mut choice = Choice::new(self.harness_text(), self.known_harness_keys.clone());
+        if !choice.step(delta) {
+            return;
+        }
+        let old_default = self.default.argv().to_vec();
+        let typed = self.typed_argv();
+        self.rows[idx].control.replace(choice.value().to_string());
         self.rows[idx].cleared = false;
+        self.refresh_default();
         if !typed.is_empty() {
-            let stripped = strip_known_launch_option_fragments(typed);
-            if stripped == old_default {
-                let new_default = self.default_argv(&next);
-                self.set_argv(&new_default);
-            } else {
-                self.set_argv(&stripped);
-            }
+            let next = launch_argv::carried(typed, &old_default, self.default.argv());
+            self.set_argv(&next);
         }
     }
 
@@ -556,8 +550,16 @@ impl PinEditFormState {
 }
 
 impl PinEditFormState {
-    /// One key: edit, move between the rows, change an option, save, or close.
+    /// One key: edit, move between the rows, change an option, save, or
+    /// close. A key that changed the harness or the cwd decides the
+    /// default argv again, so drawing never has to.
     pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
+        let outcome = self.key(key);
+        self.refresh_default();
+        outcome
+    }
+
+    fn key(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use crate::tui::keybindings::overlay::PIN_EDIT_KEYS;
         use tuikit::keys::{FormKey, resolve};
         let stop = self

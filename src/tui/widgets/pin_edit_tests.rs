@@ -483,3 +483,69 @@ fn the_focused_row_says_what_it_follows() {
         "what Ctrl-R goes back to: {lines}"
     );
 }
+
+/// Drawing the form reads the default argv it decided when it opened; it
+/// is decided again only when the harness or the cwd changes.
+#[test]
+fn drawing_the_form_reads_the_default_argv_it_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().display().to_string();
+    let mut init = mux_init();
+    init.effective[2] = field("cwd", text(&cwd), FieldSource::Override);
+    init.effective[4] = field("argv", argv(&[]), FieldSource::Default);
+    init.defaults = Some(crate::launch_default::LaunchDefaults::default().with_atelier(true));
+    let mut form = PinEditFormState::new(init);
+    assert_eq!(form.argv_now(), ["claude"]);
+
+    // The cwd becomes a workspace. Drawing (the options row reads the
+    // argv) does not look at the disk again, so the kept default stands.
+    std::fs::write(
+        dir.path()
+            .join(crate::discovery::atelier::ATELIER_CONFIG_FILENAME),
+        "[workspace]\nname = \"w\"\n",
+    )
+    .unwrap();
+    render(&form);
+    render(&form);
+    assert_eq!(
+        form.default.source(),
+        Some(crate::launch_default::DefaultSource::HarnessDefault)
+    );
+    assert_eq!(form.argv_now(), ["claude"]);
+
+    // Editing the cwd decides it again.
+    focus_row(&mut form, "cwd");
+    type_str(&mut form, "/");
+    assert_eq!(form.argv_now(), ["atelier", "exec", "claude"]);
+}
+
+#[test]
+fn an_unfinished_argv_is_read_as_far_as_it_goes_and_refused_on_save() {
+    let mut form = PinEditFormState::new(mux_init());
+    focus_row(&mut form, "argv");
+    type_str(&mut form, " --append 'two words");
+    form.handle_key(press(KeyCode::Enter));
+    assert_eq!(form.error(), Some("`argv` has an unclosed `'` quote"));
+
+    // The option row works on what is typed so far and writes it back
+    // finished, so the save then goes through.
+    focus_row(&mut form, "harness");
+    form.handle_key(press(KeyCode::Down));
+    form.handle_key(press(KeyCode::Char(' ')));
+    assert_eq!(
+        form.field_text("argv"),
+        Some("claude --append 'two words' --dangerously-skip-permissions")
+    );
+    assert_eq!(
+        form.request().unwrap().set,
+        vec![(
+            "argv".to_string(),
+            argv(&[
+                "claude",
+                "--append",
+                "two words",
+                "--dangerously-skip-permissions"
+            ])
+        )]
+    );
+}
