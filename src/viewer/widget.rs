@@ -647,30 +647,15 @@ pub fn render_to_buffer(
     width: u16,
     height: u16,
 ) -> ratatui::buffer::Buffer {
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
-    terminal
-        .draw(|frame| {
-            let area = frame.area();
-            draw(state, theme, frame.buffer_mut(), area);
-        })
-        .expect("draw on test backend");
-    terminal.backend().buffer().clone()
+    tuikit::testkit::render::render(width, height, |frame| {
+        let area = frame.area();
+        draw(state, theme, frame.buffer_mut(), area);
+    })
 }
 
 #[cfg(test)]
 pub fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
-    let mut out =
-        String::with_capacity((buffer.area.width as usize + 1) * buffer.area.height as usize);
-    for y in 0..buffer.area.height {
-        for x in 0..buffer.area.width {
-            let cell = &buffer[(x, y)];
-            out.push_str(cell.symbol());
-        }
-        out.push('\n');
-    }
-    out
+    tuikit::testkit::buffer::text(buffer)
 }
 
 #[cfg(test)]

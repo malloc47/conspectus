@@ -15,7 +15,7 @@ use tuikit::glyphs::{drawn_glyphs, marks};
 
 use super::glyphs::sources;
 use super::source_tree::{self, Tree};
-use super::text::string_literals;
+use tuikit::testkit::source::{Literal, string_literals};
 
 /// The host trees that draw into the terminal UI.
 const TUI_SRC: Tree = Tree::new("src/tui", 100);
@@ -96,7 +96,11 @@ fn typed_marks(root: &Path, trees: &[Tree], exceptions: &[Exception]) -> Vec<Str
                 )),
             }
         }
-        for (line, literal) in string_literals(&text) {
+        for Literal {
+            line,
+            text: literal,
+        } in string_literals(&text)
+        {
             if bare_marks().contains(&literal.as_str()) {
                 out.push(format!(
                     "{path}:{line}: the string \"{literal}\" is a mark; use the matching \

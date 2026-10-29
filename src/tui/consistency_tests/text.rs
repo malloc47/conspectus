@@ -10,6 +10,7 @@
 //! scan is guarded against visiting too few files.
 
 use clap::CommandFactory;
+use tuikit::testkit::source::{Literal, string_literals};
 
 use super::source_tree::{self, FRAMEWORK_SRC, Tree};
 use super::*;
@@ -216,106 +217,6 @@ fn no_help_page_shows_a_developer_artifact() {
     assert!(offenders.is_empty(), "{}", offenders.join("\n"));
 }
 
-/// The string literals of `source` outside comments, with their 1-based
-/// line numbers. Understands escapes, raw strings, and char literals;
-/// stops at the first `#[cfg(test)]` so test code is exempt.
-pub(super) fn string_literals(source: &str) -> Vec<(usize, String)> {
-    let chars: Vec<char> = source.chars().collect();
-    let mut out = Vec::new();
-    let (mut i, mut line) = (0, 1);
-    let mut at_line_start = true;
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '\n' {
-            line += 1;
-            at_line_start = true;
-            i += 1;
-            continue;
-        }
-        if at_line_start && !c.is_whitespace() {
-            at_line_start = false;
-            if chars[i..].starts_with(&['#', '[', 'c', 'f', 'g', '(', 't', 'e', 's', 't', ')']) {
-                break;
-            }
-        }
-        if c == '/' && chars.get(i + 1) == Some(&'/') {
-            while i < chars.len() && chars[i] != '\n' {
-                i += 1;
-            }
-            continue;
-        }
-        if c == '/' && chars.get(i + 1) == Some(&'*') {
-            i += 2;
-            while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
-                if chars[i] == '\n' {
-                    line += 1;
-                }
-                i += 1;
-            }
-            i += 2;
-            continue;
-        }
-        if c == 'r' && matches!(chars.get(i + 1), Some('"' | '#')) {
-            let hashes = chars[i + 1..].iter().take_while(|c| **c == '#').count();
-            if chars.get(i + 1 + hashes) == Some(&'"') {
-                let start = i + hashes + 2;
-                let close: Vec<char> = std::iter::once('"')
-                    .chain(std::iter::repeat_n('#', hashes))
-                    .collect();
-                let mut j = start;
-                while j < chars.len() && !chars[j..].starts_with(&close) {
-                    j += 1;
-                }
-                out.push((line, chars[start..j].iter().collect()));
-                line += chars[start..j].iter().filter(|c| **c == '\n').count();
-                i = j + close.len();
-                continue;
-            }
-        }
-        if c == '"' {
-            let mut j = i + 1;
-            let mut text = String::new();
-            let start_line = line;
-            while j < chars.len() && chars[j] != '"' {
-                if chars[j] == '\\' {
-                    j += 1;
-                }
-                if chars[j] == '\n' {
-                    line += 1;
-                }
-                text.push(chars[j]);
-                j += 1;
-            }
-            out.push((start_line, text));
-            i = j + 1;
-            continue;
-        }
-        if c == '\'' {
-            // A char literal like '"' or '\n', not a lifetime.
-            if chars.get(i + 1) == Some(&'\\') {
-                i += 4;
-                continue;
-            }
-            if chars.get(i + 2) == Some(&'\'') {
-                i += 3;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out
-}
-
-#[test]
-fn the_literal_scanner_skips_comments_and_tests() {
-    let source = "let a = \"keep\"; // \"not this\"\n/* \"nor this\" */\nlet b = r#\"raw \"q\" \"#; let c = '\"'; let d = \"e\\\"s\";\n#[cfg(test)]\nlet e = \"test only\";";
-    let found: Vec<String> = string_literals(source)
-        .into_iter()
-        .map(|(_, s)| s)
-        .collect();
-    assert_eq!(found, ["keep", "raw \"q\" ", "e\"s"]);
-}
-
 /// The host's TUI sources. The tripwire minimum is below the current
 /// count (169 files) because code leaves `src/tui` for the framework.
 const TUI_SRC: Tree = Tree::new("src/tui", 100);
@@ -344,7 +245,7 @@ fn literal_offenders(
 ) -> Vec<String> {
     let mut out = Vec::new();
     for (path, source) in source_files(root, trees) {
-        for (line, text) in string_literals(&source) {
+        for Literal { line, text } in string_literals(&source) {
             if let Some(found) = bad(&text) {
                 out.push(format!(
                     "{}:{line}: {found} in {:?}",

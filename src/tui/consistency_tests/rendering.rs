@@ -3,30 +3,10 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
+use tuikit::testkit::buffer::{count_cells, find_in, rows, tokens};
 
 use super::*;
 use crate::tui::app::Focus;
-
-/// `(start, end)` char columns and text of each whitespace-separated token.
-fn tokens(line: &str) -> Vec<(usize, usize, String)> {
-    let mut out = Vec::new();
-    let mut start = None;
-    let mut text = String::new();
-    for (col, ch) in line.chars().enumerate() {
-        if ch.is_whitespace() {
-            if let Some(from) = start.take() {
-                out.push((from, col, std::mem::take(&mut text)));
-            }
-        } else {
-            start.get_or_insert(col);
-            text.push(ch);
-        }
-    }
-    if let Some(from) = start {
-        out.push((from, line.chars().count(), text));
-    }
-    out
-}
 
 /// Column where the label starts and where the age ends, for the left
 /// pane's row mentioning `label`.
@@ -38,13 +18,13 @@ fn row_grid(lines: &[String], label: &str) -> (usize, Option<usize>) {
     let toks = tokens(line);
     let label_col = toks
         .iter()
-        .find(|(_, _, text)| text.contains(label))
-        .map(|(start, _, _)| *start)
+        .find(|token| token.text.contains(label))
+        .map(|token| token.start)
         .expect("label token");
     let age_end = toks
         .iter()
-        .find(|(_, _, text)| is_age(text))
-        .map(|(_, end, _)| *end);
+        .find(|token| is_age(&token.text))
+        .map(|token| token.end);
     (label_col, age_end)
 }
 
@@ -112,17 +92,15 @@ fn a_pinned_entity_in_its_own_view_wears_the_filled_pin_marker() {
     assert!(!scratch.chars().take(100).any(|c| c == '◉'), "{scratch}");
 }
 
-/// Whether the cells of the first `needle` on `needle_row`'s line have a
+/// Whether the cells of the first `needle` on `row_label`'s line have a
 /// filled background (the badge look every view gives an agent name).
 fn token_is_a_chip(buffer: &Buffer, row_label: &str, needle: &str) -> Option<bool> {
-    let text = buffer_to_string(buffer);
-    let (y, line) = text
-        .lines()
-        .enumerate()
-        .find(|(_, line)| line.contains(row_label) && line.contains(needle))?;
-    let x = line.chars().collect::<String>().find(needle)?;
-    let x = line[..x].chars().count();
-    let cell = &buffer[(u16::try_from(x).ok()?, u16::try_from(y).ok()?)];
+    let y = rows(buffer)
+        .iter()
+        .position(|line| line.contains(row_label) && line.contains(needle))?;
+    let row = Rect::new(0, u16::try_from(y).ok()?, buffer.area.width, 1);
+    let at = find_in(buffer, row, needle)?;
+    let cell = &buffer[(at.x, at.y)];
     Some(cell.bg != Color::Reset || cell.modifier.contains(Modifier::REVERSED))
 }
 
@@ -175,9 +153,9 @@ fn session_rows_show_the_agent_glyph_in_every_view_that_lists_them() {
     }
 }
 
-/// Cells of one half of the frame drawn REVERSED. Chips are reversed
-/// too, so a test compares the count with and without focus rather than
-/// expecting zero.
+/// Cells of one half of the frame drawn REVERSED, header and status rows
+/// left out. Chips are reversed too, so a test compares the count with and
+/// without focus rather than expecting zero.
 fn reversed_cells(buffer: &Buffer, left: bool) -> usize {
     let half = buffer.area.width / 2;
     let (from, to) = if left {
@@ -185,18 +163,10 @@ fn reversed_cells(buffer: &Buffer, left: bool) -> usize {
     } else {
         (half, buffer.area.width)
     };
-    (1..buffer.area.height.saturating_sub(1))
-        .map(|y| {
-            (from..to)
-                .filter(|x| {
-                    buffer[(*x, y)]
-                        .style()
-                        .add_modifier
-                        .contains(Modifier::REVERSED)
-                })
-                .count()
-        })
-        .sum()
+    let body = Rect::new(from, 1, to - from, buffer.area.height.saturating_sub(2));
+    count_cells(buffer, body, |cell| {
+        cell.modifier.contains(Modifier::REVERSED)
+    })
 }
 
 /// Only the focused pane reverses its cursor row; the other keeps its

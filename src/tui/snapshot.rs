@@ -451,6 +451,16 @@ fn modal_key(
     });
 }
 
+/// One key for the modal on top, as `--snapshot-keys` drives it with no
+/// fixture world, for tests elsewhere in the TUI: what the snapshot
+/// skipped, one note each.
+#[cfg(test)]
+pub(in crate::tui) fn press_modal_key(app: &mut App, key: KeyEvent) -> Notes {
+    let mut notes = Notes::new();
+    modal_key(app, key, None, &mut notes);
+    notes
+}
+
 fn action_label(action: &Action) -> &'static str {
     match action {
         Action::Attach => "Attach",

@@ -87,6 +87,7 @@ mod actions;
 mod chrome;
 mod content_filter;
 mod content_interactions;
+mod conventions;
 mod docs;
 mod feedback;
 mod fixture_mode;

@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use ratatui::widgets::Widget;
 use tuikit::help::{HelpPage, HelpScroll};
+use tuikit::testkit::conformance::same_chrome;
 
 use crate::tui::Theme;
 use crate::tui::keybindings::overlay::{PANE_VIEWER_KEYS, VIEWER_KEYS};
@@ -56,34 +57,10 @@ fn all_three_helps_draw_the_same_frame() {
         let rect = HelpPage::SIZE.rect(area, 0);
         let a = page(PAGES[0], area, &theme);
         for other in &PAGES[1..] {
-            let b = page(other, area, &theme);
-            let (right, bottom) = (rect.x + rect.width - 1, rect.y + rect.height - 1);
-            // Corners, and the whole top and bottom borders, title included.
-            for x in rect.x..=right {
-                assert_eq!(
-                    cell(&a, x, rect.y),
-                    cell(&b, x, rect.y),
-                    "{other}: title row x={x} at {w}x{h}"
-                );
-                assert_eq!(
-                    cell(&a, x, bottom),
-                    cell(&b, x, bottom),
-                    "{other}: bottom row x={x} at {w}x{h}"
-                );
-            }
-            // The side borders.
-            for y in rect.y..=bottom {
-                assert_eq!(
-                    cell(&a, rect.x, y),
-                    cell(&b, rect.x, y),
-                    "{other}: left edge y={y}"
-                );
-                assert_eq!(
-                    cell(&a, right, y),
-                    cell(&b, right, y),
-                    "{other}: right edge y={y}"
-                );
-            }
+            // Corners, the whole top and bottom borders (title included),
+            // and the sides.
+            let differ = same_chrome(&a, &page(other, area, &theme), rect);
+            assert!(differ.is_empty(), "{other} at {w}x{h}: {differ:?}");
         }
     }
 }

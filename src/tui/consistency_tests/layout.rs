@@ -1,25 +1,27 @@
-//! Modals and forms keep a stable layout: nothing they draw escapes the
-//! frame, and moving the selection inside one changes which row is
-//! highlighted, not where any text sits.
+//! The modals the layout checks build, and the layout rules that are
+//! Conspectus's own.
 //!
-//! Every [`Modal`] variant is either built here and checked at a range of
-//! sizes, or listed with the reason it can't be. A new variant fails the
-//! coverage test until it is added to one list or the other.
+//! [`builders`] opens every framed modal over the shared world; the
+//! framework's conformance suite (`conventions.rs`) checks each at a range
+//! of sizes: nothing it draws escapes the frame, the frame and title take
+//! the one look, moving the selection moves no text, and no word is cut
+//! at the edge. What stays here is particular to Conspectus's modals: the
+//! search modal's sizing rule and title, and how a prompt draws over
+//! another modal.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
+use tuikit::testkit::conformance::{HEIGHTS, WIDTHS};
+use tuikit::testkit::keys;
 
 use super::*;
 use crate::tui::Modal;
-
-const WIDTHS: [u16; 5] = [60, 80, 120, 160, 220];
-const HEIGHTS: [u16; 2] = [20, 40];
 
 pub(super) type Open = fn(&mut App);
 
 /// One key into the open search overlay, through the modal stack.
 pub(super) fn search_key(app: &mut App, code: KeyCode) {
-    crate::tui::runtime::modal_key_pure(app, KeyEvent::new(code, KeyModifiers::NONE));
+    crate::tui::runtime::modal_key_pure(app, keys::press(code));
 }
 
 pub(super) fn type_into_search(app: &mut App, text: &str) {
@@ -32,18 +34,6 @@ pub(super) fn type_into_search(app: &mut App, text: &str) {
 pub(super) fn name_of(modal: &Modal) -> &'static str {
     modal.name()
 }
-
-/// Modals the layout checks can't build here, and why.
-const SKIPPED: &[(&str, &str)] = &[
-    (
-        "Viewer",
-        "the full-screen transcript viewer needs a session transcript on disk; its own tests cover its layout",
-    ),
-    (
-        "PaneViewer",
-        "the full-screen pane viewer fills the screen rather than framing a modal; its own tests cover its layout",
-    ),
-];
 
 fn open_pinned(app: &mut App, message: Msg) {
     select(app, "conspectus-main");
@@ -120,10 +110,6 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
     ]
 }
 
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
 /// One key into the top modal, through the stack, its outcome left
 /// unsettled. `false` when the modal reads live App context that moves
 /// with the key (its layout is checked without moving).
@@ -133,14 +119,10 @@ pub(super) fn press(app: &mut App, code: KeyCode) -> bool {
         None | Some("Controls" | "Search" | "Messages" | "Viewer" | "PaneViewer")
     );
     if !fixed {
-        let _ = app.with_modals(|stack, app| stack.route(key(code), app));
+        let _ = app.with_modals(|stack, app| stack.route(keys::press(code), app));
     }
     !fixed
 }
-
-/// Modals whose whole body scrolls with Up and Down, so their text
-/// legitimately moves.
-const SCROLLS: &[&str] = &["Help", "ValueModal"];
 
 /// The frame with the modal open, and the same app state without it.
 pub(super) fn framed_and_bare(view: View, open: Open, width: u16, height: u16) -> (Buffer, Buffer) {
@@ -157,263 +139,16 @@ pub(super) fn app_with(view: View, open: Open) -> App {
     app
 }
 
-fn symbol(buf: &Buffer, x: u16, y: u16) -> &str {
-    buf[(x, y)].symbol()
-}
-
-fn corner(symbol: &str) -> bool {
-    matches!(
-        symbol,
-        "┌" | "┐" | "└" | "┘" | "╭" | "╮" | "╰" | "╯" | "╔" | "╗" | "╚" | "╝"
-    )
-}
-
-fn vertical(symbol: &str) -> bool {
-    matches!(symbol, "│" | "┃" | "║")
-}
-
-/// The rectangle of the frame the modal drew, from its corner glyphs
-/// among the cells that differ from the frame without it.
+/// The corners `(x0, y0, x1, y1)` of the frame the modal drew: the kit's
+/// [`frame_rect`](tuikit::testkit::buffer::frame_rect), from its corner
+/// glyphs among the cells that differ from the frame without it.
 pub(super) fn modal_rect(with: &Buffer, without: &Buffer) -> Option<(u16, u16, u16, u16)> {
-    let area = with.area;
-    let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0, 0);
-    let mut found = false;
-    for y in 0..area.height {
-        for x in 0..area.width {
-            if with[(x, y)] != without[(x, y)] && corner(symbol(with, x, y)) {
-                found = true;
-                x0 = x0.min(x);
-                y0 = y0.min(y);
-                x1 = x1.max(x);
-                y1 = y1.max(y);
-            }
-        }
-    }
-    found.then_some((x0, y0, x1, y1))
+    tuikit::testkit::buffer::frame_rect(with, without)
+        .map(|rect| (rect.x, rect.y, rect.right() - 1, rect.bottom() - 1))
 }
 
 fn describe_size(name: &str, width: u16, height: u16) -> String {
     format!("{name} at {width}x{height}")
-}
-
-#[test]
-fn every_modal_is_checked_or_has_a_reason() {
-    let built: Vec<&str> = builders().iter().map(|(name, _, _)| *name).collect();
-    for variant in Modal::NAMES {
-        assert!(
-            built.contains(variant) || SKIPPED.iter().any(|(name, _)| name == variant),
-            "Modal::{variant} is neither built in layout.rs nor listed with a reason"
-        );
-    }
-}
-
-#[test]
-fn each_builder_opens_the_modal_it_names() {
-    for (name, view, open) in builders() {
-        let app = app_with(view, open);
-        let top = app
-            .modal_stack()
-            .top()
-            .unwrap_or_else(|| panic!("{name}: nothing opened"));
-        assert_eq!(name_of(top), name);
-    }
-}
-
-#[test]
-fn nothing_a_modal_draws_escapes_its_frame() {
-    for (name, view, open) in builders() {
-        for width in WIDTHS {
-            for height in HEIGHTS {
-                let (with, without) = framed_and_bare(view, open, width, height);
-                let label = describe_size(name, width, height);
-                let Some((x0, y0, x1, y1)) = modal_rect(&with, &without) else {
-                    continue;
-                };
-                for y in 0..with.area.height {
-                    for x in 0..with.area.width {
-                        let inside = (x0..=x1).contains(&x) && (y0..=y1).contains(&y);
-                        assert!(
-                            inside || with[(x, y)] == without[(x, y)],
-                            "{label}: cell ({x},{y}) outside the frame ({x0},{y0})-({x1},{y1}) changed to {:?}",
-                            symbol(&with, x, y)
-                        );
-                    }
-                }
-                for y in (y0 + 1)..y1 {
-                    for edge in [x0, x1] {
-                        assert!(
-                            vertical(symbol(&with, edge, y)),
-                            "{label}: text runs into the frame at ({edge},{y}): {:?}\n{}",
-                            symbol(&with, edge, y),
-                            buffer_to_string(&with)
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// The rows whose styling changed between two frames: the rows that
-/// move with the selection.
-fn restyled_rows(a: &Buffer, b: &Buffer) -> Vec<u16> {
-    (0..a.area.height)
-        .filter(|&y| (0..a.area.width).any(|x| a[(x, y)].style() != b[(x, y)].style()))
-        .collect()
-}
-
-#[test]
-fn moving_the_selection_in_a_modal_moves_no_text() {
-    let mut compared: Vec<&str> = Vec::new();
-    for (name, view, open) in builders() {
-        for width in [80_u16, 120] {
-            let height = 40_u16;
-            if SCROLLS.contains(&name) {
-                continue;
-            }
-            let (first, without) = framed_and_bare(view, open, width, height);
-            let mut app = app_with(view, open);
-            let mut frames = vec![first];
-            let mut steps = 0;
-            for code in [
-                KeyCode::Down,
-                KeyCode::Down,
-                KeyCode::Down,
-                KeyCode::Down,
-                KeyCode::Up,
-            ] {
-                let moved = press(&mut app, code);
-                if !moved {
-                    break;
-                }
-                steps += 1;
-                frames.push(buffer_of(&mut app, width, height));
-            }
-            if steps == 0 {
-                continue;
-            }
-            let label = describe_size(name, width, height);
-            let rect = modal_rect(&frames[0], &without);
-            for pair in frames.windows(2) {
-                if let Some(rect) = rect {
-                    assert_eq!(
-                        modal_rect(&pair[1], &without),
-                        Some(rect),
-                        "{label}: the frame moved or resized with the selection"
-                    );
-                }
-            }
-            // Rows that restyle as the selection moves hold the choices;
-            // anything above and including the last of them keeps its
-            // text in place except the two-cell selection gutter. Rows
-            // below carry explanations that follow the selection.
-            let mut selectable = Vec::new();
-            for pair in frames.windows(2) {
-                selectable.extend(restyled_rows(&pair[0], &pair[1]));
-            }
-            let Some(&last) = selectable.iter().max() else {
-                continue;
-            };
-            compared.push(name);
-            let (x0, x1) = rect.map_or((0, frames[0].area.width - 1), |r| (r.0, r.2));
-            for pair in frames.windows(2) {
-                for y in 0..=last {
-                    for x in (x0 + 3)..x1 {
-                        assert_eq!(
-                            symbol(&pair[0], x, y),
-                            symbol(&pair[1], x, y),
-                            "{label}: text at ({x},{y}) changed when only the selection moved\nbefore:\n{}\nafter:\n{}",
-                            buffer_to_string(&pair[0]),
-                            buffer_to_string(&pair[1])
-                        );
-                    }
-                }
-            }
-        }
-    }
-    // The check has to bite: these forms and menus all have a moving
-    // selection, so a pass that compared nothing would be a false one.
-    for name in ["PinEdit", "RowMenu", "Picker", "MuxLaunch", "NewMux"] {
-        assert!(
-            compared.contains(&name),
-            "{name}: no selection movement was compared"
-        );
-    }
-}
-
-/// The text of each row inside the modal's frame, frame excluded. A
-/// scrollbar cell in the last column reads as a space, so a word that
-/// fills the last text column is not glued to the bar.
-fn inner_rows(buf: &Buffer, rect: (u16, u16, u16, u16)) -> Vec<String> {
-    let (x0, y0, x1, y1) = rect;
-    let bar = ratatui::symbols::scrollbar::DOUBLE_VERTICAL;
-    let parts = [bar.begin, bar.end, bar.thumb, bar.track];
-    ((y0 + 1)..y1)
-        .map(|y| {
-            ((x0 + 1)..x1)
-                .map(|x| {
-                    let cell = symbol(buf, x, y);
-                    if x + 1 == x1 && parts.contains(&cell) {
-                        " "
-                    } else {
-                        cell
-                    }
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn tokens_of(rows: &[String]) -> std::collections::BTreeSet<String> {
-    rows.iter()
-        .flat_map(|row| row.split_whitespace().map(str::to_string))
-        .collect()
-}
-
-#[test]
-fn no_word_in_a_modal_is_cut_off_at_its_edge() {
-    // The same modal drawn on a very wide screen shows every word whole.
-    // A word that touches the narrow modal's right edge and is only the
-    // start of a longer word there was clipped; a deliberate cut ends in
-    // an ellipsis.
-    for (name, view, open) in builders() {
-        let (wide, wide_bare) = framed_and_bare(view, open, 240, 40);
-        let Some(wide_rect) = modal_rect(&wide, &wide_bare) else {
-            continue;
-        };
-        let wide_tokens = tokens_of(&inner_rows(&wide, wide_rect));
-        for width in WIDTHS {
-            for height in HEIGHTS {
-                let (with, without) = framed_and_bare(view, open, width, height);
-                let Some(rect) = modal_rect(&with, &without) else {
-                    continue;
-                };
-                for (index, row) in inner_rows(&with, rect).iter().enumerate() {
-                    // The last text column: the inner column before the
-                    // right frame, or before a scrollbar column.
-                    let Some(last) = row.split_whitespace().last() else {
-                        continue;
-                    };
-                    let touches_edge = row.chars().count() <= row.trim_end().chars().count() + 1;
-                    if !touches_edge || last.ends_with('…') || wide_tokens.contains(last) {
-                        continue;
-                    }
-                    // A word longer than the modal has to be broken
-                    // somewhere; that is wrapping, not clipping.
-                    let inner = usize::from(rect.2 - rect.0 - 1);
-                    let clipped = wide_tokens.iter().any(|full| {
-                        full.len() > last.len() && full.len() <= inner && full.starts_with(last)
-                    });
-                    assert!(
-                        !clipped,
-                        "{}: row {index} ends in {last:?}, the start of a longer word, at the modal's edge\n{}",
-                        describe_size(name, width, height),
-                        buffer_to_string(&with)
-                    );
-                }
-            }
-        }
-    }
 }
 
 #[test]
@@ -480,52 +215,6 @@ fn the_quick_select_title_shows_both_reaches_and_does_not_shift_when_toggled() {
         );
         search_key(&mut app, KeyCode::Tab);
     }
-}
-
-#[test]
-fn every_modal_draws_one_frame_and_one_title_form() {
-    use ratatui::style::Modifier;
-    let accent = crate::tui::Theme::default().accent;
-    let mut checked = Vec::new();
-    for (name, view, open) in builders() {
-        let (with, without) = framed_and_bare(view, open, 120, 40);
-        let label = describe_size(name, 120, 40);
-        let (x0, y0, x1, y1) = modal_rect(&with, &without).unwrap_or_else(|| panic!("{label}"));
-        for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
-            assert_eq!(with[(x, y)].fg, accent, "{label}: the border is the accent");
-        }
-        // The title runs from the corner to the first rule cell.
-        let cells: Vec<_> = (x0 + 1..x1)
-            .map(|x| &with[(x, y0)])
-            .take_while(|cell| cell.symbol() != "─")
-            .collect();
-        let title: String = cells.iter().map(|cell| cell.symbol()).collect();
-        assert!(
-            title.len() > 2 && title.starts_with(' ') && !title.starts_with("  "),
-            "{label}: one space before the title: {title:?}"
-        );
-        assert!(
-            title.ends_with(' ') && !title.ends_with("  "),
-            "{label}: one space after the title: {title:?}"
-        );
-        // Outside the chips a title may carry, it is plain text in the
-        // border's color.
-        for cell in cells
-            .iter()
-            .filter(|cell| !cell.modifier.contains(Modifier::REVERSED))
-        {
-            assert_eq!(cell.fg, accent, "{label}: {title:?}");
-            assert!(
-                !cell.modifier.contains(Modifier::BOLD),
-                "{label}: the title is regular weight: {title:?}"
-            );
-        }
-        checked.push(name);
-    }
-    for (name, _) in SKIPPED {
-        assert!(!checked.contains(name), "{name}");
-    }
-    assert!(checked.len() >= 14, "{checked:?}");
 }
 
 /// A stacked pair draws as its two halves: over any modal, a prompt

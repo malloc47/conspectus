@@ -172,21 +172,15 @@ fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
 // -----------------------------------------------------------------------------
 
 /// Render the entire UI for `app` into a fresh `Buffer` at the given
-/// terminal area. Exposed for snapshot tests so they can assert on
-/// the rendered shape without a real TTY.
+/// terminal area, with the framework's one-frame driver. Exposed for
+/// snapshot tests so they can assert on the rendered shape without a real
+/// TTY.
 #[cfg(test)]
 pub fn render_to_buffer(app: &mut App, area: Rect) -> ratatui::buffer::Buffer {
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-    let mut terminal =
-        Terminal::new(TestBackend::new(area.width, area.height)).expect("test terminal");
-    terminal
-        .draw(|frame| {
-            let report = draw(app, frame);
-            app.keep_viewports(report);
-        })
-        .expect("draw on test backend");
-    terminal.backend().buffer().clone()
+    tuikit::testkit::render::render(area.width, area.height, |frame| {
+        let report = draw(app, frame);
+        app.keep_viewports(report);
+    })
 }
 
 /// Convert a buffer to a newline-joined string. Used by snapshot
@@ -194,16 +188,7 @@ pub fn render_to_buffer(app: &mut App, area: Rect) -> ratatui::buffer::Buffer {
 /// the operator would see.
 #[cfg(test)]
 pub fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
-    let width = buffer.area.width as usize;
-    let mut out = String::with_capacity((width + 1) * buffer.area.height as usize);
-    for y in 0..buffer.area.height {
-        for x in 0..buffer.area.width {
-            let cell = &buffer[(x, y)];
-            out.push_str(cell.symbol());
-        }
-        out.push('\n');
-    }
-    out
+    tuikit::testkit::buffer::text(buffer)
 }
 
 #[cfg(test)]
