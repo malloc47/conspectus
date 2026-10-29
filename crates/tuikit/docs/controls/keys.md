@@ -168,7 +168,11 @@ not shown in the footer.
 | --- | --- | --- |
 | `MENU_KEYS` (`MenuKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Enter` pick; `Esc` close (the table of `ActionMenu`, whose entries' shortcuts come after it) | `↑/↓ move · Enter pick · Esc close` |
 | `DIALOG_KEYS` (`DialogKey`) | `Ctrl-C` and `q` abort; `↑`/`k` and `↓`/`j` scroll an overflowing body (aliases); `Enter`/`y` confirm; `Esc`/`n` cancel (the one table of every `Dialog`, whose choice verbs come after it) | `Enter/y confirm · Esc/n cancel` in a confirmation; a choice shows its verbs then `Esc/n cancel` (`Footer::only`), a notice `Enter/Esc close` |
-| `PAGER_KEYS` (`PagerKey`) | `Ctrl-C` abort; `j`/`↓` down; `k`/`↑` up; `PgDn`/`Space` page down; `PgUp` page up; `g`/`Home` top; `G`/`End` bottom; `Esc`/`q` close | `j/k/PgDn/PgUp scroll · Esc/q close` |
+| `PAGER_SCROLL_KEYS` (`PagerKey`) | a part of a pager's table, after its `Ctrl-C`: `j`/`↓` down; `k`/`↑` up; `PgDn`/`Space` page down; `PgUp` page up; `Ctrl-D`/`Ctrl-U` half a page (aliases); `g`/`Home` top; `G`/`End` bottom | `j/k/PgDn/PgUp scroll` |
+| `PAGER_KEYS` (`PagerKey`) | `Ctrl-C` abort; the scroll rows; `Esc` close (a step back); `q` abort (a pager types nothing) | `j/k/PgDn/PgUp scroll · Esc/q close` |
+| `READER_KEYS` (`PagerKey`) | `PAGER_KEYS`; `/` find; `n`/`N` next and previous match (aliases); `?` help (the default table of `Pager`; see [pager.md](pager.md)) | `j/k/PgDn/PgUp scroll · Esc/q close · / find · ? help` |
+| `PAGER_HELP_KEYS` (`PagerKey`) | `Ctrl-C` abort; the scroll rows; `Esc` and `?` back to the pager; `q` abort (a pager's help page) | `j/k/PgDn/PgUp scroll · Esc/? back · q close` |
+| `FIND_KEYS` (`FindKey`) | `Ctrl-C` abort; `Enter` confirm; `Esc` cancel; every other key edits the query, so `q` types (a pager's find prompt) | `Enter find · Esc cancel` |
 | `TEXT_INPUT_KEYS` (`TextInputKey`) | `Ctrl-C` abort; `Enter` confirm; `Esc` cancel; `Tab` swallowed; every other key goes to the line editor (the table of `TextPrompt`) | `Enter confirm · Esc cancel` |
 | `LINE_EDIT_KEYS` (`EditKey`) | the editing keys every text field shares, all aliases: arrows and `Home`/`End` with their readline chords, word motion on `Alt-b`/`Alt-f` and the Control and Alt arrows, the delete, kill, and yank keys (see [text_edit.md](text_edit.md)) | none |
 | `PATH_FIELD_KEYS` (`PathKey`) | `Tab` completes the path, an alias (a path field's own key, consulted after its form's table; see [path_field.md](path_field.md)) | none |
@@ -189,7 +193,7 @@ drops a field's own value and takes the inherited one again, for forms
 with override rows; no standard table binds it, so a form binds its own
 reset key (a chord such as `Ctrl-R`) in its own table and the chord stays
 free to mean something else in another overlay. `PagerKey::Copy` is bound
-by a pager whose content can be copied.
+by a pager whose content can be copied; no standard table binds it.
 
 ## Theme tokens
 
@@ -209,7 +213,7 @@ the style the control draws its footer in.
 | 4 | Close keys | `Esc` leaves one level in every standard table; `Ctrl-C` comes first and dismisses (`ctrl_c_first`); `q` dismisses too in every table where nothing is typed (menus, dialogs, checklists, settings panels, pagers, a palette's options pane) and types in the text, form, and palette tables |
 | 6 | Forms | `FORM_KEYS`: `Tab`/`↓`/`Ctrl-N` next and `S-Tab`/`↑`/`Ctrl-P` previous; `Enter` is the form's submit row |
 | 8 | Footers and hints | every footer is generated from its table in one grammar; `unresolved` fails a footer that names a key an earlier row takes |
-| 12 | Paging | `PAGER_KEYS`, `CHECKLIST_KEYS`, and `SETTINGS_KEYS` bind `PgUp`/`PgDn`, `Home`/`End`, and `g`/`G` as typed, and `PALETTE_KEYS` binds `PgUp`/`PgDn` (its `Home`/`End` move the query's caret and `g`/`G` type); the control sizes the page |
+| 12 | Paging | `PAGER_KEYS`, `CHECKLIST_KEYS`, and `SETTINGS_KEYS` bind `PgUp`/`PgDn`, `Home`/`End`, and `g`/`G` as typed, the pager tables add half-page `Ctrl-D`/`Ctrl-U`, and `PALETTE_KEYS` binds `PgUp`/`PgDn` (its `Home`/`End` move the query's caret and `g`/`G` type); the control sizes the page |
 | 13 | Theme | the one look it adds, for an unavailable action, comes from `inert` and `muted` |
 | 14 | Width | `Footer::lines` measures segments in cells and wraps only between them |
 
@@ -218,8 +222,7 @@ Not applicable: 1, 2, and 10 (the list's look and ends are `selection`'s),
 pane frame's), 11 (feedback severity), 15 and 16 (editing and paths are
 the text-entry controls', though the editing keys' table is kept here with
 the others), 17 (labels are the control's copy), and 18 (the
-pager's stepping is the pager's; its keys come from here). Half-page
-`Ctrl-D`/`Ctrl-U` join `PAGER_KEYS` with the pager control.
+pager's stepping is the pager's; its keys come from here).
 
 ## Seams left open
 

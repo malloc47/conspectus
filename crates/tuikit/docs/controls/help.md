@@ -204,13 +204,16 @@ page opened by a key is the standard pager plus that key:
 | --- | --- | --- |
 | `j` / `↓`, `k` / `↑` | scroll a row | `PAGER_KEYS`; `HelpScroll::apply(PagerKey::Down)` |
 | `PgDn` / `Space`, `PgUp` | scroll a page | `PAGER_KEYS`; a page is the rows shown |
+| `Ctrl-D`, `Ctrl-U` | scroll half a page | `PAGER_KEYS` (aliases); `HelpScroll::apply(PagerKey::HalfPageDown)` |
 | `g` / `Home`, `G` / `End` | the top, the end | `PAGER_KEYS` |
-| `Esc`, `q`, `Ctrl-C` | close | `PAGER_KEYS` (`Ctrl-C` first, as an alias) |
+| `Esc`, `q`, `Ctrl-C` | close | `PAGER_KEYS` (`Ctrl-C` first, as an alias; `q` with it as `Abort`) |
 | the key that opened it (`?`) | close | the host's row, `shown(ch('?'), PagerKey::Close, "?", "close")` |
 
-A page drawn inside a control with its own keys (a full-screen viewer)
-maps that control's movement actions onto the same `HelpScroll` steps,
-half pages included.
+A page that is a level of a reader (the `Pager`'s `?` page) resolves
+`PAGER_HELP_KEYS` instead: the same scrolling, `Esc` and `?` going back to
+the reader, and `q` leaving it, with the footer `j/k/PgDn/PgUp scroll ·
+Esc/? back · q close`. A control with its own keys maps its movement
+actions onto the same `HelpScroll` steps, half pages included.
 
 ## Theme tokens
 

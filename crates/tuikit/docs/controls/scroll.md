@@ -126,6 +126,7 @@ assert_eq!(pager.visible(), 24..30);
 | `ScrollGutter::layout(area, rows)` | the content area and, on overflow, the gutter | fade on fit; no gutter below 2 columns |
 | `ScrollGutter::render(&window, buf)` | draws the bar | nothing when there is no gutter or the window fits |
 | `WrappedRows::new(lines, width)`, `fit(lines, width, height)` | lines wrapped by `text::wrap_line`, with each line's rows | `fit` narrows by the gutter's column on overflow |
+| `WrappedRows::hanging(lines, width, indent)`, `cut(lines, width)` | lines wrapped under a hanging indent (a gutter such as line numbers), or one row each cut with `…` | `rows_of(line)` and `line_of(row)` map lines and rows both ways, for a pager's content |
 | `len`, `lines`, `rows_of(line)`, `rows`, `into_rows` | read the rows | `rows_of` is the span to follow |
 
 ### The follow rule

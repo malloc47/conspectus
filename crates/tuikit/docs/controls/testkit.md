@@ -136,6 +136,11 @@ let registry = Registry::new(Host(Theme::default())).case(
 conformance::assert_conventions(&registry);
 ```
 
+A level that consults a second table after its first (a pager's content
+keys after the pager's own) passes it as `conformance::part`, which skips
+the `Ctrl-C`-first check for that table alone; the level's own check that
+`Ctrl-C` dismisses still covers both.
+
 A host's real registry lists every modal it registers, one `Case` each (a
 modal with several modes, such as a search, takes one case per mode with a
 `variant`), and fails a test of its own when a modal it registers is
