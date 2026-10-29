@@ -180,6 +180,14 @@ pub const fn alt(c: char) -> KeyMatcher {
     }
 }
 
+/// An Alt chord of a key that is not a character: `Alt-←`.
+pub const fn alt_key(code: KeyCode) -> KeyMatcher {
+    KeyMatcher::Exact {
+        modifiers: KeyModifiers::ALT,
+        code,
+    }
+}
+
 /// A Control chord of a key that is not a character: `Ctrl-←`.
 pub const fn ctrl_key(code: KeyCode) -> KeyMatcher {
     KeyMatcher::Exact {

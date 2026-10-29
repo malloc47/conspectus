@@ -35,8 +35,9 @@
 //!   runs them over every table it has.
 //! - **Standard tables** for the standard controls, with the action enums
 //!   they bind: [`MENU_KEYS`], [`CONFIRM_KEYS`] and [`ChoiceKey`] for
-//!   dialogs, [`PAGER_KEYS`], [`TEXT_INPUT_KEYS`], [`CHECKLIST_KEYS`], and
-//!   [`FORM_KEYS`] with [`FORM_OPTION_KEYS`].
+//!   dialogs, [`PAGER_KEYS`], [`TEXT_INPUT_KEYS`], [`CHECKLIST_KEYS`],
+//!   [`FORM_KEYS`] with [`FORM_OPTION_KEYS`], and [`LINE_EDIT_KEYS`], the
+//!   editing keys every text field shares.
 //!
 //! ```
 //! use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -81,11 +82,12 @@ mod standard;
 mod table;
 
 pub use footer::{Footer, HINT_SEPARATOR, Segment, footer, unavailable_style};
-pub use matcher::{KeyMatcher, alt, ch, ctrl, ctrl_key, key, key_label};
+pub use matcher::{KeyMatcher, alt, alt_key, ch, ctrl, ctrl_key, key, key_label};
 pub use role::{Convention, EnterMeans, KeyAction, KeyRole, SpaceMeans, ctrl_c_first};
 pub use standard::{
-    CHECKLIST_KEYS, CONFIRM_KEYS, ChecklistKey, ChoiceKey, ConfirmKey, FORM_KEYS, FORM_OPTION_KEYS,
-    FormKey, MENU_KEYS, MenuKey, PAGER_KEYS, PagerKey, TEXT_INPUT_KEYS, TextInputKey,
+    CHECKLIST_KEYS, CONFIRM_KEYS, ChecklistKey, ChoiceKey, ConfirmKey, EditKey, FORM_KEYS,
+    FORM_OPTION_KEYS, FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PagerKey,
+    TEXT_INPUT_KEYS, TextInputKey,
 };
 pub use table::{
     Hint, KeyRow, Rows, alias, include, loose_characters, mislabeled, resolve, rows, shown,

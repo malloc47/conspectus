@@ -1,8 +1,8 @@
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use tuikit::keys::{
     CHECKLIST_KEYS, CONFIRM_KEYS, ChecklistKey, ConfirmKey, FORM_KEYS, FORM_OPTION_KEYS,
-    HINT_SEPARATOR, MENU_KEYS, MenuKey, PAGER_KEYS, TEXT_INPUT_KEYS, ctrl_c_first, footer,
-    loose_characters, mislabeled, resolve, unresolved,
+    HINT_SEPARATOR, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, TEXT_INPUT_KEYS, ctrl_c_first,
+    footer, loose_characters, mislabeled, resolve, unresolved,
 };
 
 use super::*;
@@ -37,6 +37,7 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("CHECKLIST_KEYS", problems(CHECKLIST_KEYS)),
         ("FORM_KEYS", problems(FORM_KEYS)),
         ("FORM_OPTION_KEYS", problems(FORM_OPTION_KEYS)),
+        ("LINE_EDIT_KEYS", problems(LINE_EDIT_KEYS)),
         ("SEARCH_OPTION_KEYS", problems(SEARCH_OPTION_KEYS)),
         ("PICKER_KEYS", problems(PICKER_KEYS)),
         ("SEARCH_KEYS", problems(SEARCH_KEYS)),
@@ -58,9 +59,10 @@ fn registry() -> Vec<(&'static str, Problems)> {
 
 /// Tables that are a part of another table or of a field, not a whole
 /// overlay's, so they need not start with `Ctrl-C`: the form's option
-/// rows are included after `FORM_KEYS`, and the path field's one row is
-/// consulted by a form after the form's own table.
-const FRAGMENTS: &[&str] = &["FORM_OPTION_KEYS", "OMNIBOX_KEYS"];
+/// rows are included after `FORM_KEYS`, the path field's one row is
+/// consulted by a form after the form's own table, and the line editor's
+/// keys are every text field's, consulted after its overlay's table.
+const FRAGMENTS: &[&str] = &["FORM_OPTION_KEYS", "LINE_EDIT_KEYS", "OMNIBOX_KEYS"];
 
 #[test]
 fn every_advertised_key_resolves_to_what_its_footer_says() {

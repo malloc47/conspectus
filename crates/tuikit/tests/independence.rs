@@ -58,13 +58,13 @@ const GUARD_FILE: &str = "tests/independence.rs";
 /// Fewest manifests the manifest scan may visit.
 const MIN_MANIFESTS: usize = 1;
 /// Fewest files the vocabulary scan may visit. The manifest, the README,
-/// the pages under `docs`, the glyph script, 95 files under `src` (a golden
-/// among them), and five test files besides this one make 119 today; the
-/// minimum is a little under three quarters of that.
-const MIN_VOCABULARY_FILES: usize = 85;
-/// Fewest non-test Rust files the process and write scan may visit: 61
+/// the 18 pages under `docs`, the glyph script, 101 files under `src` (two
+/// goldens among them), and five test files besides this one make 127
+/// today; the minimum is a little under three quarters of that.
+const MIN_VOCABULARY_FILES: usize = 95;
+/// Fewest non-test Rust files the process and write scan may visit: 64
 /// under `src` today.
-const MIN_CAPABILITY_FILES: usize = 45;
+const MIN_CAPABILITY_FILES: usize = 48;
 
 /// A dependency the framework may declare, and why.
 struct Allowed {

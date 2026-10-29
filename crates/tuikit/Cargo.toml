@@ -15,6 +15,9 @@ ratatui = { workspace = true }
 # Cell widths for the glyph checks. Already shared through
 # `[workspace.dependencies]` and in ratatui's own tree; ADR 0152 names it.
 unicode-width = { workspace = true }
+# The one line-edit engine, behind `text_edit::LineEdit`. Already shared
+# through `[workspace.dependencies]`; ADR 0152 names it.
+tui-input = { workspace = true }
 
 [features]
 # The test kit (`tuikit::testkit`): key scripts, the one-frame driver,

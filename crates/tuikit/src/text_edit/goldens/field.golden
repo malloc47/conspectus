@@ -1,0 +1,19 @@
+frame 24x6
+text  |< bcdefghijklmnopqrstu >|
+style |aabbbbbbbbbbbbbbbbbbbcaa|
+text  |  idle value            |
+style |  dddddddddddddddddddd  |
+text  |  -                     |
+style |  cbbbbbbbbbbbbbbbbbbb  |
+text  |/京タワーと富士山の写真 |
+style |e                      c|
+text  |/東京タワーと富士山の写 |
+style |e      c                |
+text  |  a🙂b                  |
+style |  bc bbbbbbbbbbbbbbbbb  |
+legend
+  a  fg Cyan, bg DarkGray, bold
+  b  fg White, bg DarkGray
+  c  fg Black, bg White
+  d  fg Gray
+  e  fg Cyan

@@ -11,7 +11,7 @@
 
 use ratatui::crossterm::event::KeyCode;
 
-use super::matcher::{alt, ch, ctrl, key};
+use super::matcher::{alt, alt_key, ch, ctrl, ctrl_key, key};
 use super::role::{KeyAction, KeyRole};
 use super::table::{KeyRow, alias, shown};
 use crate::glyphs::marks;
@@ -216,6 +216,103 @@ impl KeyAction for TextInputKey {
             Self::Cancel => KeyRole::Leave,
             Self::Tab => KeyRole::Other,
             Self::WordLeft | Self::WordRight => KeyRole::Move,
+        }
+    }
+}
+
+/// What an editing key does in a text field. [`LINE_EDIT_KEYS`] binds
+/// every variant but [`Insert`](Self::Insert), which is the character a key
+/// types; the line editor
+/// ([`LineEdit`](crate::text_edit::LineEdit)) applies them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EditKey {
+    /// Type a character at the cursor.
+    Insert(char),
+    /// Move one character (one grapheme) left.
+    Left,
+    /// Move one character right.
+    Right,
+    /// Move to the start of the word before the cursor.
+    WordLeft,
+    /// Move to the start of the word after the cursor, or to the end.
+    WordRight,
+    /// Move to the start of the line.
+    Home,
+    /// Move to the end of the line.
+    End,
+    /// Delete the character before the cursor.
+    DeleteBefore,
+    /// Delete the character under the cursor.
+    DeleteAfter,
+    /// Delete back to the start of the word before the cursor.
+    DeleteWordBefore,
+    /// Delete forward to the start of the next word.
+    DeleteWordAfter,
+    /// Delete the whole line.
+    DeleteLine,
+    /// Delete from the cursor to the end of the line.
+    DeleteToEnd,
+    /// Type what the last deletion of a word, the rest of the line, or
+    /// the line removed.
+    Yank,
+}
+
+/// The editing keys of every text field: readline's keys, with word
+/// motion on both the Alt letters and the Control and Alt arrows.
+///
+/// A terminal sends Alt as an Esc prefix, which arrives as the Alt
+/// modifier, so `Alt-b`, `Alt-f`, `Alt-d`, and `Alt-Backspace` are bound
+/// to Alt here (the edit engine underneath binds them to Meta, which a
+/// terminal does not report). Chords come before the plain keys they
+/// share a code with, because a key that is not a character matches with
+/// any modifiers: a stray Shift on `←` still moves. Every row is an
+/// alias: a field's footer names the keys of its host (`Enter`, `Esc`),
+/// not the editing keys every field shares. `Enter`, `Esc`, and `Tab`
+/// are not here; what they mean is the host's.
+pub const LINE_EDIT_KEYS: &[KeyRow<EditKey>] = &[
+    alias(ctrl_key(KeyCode::Left), EditKey::WordLeft),
+    alias(alt_key(KeyCode::Left), EditKey::WordLeft),
+    alias(alt('b'), EditKey::WordLeft),
+    alias(ctrl_key(KeyCode::Right), EditKey::WordRight),
+    alias(alt_key(KeyCode::Right), EditKey::WordRight),
+    alias(alt('f'), EditKey::WordRight),
+    alias(key(KeyCode::Left), EditKey::Left),
+    alias(ctrl('b'), EditKey::Left),
+    alias(key(KeyCode::Right), EditKey::Right),
+    alias(ctrl('f'), EditKey::Right),
+    alias(key(KeyCode::Home), EditKey::Home),
+    alias(ctrl('a'), EditKey::Home),
+    alias(key(KeyCode::End), EditKey::End),
+    alias(ctrl('e'), EditKey::End),
+    alias(alt_key(KeyCode::Backspace), EditKey::DeleteWordBefore),
+    alias(key(KeyCode::Backspace), EditKey::DeleteBefore),
+    alias(ctrl('h'), EditKey::DeleteBefore),
+    alias(ctrl_key(KeyCode::Delete), EditKey::DeleteWordAfter),
+    alias(key(KeyCode::Delete), EditKey::DeleteAfter),
+    alias(ctrl('w'), EditKey::DeleteWordBefore),
+    alias(alt('d'), EditKey::DeleteWordAfter),
+    alias(ctrl('u'), EditKey::DeleteLine),
+    alias(ctrl('k'), EditKey::DeleteToEnd),
+    alias(ctrl('y'), EditKey::Yank),
+];
+
+impl KeyAction for EditKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Left
+            | Self::Right
+            | Self::WordLeft
+            | Self::WordRight
+            | Self::Home
+            | Self::End => KeyRole::Move,
+            Self::Insert(_)
+            | Self::DeleteBefore
+            | Self::DeleteAfter
+            | Self::DeleteWordBefore
+            | Self::DeleteWordAfter
+            | Self::DeleteLine
+            | Self::DeleteToEnd
+            | Self::Yank => KeyRole::Other,
         }
     }
 }

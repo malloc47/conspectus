@@ -74,6 +74,8 @@ pub use cut::{clip, clip_start, fit, fit_spans, pad, pad_start, truncate_end, tr
 pub use escape::strip_ansi;
 pub use find::{FindAll, find_all_ci, find_ci, paint};
 pub use measure::{spans_width, width};
+// The text field windows a line by the same graphemes every cut uses.
+pub(crate) use measure::{Cluster, clusters};
 pub use snippet::{Snippet, fit_snippet};
 pub use wrap::{wrap, wrap_at, wrap_chars, wrap_line, wrap_line_chars};
 

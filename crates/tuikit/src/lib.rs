@@ -26,6 +26,7 @@ pub mod overlay;
 pub mod scroll;
 pub mod selection;
 pub mod text;
+pub mod text_edit;
 pub mod theme;
 
 // The test kit is off in production builds: a host turns on the `testkit`
