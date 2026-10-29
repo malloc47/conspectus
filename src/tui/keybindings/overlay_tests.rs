@@ -1,9 +1,10 @@
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use tuikit::keys::{
-    CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, FORM_KEYS, FORM_OPTION_KEYS,
-    HINT_SEPARATOR, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PALETTE_KEYS,
-    PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, PaletteKey, PaletteOptionKey, SETTINGS_KEYS, SettingsKey,
-    TEXT_INPUT_KEYS, ctrl_c_first, footer, loose_characters, mislabeled, resolve, unresolved,
+    CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, FIND_KEYS, FORM_KEYS, FORM_OPTION_KEYS,
+    HINT_SEPARATOR, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_HELP_KEYS, PAGER_KEYS,
+    PAGER_SCROLL_KEYS, PALETTE_KEYS, PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, PaletteKey,
+    PaletteOptionKey, READER_KEYS, SETTINGS_KEYS, SettingsKey, TEXT_INPUT_KEYS, ctrl_c_first,
+    footer, loose_characters, mislabeled, resolve, unresolved,
 };
 
 use super::*;
@@ -34,6 +35,10 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("MENU_KEYS", problems(MENU_KEYS)),
         ("DIALOG_KEYS", problems(DIALOG_KEYS)),
         ("PAGER_KEYS", problems(PAGER_KEYS)),
+        ("PAGER_SCROLL_KEYS", problems(PAGER_SCROLL_KEYS)),
+        ("READER_KEYS", problems(READER_KEYS)),
+        ("PAGER_HELP_KEYS", problems(PAGER_HELP_KEYS)),
+        ("FIND_KEYS", problems(FIND_KEYS)),
         ("TEXT_INPUT_KEYS", problems(TEXT_INPUT_KEYS)),
         ("CHECKLIST_KEYS", problems(CHECKLIST_KEYS)),
         ("SETTINGS_KEYS", problems(SETTINGS_KEYS)),
@@ -59,10 +64,17 @@ fn registry() -> Vec<(&'static str, Problems)> {
 
 /// Tables that are a part of another table or of a field, not a whole
 /// overlay's, so they need not start with `Ctrl-C`: the form's option
-/// rows are included after `FORM_KEYS`, the path field's one row is
-/// consulted by a form after the form's own table, and the line editor's
-/// keys are every text field's, consulted after its overlay's table.
-const FRAGMENTS: &[&str] = &["FORM_OPTION_KEYS", "LINE_EDIT_KEYS", "PATH_FIELD_KEYS"];
+/// rows are included after `FORM_KEYS`, the pager's scroll rows after
+/// `PAGER_KEYS` and `PAGER_HELP_KEYS` start with it, the path field's one
+/// row is consulted by a form after the form's own table, and the line
+/// editor's keys are every text field's, consulted after its overlay's
+/// table.
+const FRAGMENTS: &[&str] = &[
+    "FORM_OPTION_KEYS",
+    "PAGER_SCROLL_KEYS",
+    "LINE_EDIT_KEYS",
+    "PATH_FIELD_KEYS",
+];
 
 #[test]
 fn every_advertised_key_resolves_to_what_its_footer_says() {

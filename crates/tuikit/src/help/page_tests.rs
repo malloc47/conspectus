@@ -372,6 +372,8 @@ fn the_standard_pager_keys_scroll_and_leave_the_rest_to_the_control() {
         (PagerKey::Down, 1),
         (PagerKey::PageDown, 11),
         (PagerKey::Up, 10),
+        (PagerKey::HalfPageDown, 15),
+        (PagerKey::HalfPageUp, 10),
         (PagerKey::PageUp, 0),
         (PagerKey::Bottom, usize::MAX),
         (PagerKey::Top, 0),
@@ -379,7 +381,15 @@ fn the_standard_pager_keys_scroll_and_leave_the_rest_to_the_control() {
         assert!(scroll.apply(key), "{key:?}");
         assert_eq!(scroll.offset(), offset, "{key:?}");
     }
-    for key in [PagerKey::Abort, PagerKey::Close, PagerKey::Copy] {
+    for key in [
+        PagerKey::Abort,
+        PagerKey::Close,
+        PagerKey::Find,
+        PagerKey::FindNext,
+        PagerKey::FindPrev,
+        PagerKey::Help,
+        PagerKey::Copy,
+    ] {
         assert!(!scroll.apply(key), "{key:?}");
         assert_eq!(scroll.offset(), 0);
     }

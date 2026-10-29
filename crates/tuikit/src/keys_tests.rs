@@ -463,6 +463,21 @@ fn the_standard_tables_keep_the_rules() {
         Convention::new("pager", Nothing, Pages, ""),
     );
     check(
+        "reader",
+        READER_KEYS,
+        Convention::new("reader", Nothing, Pages, ""),
+    );
+    check(
+        "pager help",
+        PAGER_HELP_KEYS,
+        Convention::new("pager help", Nothing, Pages, ""),
+    );
+    check(
+        "find",
+        FIND_KEYS,
+        Convention::new("find", Submits, Types, ""),
+    );
+    check(
         "text",
         TEXT_INPUT_KEYS,
         Convention::new("text", Submits, Types, ""),
@@ -506,7 +521,11 @@ fn q_dismisses_where_nothing_is_typed() {
     assert_eq!(resolve(DIALOG_KEYS, q), Some(DialogKey::Abort));
     assert_eq!(resolve(CHECKLIST_KEYS, q), Some(ChecklistKey::Abort));
     assert_eq!(resolve(SETTINGS_KEYS, q), Some(SettingsKey::Abort));
-    assert_eq!(resolve(PAGER_KEYS, q), Some(PagerKey::Close));
+    assert_eq!(resolve(PAGER_KEYS, q), Some(PagerKey::Abort));
+    assert_eq!(resolve(READER_KEYS, q), Some(PagerKey::Abort));
+    assert_eq!(resolve(PAGER_HELP_KEYS, q), Some(PagerKey::Abort));
+    // A find prompt types `q`.
+    assert_eq!(resolve(FIND_KEYS, q), None);
     assert_eq!(resolve(TEXT_INPUT_KEYS, q), None);
     assert_eq!(resolve(FORM_KEYS, q), None);
     assert_eq!(resolve(FORM_OPTION_KEYS, q), None);
@@ -538,6 +557,16 @@ fn the_standard_footers_read_in_the_one_grammar() {
         footer(PAGER_KEYS),
         ["j/k/PgDn/PgUp scroll", "Esc/q close"].join(sep)
     );
+    assert_eq!(footer(PAGER_SCROLL_KEYS), "j/k/PgDn/PgUp scroll");
+    assert_eq!(
+        footer(READER_KEYS),
+        ["j/k/PgDn/PgUp scroll", "Esc/q close", "/ find", "? help"].join(sep)
+    );
+    assert_eq!(
+        footer(PAGER_HELP_KEYS),
+        ["j/k/PgDn/PgUp scroll", "Esc/? back", "q close"].join(sep)
+    );
+    assert_eq!(footer(FIND_KEYS), ["Enter find", "Esc cancel"].join(sep));
     assert_eq!(
         footer(TEXT_INPUT_KEYS),
         ["Enter confirm", "Esc cancel"].join(sep)
@@ -643,5 +672,49 @@ fn a_pager_goes_to_its_ends_on_plain_g_and_shift_g_only() {
     assert_eq!(
         resolve(PAGER_KEYS, press(KeyCode::End)),
         Some(PagerKey::Bottom)
+    );
+}
+
+#[test]
+fn a_pager_pages_by_half_on_ctrl_d_and_ctrl_u() {
+    // House rule 12: every pager has the half-page chords, as aliases.
+    let ctrl_d = chord(KeyModifiers::CONTROL, KeyCode::Char('d'));
+    let ctrl_u = chord(KeyModifiers::CONTROL, KeyCode::Char('u'));
+    for table in [PAGER_KEYS, READER_KEYS, PAGER_HELP_KEYS] {
+        assert_eq!(resolve(table, ctrl_d), Some(PagerKey::HalfPageDown));
+        assert_eq!(resolve(table, ctrl_u), Some(PagerKey::HalfPageUp));
+    }
+    // `d` and `u` alone are not the chords.
+    assert_eq!(resolve(PAGER_KEYS, press(KeyCode::Char('d'))), None);
+    assert_eq!(resolve(PAGER_KEYS, press(KeyCode::Char('u'))), None);
+}
+
+#[test]
+fn a_readers_esc_steps_back_and_q_dismisses() {
+    let esc = press(KeyCode::Esc);
+    assert_eq!(resolve(READER_KEYS, esc), Some(PagerKey::Close));
+    assert_eq!(resolve(PAGER_HELP_KEYS, esc), Some(PagerKey::Close));
+    assert_eq!(
+        resolve(READER_KEYS, press(KeyCode::Char('?'))),
+        Some(PagerKey::Help)
+    );
+    assert_eq!(
+        resolve(PAGER_HELP_KEYS, press(KeyCode::Char('?'))),
+        Some(PagerKey::Help)
+    );
+    assert_eq!(
+        resolve(READER_KEYS, press(KeyCode::Char('/'))),
+        Some(PagerKey::Find)
+    );
+    assert_eq!(
+        resolve(READER_KEYS, chord(KeyModifiers::SHIFT, KeyCode::Char('N'))),
+        Some(PagerKey::FindPrev)
+    );
+    // The help page does not find: `/` and `n` do nothing there.
+    assert_eq!(resolve(PAGER_HELP_KEYS, press(KeyCode::Char('/'))), None);
+    assert_eq!(resolve(PAGER_HELP_KEYS, press(KeyCode::Char('n'))), None);
+    assert_eq!(
+        resolve(FIND_KEYS, chord(KeyModifiers::CONTROL, KeyCode::Char('c'))),
+        Some(FindKey::Abort)
     );
 }

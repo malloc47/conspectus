@@ -223,6 +223,8 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
             PagerKey::Up => ViewerMsg::ScrollUp,
             PagerKey::PageDown => ViewerMsg::PageDown,
             PagerKey::PageUp => ViewerMsg::PageUp,
+            PagerKey::HalfPageDown => ViewerMsg::HalfPageDown,
+            PagerKey::HalfPageUp => ViewerMsg::HalfPageUp,
             PagerKey::Top => ViewerMsg::JumpToStart,
             PagerKey::Bottom => ViewerMsg::JumpToEnd,
             // `?` toggles the viewer's help; the rest close it.
@@ -231,6 +233,9 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
             PagerKey::Abort | PagerKey::Close if code == KeyCode::Esc => ViewerMsg::Close,
             PagerKey::Abort | PagerKey::Close => ViewerMsg::Quit,
             PagerKey::Copy => continue,
+            PagerKey::Find | PagerKey::FindNext | PagerKey::FindPrev | PagerKey::Help => {
+                unreachable!("the help table binds no find and no help")
+            }
         };
         expect(event, viewer);
     }

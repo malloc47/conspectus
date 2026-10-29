@@ -118,6 +118,14 @@ impl ValueModalState {
                 self.scroll_by(-i32::from(self.page_rows.max(1)));
                 ValueModalOutcome::Continue
             }
+            Some(PagerKey::HalfPageDown) => {
+                self.scroll_by(i32::from((self.page_rows / 2).max(1)));
+                ValueModalOutcome::Continue
+            }
+            Some(PagerKey::HalfPageUp) => {
+                self.scroll_by(-i32::from((self.page_rows / 2).max(1)));
+                ValueModalOutcome::Continue
+            }
             Some(PagerKey::Top) => {
                 self.scroll = 0;
                 ValueModalOutcome::Continue
@@ -126,7 +134,9 @@ impl ValueModalState {
                 self.scroll = u16::MAX;
                 ValueModalOutcome::Continue
             }
-            None => ValueModalOutcome::Continue,
+            // The value modal's table binds no find and no help page.
+            Some(PagerKey::Find | PagerKey::FindNext | PagerKey::FindPrev | PagerKey::Help)
+            | None => ValueModalOutcome::Continue,
         }
     }
 

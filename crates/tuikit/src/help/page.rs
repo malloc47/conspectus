@@ -454,17 +454,25 @@ impl HelpScroll {
     }
 
     /// Does what a standard pager key asks: the scroll keys move the page
-    /// and return `true`; the keys that leave or copy are the control's
-    /// and return `false`.
+    /// and return `true`; the keys that leave, find, open help, or copy
+    /// are the control's and return `false`.
     pub fn apply(&mut self, key: PagerKey) -> bool {
         match key {
             PagerKey::Down => self.down(1),
             PagerKey::Up => self.up(1),
             PagerKey::PageDown => self.page_down(),
             PagerKey::PageUp => self.page_up(),
+            PagerKey::HalfPageDown => self.half_page_down(),
+            PagerKey::HalfPageUp => self.half_page_up(),
             PagerKey::Top => self.to_top(),
             PagerKey::Bottom => self.to_bottom(),
-            PagerKey::Abort | PagerKey::Close | PagerKey::Copy => return false,
+            PagerKey::Abort
+            | PagerKey::Close
+            | PagerKey::Find
+            | PagerKey::FindNext
+            | PagerKey::FindPrev
+            | PagerKey::Help
+            | PagerKey::Copy => return false,
         }
         true
     }

@@ -3,7 +3,11 @@
 //! palette, settings panel, and form takes the same keys.
 //!
 //! Each table starts with `Ctrl-C`, bound to its `Abort` action, and a
-//! table where nothing is typed binds `q` to it as well (house rule 4). Lists
+//! table where nothing is typed binds `q` to it as well (house rule 4);
+//! the parts of a table that another includes or consults after its own
+//! (the pager's scroll rows, a form's option rows, the editing keys, the
+//! path field's key) are the exceptions, since the whole table they are
+//! part of starts with `Ctrl-C`. Lists
 //! move with the arrows, `Ctrl-P` and `Ctrl-N`, and `k` and `j` where
 //! nothing is typed; characters are bound as typed (see
 //! [`KeyMatcher`](super::KeyMatcher)). A host table builds on one with
@@ -13,7 +17,7 @@ use ratatui::crossterm::event::KeyCode;
 
 use super::matcher::{alt, alt_key, ch, ctrl, ctrl_key, key};
 use super::role::{KeyAction, KeyRole};
-use super::table::{KeyRow, alias, shown};
+use super::table::{KeyRow, alias, include, shown};
 use crate::glyphs::marks;
 
 /// What a menu's keys do.
@@ -102,34 +106,51 @@ impl KeyAction for DialogKey {
     }
 }
 
-/// What a pager's keys do.
+/// What a pager's keys do: every reader's, the
+/// `Pager` control's and a help page's alike.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PagerKey {
-    /// Dismiss the pager (`Ctrl-C`).
+    /// Dismiss the pager at once, from any level of it (`Ctrl-C`, `q`).
     Abort,
-    /// Leave the pager.
+    /// Step back one level: close the help page, then clear the find,
+    /// then leave (`Esc`).
     Close,
     /// Scroll down a row.
     Down,
     /// Scroll up a row.
     Up,
-    /// Scroll down a page.
+    /// Scroll down a page: the rows the pager shows.
     PageDown,
     /// Scroll up a page.
     PageUp,
+    /// Scroll down half a page.
+    HalfPageDown,
+    /// Scroll up half a page.
+    HalfPageUp,
     /// Go to the first row.
     Top,
-    /// Go to the last row.
+    /// Go to the last row, and stay at the end as the content grows.
     Bottom,
+    /// Open the find prompt (a pager whose table binds it).
+    Find,
+    /// Go to the next match of the active find.
+    FindNext,
+    /// Go to the previous match of the active find.
+    FindPrev,
+    /// Show or hide the pager's help page (a pager whose table binds it).
+    Help,
     /// Copy the content (a pager whose table binds it).
     Copy,
 }
 
-/// A pager: `j/k/PgDn/PgUp scroll · Esc/q close`, with `Space` paging
-/// down, `g`/`Home` and `G`/`End` going to the ends, and the arrows
-/// scrolling. A pager opened by a key adds that key as another close.
-pub const PAGER_KEYS: &[KeyRow<PagerKey>] = &[
-    alias(ctrl('c'), PagerKey::Abort),
+/// Scrolling a pager: `j/k/PgDn/PgUp scroll`, with the arrows scrolling,
+/// `Space` paging down, `Ctrl-D`/`Ctrl-U` half a page, and `g`/`Home`
+/// and `G`/`End` going to the ends.
+///
+/// A part of a pager's table, not a whole one, so it does not start with
+/// `Ctrl-C`: [`PAGER_KEYS`] and [`PAGER_HELP_KEYS`] include it after
+/// their `Ctrl-C` row, and add the keys that leave their level.
+pub const PAGER_SCROLL_KEYS: &[KeyRow<PagerKey>] = &[
     shown(ch('j'), PagerKey::Down, "j", "scroll"),
     alias(key(KeyCode::Down), PagerKey::Down),
     shown(ch('k'), PagerKey::Up, "k", "scroll"),
@@ -137,12 +158,49 @@ pub const PAGER_KEYS: &[KeyRow<PagerKey>] = &[
     shown(key(KeyCode::PageDown), PagerKey::PageDown, "PgDn", "scroll"),
     alias(ch(' '), PagerKey::PageDown),
     shown(key(KeyCode::PageUp), PagerKey::PageUp, "PgUp", "scroll"),
+    alias(ctrl('d'), PagerKey::HalfPageDown),
+    alias(ctrl('u'), PagerKey::HalfPageUp),
     alias(ch('g'), PagerKey::Top),
     alias(key(KeyCode::Home), PagerKey::Top),
     alias(ch('G'), PagerKey::Bottom),
     alias(key(KeyCode::End), PagerKey::Bottom),
+];
+
+/// A pager: `j/k/PgDn/PgUp scroll · Esc/q close`, the scrolling of
+/// [`PAGER_SCROLL_KEYS`] and the keys that leave. `Esc` steps back
+/// ([`Close`](PagerKey::Close)) and `q`, like `Ctrl-C`, dismisses
+/// ([`Abort`](PagerKey::Abort)): nothing is typed in a pager. A pager
+/// opened by a key adds that key as another close.
+pub const PAGER_KEYS: &[KeyRow<PagerKey>] = &[
+    alias(ctrl('c'), PagerKey::Abort),
+    include(PAGER_SCROLL_KEYS),
     shown(key(KeyCode::Esc), PagerKey::Close, "Esc", "close"),
-    shown(ch('q'), PagerKey::Close, "q", "close"),
+    shown(ch('q'), PagerKey::Abort, "q", "close"),
+];
+
+/// A reader: a pager with a find and a help page, the default table of
+/// the `Pager` control. [`PAGER_KEYS`], then `/`
+/// to find, `n` and `N` to step between its matches (aliases), and `?`
+/// for the help page: `j/k/PgDn/PgUp scroll · Esc/q close · / find · ?
+/// help`.
+pub const READER_KEYS: &[KeyRow<PagerKey>] = &[
+    include(PAGER_KEYS),
+    shown(ch('/'), PagerKey::Find, "/", "find"),
+    alias(ch('n'), PagerKey::FindNext),
+    alias(ch('N'), PagerKey::FindPrev),
+    shown(ch('?'), PagerKey::Help, "?", "help"),
+];
+
+/// A pager's help page, a level of the pager: the scrolling of
+/// [`PAGER_SCROLL_KEYS`] moves the page, `Esc` and `?` go back to the
+/// pager, and `q` and `Ctrl-C` leave the pager at once: `j/k/PgDn/PgUp
+/// scroll · Esc/? back · q close`.
+pub const PAGER_HELP_KEYS: &[KeyRow<PagerKey>] = &[
+    alias(ctrl('c'), PagerKey::Abort),
+    include(PAGER_SCROLL_KEYS),
+    shown(key(KeyCode::Esc), PagerKey::Close, "Esc", "back"),
+    shown(ch('?'), PagerKey::Help, "?", "back"),
+    shown(ch('q'), PagerKey::Abort, "q", "close"),
 ];
 
 impl KeyAction for PagerKey {
@@ -151,8 +209,41 @@ impl KeyAction for PagerKey {
             Self::Abort => KeyRole::Abort,
             Self::Close => KeyRole::Leave,
             Self::Down | Self::Up | Self::Top | Self::Bottom => KeyRole::Move,
-            Self::PageDown | Self::PageUp => KeyRole::Page,
-            Self::Copy => KeyRole::Other,
+            Self::PageDown | Self::PageUp | Self::HalfPageDown | Self::HalfPageUp => KeyRole::Page,
+            Self::Find | Self::FindNext | Self::FindPrev | Self::Help | Self::Copy => {
+                KeyRole::Other
+            }
+        }
+    }
+}
+
+/// What the keys of a pager's find prompt do. Keys no row binds edit the
+/// query ([`LINE_EDIT_KEYS`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FindKey {
+    /// Dismiss the pager the prompt is in (`Ctrl-C`): `q` types.
+    Abort,
+    /// Run the find and go to its first match.
+    Confirm,
+    /// Leave the prompt, keeping the find that was active.
+    Cancel,
+}
+
+/// A pager's find prompt: `Enter find · Esc cancel`. Every other key
+/// edits the query, so `q`, `n`, and `/` type; `Ctrl-C` leaves the
+/// pager.
+pub const FIND_KEYS: &[KeyRow<FindKey>] = &[
+    alias(ctrl('c'), FindKey::Abort),
+    shown(key(KeyCode::Enter), FindKey::Confirm, "Enter", "find"),
+    shown(key(KeyCode::Esc), FindKey::Cancel, "Esc", "cancel"),
+];
+
+impl KeyAction for FindKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Abort => KeyRole::Abort,
+            Self::Confirm => KeyRole::Apply,
+            Self::Cancel => KeyRole::Leave,
         }
     }
 }

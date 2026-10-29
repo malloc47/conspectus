@@ -35,7 +35,10 @@
 //!   runs them over every table it has.
 //! - **Standard tables** for the standard controls, with the action enums
 //!   they bind: [`MENU_KEYS`], [`DIALOG_KEYS`] for every dialog (a
-//!   choice's verbs are the dialog's own keys), [`PAGER_KEYS`],
+//!   choice's verbs are the dialog's own keys), [`PAGER_KEYS`] (its
+//!   scrolling rows are [`PAGER_SCROLL_KEYS`]) with [`READER_KEYS`] for a
+//!   pager that finds and has a help page, [`PAGER_HELP_KEYS`] for that
+//!   help page, and [`FIND_KEYS`] for its find prompt,
 //!   [`TEXT_INPUT_KEYS`], [`CHECKLIST_KEYS`], [`PALETTE_KEYS`] with
 //!   [`PALETTE_OPTION_KEYS`] for a palette's options pane,
 //!   [`SETTINGS_KEYS`] for a settings panel,
@@ -89,9 +92,10 @@ pub use footer::{Footer, HINT_SEPARATOR, Segment, footer, unavailable_style};
 pub use matcher::{KeyMatcher, alt, alt_key, ch, ctrl, ctrl_key, key, key_label};
 pub use role::{Convention, EnterMeans, KeyAction, KeyRole, SpaceMeans, ctrl_c_first};
 pub use standard::{
-    CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, EditKey, FORM_KEYS, FORM_OPTION_KEYS,
-    FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PALETTE_KEYS, PALETTE_OPTION_KEYS,
-    PATH_FIELD_KEYS, PagerKey, PaletteKey, PaletteOptionKey, PathKey, SETTINGS_KEYS, SettingsKey,
+    CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, EditKey, FIND_KEYS, FORM_KEYS,
+    FORM_OPTION_KEYS, FindKey, FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_HELP_KEYS,
+    PAGER_KEYS, PAGER_SCROLL_KEYS, PALETTE_KEYS, PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, PagerKey,
+    PaletteKey, PaletteOptionKey, PathKey, READER_KEYS, SETTINGS_KEYS, SettingsKey,
     TEXT_INPUT_KEYS, TextInputKey,
 };
 pub use table::{
