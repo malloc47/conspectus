@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use ratatui::text::Line;
 
-use crate::text::wrap_line;
+use crate::text::{fit_spans, wrap_line};
 
 /// Lines wrapped to a width, with the rows each line took.
 ///
@@ -29,12 +29,42 @@ impl WrappedRows {
     /// [wrapping rules](crate::text#wrapping-rules), with no hanging
     /// indent. A width of 0 is treated as 1.
     pub fn new(lines: &[Line<'_>], width: usize) -> Self {
+        Self::hanging(lines, width, 0)
+    }
+
+    /// `lines` wrapped to `width` cells with a hanging indent: every row
+    /// after a line's first starts `indent` cells in, under a gutter the
+    /// line's first row draws (a line number).
+    pub fn hanging(lines: &[Line<'_>], width: usize, indent: usize) -> Self {
         let mut rows = Vec::with_capacity(lines.len());
         let mut ends = Vec::with_capacity(lines.len());
         for line in lines {
-            rows.extend(wrap_line(line, width.max(1), 0));
+            rows.extend(wrap_line(line, width.max(1), indent));
             ends.push(rows.len());
         }
+        Self { rows, ends }
+    }
+
+    /// `lines` one row each, cut to `width` cells with the ellipsis mark
+    /// where they are longer: for a reader that shows lines as they are
+    /// instead of wrapping them.
+    pub fn cut(lines: &[Line<'_>], width: usize) -> Self {
+        let rows: Vec<Line<'static>> = lines
+            .iter()
+            .map(|line| {
+                let spans = line
+                    .spans
+                    .iter()
+                    .map(|span| ratatui::text::Span::styled(span.content.to_string(), span.style))
+                    .collect();
+                Line {
+                    spans: fit_spans(spans, width),
+                    style: line.style,
+                    alignment: line.alignment,
+                }
+            })
+            .collect();
+        let ends = (1..=rows.len()).collect();
         Self { rows, ends }
     }
 
@@ -79,6 +109,12 @@ impl WrappedRows {
             .copied()
             .unwrap_or(0);
         start..end
+    }
+
+    /// The line row `row` belongs to, or `None` past the last row.
+    pub fn line_of(&self, row: usize) -> Option<usize> {
+        let line = self.ends.partition_point(|&end| end <= row);
+        (line < self.ends.len()).then_some(line)
     }
 
     /// The rows, top to bottom.

@@ -171,3 +171,46 @@ fn the_rows_draw_what_a_wrapping_paragraph_draws() {
         );
     }
 }
+
+#[test]
+fn a_hanging_indent_starts_every_row_after_a_lines_first() {
+    let lines = [Line::from(vec![
+        Span::raw("  1 "),
+        Span::raw("one two three four"),
+    ])];
+    let rows = WrappedRows::hanging(&lines, 12, 4);
+    assert_eq!(texts(&rows), ["  1 one two ", "    three ", "    four"]);
+    assert_eq!(rows.rows_of(0), 0..3);
+}
+
+#[test]
+fn cut_rows_keep_one_row_per_line_and_mark_the_cut() {
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let lines = [
+        Line::from(vec![
+            Span::styled("  1 ", bold),
+            Span::raw("a line too long"),
+        ]),
+        Line::from("fits"),
+    ];
+    let rows = WrappedRows::cut(&lines, 10);
+    assert_eq!(texts(&rows), ["  1 a lin…", "fits"]);
+    assert_eq!(
+        rows.rows()[0].spans[0].style,
+        bold,
+        "the spans keep their styles"
+    );
+    assert_eq!(rows.rows_of(1), 1..2);
+}
+
+#[test]
+fn each_row_knows_its_line() {
+    let lines = [
+        Line::from("one two three"),
+        Line::from(""),
+        Line::from("four"),
+    ];
+    let rows = WrappedRows::new(&lines, 8);
+    let owners: Vec<Option<usize>> = (0..rows.len() + 1).map(|row| rows.line_of(row)).collect();
+    assert_eq!(owners, [Some(0), Some(0), Some(1), Some(2), None]);
+}
