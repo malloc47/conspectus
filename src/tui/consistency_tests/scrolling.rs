@@ -16,7 +16,7 @@ use super::layout::{app_with, builders, framed_and_bare, modal_rect};
 use super::*;
 use crate::tui::keymap::Action;
 use crate::tui::messages::{LogEntry, LogEntryExt};
-use crate::tui::widgets::value_modal::ValueModalState;
+use crate::tui::widgets::value_modal::ValueText;
 use tuikit::testkit::keys::typed_key;
 
 /// The sizes every check runs at: a common terminal and a small one.
@@ -141,7 +141,7 @@ fn describe(what: &str, (width, height): (u16, u16)) -> String {
 
 fn value_modal_app(value: &str) -> App {
     let mut app = app_in(View::Pinned);
-    app.open_value_modal(ValueModalState::new("detail", value));
+    app.open_value_modal(ValueText::new("detail", value));
     app
 }
 

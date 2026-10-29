@@ -1510,8 +1510,8 @@ fn o_opens_a_truncated_field_past_the_core_rows_when_the_node_detail_is_expanded
     app.open_value_modal_for_cursor();
 
     let modal = app.value_modal().expect("o opens the full-value modal");
-    assert_eq!(modal.label, "last_message_preview");
-    assert_eq!(modal.value, LONG_PREVIEW);
+    assert_eq!(modal.content().label, "last_message_preview");
+    assert_eq!(modal.content().value, LONG_PREVIEW);
 }
 
 #[test]
@@ -1605,8 +1605,8 @@ fn o_inspects_the_field_under_the_cursor_with_the_node_detail_collapsed_and_expa
                 let modal = app
                     .value_modal()
                     .unwrap_or_else(|| panic!("o opens {} (expanded: {expanded})", field.label));
-                assert_eq!(modal.label, field.label);
-                assert_eq!(&modal.value, full);
+                assert_eq!(modal.content().label, field.label);
+                assert_eq!(&modal.content().value, full);
                 app.close_value_modal();
             } else {
                 assert!(
@@ -1627,8 +1627,9 @@ fn o_inspects_the_field_under_the_cursor_with_the_node_detail_collapsed_and_expa
 fn value_modal_close_clears_state() {
     let mut app = app_for_explorer();
     // Simulate an opened modal — exercise the close path.
-    app.modal_stack.push(crate::tui::Modal::ValueModal(
-        crate::tui::widgets::value_modal::ValueModalState::new("command", "long".to_string()),
+    app.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
+        "command",
+        "long".to_string(),
     ));
     assert!(app.value_modal().is_some());
     app.close_value_modal();
@@ -2166,10 +2167,9 @@ mod modal_stack {
     }
 
     // Rename, search, value_modal on the
-    // same stack. ValueModal implements the Overlay trait
-    // (its Continue/Close outcomes map cleanly to
-    // Consumed/Close); rename and search stay with their
-    // specialized dispatchers.
+    // same stack. ValueModal is the framework's pager, which
+    // implements the Overlay trait for any context; rename and
+    // search stay with their specialized dispatchers.
     /// A rename prompt whose confirm does nothing, for stack tests.
     fn staying_prompt() -> tuikit::text_prompt::TextPrompt<Msg> {
         tuikit::text_prompt::TextPrompt::new("rename", "", |_: &str| {
@@ -2221,24 +2221,30 @@ mod modal_stack {
 
     #[test]
     fn value_modal_esc_key_returns_close_via_overlay_trait() {
-        use crate::tui::widgets::value_modal::ValueModalState;
+        use crate::tui::widgets::value_modal::{ValueText, open};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         use tuikit::overlay::{Outcome, Overlay};
         let app = App::new(RunConfig::defaults());
-        let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
+        let mut modal = open(ValueText::new("cwd", "/very/long/path".to_string()));
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert_eq!(state.handle(key, &app), Outcome::Close);
+        assert_eq!(
+            Overlay::<Msg, App>::handle(&mut modal, key, &app),
+            Outcome::Close
+        );
     }
 
     #[test]
     fn value_modal_scroll_key_returns_consumed_via_overlay_trait() {
-        use crate::tui::widgets::value_modal::ValueModalState;
+        use crate::tui::widgets::value_modal::{ValueText, open};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         use tuikit::overlay::{Outcome, Overlay};
         let app = App::new(RunConfig::defaults());
-        let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
+        let mut modal = open(ValueText::new("cwd", "/very/long/path".to_string()));
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert_eq!(state.handle(key, &app), Outcome::Consumed);
+        assert_eq!(
+            Overlay::<Msg, App>::handle(&mut modal, key, &app),
+            Outcome::Consumed
+        );
     }
 
     #[test]

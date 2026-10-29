@@ -8,9 +8,10 @@
 //! which clears what it covers, or fills the screen. The rename and step
 //! prompts, the new mux form, the row, mux, and worktree menus, the
 //! dialogs, Clean up, the Controls panel and its editors, the picker, the
-//! keymap help, and the pane viewer have no impl here: they are the
-//! framework's text prompt, form, action menu, dialog, checklist, settings
-//! panel, palette, and pager, which implement the trait for any context.
+//! keymap help, the value modal, and the pane viewer have no impl here:
+//! they are the framework's text prompt, form, action menu, dialog,
+//! checklist, settings panel, palette, and pager, which implement the
+//! trait for any context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
@@ -25,7 +26,6 @@ use crate::tui::widgets::{
     mux_launch::MuxLaunchForm,
     pin_edit::PinEditForm,
     search::SearchOverlayState,
-    value_modal::{ValueModalOutcome, ValueModalState, ValueModalWidget},
 };
 use crate::tui::{App, Msg};
 
@@ -93,30 +93,6 @@ impl Overlay<Msg, App> for SearchOverlayState {
 
     fn takes_text(&self) -> bool {
         self.options_cursor().is_none()
-    }
-}
-
-impl Overlay<Msg, App> for ValueModalState {
-    fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
-        use crate::tui::keybindings::overlay::VALUE_MODAL_KEYS;
-        use tuikit::keys::PagerKey;
-        // `y` copies; the clipboard write is the executor's.
-        if resolve(VALUE_MODAL_KEYS, key) == Some(PagerKey::Copy) {
-            let (text, what) = self.copy_payload();
-            return Outcome::Stay(Msg::Copy {
-                text: text.to_string(),
-                done: format!("Copied {what}"),
-            });
-        }
-        match self.handle_key(key) {
-            ValueModalOutcome::Continue => Outcome::Consumed,
-            ValueModalOutcome::Close => Outcome::Close,
-        }
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        let window = ValueModalWidget::new(self, app.theme()).draw(area, buf);
-        self.fit(window);
     }
 }
 

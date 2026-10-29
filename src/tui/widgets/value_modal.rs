@@ -1,50 +1,50 @@
-//! Full-value inspection modal.
+//! Full-value inspection modal: the framework's pager (`tuikit::pager`)
+//! over a long value, framed at a reader's size.
 //!
 //! Surfaces the untruncated text of a long detail-pane value (`cwd`,
-//! `command`, `url`, `last_message_preview`, …) in a centered modal
-//! so the operator can read or copy the full content without forcing
-//! it into the main right-panel layout. It is a reader, so it takes the
-//! help page's size and frame.
+//! `command`, `url`, `last_message_preview`, …) so the operator can read
+//! or copy the full content without forcing it into the main right-panel
+//! layout, and shows a rebuild plan.
 //!
-//! Input handling:
-//! - `Esc` / `q` / `o` close the modal.
-//! - `j` / `k` / `Down` / `Up` scroll the value body by one row.
-//! - `PageDown` / `PageUp` / `Space` jump by the rows the body showed.
-//! - `g` / `G` jump to the top / bottom.
-//!
-//! The value is wrapped here rather than by the paragraph, so the draw
-//! knows how many rows it has and can keep the offset inside them.
-//! - `y` copies the text, or the payload the opener supplied (a rebuild
-//!   plan copies its commands as a script rather than its prose); the
-//!   runtime does the clipboard write and the toast.
+//! The pager owns the reading: scrolling and viewport-sized paging, `g`
+//! and `G` (which keeps to the last page), the scrollbar, `Esc`, `q`, and
+//! `o` (the key that opened it) closing, and the footer. What is the
+//! value's is here: the label as the title, the value wrapped to the
+//! frame with a rebuild plan's command lines (`$ …`) in the accent style,
+//! and `y`, whose copy hook asks the runtime to copy the text, or the
+//! payload the opener supplied (a rebuild plan copies its commands as a
+//! script rather than its prose); the runtime does the clipboard write
+//! and the toast.
 
-use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::KeyEvent;
-use ratatui::layout::Rect;
+use std::ops::Range;
+
 use ratatui::style::Style;
 use ratatui::text::Line;
-use ratatui::widgets::{Paragraph, Widget};
-use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
-use tuikit::scroll::ScrollWindow;
+use tuikit::frame::ModalSize;
+use tuikit::keys::KeyRow;
+use tuikit::pager::{NoKeys, Pager, PagerContent, PagerEffect, PagerMode};
+use tuikit::theme::Theme;
 
-use crate::tui::Theme;
+use crate::tui::Msg;
+use crate::tui::keybindings::overlay::VALUE_MODAL_KEYS;
 
-/// Pure state for the full-value modal.
+/// The value modal: the framework's pager over a value.
+pub type ValueModal = Pager<ValueText>;
+
+/// A long value laid out for the modal's width.
 #[derive(Debug, Clone)]
-pub struct ValueModalState {
+pub struct ValueText {
     /// Static label rendered in the title bar (`cwd`, `command`, …).
     pub label: String,
     /// The full untruncated value being inspected.
     pub value: String,
-    /// Vertical scroll offset in rendered rows.
-    pub scroll: u16,
-    /// Rows of text the body showed at the last draw; a page key moves
-    /// by this many.
-    pub page_rows: u16,
     /// What `y` copies when that isn't the value itself.
     pub copy: Option<ValueCopy>,
     /// Draw lines that show a command (`$ …`) in the accent style.
     pub highlight_commands: bool,
+    /// The value wrapped at the last width it was laid out at.
+    rows: Vec<Line<'static>>,
+    laid_out: Option<u16>,
 }
 
 /// Text a value modal copies to the clipboard, and how to describe it
@@ -56,15 +56,15 @@ pub struct ValueCopy {
     pub what: String,
 }
 
-impl ValueModalState {
+impl ValueText {
     pub fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             label: label.into(),
             value: value.into(),
-            scroll: 0,
-            page_rows: 0,
             copy: None,
             highlight_commands: false,
+            rows: Vec::new(),
+            laid_out: None,
         }
     }
 
@@ -76,13 +76,13 @@ impl ValueModalState {
         script: impl Into<String>,
         commands: usize,
     ) -> Self {
-        let mut state = Self::new(label, text);
-        state.highlight_commands = true;
-        state.copy = Some(ValueCopy {
+        let mut value = Self::new(label, text);
+        value.highlight_commands = true;
+        value.copy = Some(ValueCopy {
             text: script.into(),
             what: format!("{commands} command{}", if commands == 1 { "" } else { "s" }),
         });
-        state
+        value
     }
 
     /// What `y` puts on the clipboard, and how to name it.
@@ -91,68 +91,6 @@ impl ValueModalState {
             Some(copy) => (copy.text.as_str(), copy.what.clone()),
             None => (self.value.as_str(), "text".to_string()),
         }
-    }
-
-    /// Dispatch a crossterm key event. Returns
-    /// [`ValueModalOutcome::Close`] when the modal should close,
-    /// otherwise [`ValueModalOutcome::Continue`].
-    pub fn handle_key(&mut self, event: KeyEvent) -> ValueModalOutcome {
-        use crate::tui::keybindings::overlay::VALUE_MODAL_KEYS;
-        use tuikit::keys::{PagerKey, resolve};
-        match resolve(VALUE_MODAL_KEYS, event) {
-            Some(PagerKey::Abort | PagerKey::Close) => ValueModalOutcome::Close,
-            Some(PagerKey::Copy) => ValueModalOutcome::Continue,
-            Some(PagerKey::Down) => {
-                self.scroll_by(1);
-                ValueModalOutcome::Continue
-            }
-            Some(PagerKey::Up) => {
-                self.scroll_by(-1);
-                ValueModalOutcome::Continue
-            }
-            Some(PagerKey::PageDown) => {
-                self.scroll_by(i32::from(self.page_rows.max(1)));
-                ValueModalOutcome::Continue
-            }
-            Some(PagerKey::PageUp) => {
-                self.scroll_by(-i32::from(self.page_rows.max(1)));
-                ValueModalOutcome::Continue
-            }
-            Some(PagerKey::HalfPageDown) => {
-                self.scroll_by(i32::from((self.page_rows / 2).max(1)));
-                ValueModalOutcome::Continue
-            }
-            Some(PagerKey::HalfPageUp) => {
-                self.scroll_by(-i32::from((self.page_rows / 2).max(1)));
-                ValueModalOutcome::Continue
-            }
-            Some(PagerKey::Top) => {
-                self.scroll = 0;
-                ValueModalOutcome::Continue
-            }
-            Some(PagerKey::Bottom) => {
-                self.scroll = u16::MAX;
-                ValueModalOutcome::Continue
-            }
-            // The value modal's table binds no find and no help page.
-            Some(PagerKey::Find | PagerKey::FindNext | PagerKey::FindPrev | PagerKey::Help)
-            | None => ValueModalOutcome::Continue,
-        }
-    }
-
-    fn scroll_by(&mut self, delta: i32) {
-        let current = i32::from(self.scroll);
-        let next = current.saturating_add(delta).max(0);
-        self.scroll = u16::try_from(next.min(i32::from(u16::MAX))).unwrap_or(u16::MAX);
-    }
-
-    /// Take in the window the last draw showed: the offset comes back
-    /// inside the text (so `G`, or scrolling past the end, is undone by
-    /// the next key up) and page keys move by the rows on screen.
-    pub fn fit(&mut self, window: ScrollWindow) {
-        let last = u16::try_from(window.last_offset()).unwrap_or(u16::MAX);
-        self.scroll = self.scroll.min(last);
-        self.page_rows = u16::try_from(window.viewport()).unwrap_or(u16::MAX);
     }
 
     /// The value wrapped to `width` cells; a command line keeps the
@@ -175,76 +113,48 @@ impl ValueModalState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValueModalOutcome {
-    Continue,
-    Close,
-}
+impl PagerContent for ValueText {
+    type Message = Msg;
+    type Action = NoKeys;
+    const KEYS: &'static [KeyRow<NoKeys>] = &[];
 
-/// Centered modal that renders [`ValueModalState`], in the help page's
-/// size and frame.
-pub struct ValueModalWidget<'a> {
-    state: &'a ValueModalState,
-    theme: &'a Theme,
-}
+    fn layout(&mut self, width: u16, theme: &Theme) -> usize {
+        if self.laid_out != Some(width) {
+            self.rows = self.wrapped(width, theme);
+            self.laid_out = Some(width);
+        }
+        self.rows.len()
+    }
 
-impl<'a> ValueModalWidget<'a> {
-    pub fn new(state: &'a ValueModalState, theme: &'a Theme) -> Self {
-        Self { state, theme }
+    fn rows(&self, range: Range<usize>, _theme: &Theme) -> Vec<Line<'static>> {
+        self.rows[range].to_vec()
+    }
+
+    fn header(&self, _width: usize, _theme: &Theme) -> Line<'static> {
+        Line::from(self.label.clone())
+    }
+
+    fn apply(&mut self, action: NoKeys) -> PagerEffect<Msg> {
+        match action {}
+    }
+
+    /// `y`: the runtime copies the payload and says what it copied.
+    fn copy(&self) -> Option<Msg> {
+        let (text, what) = self.copy_payload();
+        Some(Msg::Copy {
+            text: text.to_string(),
+            done: format!("Copied {what}"),
+        })
     }
 }
 
-impl ValueModalWidget<'_> {
-    /// Draw the modal and report the window its body showed, for
-    /// [`ValueModalState::fit`].
-    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let body = ValueModalBody {
-            state: self.state,
-            theme: self.theme,
-        };
-        ModalFrame::new(self.theme, ModalSize::WIDE)
-            .title(self.state.label.as_str())
-            .render(area, buf, body)
-    }
-}
-
-impl Widget for ValueModalWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        self.draw(area, buf);
-    }
-}
-
-/// The wrapped value, scrolled, over its key hints.
-struct ValueModalBody<'a> {
-    state: &'a ValueModalState,
-    theme: &'a Theme,
-}
-
-impl ModalBody for ValueModalBody<'_> {
-    type Output = ScrollWindow;
-
-    /// The value fills its frame, so it is wrapped in `render`.
-    fn measure(&mut self, _width: u16) -> u16 {
-        0
-    }
-
-    fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        use ratatui::layout::{Constraint, Layout};
-        let [text_area, footer_area] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
-        let lines = self.state.wrapped(text_area.width, self.theme);
-        // An offset past the end (`G`, or paging on) shows the last rows.
-        let window = ScrollWindow::new(usize::from(text_area.height), lines.len())
-            .at(usize::from(self.state.scroll));
-        Paragraph::new(lines)
-            .scroll(window.paragraph_scroll())
-            .render(text_area, buf);
-        let hint = tuikit::keys::footer(crate::tui::keybindings::overlay::VALUE_MODAL_KEYS);
-        Paragraph::new(hint)
-            .style(Style::default().fg(self.theme.inert))
-            .render(footer_area, buf);
-        window
-    }
+/// The modal over `value`, at the top: a reader's frame, the value's
+/// keys (`VALUE_MODAL_KEYS`: the pager's, `o` closing as it opened, and
+/// `y` copying).
+pub fn open(value: ValueText) -> ValueModal {
+    Pager::new(value)
+        .mode(PagerMode::Modal(ModalSize::WIDE))
+        .keys(VALUE_MODAL_KEYS)
 }
 
 #[cfg(test)]

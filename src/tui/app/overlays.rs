@@ -498,9 +498,11 @@ impl App {
         }
     }
 
-    /// Open the full-value modal on `state`.
-    pub fn open_value_modal(&mut self, state: crate::tui::widgets::value_modal::ValueModalState) {
-        self.modal_stack.push(crate::tui::Modal::ValueModal(state));
+    /// Open the full-value modal on `value`, at its top.
+    pub fn open_value_modal(&mut self, value: crate::tui::widgets::value_modal::ValueText) {
+        let modal = crate::tui::widgets::value_modal::open(value);
+        self.modal_stack
+            .push(crate::tui::Modal::ValueModal(Box::new(modal)));
         self.status_message = None;
     }
 
@@ -885,18 +887,16 @@ impl App {
     /// Active `o` full-value modal, if any. Lives on the
     /// modal stack (ADR 0085 contract 3); this accessor peeks the
     /// top entry.
-    pub fn value_modal(&self) -> Option<&crate::tui::widgets::value_modal::ValueModalState> {
+    pub fn value_modal(&self) -> Option<&crate::tui::widgets::value_modal::ValueModal> {
         match self.modal_stack.top()? {
-            crate::tui::Modal::ValueModal(state) => Some(state),
+            crate::tui::Modal::ValueModal(modal) => Some(modal),
             _ => None,
         }
     }
 
-    pub fn value_modal_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::value_modal::ValueModalState> {
+    pub fn value_modal_mut(&mut self) -> Option<&mut crate::tui::widgets::value_modal::ValueModal> {
         match self.modal_stack.top_mut()? {
-            crate::tui::Modal::ValueModal(state) => Some(state),
+            crate::tui::Modal::ValueModal(modal) => Some(modal),
             _ => None,
         }
     }

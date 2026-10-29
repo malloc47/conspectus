@@ -740,10 +740,9 @@ impl App {
         };
         match opened {
             Some((label, value)) => {
-                self.modal_stack.push(crate::tui::Modal::ValueModal(
-                    crate::tui::widgets::value_modal::ValueModalState::new(label, value),
+                self.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
+                    label, value,
                 ));
-                self.status_message = None;
             }
             None => {
                 self.status_message = Some(Feedback::warning(

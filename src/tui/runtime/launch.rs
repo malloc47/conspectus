@@ -686,7 +686,7 @@ pub(super) fn execute_show_rebuild_plan(
     let plan = match plan {
         Ok(plan) => plan,
         Err(text) => {
-            app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
+            app.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
                 format!("rebuild plan · {reference}"),
                 text,
             ));
@@ -713,7 +713,7 @@ pub(super) fn execute_show_rebuild_plan(
         .snapshot_handle()
         .and_then(|handle| crate::tui::actions::running_note(handle.snapshot(), reference))
         .map_or_else(String::new, |note| format!("{note}\n\n"));
-    app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::plan(
+    app.open_value_modal(crate::tui::widgets::value_modal::ValueText::plan(
         format!("rebuild plan · {reference}"),
         format!("{note}{plan}"),
         script,

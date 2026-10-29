@@ -241,8 +241,8 @@ fn key_prelude_o_and_enter_reach_a_truncated_field_past_the_core_rows() {
     drive(&mut app, &config, &"j".repeat(row - cursor));
     drive(&mut app, &config, "o");
     let modal = app.value_modal().expect("o opens the value modal");
-    assert_eq!(modal.label, "last_message_preview");
-    assert_eq!(modal.value, LONG_MESSAGE);
+    assert_eq!(modal.content().label, "last_message_preview");
+    assert_eq!(modal.content().value, LONG_MESSAGE);
 
     drive(&mut app, &config, "o<Enter>");
     assert!(app.value_modal().is_none(), "o closes the modal again");

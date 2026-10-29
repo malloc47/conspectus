@@ -124,7 +124,7 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
             search_key(app, KeyCode::Tab);
         }),
         ("ValueModal", View::Pinned, |app| {
-            app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
+            app.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
                 "cwd",
                 "/home/operator/src/a/very/long/path/that/keeps/going/past/any/modal/width/to/see/what/happens",
             ));

@@ -131,8 +131,10 @@ modals! {
     /// `/` quick select and `s` content search. Ranks the App's rows and
     /// content results on every key.
     Search(crate::tui::widgets::search::SearchOverlayState),
-    /// `o` full-value modal.
-    ValueModal(crate::tui::widgets::value_modal::ValueModalState),
+    /// `o` full-value modal: the framework's pager over a long value or
+    /// a rebuild plan, whose `y` asks to copy with [`Msg::Copy`]. Boxed
+    /// to keep [`Modal`] small.
+    ValueModal(Box<crate::tui::widgets::value_modal::ValueModal>),
     /// `!` Messages overlay (ADR 0105), over the App's message log.
     Messages(crate::tui::widgets::messages::MessagesOverlayState),
     /// Full-screen transcript viewer (ADR 0052). A nested reducer: its

@@ -30,7 +30,7 @@ use conspectus::tui::search::SearchItem;
 use conspectus::tui::theme::{KeyOrigin, TokenValue};
 use conspectus::tui::widgets::help;
 use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
-use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
+use conspectus::tui::widgets::value_modal::{self, ValueText};
 use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyCode;
@@ -226,9 +226,13 @@ impl Ingredient for ValueModalVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let mut state = ValueModalState::new(self.label, &self.value);
-        state.scroll = self.scroll;
-        ValueModalWidget::new(&state, &theme).render(area, buf);
+        let mut modal = value_modal::open(ValueText::new(self.label, self.value.as_str()));
+        if self.scroll == u16::MAX {
+            modal.to_end();
+        } else {
+            modal.scroll_by(i32::from(self.scroll));
+        }
+        modal.draw(area, buf, &theme);
     }
 }
 
@@ -600,7 +604,7 @@ fn main() -> std::io::Result<()> {
                 .join("\n"),
             scroll: u16::MAX,
             variant_name: "Scrolled (bottom)",
-            description_text: "Same content as the mid-scroll variant but scrolled to the bottom (u16::MAX clamps to the last line).",
+            description_text: "Same content as the mid-scroll variant but scrolled to the bottom (u16::MAX goes to the end, which shows the last page).",
         }),
         Box::new(HelpVariant {
             scroll: 0,
