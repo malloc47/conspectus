@@ -21,7 +21,11 @@ of a table's actions (`Footer::only`) or take a control's own segments.
 Amended by
 [ADR 0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md):
 `CHECKLIST_KEYS` binds `a` (select all) and `n` (select none), shown in its
-footer, and `PgUp`/`PgDn`, `Home`/`g`, and `End`/`G` as aliases.
+footer, and `PgUp`/`PgDn`, `Home`/`g`, and `End`/`G` as aliases. Amended by
+[ADR 0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md):
+`PALETTE_KEYS` (`PaletteKey`) and `PALETTE_OPTION_KEYS`
+(`PaletteOptionKey`) are standard tables, and the picker resolves the
+former, so the host's `PICKER_KEYS` is gone.
 
 ## Context
 

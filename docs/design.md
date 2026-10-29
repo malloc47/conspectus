@@ -1125,8 +1125,8 @@ Frames are the seventh (ADR 0158). Every modal draws in the framework's
 one space each side), sized by one of five named policies, each a share, a
 cap, a minimum, and a margin per direction: compact for prompts and
 checklists, menu for menus and Controls, form for the forms, wide for the
-help pages, the value modal, Messages, and the picker, and palette for the
-search overlay. Every modal keeps two columns and a row clear on each side
+help pages, the value modal, and Messages, and palette for the search
+overlay and the picker (ADR 0174). Every modal keeps two columns and a row clear on each side
 while the terminal allows, and its body is measured once at the width its
 size gives.
 
@@ -1249,6 +1249,18 @@ checklist key table kept in view while the items scroll. `Enter` hands the
 checked indices to the host's `on_confirm`; `conspectus` keeps the labels,
 the option values each index stands for, and the `Msg::ReapRecords` mapping.
 The `ratatui-cheese` shim and the dependency are gone.
+
+Palettes are one control (ADR 0174). The picker (where a pin points next,
+which remembered search to show) is the framework's `Palette`: a query line
+with its caret, a title with scope strips and a count, results the host
+ranks (a ranker over its candidates, or batches a provider sends) drawn
+through the shared cursor look and wrapping, page keys, an edit that puts the
+cursor on the best result, a status row, an options pane, a debounce a slow
+provider's host polls, and the footer generated from the palette key table
+kept in view while the results scroll, in the palette frame. `Enter` hands
+the row under the cursor to the host's `on_pick`; `conspectus` keeps the
+retarget candidates, the history items, the titles, and the `Msg` each pick
+commits. Quick select and content search move onto it next.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

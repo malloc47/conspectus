@@ -11,7 +11,9 @@ margin on a small terminal. Amended by
 [ADR 0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md):
 a frame may carry a footer on its bottom border, in the title's form, for
 a modal whose body has no row to spare for its keys (the one-line
-prompt).
+prompt). Amended by
+[ADR 0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md):
+the picker is a palette and takes the `PALETTE` size, not `WIDE`.
 
 ## Context
 
