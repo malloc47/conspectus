@@ -78,7 +78,7 @@ each names its module path.
 | `help` | `HelpPage`, the one help page: bold headings, keys in an accent column with descriptions wrapped beside them, legend rows for marks, a scrollbar, and a footer generated from the key table that scrolls and closes it, in the reader-sized modal frame; `sections_for`, which generates a page from a key table and a `HelpAction` description per action, and `undescribed`, which finds a key the page would leave out; `HelpScroll`, which pages by the rows shown and takes an offset past the end back at the next draw. Page: [controls/help.md](controls/help.md) | landed |
 | `focus` | Declared focus rules: the pane focus cue, the modal focus lock, the Tab cycle | planned |
 | `feedback` | `Severity` (info, success, warning, error: each with its theme color, chip tone, mark, and toast lifetime) and one `Feedback { severity, text, ttl }` type feeding three channels: the status line (`Feedback::span`), `Toasts` (bottom-centered boxes bordered in the severity's color, replaced or stacked, each gone after its lifetime, errors last longest), and `Log<T>` (bounded, newest-last, repeat-collapsing, counting unseen warnings and errors, over the host's payload `T`); `clipboard::copy`, which writes OSC 52 to a sink the host supplies. Page: [controls/feedback.md](controls/feedback.md) | landed |
-| `testkit` | Buffer inspection; a key DSL; an ANSI-preserving one-frame driver; a convention conformance suite (`assert_conventions` over a registry of overlays); source-scan helpers; documentation-table sync | planned |
+| `testkit` | Behind the `testkit` feature. The key-script notation (`j<Tab><C-r>`) and press constructors; `FrameDriver`, the one-frame driver over the host's draw callback; buffer probes (text, token columns, the style under a piece of text, a modal's frame rectangle and the text inside it); the ANSI writer and `strip_ansi`; style-aware goldens that keep every color, checked against files and accepted through an environment variable; the conformance suite, `assert_conventions` over a host's `Registry` of modals and its `Rig`; and the source-scan helpers (the crate's lexer, word-start matching, a read-only walk). Page: [controls/testkit.md](controls/testkit.md) | landed |
 
 ## The one-way dependency rule
 
@@ -181,6 +181,11 @@ processes) in one place, the host runtime.
 | `unicode-width` | Display-width arithmetic for truncation, padding, wrapping | always |
 | `tui-input` | The single-line edit engine behind the text-entry controls | always |
 | `ansi-to-tui`, `tui-markdown`, `comfy-table` | ANSI text, Markdown with syntax highlighting, and tables as styled lines | `richtext` feature only |
+
+The `testkit` feature adds no dependency: it turns on the `testkit` module,
+which a host's tests and dev tools use and its production build leaves out.
+The crate depends on itself by path in its dev-dependencies so its own
+integration tests and doctests have the module.
 
 The complete allowlist, with the reason for each entry, is in the independence
 guard (`tests/independence.rs`); a dependency that is not listed there fails

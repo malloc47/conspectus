@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 mod source_tree;
 
 use source_tree::{FRAMEWORK_SRC, Tree};
+use tuikit::testkit::source::{production_code, string_literals};
 
 /// The trees scanned: the host's overlay code, then the whole framework.
 /// A single-file tree must exist, so moving one of those files fails the
@@ -52,6 +53,14 @@ const KEY_MODEL_FILES: &[(&str, &str)] = &[
         "crates/tuikit/src/keys/standard.rs",
         "the standard key tables themselves: the rows name the keys they bind",
     ),
+    (
+        "crates/tuikit/src/testkit/keys.rs",
+        "the test kit's key-script notation: turns key names into key events",
+    ),
+    (
+        "crates/tuikit/src/testkit/conformance/checks.rs",
+        "the conformance suite presses the arrows, Esc, and q to check every modal",
+    ),
 ];
 
 /// Help-overlay prose that reads like a key hint but describes the
@@ -64,48 +73,6 @@ fn overlay_sources(root: &Path, trees: &[Tree]) -> Vec<PathBuf> {
         .into_iter()
         .filter(|path| !source_tree::is_test_file(path))
         .collect()
-}
-
-/// The file's text up to its test module, which may match keys freely.
-fn production_text(text: &str) -> &str {
-    let lines: Vec<&str> = text.lines().collect();
-    let mut offset = 0;
-    for (index, line) in lines.iter().enumerate() {
-        if line.trim() == "#[cfg(test)]"
-            && lines[index + 1..]
-                .iter()
-                .find(|next| !next.trim().starts_with("#["))
-                .is_some_and(|next| next.trim_start().starts_with("mod tests"))
-        {
-            return &text[..offset];
-        }
-        offset += line.len() + 1;
-    }
-    text
-}
-
-fn string_literals(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '"' {
-            continue;
-        }
-        let mut literal = String::new();
-        while let Some(c) = chars.next() {
-            match c {
-                '\\' => {
-                    if let Some(escaped) = chars.next() {
-                        literal.push(escaped);
-                    }
-                }
-                '"' => break,
-                other => literal.push(other),
-            }
-        }
-        out.push(literal);
-    }
-    out
 }
 
 fn looks_like_key_hint(literal: &str) -> bool {
@@ -127,10 +94,15 @@ fn hand_matched_keys(root: &Path, trees: &[Tree]) -> Vec<String> {
             continue;
         }
         let text = fs::read_to_string(&path).expect("read overlay source");
-        for (number, line) in production_text(&text).lines().enumerate() {
-            let code = line.split("//").next().unwrap_or("");
+        let lines: Vec<&str> = text.lines().collect();
+        // Comments, strings, and test items may name keys freely.
+        for (number, code) in production_code(&text).lines().enumerate() {
             if code.contains("KeyCode::") {
-                offenders.push(format!("{relative}:{}: {}", number + 1, line.trim()));
+                offenders.push(format!(
+                    "{relative}:{}: {}",
+                    number + 1,
+                    lines[number].trim()
+                ));
             }
         }
     }
@@ -143,7 +115,8 @@ fn hand_written_hints(root: &Path, trees: &[Tree]) -> Vec<String> {
     let mut offenders = Vec::new();
     for path in overlay_sources(root, trees) {
         let text = fs::read_to_string(&path).expect("read overlay source");
-        for literal in string_literals(production_text(&text)) {
+        for literal in string_literals(&text) {
+            let literal = literal.text;
             if looks_like_key_hint(&literal) && !ALLOWED_HINT_TEXT.contains(&literal.as_str()) {
                 offenders.push(format!(
                     "{}: {literal:?}",
@@ -176,11 +149,7 @@ fn every_key_model_file_still_names_key_codes() {
         let text = fs::read_to_string(root.join(file))
             .unwrap_or_else(|error| panic!("{file} ({reason}): {error}"));
         assert!(
-            production_text(&text).lines().any(|line| line
-                .split("//")
-                .next()
-                .unwrap_or("")
-                .contains("KeyCode::")),
+            production_code(&text).contains("KeyCode::"),
             "{file} no longer names `KeyCode`; remove it from KEY_MODEL_FILES"
         );
     }

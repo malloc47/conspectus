@@ -7,10 +7,21 @@
 //! leaking snippet from memory instead of a fixture on disk. The rules each
 //! guard enforces, and the process for a reviewed exception, are in the
 //! crate's contribution guide, `docs/contributing.md`.
-#![allow(dead_code)]
+//!
+//! The mechanism (the walk and the Rust lexer that blanks comments,
+//! literals, and test items) is the test kit's `testkit::source`, which the
+//! host's hygiene scans use too; this file keeps the guards' policy types
+//! and report format.
+// Each guard uses its own part of this file.
+#![allow(dead_code, unused_imports)]
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+/// `text` with comments and string and character literals blanked, line
+/// breaks kept.
+pub use tuikit::testkit::source::code as sanitize_rust;
+pub use tuikit::testkit::source::{contains_at_word_start, is_identifier_char, strip_test_items};
 
 /// One reviewed exception: `term` may appear in `path` (crate-relative,
 /// forward slashes). `term` is whatever the scan matches: a listed word for
@@ -86,29 +97,7 @@ pub fn crate_root() -> &'static Path {
 /// Every file under `root`, sorted, skipping `target` and hidden directories
 /// and anything that is not a plain file or directory.
 pub fn load_sources(root: &Path) -> Vec<Source> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        let entries =
-            fs::read_dir(dir).unwrap_or_else(|error| panic!("read {}: {error}", dir.display()));
-        for entry in entries.flatten() {
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            if kind.is_dir() {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                if name != "target" && !name.starts_with('.') {
-                    walk(&entry.path(), out);
-                }
-            } else if kind.is_file() {
-                out.push(entry.path());
-            }
-        }
-    }
-
-    let mut paths = Vec::new();
-    walk(root, &mut paths);
-    paths.sort();
-    paths
+    tuikit::testkit::source::files(root)
         .into_iter()
         .map(|path| {
             let bytes =
@@ -142,185 +131,6 @@ pub fn stale_exceptions(scan: &str, exceptions: &[Exception], used: &[bool]) -> 
             )
         })
         .collect()
-}
-
-fn blank(c: char) -> char {
-    if c == '\n' { '\n' } else { ' ' }
-}
-
-pub fn is_identifier_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
-/// Index just past the string literal whose body starts at `from`.
-fn string_end(chars: &[char], from: usize) -> usize {
-    let mut index = from;
-    while index < chars.len() {
-        match chars[index] {
-            '\\' => index += 2,
-            '"' => return index + 1,
-            _ => index += 1,
-        }
-    }
-    chars.len()
-}
-
-/// Index just past the (possibly nested) block comment starting at `start`.
-fn block_comment_end(chars: &[char], start: usize) -> usize {
-    let mut depth = 0usize;
-    let mut index = start;
-    while index < chars.len() {
-        if chars[index..].starts_with(&['/', '*']) {
-            depth += 1;
-            index += 2;
-        } else if chars[index..].starts_with(&['*', '/']) {
-            depth -= 1;
-            index += 2;
-            if depth == 0 {
-                return index;
-            }
-        } else {
-            index += 1;
-        }
-    }
-    chars.len()
-}
-
-/// Index just past a raw string literal starting at the `r` at `start`, or
-/// `None` when the `r` begins something else (an identifier, `r#ident`).
-fn raw_string_end(chars: &[char], start: usize) -> Option<usize> {
-    let after_prefix = start == 0
-        || !is_identifier_char(chars[start - 1])
-        || (chars[start - 1] == 'b' && (start == 1 || !is_identifier_char(chars[start - 2])));
-    if !after_prefix {
-        return None;
-    }
-    let hashes = chars[start + 1..].iter().take_while(|c| **c == '#').count();
-    if chars.get(start + 1 + hashes) != Some(&'"') {
-        return None;
-    }
-    let closing: Vec<char> = std::iter::once('"')
-        .chain(std::iter::repeat_n('#', hashes))
-        .collect();
-    let end = (start + 2 + hashes..chars.len())
-        .find(|&index| chars[index..].starts_with(&closing))
-        .map_or(chars.len(), |index| index + closing.len());
-    Some(end)
-}
-
-/// Index just past the character literal starting at `start`, or `None` for
-/// a lifetime.
-fn char_literal_end(chars: &[char], start: usize) -> Option<usize> {
-    if chars.get(start + 1) == Some(&'\\') {
-        let tail = chars.get(start + 3..)?;
-        let close = tail.iter().position(|c| *c == '\'')?;
-        Some(start + 3 + close + 1)
-    } else if chars.get(start + 2) == Some(&'\'') {
-        Some(start + 3)
-    } else {
-        None
-    }
-}
-
-/// Index just past the comment or literal that starts at `index`, if one does.
-fn skipped_end(chars: &[char], index: usize) -> Option<usize> {
-    let second = chars.get(index + 1).copied();
-    match chars[index] {
-        '/' if second == Some('/') => Some(
-            chars[index..]
-                .iter()
-                .position(|c| *c == '\n')
-                .map_or(chars.len(), |offset| index + offset),
-        ),
-        '/' if second == Some('*') => Some(block_comment_end(chars, index)),
-        '"' => Some(string_end(chars, index + 1)),
-        'r' => raw_string_end(chars, index),
-        '\'' => char_literal_end(chars, index),
-        _ => None,
-    }
-}
-
-/// `text` with comments and string and character literals blanked out, line
-/// breaks kept so line numbers still match.
-pub fn sanitize_rust(text: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    let mut out = String::with_capacity(text.len());
-    let mut index = 0;
-    while index < chars.len() {
-        if let Some(end) = skipped_end(&chars, index) {
-            out.extend(chars[index..end].iter().map(|c| blank(*c)));
-            index = end;
-        } else {
-            out.push(chars[index]);
-            index += 1;
-        }
-    }
-    out
-}
-
-/// The attribute that gates an item to test builds.
-const TEST_GATE: &str = "#[cfg(test)]";
-
-/// Index just past the item that begins at `from`: through its closing brace,
-/// or through the `;` of a body-less item such as `mod tests;`.
-fn item_end(chars: &[char], from: usize) -> usize {
-    let mut nesting = 0i32;
-    let mut index = from;
-    while index < chars.len() {
-        match chars[index] {
-            '(' | '[' => nesting += 1,
-            ')' | ']' => nesting -= 1,
-            ';' if nesting == 0 => return index + 1,
-            '{' if nesting == 0 => {
-                let mut depth = 0i32;
-                for (offset, c) in chars[index..].iter().enumerate() {
-                    match c {
-                        '{' => depth += 1,
-                        '}' => depth -= 1,
-                        _ => {}
-                    }
-                    if depth == 0 {
-                        return index + offset + 1;
-                    }
-                }
-                return chars.len();
-            }
-            _ => {}
-        }
-        index += 1;
-    }
-    chars.len()
-}
-
-/// Blanks every `#[cfg(test)]` item out of sanitized source. Expects text
-/// that already went through `sanitize_rust`, so braces in literals are gone.
-pub fn strip_test_items(code: &str) -> String {
-    let chars: Vec<char> = code.chars().collect();
-    let gate: Vec<char> = TEST_GATE.chars().collect();
-    let mut out = chars.clone();
-    let mut index = 0;
-    while index < chars.len() {
-        if chars[index..].starts_with(&gate) {
-            let end = item_end(&chars, index + gate.len());
-            for c in &mut out[index..end] {
-                *c = blank(*c);
-            }
-            index = end;
-        } else {
-            index += 1;
-        }
-    }
-    out.into_iter().collect()
-}
-
-/// Whether `needle` occurs in `line` starting at a word start.
-pub fn contains_at_word_start(line: &str, needle: &str) -> bool {
-    line.match_indices(needle).any(|(index, _)| {
-        line[..index]
-            .chars()
-            .next_back()
-            .is_none_or(|c| !is_identifier_char(c))
-    })
 }
 
 pub fn is_rust_file(path: &str) -> bool {

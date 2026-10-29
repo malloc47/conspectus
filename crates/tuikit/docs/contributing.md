@@ -28,7 +28,7 @@ snippet from memory, so no leaking fixture ever sits on disk.
 
 | Guard | What it checks |
 | --- | --- |
-| Manifest | Every `Cargo.toml` under the crate is parsed. A dependency on the host (by key or by a `package =` rename) or on any crate outside the runtime and development allowlists fails. Build dependencies are never allowed: a build script is arbitrary code. |
+| Manifest | Every `Cargo.toml` under the crate is parsed. A dependency on the host (by key or by a `package =` rename) or on any crate outside the runtime and development allowlists fails. Build dependencies are never allowed: a build script is arbitrary code. The one dependency not on a list is the crate itself, by path `.`, as a development dependency: that is how its own tests turn on its `testkit` feature, and it adds no package. |
 | Vocabulary | No file in the crate (source, documentation, tests, manifest, README) uses a word from the `DOMAIN_TERMS` list, except the reviewed `VOCABULARY_EXCEPTIONS`. The guard file itself is the one file skipped, because it has to contain the words it tests for. |
 | Process and write | Non-test Rust source starts no process and writes, renames, or deletes no file. Read-only filesystem access (`File::open`, `fs::read`, `fs::read_dir`, `fs::metadata`) is allowed. Hosts supply sinks (a clipboard `Write`) and sources (path completion) instead. |
 
@@ -132,7 +132,9 @@ selection and chip looks are reversed by default) and its grammar maps color
 and modifier names to values. Two other files name the reversed modifier
 without drawing a cursor: the scrollbar removes it so a highlight does not
 show through the bar, and the selection highlight looks for it to leave a
-chip's fill alone. An exception is per file and per needle,
+chip's fill alone. The test kit's ANSI writer (`src/testkit/ansi.rs`) names
+every color to write its escape code; it reads the styles of drawn cells and
+draws nothing. An exception is per file and per needle,
 lists its reason in the guard's `EXCEPTIONS`, and fails the scan once it
 matches nothing. A control that seems to need a raw color needs a token or a
 named style instead; add the token to the table in `src/theme.rs` and to the
@@ -188,9 +190,11 @@ Every scan states the fewest source files it may visit, so a scan pointed at
 the wrong place fails instead of passing empty. When a change moves code into
 this crate, raise this crate's minimum in the host's test support in the same
 change, and lower the host's if the move took it below its own; the two
-should not shrink in sum. The mechanisms behind these scans are meant to
-become helpers in the test kit; the rule sets stay with whichever repository
-hosts the code.
+should not shrink in sum. The mechanisms behind these scans (the file walk,
+the Rust lexer that blanks comments, literals, and test items, and the string
+literal reader) are the test kit's `testkit::source`, which this crate's own
+guards use too; the rule sets stay with whichever repository hosts the
+code.
 
 ## The documentation lint
 
@@ -390,24 +394,27 @@ outcome plus a rendered buffer. Test it through exactly those.
 
 ### With the test kit
 
-The test kit (module `testkit`; see the module map for its status) packages
-the repeated parts:
+The test kit (module `testkit`, behind the `testkit` feature, which the
+crate's own tests always have) packages the repeated parts. Its page,
+[controls/testkit.md](controls/testkit.md), is the reference.
 
-- buffer inspection helpers (the text of a row, the style of a cell);
-- a key DSL that writes input as a short text string and replays it through a
-  control;
-- an ANSI-preserving one-frame driver that renders a frame to a string with
-  its styling kept, for snapshots of layout and color;
-- a convention conformance suite: `assert_conventions` takes a registry of
-  overlays and checks them against the house rules (close keys, generated
-  footers, selection look, wrap or clamp, paging), so a control that
-  registers is held to the rules mechanically instead of by review;
-- source-scan and documentation-table helpers that a host's hygiene tests
-  build on.
-
-A control that has an overlay form registers it with the conformance suite as
-part of the change that adds it. Until the kit lands, use a ratatui
-`TestBackend` buffer for the same checks, and expect to port them to the kit.
+- `testkit::keys`: write input as a key script (`j<Tab><C-r>`) or build one
+  press (`press`, `ctrl`, `chord`); never write a `KeyEvent` literal or a
+  per-file key helper.
+- `testkit::render` and `testkit::buffer`: draw a frame off screen and read
+  it (the text of a row, token columns, the style under a piece of text, a
+  modal's frame).
+- `testkit::golden`: a golden that keeps every color and modifier, so a
+  test fails when only a color changes. Check a frame with
+  `assert_golden`, passing `std::fs::write` as the writer, and accept a
+  deliberate change by running the test with `TUIKIT_ACCEPT_GOLDENS=1`.
+- `testkit::conformance`: `assert_conventions` over a registry of modals
+  holds each to the conventions (drawn, contained, one title form, a
+  selection that moves no text, no word cut at the edge, keys by role,
+  generated footers, the close keys). A control that has an overlay form
+  registers it, in the change that adds it, with the suite in this crate's
+  tests and in each host's.
+- `testkit::source`: the lexer and walk the source guards use.
 
 ## Checks before you finish
 

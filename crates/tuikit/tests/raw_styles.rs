@@ -12,7 +12,9 @@
 //! `support/source_scan.rs`) and fails on each needle below. The theme
 //! module defines the default palette and the grammar that names colors
 //! and modifiers, so it is the reviewed exception, along with the two
-//! places that look for the reversed modifier without drawing a cursor.
+//! places that look for the reversed modifier without drawing a cursor and
+//! the test kit's ANSI writer, which turns the colors of drawn cells into
+//! escape codes.
 //! The rule and the exception process are in `docs/contributing.md`,
 //! section "The raw-style guard".
 
@@ -25,9 +27,8 @@ use source_scan::{
     tripwire,
 };
 
-/// Fewest non-test Rust files the scan may visit: `lib.rs`, four glyph
-/// files, three theme files, and six text files make 14 today.
-const MIN_FILES: usize = 10;
+/// Fewest non-test Rust files the scan may visit: 61 under `src` today.
+const MIN_FILES: usize = 45;
 
 /// What the guard looks for, matched at a word start.
 #[rustfmt::skip]
@@ -82,6 +83,11 @@ const EXCEPTIONS: &[Exception] = &[
         path: "src/selection/look.rs",
         term: "Modifier::REVERSED",
         reason: "the highlight finds a chip's reversed fill so it can leave it as it is",
+    },
+    Exception {
+        path: "src/testkit/ansi.rs",
+        term: "Color::",
+        reason: "the test kit's ANSI writer encodes each color a drawn cell carries as its escape code; it reads styles and draws nothing",
     },
 ];
 

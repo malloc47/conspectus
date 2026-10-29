@@ -58,14 +58,13 @@ const GUARD_FILE: &str = "tests/independence.rs";
 /// Fewest manifests the manifest scan may visit.
 const MIN_MANIFESTS: usize = 1;
 /// Fewest files the vocabulary scan may visit. The manifest, the README,
-/// seven pages under `docs`, the glyph script, 24 files under `src`, and
-/// five test files besides this one make 39 today; the minimum is a little
-/// under three quarters of that.
-const MIN_VOCABULARY_FILES: usize = 28;
-/// Fewest non-test Rust files the process and write scan may visit:
-/// `lib.rs`, four glyph files, three theme files, and six text files make
-/// 14 today.
-const MIN_CAPABILITY_FILES: usize = 10;
+/// the pages under `docs`, the glyph script, 95 files under `src` (a golden
+/// among them), and five test files besides this one make 119 today; the
+/// minimum is a little under three quarters of that.
+const MIN_VOCABULARY_FILES: usize = 85;
+/// Fewest non-test Rust files the process and write scan may visit: 61
+/// under `src` today.
+const MIN_CAPABILITY_FILES: usize = 45;
 
 /// A dependency the framework may declare, and why.
 struct Allowed {
@@ -194,7 +193,7 @@ const FS_WRITE_IMPORTS: &[&str] = &["write", "copy", "rename"];
 // Guard 1: the manifest.
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Section {
     Runtime,
     Dev,
@@ -246,6 +245,10 @@ fn manifest_violations(
         }
     }
 
+    let own_name = manifest
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str);
     let mut problems = Vec::new();
     for (location, section, table) in tables {
         for (key, spec) in table {
@@ -254,6 +257,9 @@ fn manifest_violations(
                 .and_then(|spec| spec.get("package"))
                 .and_then(toml::Value::as_str)
                 .unwrap_or(key.as_str());
+            if section == Section::Dev && is_own_feature_dependency(own_name, package, spec) {
+                continue;
+            }
             if is_host_name(key) || is_host_name(package) {
                 problems.push(format!(
                     "{path}: [{location}] `{key}` depends on the host application"
@@ -274,6 +280,19 @@ fn manifest_violations(
         }
     }
     problems
+}
+
+/// Whether `spec` (named `package`) is the manifest's own crate, by path
+/// `.`: the dev-dependency a crate declares on itself to turn its own
+/// features on for its integration tests and doctests. It adds no package,
+/// so it needs no allowlist entry.
+fn is_own_feature_dependency(own_name: Option<&str>, package: &str, spec: &toml::Value) -> bool {
+    own_name == Some(package)
+        && spec
+            .as_table()
+            .and_then(|spec| spec.get("path"))
+            .and_then(toml::Value::as_str)
+            .is_some_and(|path| path == ".")
 }
 
 /// Checks every `Cargo.toml` in `sources`.
@@ -580,6 +599,34 @@ fn manifest_guard_rejects_dependencies_outside_the_allowlist() {
         assert!(
             problems.iter().any(|p| p.contains("not on the allowlist")),
             "no allowlist violation for:\n{leak}\ngot: {problems:?}"
+        );
+    }
+}
+
+#[test]
+fn manifest_guard_accepts_the_crate_turning_on_its_own_features() {
+    let own = r#"
+[package]
+name = "tuikit"
+
+[dev-dependencies]
+tuikit = { path = ".", features = ["testkit"] }
+"#;
+    assert_eq!(manifest_problems(own), Vec::<String>::new());
+    // Only as a dev-dependency, only by its own path, and only under its
+    // own name.
+    let leaks = [
+        "[package]\nname = \"tuikit\"\n[dependencies]\ntuikit = { path = \".\" }\n",
+        "[package]\nname = \"tuikit\"\n[dev-dependencies]\ntuikit = { path = \"../fork\" }\n",
+        "[package]\nname = \"tuikit\"\n[dev-dependencies]\ntuikit = \"0.1\"\n",
+        "[package]\nname = \"other\"\n[dev-dependencies]\ntuikit = { path = \".\" }\n",
+    ];
+    for leak in leaks {
+        assert!(
+            manifest_problems(leak)
+                .iter()
+                .any(|p| p.contains("not on the allowlist")),
+            "no allowlist violation for:\n{leak}"
         );
     }
 }

@@ -1,0 +1,257 @@
+//! Reading a drawn frame: its text, where a piece of text sits and how it
+//! is styled, and the frame of a modal drawn over a screen.
+//!
+//! Positions are cells: `x` counts the cells from the buffer's left edge,
+//! as the buffer indexes them, whatever the text in them. A row's text is
+//! its cells' symbols in order, so a two-cell character is followed by the
+//! cell it covers.
+//!
+//! - **Text**: [`text`] (every row, each ended by a line break), [`rows`],
+//!   and [`region_rows`].
+//! - **Token columns**: [`tokens`] splits a row's text into the
+//!   whitespace-separated words with the columns each starts and ends at,
+//!   for checks that columns line up.
+//! - **Probes**: [`find`] and [`find_all`] place a piece of text,
+//!   [`cell_at`] and [`style_at`] read the cell it starts in, and
+//!   [`count_cells`] counts the cells of a region that match a test.
+//! - **Modal frames**: [`frame_rect`] finds the rectangle of the frame a
+//!   modal drew by its corners among the cells that differ from the same
+//!   screen without it, [`inner_rows`] reads the text inside a frame, and
+//!   [`restyled_rows`] lists the rows whose styles differ between two
+//!   frames (the rows a moving selection repaints).
+//!
+//! ```
+//! use ratatui::layout::{Position, Rect};
+//! use ratatui::widgets::{Block, Paragraph};
+//! use tuikit::testkit::{buffer, render};
+//!
+//! let bare = render::render_widget(Paragraph::new("under"), 12, 5);
+//! let framed = render::render(12, 5, |frame| {
+//!     frame.render_widget(Paragraph::new("under"), frame.area());
+//!     frame.render_widget(
+//!         Paragraph::new("hi there").block(Block::bordered()),
+//!         Rect::new(1, 1, 10, 3),
+//!     );
+//! });
+//! let rect = buffer::frame_rect(&framed, &bare).expect("a frame");
+//! assert_eq!(rect, Rect::new(1, 1, 10, 3));
+//! assert_eq!(buffer::inner_rows(&framed, rect), ["hi there"]);
+//! assert_eq!(buffer::find(&framed, "there"), Some(Position::new(5, 2)));
+//! assert_eq!(buffer::tokens("  one  two")[1].start, 7);
+//! ```
+
+use ratatui::buffer::{Buffer, Cell};
+use ratatui::layout::{Position, Rect};
+use ratatui::style::Style;
+use ratatui::symbols::{line, scrollbar};
+
+/// Every row of `buffer`, each ended by a line break.
+pub fn text(buffer: &Buffer) -> String {
+    let mut out = String::new();
+    for row in rows(buffer) {
+        out.push_str(&row);
+        out.push('\n');
+    }
+    out
+}
+
+/// The text of each row of `buffer`.
+pub fn rows(buffer: &Buffer) -> Vec<String> {
+    region_rows(buffer, buffer.area)
+}
+
+/// The text of each row of `region` (clipped to `buffer`).
+pub fn region_rows(buffer: &Buffer, region: Rect) -> Vec<String> {
+    let region = region.intersection(buffer.area);
+    (region.y..region.bottom())
+        .map(|y| {
+            (region.x..region.right())
+                .map(|x| buffer[(x, y)].symbol())
+                .collect()
+        })
+        .collect()
+}
+
+/// One whitespace-separated word of a row and the columns it covers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Token {
+    /// The column (in characters of the row's text) the word starts at.
+    pub start: usize,
+    /// The column just past its last character.
+    pub end: usize,
+    /// The word.
+    pub text: String,
+}
+
+/// The whitespace-separated words of `line` with their columns.
+pub fn tokens(line: &str) -> Vec<Token> {
+    let mut out = Vec::new();
+    let mut start = None;
+    let mut word = String::new();
+    let mut column = 0;
+    for ch in line.chars() {
+        if ch.is_whitespace() {
+            if let Some(from) = start.take() {
+                out.push(Token {
+                    start: from,
+                    end: column,
+                    text: std::mem::take(&mut word),
+                });
+            }
+        } else {
+            start.get_or_insert(column);
+            word.push(ch);
+        }
+        column += 1;
+    }
+    if let Some(from) = start {
+        out.push(Token {
+            start: from,
+            end: column,
+            text: word,
+        });
+    }
+    out
+}
+
+/// The cell `needle` starts in, at its first appearance in reading order
+/// (row by row, left to right). A needle is found within one row.
+pub fn find(buffer: &Buffer, needle: &str) -> Option<Position> {
+    find_in(buffer, buffer.area, needle)
+}
+
+/// [`find`] inside `region` only.
+pub fn find_in(buffer: &Buffer, region: Rect, needle: &str) -> Option<Position> {
+    positions(buffer, region, needle).into_iter().next()
+}
+
+/// The cell every appearance of `needle` starts in, in reading order.
+/// Appearances on one row do not overlap.
+pub fn find_all(buffer: &Buffer, needle: &str) -> Vec<Position> {
+    positions(buffer, buffer.area, needle)
+}
+
+fn positions(buffer: &Buffer, region: Rect, needle: &str) -> Vec<Position> {
+    let region = region.intersection(buffer.area);
+    let mut out = Vec::new();
+    if needle.is_empty() {
+        return out;
+    }
+    for y in region.y..region.bottom() {
+        // The row's text and, for each cell, the byte its symbol starts at.
+        let mut row = String::new();
+        let mut starts = Vec::new();
+        for x in region.x..region.right() {
+            starts.push((row.len(), x));
+            row.push_str(buffer[(x, y)].symbol());
+        }
+        for (byte, _) in row.match_indices(needle) {
+            if let Some(&(_, x)) = starts.iter().rev().find(|(start, _)| *start <= byte) {
+                out.push(Position::new(x, y));
+            }
+        }
+    }
+    out
+}
+
+/// The cell `needle` starts in, at its first appearance.
+pub fn cell_at<'a>(buffer: &'a Buffer, needle: &str) -> Option<&'a Cell> {
+    find(buffer, needle).map(|at| &buffer[(at.x, at.y)])
+}
+
+/// The style of the cell `needle` starts in, at its first appearance.
+pub fn style_at(buffer: &Buffer, needle: &str) -> Option<Style> {
+    cell_at(buffer, needle).map(Cell::style)
+}
+
+/// How many cells of `region` pass `test`.
+pub fn count_cells(buffer: &Buffer, region: Rect, test: impl Fn(&Cell) -> bool) -> usize {
+    let region = region.intersection(buffer.area);
+    (region.y..region.bottom())
+        .flat_map(|y| (region.x..region.right()).map(move |x| (x, y)))
+        .filter(|&(x, y)| test(&buffer[(x, y)]))
+        .count()
+}
+
+/// The line sets a frame's border can be drawn in.
+const BORDERS: [line::Set; 4] = [line::NORMAL, line::ROUNDED, line::DOUBLE, line::THICK];
+
+/// Whether `symbol` is the corner of a frame's border.
+pub fn is_corner(symbol: &str) -> bool {
+    BORDERS.iter().any(|set| {
+        [
+            set.top_left,
+            set.top_right,
+            set.bottom_left,
+            set.bottom_right,
+        ]
+        .contains(&symbol)
+    })
+}
+
+/// Whether `symbol` is the side of a frame's border.
+pub fn is_side(symbol: &str) -> bool {
+    BORDERS.iter().any(|set| set.vertical == symbol)
+}
+
+/// The rectangle of the frame a modal drew: the span of the border corners
+/// among the cells of `with` (the screen with the modal) that differ from
+/// `without` (the same screen without it). `None` when no corner differs,
+/// so nothing framed was drawn.
+pub fn frame_rect(with: &Buffer, without: &Buffer) -> Option<Rect> {
+    let area = with.area;
+    let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0, 0);
+    let mut found = false;
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            let cell = &with[(x, y)];
+            if without.area.contains(Position::new(x, y))
+                && *cell != without[(x, y)]
+                && is_corner(cell.symbol())
+            {
+                found = true;
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    found.then(|| Rect::new(x0, y0, x1 - x0 + 1, y1 - y0 + 1))
+}
+
+/// The text of each row inside the frame `rect`, border excluded. A
+/// scrollbar cell in the last inner column reads as a space, so a word
+/// that fills the last text column is not glued to the bar.
+pub fn inner_rows(buffer: &Buffer, rect: Rect) -> Vec<String> {
+    let bar = scrollbar::DOUBLE_VERTICAL;
+    let parts = [bar.begin, bar.end, bar.thumb, bar.track];
+    let (left, right) = (rect.x, rect.right().saturating_sub(1));
+    (rect.y + 1..rect.bottom().saturating_sub(1))
+        .map(|y| {
+            (left + 1..right)
+                .map(|x| {
+                    let symbol = buffer[(x, y)].symbol();
+                    if x + 1 == right && parts.contains(&symbol) {
+                        " "
+                    } else {
+                        symbol
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The rows whose cell styles differ between `a` and `b` (frames of one
+/// size): the rows a moving selection repainted.
+pub fn restyled_rows(a: &Buffer, b: &Buffer) -> Vec<u16> {
+    let area = a.area.intersection(b.area);
+    (area.y..area.bottom())
+        .filter(|&y| (area.x..area.right()).any(|x| a[(x, y)].style() != b[(x, y)].style()))
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "buffer_tests.rs"]
+mod tests;

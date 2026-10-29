@@ -1,15 +1,12 @@
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::widgets::{Clear, Widget};
 
 use super::*;
 use crate::frame::{Lines, ModalFrame, ModalSize};
+use crate::testkit::keys::press;
 use crate::theme::Theme;
-
-fn press(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
 
 /// The host context the test overlays read: a word that changes between
 /// keys, so a test can tell a live read from a copy.

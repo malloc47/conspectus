@@ -29,6 +29,9 @@
 //! - **Find and paint**: [`find_ci`] and [`find_all_ci`] find matches
 //!   without case for ASCII; [`paint`] restyles them, the one match
 //!   painter.
+//! - **Escapes**: [`strip_ansi`] drops the terminal escape sequences of
+//!   captured output or ANSI-written frames, so the text can be measured,
+//!   shown plainly, or compared.
 //!
 //! ```
 //! use tuikit::text::{fit, truncate_end, truncate_middle, width, wrap};
@@ -61,12 +64,14 @@
 //! like a wrapped paragraph.
 
 mod cut;
+mod escape;
 mod find;
 mod measure;
 mod snippet;
 mod wrap;
 
 pub use cut::{clip, clip_start, fit, fit_spans, pad, pad_start, truncate_end, truncate_middle};
+pub use escape::strip_ansi;
 pub use find::{FindAll, find_all_ci, find_ci, paint};
 pub use measure::{spans_width, width};
 pub use snippet::{Snippet, fit_snippet};

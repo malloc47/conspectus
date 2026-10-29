@@ -3,6 +3,7 @@ use ratatui::style::Style;
 
 use super::*;
 use crate::glyphs::marks;
+use crate::testkit::keys::{chord, press};
 use crate::text::wrap_at;
 use crate::theme::Theme;
 
@@ -74,14 +75,6 @@ const CHOICE: &[KeyRow<ChoiceKey<Choice>>] = &[
     shown(key(KeyCode::Esc), ChoiceKey::Back, "Esc", "cancel"),
     alias(ch('q'), ChoiceKey::Back),
 ];
-
-fn press(modifiers: KeyModifiers, code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, modifiers)
-}
-
-fn plain(code: KeyCode) -> KeyEvent {
-    press(KeyModifiers::NONE, code)
-}
 
 fn segments(footer: &Footer) -> Vec<(&str, bool)> {
     footer
@@ -192,15 +185,15 @@ fn labels_are_written_one_way() {
 
 #[test]
 fn resolve_returns_the_first_matching_row_and_looks_inside_includes() {
-    assert_eq!(resolve(ROWS, plain(KeyCode::Up)), Some(Key::Up));
-    assert_eq!(resolve(ROWS, plain(KeyCode::Char('k'))), Some(Key::Up));
+    assert_eq!(resolve(ROWS, press(KeyCode::Up)), Some(Key::Up));
+    assert_eq!(resolve(ROWS, press(KeyCode::Char('k'))), Some(Key::Up));
     assert_eq!(
-        resolve(ROWS, press(KeyModifiers::CONTROL, KeyCode::Char('c'))),
+        resolve(ROWS, chord(KeyModifiers::CONTROL, KeyCode::Char('c'))),
         Some(Key::Abort)
     );
-    assert_eq!(resolve(ROWS, plain(KeyCode::Char('x'))), None);
-    assert_eq!(resolve(MORE, plain(KeyCode::Esc)), Some(Key::Close));
-    assert_eq!(resolve(MORE, plain(KeyCode::Char('y'))), Some(Key::Copy));
+    assert_eq!(resolve(ROWS, press(KeyCode::Char('x'))), None);
+    assert_eq!(resolve(MORE, press(KeyCode::Esc)), Some(Key::Close));
+    assert_eq!(resolve(MORE, press(KeyCode::Char('y'))), Some(Key::Copy));
     let flat: Vec<_> = rows(MORE).collect();
     assert_eq!(flat.len(), ROWS.len() + 2);
     assert!(flat.iter().all(|row| !matches!(row, KeyRow::Include(_))));
@@ -308,7 +301,7 @@ fn an_unavailable_action_is_dimmed_in_the_footer() {
         .collect::<Vec<_>>();
     assert!(Footer::new(&one_off).segments().iter().all(|s| s.available));
     // Availability is how a row is drawn; the key still resolves.
-    assert_eq!(resolve(&rows, plain(KeyCode::Char('y'))), Some(Key::Copy));
+    assert_eq!(resolve(&rows, press(KeyCode::Char('y'))), Some(Key::Copy));
 }
 
 #[test]
@@ -382,21 +375,21 @@ fn ctrl_c_comes_first_and_dismisses() {
 
 #[test]
 fn typed_chars_are_plain_and_shifted_characters_only() {
-    assert_eq!(typed_char(plain(KeyCode::Char('a'))), Some('a'));
+    assert_eq!(typed_char(press(KeyCode::Char('a'))), Some('a'));
     assert_eq!(
-        typed_char(press(KeyModifiers::SHIFT, KeyCode::Char('A'))),
+        typed_char(chord(KeyModifiers::SHIFT, KeyCode::Char('A'))),
         Some('A')
     );
-    assert_eq!(typed_char(plain(KeyCode::Char(' '))), Some(' '));
+    assert_eq!(typed_char(press(KeyCode::Char(' '))), Some(' '));
     assert_eq!(
-        typed_char(press(KeyModifiers::CONTROL, KeyCode::Char('a'))),
+        typed_char(chord(KeyModifiers::CONTROL, KeyCode::Char('a'))),
         None
     );
     assert_eq!(
-        typed_char(press(KeyModifiers::ALT, KeyCode::Char('a'))),
+        typed_char(chord(KeyModifiers::ALT, KeyCode::Char('a'))),
         None
     );
-    assert_eq!(typed_char(plain(KeyCode::Enter)), None);
+    assert_eq!(typed_char(press(KeyCode::Enter)), None);
 }
 
 fn roles<A: KeyAction>(table: &'static [KeyRow<A>]) -> impl Fn(KeyEvent) -> Vec<KeyRole> {
@@ -489,7 +482,7 @@ fn the_standard_tables_keep_the_rules() {
 fn q_dismisses_where_nothing_is_typed() {
     // House rule 4: q is a dismiss key in the tables with no text field,
     // and left to type in the ones that edit text.
-    let q = plain(KeyCode::Char('q'));
+    let q = press(KeyCode::Char('q'));
     assert_eq!(resolve(MENU_KEYS, q), Some(MenuKey::Abort));
     assert_eq!(resolve(CONFIRM_KEYS, q), Some(ConfirmKey::Abort));
     assert_eq!(resolve(CHECKLIST_KEYS, q), Some(ChecklistKey::Abort));
@@ -499,7 +492,7 @@ fn q_dismisses_where_nothing_is_typed() {
     assert_eq!(resolve(FORM_OPTION_KEYS, q), None);
     // A chord of q is not q.
     assert_eq!(
-        resolve(MENU_KEYS, press(KeyModifiers::CONTROL, KeyCode::Char('q'))),
+        resolve(MENU_KEYS, chord(KeyModifiers::CONTROL, KeyCode::Char('q'))),
         None
     );
 }
@@ -545,8 +538,8 @@ fn the_standard_footers_read_in_the_one_grammar() {
 
 #[test]
 fn every_list_moves_with_ctrl_p_and_ctrl_n() {
-    let ctrl_n = press(KeyModifiers::CONTROL, KeyCode::Char('n'));
-    let ctrl_p = press(KeyModifiers::CONTROL, KeyCode::Char('p'));
+    let ctrl_n = chord(KeyModifiers::CONTROL, KeyCode::Char('n'));
+    let ctrl_p = chord(KeyModifiers::CONTROL, KeyCode::Char('p'));
     assert_eq!(resolve(MENU_KEYS, ctrl_n), Some(MenuKey::Down));
     assert_eq!(resolve(MENU_KEYS, ctrl_p), Some(MenuKey::Up));
     assert_eq!(resolve(CHECKLIST_KEYS, ctrl_n), Some(ChecklistKey::Down));
@@ -560,8 +553,8 @@ fn every_list_moves_with_ctrl_p_and_ctrl_n() {
 
 #[test]
 fn a_pager_goes_to_its_ends_on_plain_g_and_shift_g_only() {
-    let g = |modifiers| press(modifiers, KeyCode::Char('g'));
-    let upper = |modifiers| press(modifiers, KeyCode::Char('G'));
+    let g = |modifiers| chord(modifiers, KeyCode::Char('g'));
+    let upper = |modifiers| chord(modifiers, KeyCode::Char('G'));
     assert_eq!(
         resolve(PAGER_KEYS, g(KeyModifiers::NONE)),
         Some(PagerKey::Top)
@@ -578,11 +571,11 @@ fn a_pager_goes_to_its_ends_on_plain_g_and_shift_g_only() {
     assert_eq!(resolve(PAGER_KEYS, g(KeyModifiers::ALT)), None);
     assert_eq!(resolve(PAGER_KEYS, upper(KeyModifiers::ALT)), None);
     assert_eq!(
-        resolve(PAGER_KEYS, plain(KeyCode::Home)),
+        resolve(PAGER_KEYS, press(KeyCode::Home)),
         Some(PagerKey::Top)
     );
     assert_eq!(
-        resolve(PAGER_KEYS, plain(KeyCode::End)),
+        resolve(PAGER_KEYS, press(KeyCode::End)),
         Some(PagerKey::Bottom)
     );
 }

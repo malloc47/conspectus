@@ -48,8 +48,11 @@ rule), the `keys` module (key tables, footers, key labels, roles, and the
 standard tables for menus, dialogs, pagers, prompts, checklists, and
 forms), the `overlay` module (the overlay contract, its outcomes, and the
 host-owned modal stack that routes keys to its top entry and draws every
-entry), the source guards, and this documentation set; the module map in
-the architecture guide says which modules have landed.
+entry), the `help` and `feedback` modules, the `testkit` module behind its
+feature (key scripts, the one-frame driver, buffer probes, ANSI text,
+style-aware goldens, the conformance suite, and source-scan helpers), the
+source guards, and this documentation set; the module map in the
+architecture guide says which modules have landed.
 
 ## Depending on it by path
 
@@ -70,7 +73,14 @@ confusing "two different types with the same name" errors.
 Cargo features are off by default and add to the build only what a host asks
 for. The planned `richtext` feature turns ANSI text, Markdown, tables, and
 syntax highlighting into styled lines for content views; it is the only
-feature that pulls in the heavier parsing crates.
+feature that pulls in the heavier parsing crates. The `testkit` feature turns
+on the test kit for a host's tests and dev tools; it adds no dependency, and a
+host enables it from its dev-dependencies so production builds leave it out:
+
+```toml
+[dev-dependencies]
+tuikit = { path = "crates/tuikit", features = ["testkit"] }
+```
 
 ## Independence
 

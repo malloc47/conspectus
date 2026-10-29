@@ -16,7 +16,19 @@ ratatui = { workspace = true }
 # `[workspace.dependencies]` and in ratatui's own tree; ADR 0152 names it.
 unicode-width = { workspace = true }
 
+[features]
+# The test kit (`tuikit::testkit`): key scripts, the one-frame driver,
+# buffer probes, the ANSI writer, style-aware goldens, the conformance
+# suite, and the source-scan helpers. Off by default, so a production
+# build carries none of it; a host turns it on from its dev-dependencies
+# (and from any dev-only feature of its own that drives frames).
+testkit = []
+
 [dev-dependencies]
+# The crate's own integration tests (the source guards) and doctests use
+# the test kit, so the crate depends on itself with the feature on. This
+# adds no package: it is this crate.
+tuikit = { path = ".", features = ["testkit"] }
 # The independence guard in `tests/independence.rs` parses this manifest as
 # TOML instead of guessing at its layout. `toml` is already shared through
 # `[workspace.dependencies]`, so the lockfile gains no package. Every entry

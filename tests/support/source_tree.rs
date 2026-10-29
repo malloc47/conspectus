@@ -52,9 +52,9 @@
 //! * When a story moves files from `src` into `crates/tuikit/src`, raise
 //!   `FRAMEWORK_SRC` in the same change and lower `HOST_SRC` if the move
 //!   took the host under its minimum. The sum of the two should not shrink.
-//! * `FRAMEWORK_SRC` asks for 43 of the 58 files the crate holds today:
-//!   `lib.rs` and the foundation and `keys` modules with their sibling
-//!   test files.
+//! * `FRAMEWORK_SRC` asks for 70 of the 94 files the crate holds today:
+//!   `lib.rs`, the foundation and convention modules, and the test kit,
+//!   with their sibling test files.
 //!   `FRAMEWORK_EXAMPLES` is 0 until the first example exists; raise it to 1
 //!   with that example.
 //! * A tree can name a single file (`src/tui/modal.rs`). Its minimum is 1,
@@ -103,8 +103,8 @@ pub const HOST_SRC: Tree = Tree::new("src", 300);
 pub const HOST_TESTS: Tree = Tree::new("tests", 30);
 /// The host's examples (1 file today).
 pub const HOST_EXAMPLES: Tree = Tree::new("examples", 1);
-/// The framework's `src` (58 files today). Raise this as code moves in.
-pub const FRAMEWORK_SRC: Tree = Tree::new("crates/tuikit/src", 43);
+/// The framework's `src` (94 files today). Raise this as code moves in.
+pub const FRAMEWORK_SRC: Tree = Tree::new("crates/tuikit/src", 70);
 /// The framework's integration tests (6 files today, one of them shared
 /// scan plumbing under `support/`). The independence guard alone keeps the
 /// minimum of 1.
@@ -122,27 +122,16 @@ pub const EVERY_RUST_TREE: &[Tree] = &[
     FRAMEWORK_EXAMPLES,
 ];
 
-fn collect(path: &Path, out: &mut Vec<PathBuf>) {
-    if path.is_dir() {
-        let Ok(entries) = fs::read_dir(path) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            collect(&entry.path(), out);
-        }
-    } else if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
-        out.push(path.to_path_buf());
-    }
-}
-
 /// The `.rs` files under `trees`, sorted, or a description of every tree
-/// that has fewer files than its minimum.
+/// that has fewer files than its minimum. The walk is the framework test
+/// kit's (`tuikit::testkit::source::rust_files`), which the framework's own
+/// guards use too.
 pub fn try_rust_files(root: &Path, trees: &[Tree]) -> Result<Vec<PathBuf>, String> {
     let mut files = Vec::new();
     let mut short = Vec::new();
     for tree in trees {
         let before = files.len();
-        collect(&root.join(tree.dir), &mut files);
+        files.extend(tuikit::testkit::source::rust_files(&root.join(tree.dir)));
         let found = files.len() - before;
         if found < tree.min_files {
             short.push(format!(

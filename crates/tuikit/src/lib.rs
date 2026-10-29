@@ -27,3 +27,11 @@ pub mod scroll;
 pub mod selection;
 pub mod text;
 pub mod theme;
+
+// The test kit is off in production builds: a host turns on the `testkit`
+// feature from its dev-dependencies, and the crate's own unit tests always
+// have it.
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
+
+mod lex;

@@ -170,8 +170,10 @@ workspace = true
 # TUI frame to stdout with ANSI styling preserved so agents can
 # iterate on renderer changes without a manual screenshot loop.
 # Off by default; `just check` and CI enable it through
-# `--all-features`, while release/downstream builds leave it off.
-snapshot = []
+# `--all-features`, while release/downstream builds leave it off. The
+# key-script parser, the one-frame driver, and the ANSI writer it uses
+# are the framework's test kit.
+snapshot = ["tuikit/testkit"]
 
 [dependencies]
 ansi-to-tui = { workspace = true }
@@ -206,6 +208,10 @@ unicode-width = { workspace = true }
 [dev-dependencies]
 assert_cmd = { workspace = true }
 insta = { workspace = true }
+# The framework's test kit (key scripts, frame driver, buffer probes,
+# goldens, the conformance suite, source-scan helpers) for the tests and
+# the preview example; production builds leave the feature off.
+tuikit = { path = "crates/tuikit", features = ["testkit"] }
 tui-pantry = { workspace = true }
 predicates = { workspace = true }
 tempfile = { workspace = true }
