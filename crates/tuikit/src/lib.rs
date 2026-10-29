@@ -15,6 +15,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::private_intra_doc_links)]
 
+pub mod action_menu;
 pub mod age;
 pub mod chip;
 pub mod feedback;

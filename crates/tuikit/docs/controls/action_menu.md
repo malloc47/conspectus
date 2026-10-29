@@ -1,0 +1,257 @@
+# `ActionMenu<M>`
+
+| | |
+| --- | --- |
+| Module | `tuikit::action_menu` |
+| Layer | 1 (control) |
+| Type parameters | `M`, the host's message, which each entry carries and a pick commits (`Clone`, since the menu keeps its entries); the menu implements `Overlay<M, Cx>` for every context `Cx` and reads none |
+| Cargo feature | none |
+| Outcomes | `Commit(M)` when an entry is picked (`Enter`, its shortcut, or the second `Enter` on an armed entry); `Close` for `Esc`, `q`, and `Ctrl-C`; `Consumed` for a move, an arm, a disabled entry's shortcut, and every other key; never `Stay(M)` |
+
+## Purpose
+
+`ActionMenu<M>` offers the actions that apply to something (a row, a
+selection, the program itself) in a small modal list, and reports the one
+the user picks. Each entry is data (`Entry<M>`): a label, an optional
+detail line under it, an optional shortcut, whether it can run now, how it
+confirms (`Confirm::None` or `Confirm::Inline`), and the message it
+commits.
+
+It replaces what grows menu by menu: one menu that stops at its ends and
+another that wraps, a menu that cannot scroll and loses its keys on a short
+screen beside one that keeps them, a menu with a heading of its own and a
+width of its own, a menu whose only way to show a key is to mention it in
+prose, and a second `Enter` that one menu asks for without saying it is
+waiting for it.
+
+The host keeps which entries a menu offers and in what order, their labels
+and details, which of them confirm, and what each commits. It builds the
+entries from its own state each time it opens the menu, so the same thing
+offers the same actions wherever the menu is opened from.
+
+## Usage example
+
+A host whose files can be opened, shared, and deleted builds the menu for
+the file under its cursor and pushes it on its stack. Sharing a file that
+is already shared cannot run, and says why; deleting asks twice.
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
+use tuikit::action_menu::{ActionMenu, Confirm, Entry};
+use tuikit::keys::ch;
+use tuikit::overlay::ModalStack;
+use tuikit::theme::Theme;
+
+#[derive(Clone, Debug, PartialEq)]
+enum Msg {
+    Open(String),
+    Share(String),
+    Delete(String),
+}
+
+struct File {
+    name: String,
+    shared: bool,
+}
+
+/// The actions on `file`: sharing it again cannot run, and deleting it
+/// asks twice.
+fn file_menu(file: &File) -> ActionMenu<Msg> {
+    let mut share = Entry::new("Share", Msg::Share(file.name.clone()));
+    share = if file.shared {
+        share.detail("already shared").disabled()
+    } else {
+        share.detail("send a link").shortcut(ch('s'))
+    };
+    ActionMenu::new(
+        file.name.as_str(),
+        vec![
+            Entry::new("Open", Msg::Open(file.name.clone())).detail("show it"),
+            share,
+            Entry::new("Delete", Msg::Delete(file.name.clone()))
+                .detail("remove it for good")
+                .confirm(Confirm::Inline),
+        ],
+    )
+}
+
+let file = File { name: "plan.txt".into(), shared: true };
+let mut stack: ModalStack<ActionMenu<Msg>> = ModalStack::new();
+stack.push(file_menu(&file));
+let press = |code| KeyEvent::new(code, KeyModifiers::NONE);
+
+// Down steps over the entry that cannot run; Delete asks twice.
+stack.route(press(KeyCode::Down), &file);
+assert_eq!(stack.top().map(ActionMenu::cursor), Some(2));
+let first = stack.route(press(KeyCode::Enter), &file).expect("a menu is open");
+assert!(stack.settle(first).message.is_none(), "armed, still open");
+let second = stack.route(press(KeyCode::Enter), &file).expect("a menu is open");
+let settled = stack.settle(second);
+assert_eq!(settled.message, Some(Msg::Delete("plan.txt".into())));
+assert!(stack.is_empty(), "the pick closed the menu");
+
+// Drawn in the menu-sized frame with its generated footer.
+let mut menu = file_menu(&File { name: "plan.txt".into(), shared: false });
+let mut buf = Buffer::empty(Rect::new(0, 0, 70, 14));
+menu.draw(buf.area, &mut buf, &Theme::default());
+assert!(menu.shadowed_shortcuts().is_empty());
+```
+
+The same example is the doctest on `ActionMenu`, so it compiles.
+
+A host whose overlay holds a menu as one of its levels (a list whose
+entries lead to further questions) makes the menu's `M` a value of its
+own, routes keys to it with `Overlay::handle`, takes a `Commit` as the
+pick (opening its next level instead of closing), takes `Close` as
+leaving, and draws it with `ActionMenu::draw`, which keeps the scroll
+window as the stack's draw does.
+
+### Rows
+
+Inside the frame, from the top: a blank row; for each entry its label row
+and its detail rows; a blank row; the footer.
+
+- **The label row** starts with the cursor gutter (`selection::row`). When
+  any entry has a shortcut, a key column follows: each shortcut's label as
+  `keys::key_label` writes it, padded to the widest, and two cells; rows
+  without a shortcut leave the column blank, so every label starts in one
+  column. A menu with no shortcuts has no key column. A label too long for
+  the row is cut with `…`.
+- **Detail rows** are the detail wrapped to the width left after an indent
+  three cells past the labels, unstyled.
+- **The footer** is generated from `MENU_KEYS` (`↑/↓ move · Enter pick ·
+  Esc close`) and broken only between hints.
+
+### Size and scrolling
+
+The menu is the menu-sized modal frame (`MENU_SIZE`, which is
+`ModalSize::MENU`: up to 64 columns, at least 40, two columns and a row
+clear on each side while the screen allows) and is as tall as its rows
+plus the border. One title form, the frame's: no heading inside the body.
+
+When the screen is too short, the footer keeps the bottom rows (every row
+but one, its blank row giving way first) and the entries scroll in a
+`ScrollWindow` the menu keeps between draws: the window moves no further
+than it must to show the cursor's entry (its label first, when the entry
+is taller than the window), so moving inside the window does not scroll
+it. Entries that overflow give their last column to the shared scrollbar
+(`ScrollGutter`) and are laid out again one cell narrower. The bar's track
+keeps a row clear above and below it, so on a screen where the entries
+have fewer than five rows (a 40x10 screen gives them four) the column is
+kept but no bar is drawn. `ActionMenu::window` is the window of the last
+draw.
+
+### Confirming inline
+
+An entry with `Confirm::Inline` arms on the first `Enter` (or its
+shortcut) instead of committing. While it is armed its row says what the
+next press does, in the theme's `error` and bold: the label, `·`, and
+`confirm_note()` (`press Enter again to confirm`, with the key written as
+`MENU_KEYS` shows it). The second press commits it. Moving the cursor
+disarms it; `Esc`, `q`, and `Ctrl-C` close the menu, armed or not, saying
+nothing. An action that needs more than "are you sure" (a list of what it
+will affect, a choice of how) belongs in a dialog the entry opens, not in
+an inline arm (house rule 3).
+
+### Entries that cannot run
+
+A disabled entry (`Entry::disabled`, `enabled: false`) stays in the list,
+so the menu has the same shape whether or not the action can run, and is
+drawn receding: its label and key in `keys::unavailable_style` (the
+theme's `inert` color with its `muted` modifier). The cursor steps over it
+in both directions and is never on it, the cursor starts on the first
+entry that can run, and neither `Enter` nor the entry's shortcut commits
+it. Its detail stays plain, since it is where the host says why the entry
+cannot run. In a menu where nothing can run no row is marked and `Enter`
+does nothing; the close keys still close it.
+
+### Shortcuts
+
+`Entry::shortcut` takes a `KeyMatcher`, so a shortcut follows the overlay
+rule for characters: `ch('o')` fires on `o` typed plain or with Shift and
+never on `Ctrl-O`. A shortcut moves the cursor to its entry and picks it
+(arming an inline entry, whose second press commits it). The menu resolves
+its table first, so a shortcut on a key `MENU_KEYS` binds (`j`, `k`, `q`,
+`Enter`, `Esc`, the arrows, `Ctrl-N`, `Ctrl-P`, `Ctrl-C`) never fires, and
+of two entries with one shortcut only the first does.
+`ActionMenu::shadowed_shortcuts` lists such shortcuts by their labels; a
+host runs it over the menus it builds.
+
+## Key table
+
+`MENU_KEYS`, over `MenuKey` (a standard table; see [keys.md](keys.md)),
+then the entries' shortcuts.
+
+| Key | Action | Notes |
+| --- | --- | --- |
+| `Ctrl-C` | Abort | closes the menu, saying nothing; an alias, not in the footer |
+| `q` | Abort | closes the menu, saying nothing; nothing is typed in a menu |
+| `↑`, `k`, `Ctrl-P` | Up | the previous entry that can run, wrapping from the first to the last |
+| `↓`, `j`, `Ctrl-N` | Down | the next entry that can run, wrapping from the last to the first |
+| `Enter` | Pick | commits the cursor's entry, or arms it when it confirms inline and is not armed |
+| `Esc` | Close | closes the menu, saying nothing; a menu has one level |
+| an entry's shortcut | (pick that entry) | moves the cursor to it and picks it; does nothing for an entry that cannot run |
+| any other key | (none) | swallowed |
+
+The footer, generated from the table, reads `↑/↓ move · Enter pick · Esc
+close`.
+
+## Theme tokens
+
+| Token | Used for |
+| --- | --- |
+| `accent` | the frame's border and its title |
+| `surface` | the background the frame paints |
+| `selection_active` | the cursor's label row, gutter to label (`selection::row`) |
+| `error` | an armed entry's label row (with bold) |
+| `inert`, `muted` | a disabled entry's label and key (`keys::unavailable_style`) |
+
+Detail rows and the footer are unstyled. The scrollbar is the shared
+`ScrollGutter` look.
+
+## House rules followed
+
+| # | Rule | How this control follows it |
+| --- | --- | --- |
+| 1 | List cursor and highlight | each label row goes through `selection::row`: the pointer in the 2-cell gutter and the theme's selection pair over the gutter, key, and label |
+| 2 | List ends | a menu is a short choice list: `Ends::Wrap`, stepping over entries that cannot run |
+| 3 | Confirmation | `Confirm::Inline` is the inline arm, for an action with nothing more to say; the armed row says what `Enter` will do. A dialog is the idiom when a body helps |
+| 4 | Close keys | `Esc` closes the menu's one level; `Ctrl-C` and `q` dismiss it, armed or not; nothing is typed in a menu |
+| 5 | Close feedback | closing returns `Close` and carries no message |
+| 8 | Footers and hints | the footer is generated from `MENU_KEYS` in the one grammar; a shortcut is shown in the menu's key column, written as `key_label` writes keys, never in prose |
+| 10 | Unfocused cursor | an open menu has the keys, so its cursor row takes `selection_active` |
+| 13 | Theme | the frame, highlight, armed row, and disabled entries take theme tokens; no raw color or reversed cell |
+| 14 | Width | labels are cut with `…`, details wrapped, the key column padded, and the footer broken, all in cells |
+
+Not applicable: 6 and 7 (a menu has no fields and refuses nothing; an
+entry that cannot run is shown as such, with its reason in its detail), 9
+(the focus cue is the pane frame's), 11 (the menu reports no feedback),
+12 (a menu is short; see the seams), 15 and 16 (no text field), 17 (labels
+and details are the host's copy), and 18 (pagers).
+
+## Seams left open
+
+- **Paging.** A menu has no `PgUp`/`PgDn` or `Home`/`End`; a menu long
+  enough to need them would gain them in `MENU_KEYS` (house rule 12),
+  moving by `ActionMenu::window`'s page.
+- **Availability from a key table.** `enabled` is set per entry. A host
+  whose actions also have key rows could derive it from the rows'
+  availability (`keys::with_availability`), so a menu, a footer, and a
+  help page dim the same actions from one source.
+- **A host's confirm words.** The armed row always says `press Enter again
+  to confirm`. An entry could carry its own words (`press Enter again to
+  delete`) if a host needs them.
+- **Groups.** No separators or headings between entries; a long menu that
+  needs them would take a non-selectable row kind the cursor steps over,
+  as it steps over a disabled entry.
+- **Mouse hit testing.** The menu's rect is the frame's for the rows it
+  measured (`MENU_SIZE.rect`), and each entry's rows are known when it is
+  laid out, which a click would be tested against.
+- **An unfocused menu.** A menu covered by another overlay keeps the
+  active look; a stack that told its lower entries they lost focus would
+  let them draw `selection_inactive`.
+- **The scrollbar on short screens.** On a screen whose entries get fewer
+  than five rows the bar's column is kept and no bar is drawn; the
+  gutter could skip such a column for every scrolled body at once.

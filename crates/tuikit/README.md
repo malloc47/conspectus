@@ -43,7 +43,9 @@ text field that draws it), the `text_prompt` module (the one-line prompt
 that commits, refuses with a reason, or stays), the `path_field` module
 (the path field that completes through a source its host supplies), the
 `form` module (the multi-field form that submits from any field and keeps
-its keys in view), the `scroll`
+its keys in view), the `action_menu` module (the action menu whose entries
+are data, with shortcuts, entries that cannot run, an inline confirmation,
+and a footer that stays in view while the entries scroll), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
 scrollbar gutter, and wrapped-row counts), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age

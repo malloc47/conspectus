@@ -167,7 +167,7 @@ not shown in the footer.
 
 | Table (enum) | Keys | Footer |
 | --- | --- | --- |
-| `MENU_KEYS` (`MenuKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Enter` pick; `Esc` close | `↑/↓ move · Enter pick · Esc close` |
+| `MENU_KEYS` (`MenuKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Enter` pick; `Esc` close (the table of `ActionMenu`, whose entries' shortcuts come after it) | `↑/↓ move · Enter pick · Esc close` |
 | `CONFIRM_KEYS` (`ConfirmKey`) | `Ctrl-C` and `q` abort; `Enter`/`y` yes; `Esc`/`n` no | `Enter/y confirm · Esc/n cancel` |
 | a choice dialog (`ChoiceKey<C>`) | `Ctrl-C` and `q` abort; one shown row per choice; `Esc` (shown as cancel) back | `m merge & close · d discard & close · Esc cancel` (the host's choices) |
 | `PAGER_KEYS` (`PagerKey`) | `Ctrl-C` abort; `j`/`↓` down; `k`/`↑` up; `PgDn`/`Space` page down; `PgUp` page up; `g`/`Home` top; `G`/`End` bottom; `Esc`/`q` close | `j/k/PgDn/PgUp scroll · Esc/q close` |
