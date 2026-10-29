@@ -107,7 +107,7 @@ impl KeyAction for DialogKey {
 }
 
 /// What a pager's keys do: every reader's, the
-/// `Pager` control's and a help page's alike.
+/// [`Pager`](crate::pager::Pager) control's and a help page's alike.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PagerKey {
     /// Dismiss the pager at once, from any level of it (`Ctrl-C`, `q`).
@@ -179,7 +179,7 @@ pub const PAGER_KEYS: &[KeyRow<PagerKey>] = &[
 ];
 
 /// A reader: a pager with a find and a help page, the default table of
-/// the `Pager` control. [`PAGER_KEYS`], then `/`
+/// the [`Pager`](crate::pager::Pager) control. [`PAGER_KEYS`], then `/`
 /// to find, `n` and `N` to step between its matches (aliases), and `?`
 /// for the help page: `j/k/PgDn/PgUp scroll · Esc/q close · / find · ?
 /// help`.

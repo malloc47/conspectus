@@ -439,6 +439,24 @@ pub fn table<A: KeyAction + PartialEq + 'static>(
     name: &'static str,
     rows: &'static [KeyRow<A>],
 ) -> KeyTable {
+    let mut table = part(name, rows);
+    if !ctrl_c_first(rows) {
+        table
+            .problems
+            .push("does not start with Ctrl-C bound to dismissing".to_string());
+    }
+    table
+}
+
+/// `rows`, named `name`, as a part of a level's keys: a table the level
+/// consults after its first (a pager's content keys, after the pager's
+/// own), so it need not start with `Ctrl-C`. The level's check that
+/// `Ctrl-C` dismisses still holds over every table it consults, and the
+/// other table checks run as for [`table`].
+pub fn part<A: KeyAction + PartialEq + 'static>(
+    name: &'static str,
+    rows: &'static [KeyRow<A>],
+) -> KeyTable {
     let mut problems = Vec::new();
     for (label, key) in mislabeled(rows) {
         problems.push(format!("labels `{key}` as `{label}`"));
@@ -450,9 +468,6 @@ pub fn table<A: KeyAction + PartialEq + 'static>(
     }
     for key in loose_characters(rows) {
         problems.push(format!("binds the character `{key}` with its chords too"));
-    }
-    if !ctrl_c_first(rows) {
-        problems.push("does not start with Ctrl-C bound to dismissing".to_string());
     }
     let mut keys: Vec<KeyEvent> = Vec::new();
     for row in crate::keys::rows(rows) {
