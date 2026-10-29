@@ -41,6 +41,7 @@ pub mod text;
 pub mod text_edit;
 pub mod text_prompt;
 pub mod theme;
+pub mod tree;
 
 // The test kit is off in production builds: a host turns on the `testkit`
 // feature from its dev-dependencies, and the crate's own unit tests always
