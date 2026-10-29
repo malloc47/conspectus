@@ -1730,8 +1730,7 @@ fn derive_new_mux_name(_app: &App) -> String {
 /// Open the Mux action menu (`m`). Context-free — the menu itself
 /// derives per-entry defaults when its selection commits.
 pub(super) fn open_mux_menu_action(app: &mut App) {
-    use crate::tui::widgets::mux_menu::MuxMenuState;
-    app.open_mux_menu(MuxMenuState::new());
+    app.open_mux_menu(crate::tui::actions::mux_menu());
     app.update(Msg::SetStatus(Some(Feedback::info(
         "mux: ↑/↓ move · Enter pick · Esc close",
     ))));

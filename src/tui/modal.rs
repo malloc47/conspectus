@@ -136,8 +136,9 @@ modals! {
     /// `n` bare tmux new-session form (ADR 0095): the framework's form,
     /// whose submit its closure turns into the new mux.
     NewMux(tuikit::form::Form<Msg>),
-    /// `m` mux action menu (ADR 0096).
-    MuxMenu(crate::tui::widgets::mux_menu::MuxMenuState),
+    /// `m` mux action menu (ADR 0096): the framework's action menu over
+    /// the two ways to start a mux. Boxed to keep [`Modal`] small.
+    MuxMenu(Box<tuikit::action_menu::ActionMenu<Msg>>),
     /// Mux launch form: a harness in a fresh mux (ADR 0096), the
     /// framework's form with the fields that follow others kept in step.
     /// Boxed to keep [`Modal`] small.
@@ -145,9 +146,10 @@ modals! {
     /// The pin edit form: every field a pin can change, with the layer
     /// each value comes from.
     PinEdit(Box<crate::tui::widgets::pin_edit::PinEditForm>),
-    /// `.` row action menu: the verbs for the selected row, each
-    /// committing a [`Msg`].
-    RowMenu(Box<crate::tui::widgets::row_menu::RowMenuState>),
+    /// `.` row action menu, and the menu that unpins one of several
+    /// pins: the framework's action menu over the verbs for the selected
+    /// row, each committing a [`Msg`].
+    RowMenu(Box<tuikit::action_menu::ActionMenu<Msg>>),
     /// The History view's Clean up checklist (ADR 0140).
     CleanUp(Box<crate::tui::widgets::clean_up::CleanUpState>),
     /// A pick-one list with type-to-filter: where a pin points next, or a

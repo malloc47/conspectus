@@ -121,7 +121,7 @@ fn screens() -> Vec<(String, String)> {
             overlays.push((name, app));
         }
         let mut mux_menu = app_in(view);
-        mux_menu.open_mux_menu(crate::tui::widgets::mux_menu::MuxMenuState::new());
+        mux_menu.open_mux_menu(crate::tui::actions::mux_menu());
         overlays.push(("mux menu", mux_menu));
         for (name, mut app) in overlays {
             out.push((format!("{view:?} {name}"), frame(&mut app, 160, 60)));

@@ -5,22 +5,22 @@ expression: "trimmed(pinned_frame(&mut app, 100))"
 updated 0s ago · 1 sessions · 1 mux
 ┌ ► sessions · mux┌ mux config-agent3 ───────────────────────────────────────────┐─────────────────┐
 │  ◇ ◎ conspectus-│                                                              │.                │
-│  ▣ ◎ config-agen│► Rebuild                                                     │                 │
-│                 │     bring it back without attaching (Enter also attaches)    │                 │
-│                 │  Show rebuild plan                                           │                 │
-│                 │     what rebuild would run, without running it               │                 │
-│                 │  Edit…                                                       │                 │
-│                 │     change the name, cwd, harness, arguments, and more       │                 │
-│                 │  Rename…                                                     │                 │
-│                 │     change the pin name (a live mux is renamed with it)      │                 │
-│                 │  Retarget…                                                   │                 │
-│                 │     point it at another entity of the same kind              │                 │
-│                 │  Refresh snapshot                                            │                 │
-│                 │     copy the entity's current recipe into the pin            │                 │
-│                 │  Reveal in its view                                          │                 │
-│                 │     jump to the entity in Sessions, Mux, PRs, or History     │                 │
-│                 │  Unpin config-agent3                                         │                 │
-│                 │     remove the pin; the entity and its history stay          │                 │
+│  ▣ ◎ config-agen│► Rebuild                                                    ▲│                 │
+│                 │     bring it back without attaching (Enter also attaches)   █│                 │
+│                 │  Show rebuild plan                                          █│                 │
+│                 │     what rebuild would run, without running it              █│                 │
+│                 │  Edit…                                                      █│                 │
+│                 │     change the name, cwd, harness, arguments, and more      █│                 │
+│                 │  Rename…                                                    █│                 │
+│                 │     change the pin name (a live mux is renamed with it)     █│                 │
+│                 │  Retarget…                                                  █│                 │
+│                 │     point it at another entity of the same kind             █│                 │
+│                 │  Refresh snapshot                                           █│                 │
+│                 │     copy the entity's current recipe into the pin           █│                 │
+│                 │  Reveal in its view                                         █│                 │
+│                 │     jump to the entity in Sessions, Mux, PRs, or History    ║│                 │
+│                 │  Unpin config-agent3                                        ║│                 │
+│                 │     remove the pin; the entity and its history stay         ▼│                 │
 │                 │  Forget                                                      │                 │
 │                 │                                                              │                 │
 │                 │↑/↓ move · Enter pick · Esc close                             │                 │

@@ -5,9 +5,10 @@
 //! for drawing; the impl here hands each the App data it reads. A scrolled
 //! entry keeps the window it drew, so its next page key moves by the rows
 //! that were on screen. Every entry draws through the shared modal frame,
-//! which clears what it covers, or fills the screen. The rename prompt and
-//! the new mux form have no impl here: they are the framework's text
-//! prompt and form, which implement the trait for any context.
+//! which clears what it covers, or fills the screen. The rename prompt, the
+//! new mux form, and the row and mux menus have no impl here: they are the
+//! framework's text prompt, form, and action menu, which implement the
+//! trait for any context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
@@ -23,11 +24,9 @@ use crate::tui::widgets::{
     help::{HelpOutcome, HelpOverlayState, HelpOverlayWidget},
     messages::{MessagesOverlayState, MessagesWidget},
     mux_launch::MuxLaunchForm,
-    mux_menu::{MuxMenuState, MuxMenuWidget},
     pane_viewer::{PaneViewerOutcome, PaneViewerState},
     picker::{PickerState, PickerWidget},
     pin_edit::PinEditForm,
-    row_menu::{RowMenuState, RowMenuWidget},
     search::SearchOverlayState,
     value_modal::{ValueModalOutcome, ValueModalState, ValueModalWidget},
     worktree_menu::{WorktreeMenuState, WorktreeMenuWidget},
@@ -248,16 +247,6 @@ impl Overlay<Msg, App> for WorktreeMenuState {
     }
 }
 
-impl Overlay<Msg, App> for MuxMenuState {
-    fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
-        self.handle_key(key)
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        MuxMenuWidget::new(self, app.theme()).render(area, buf);
-    }
-}
-
 impl Overlay<Msg, App> for MuxLaunchForm {
     fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
         self.handle_key(key)
@@ -283,16 +272,6 @@ impl Overlay<Msg, App> for PinEditForm {
 
     fn takes_text(&self) -> bool {
         PinEditForm::takes_text(self)
-    }
-}
-
-impl Overlay<Msg, App> for RowMenuState {
-    fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
-        self.handle_key(key)
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        RowMenuWidget::new(self, app.theme()).render(area, buf);
     }
 }
 

@@ -91,7 +91,7 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
             ));
         }),
         ("MuxMenu", View::Pinned, |app| {
-            app.open_mux_menu(crate::tui::widgets::mux_menu::MuxMenuState::new());
+            app.open_mux_menu(crate::tui::actions::mux_menu());
         }),
         ("MuxLaunch", View::Pinned, |app| {
             open_pinned(app, Msg::OpenMuxLaunchForm);

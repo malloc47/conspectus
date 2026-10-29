@@ -11,6 +11,7 @@ use crate::model::{
 use crate::tui::app::App;
 use crate::tui::rows::RowId;
 use crate::tui::viewer::ViewerDisabled;
+use tuikit::action_menu::{ActionMenu, Confirm, Entry};
 
 /// Resolved target for an attach action.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -677,10 +678,9 @@ pub fn running_note(snapshot: &GraphSnapshot, reference: &str) -> Option<String>
 /// the view that opened the menu, so the same entity offers the same
 /// verbs everywhere. The History view always has a menu: even with
 /// nothing selected it offers Clean up.
-pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuState> {
+pub fn row_menu_for(app: &App) -> Option<ActionMenu<crate::tui::Msg>> {
     use crate::model::SlotStatus;
     use crate::tui::Msg;
-    use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
     let snapshot = app.snapshot_handle()?.snapshot();
     let in_history = app.active_view() == crate::tui::View::History;
     let subject = action_subject(app);
@@ -721,16 +721,20 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
             PinSubject::Node(node) => Msg::PinNode(node),
             PinSubject::Record(id) => Msg::PinRecord(id),
         };
-        entries.push(RowMenuEntry::new("Pin", "pin this (p)", msg));
+        // `p` pins from the menu as it does from the list.
+        entries.push(
+            Entry::new("Pin", msg)
+                .detail("pin this")
+                .shortcut(tuikit::keys::ch('p')),
+        );
     }
     if let Some(reference) = reference {
         let offer = rebuild_offer(kind, status);
         if offer == RebuildOffer::Full {
-            entries.push(RowMenuEntry::new(
-                "Rebuild",
-                "bring it back without attaching (Enter also attaches)",
-                Msg::RebuildReference(reference.clone()),
-            ));
+            entries.push(
+                Entry::new("Rebuild", Msg::RebuildReference(reference.clone()))
+                    .detail("bring it back without attaching (Enter also attaches)"),
+            );
         }
         if offer != RebuildOffer::Nothing {
             let note = if offer == RebuildOffer::PlanOnly {
@@ -738,11 +742,9 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
             } else {
                 "what rebuild would run, without running it"
             };
-            entries.push(RowMenuEntry::new(
-                "Show rebuild plan",
-                note,
-                Msg::ShowRebuildPlan(reference),
-            ));
+            entries.push(
+                Entry::new("Show rebuild plan", Msg::ShowRebuildPlan(reference)).detail(note),
+            );
         }
     }
     if let Some(name) = pins.first() {
@@ -760,24 +762,47 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
                 pins.join(", ")
             )
         };
-        entries.push(RowMenuEntry::new("Forget", note, Msg::ForgetRecord(id)).confirming());
+        entries.push(
+            Entry::new("Forget", Msg::ForgetRecord(id))
+                .detail(note)
+                .confirm(Confirm::Inline),
+        );
     }
     if in_history {
-        entries.push(RowMenuEntry::new(
-            "Clean up…",
-            "forget gone records past their reap age",
-            Msg::OpenCleanUp,
-        ));
+        entries.push(
+            Entry::new("Clean up…", Msg::OpenCleanUp)
+                .detail("forget gone records past their reap age"),
+        );
     }
     let title = menu_title(app, &subject, &pins);
-    (!entries.is_empty()).then(|| RowMenuState::new(title, entries))
+    (!entries.is_empty()).then(|| ActionMenu::new(title, entries))
 }
 
-fn unpin_entry(name: &str) -> crate::tui::widgets::row_menu::RowMenuEntry {
-    crate::tui::widgets::row_menu::RowMenuEntry::new(
+/// The entry that removes the pin `name`, in the row menu and in the menu
+/// `p` opens when several pins point at the row.
+pub(crate) fn unpin_entry(name: &str) -> Entry<crate::tui::Msg> {
+    Entry::new(
         format!("Unpin {name}"),
-        "remove the pin; the entity and its history stay",
         crate::tui::Msg::Unpin(name.to_string()),
+    )
+    .detail("remove the pin; the entity and its history stay")
+}
+
+/// The `m` menu: the two ways to start a new mux, each opening its form.
+/// Their shortcuts are the keys that open the same forms from the list.
+pub fn mux_menu() -> ActionMenu<crate::tui::Msg> {
+    use crate::tui::Msg;
+    use tuikit::keys::ch;
+    ActionMenu::new(
+        "Mux",
+        vec![
+            Entry::new("New tmux session (bare shell)", Msg::OpenNewMuxForm)
+                .detail("shell only, no harness")
+                .shortcut(ch('n')),
+            Entry::new("Launch harness in new mux…", Msg::OpenMuxLaunchForm)
+                .detail("spawn harness; optionally pin it")
+                .shortcut(ch('N')),
+        ],
     )
 }
 
@@ -788,40 +813,34 @@ fn pin_management_entries(
     subject: &Subject,
     name: &str,
     current_view: crate::tui::View,
-    entries: &mut Vec<crate::tui::widgets::row_menu::RowMenuEntry>,
+    entries: &mut Vec<Entry<crate::tui::Msg>>,
 ) {
     use crate::tui::Msg;
-    use crate::tui::widgets::row_menu::RowMenuEntry;
-    entries.push(RowMenuEntry::new(
-        "Edit…",
-        "change the name, cwd, harness, arguments, and more",
-        Msg::OpenSlotEdit(name.to_string()),
-    ));
-    entries.push(RowMenuEntry::new(
-        "Rename…",
-        "change the pin name (a live mux is renamed with it)",
-        Msg::OpenSlotRename(name.to_string()),
-    ));
-    entries.push(RowMenuEntry::new(
-        "Retarget…",
-        "point it at another entity of the same kind",
-        Msg::OpenSlotRetarget(name.to_string()),
-    ));
-    entries.push(RowMenuEntry::new(
-        "Refresh snapshot",
-        "copy the entity's current recipe into the pin",
-        Msg::RefreshSlot(name.to_string()),
-    ));
+    entries.push(
+        Entry::new("Edit…", Msg::OpenSlotEdit(name.to_string()))
+            .detail("change the name, cwd, harness, arguments, and more"),
+    );
+    entries.push(
+        Entry::new("Rename…", Msg::OpenSlotRename(name.to_string()))
+            .detail("change the pin name (a live mux is renamed with it)"),
+    );
+    entries.push(
+        Entry::new("Retarget…", Msg::OpenSlotRetarget(name.to_string()))
+            .detail("point it at another entity of the same kind"),
+    );
+    entries.push(
+        Entry::new("Refresh snapshot", Msg::RefreshSlot(name.to_string()))
+            .detail("copy the entity's current recipe into the pin"),
+    );
     let elsewhere = subject
         .node
         .as_ref()
         .is_some_and(|node| natural_view(snapshot, node) != current_view);
     if elsewhere {
-        entries.push(RowMenuEntry::new(
-            "Reveal in its view",
-            "jump to the entity in Sessions, Mux, PRs, or History",
-            Msg::RevealSlot(name.to_string()),
-        ));
+        entries.push(
+            Entry::new("Reveal in its view", Msg::RevealSlot(name.to_string()))
+                .detail("jump to the entity in Sessions, Mux, PRs, or History"),
+        );
     }
     entries.push(unpin_entry(name));
 }

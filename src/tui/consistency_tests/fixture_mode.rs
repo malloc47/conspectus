@@ -13,7 +13,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use super::layout::{app_with, builders, name_of};
 use super::*;
 use crate::tui::runtime::press_in_fixture_mode;
-use crate::tui::widgets::row_menu::RowMenuState;
+use tuikit::action_menu::ActionMenu;
 use tuikit::testkit::keys::chord;
 
 fn press(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
@@ -97,7 +97,7 @@ fn a_menu_opened_with_dot_moves_and_closes_in_fixture_mode() {
     let cursor = menu.cursor();
     key(&mut app, KeyCode::Char('j'));
     assert_ne!(
-        app.row_menu().map(RowMenuState::cursor),
+        app.row_menu().map(ActionMenu::cursor),
         Some(cursor),
         "`j` moves the menu's cursor"
     );

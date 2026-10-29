@@ -175,7 +175,7 @@ fn p_pins_exactly_what_the_menus_pin_entry_pins() {
             let Some(pin) = app
                 .row_menu()
                 .and_then(|menu| menu.entries().iter().find(|entry| entry.label == "Pin"))
-                .map(|entry| entry.msg.clone())
+                .map(|entry| entry.outcome.clone())
             else {
                 app.close_row_menu();
                 panic!("{}: no Pin entry for a pinnable row", describe(view, &id));

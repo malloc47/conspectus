@@ -377,3 +377,29 @@ fn a_menu_pick_and_a_prompt_submit_reach_the_reducer() {
     assert!(app.modal_stack().is_empty(), "Enter closed the prompt");
     assert_eq!(notes, ["snapshot mode skipped a store write"]);
 }
+
+#[test]
+fn the_mux_menus_shortcuts_open_what_their_keys_open_on_the_list() {
+    // The menu shows each entry's shortcut so the operator learns the key
+    // that opens the same form from the list.
+    let menu = crate::tui::actions::mux_menu();
+    let mut checked = 0;
+    for entry in menu.entries() {
+        let key = tuikit::keys::key_label(&entry.shortcut.expect("a shortcut"));
+        let (mut through_menu, config) = session_mux_app();
+        drive(&mut through_menu, &config, &format!("m{key}"));
+        let (mut on_the_list, config) = session_mux_app();
+        drive(&mut on_the_list, &config, &key);
+        assert!(
+            through_menu.top_modal_name().is_some(),
+            "{key} opened a form"
+        );
+        assert_eq!(
+            through_menu.top_modal_name(),
+            on_the_list.top_modal_name(),
+            "`m` then `{key}`"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 2);
+}

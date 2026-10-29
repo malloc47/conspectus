@@ -155,3 +155,100 @@ fn every_pin_menu_entry_acts_on_that_pin() {
     }
     assert!(checked >= 6, "{checked}");
 }
+
+/// What a gesture left on screen: the modal on top, the toasts, and the
+/// status line.
+fn left_on_screen(app: &App) -> (Option<&'static str>, Vec<String>, Option<String>) {
+    (
+        app.top_modal_name(),
+        app.toasts()
+            .iter()
+            .map(|toast| toast.text.clone())
+            .collect(),
+        app.status_message().map(str::to_string),
+    )
+}
+
+/// One key through the routing the interactive loop uses.
+fn route(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+    crate::tui::runtime::press_in_fixture_mode(app, ratatui::crossterm::event::Event::Key(key));
+}
+
+/// A menu shows an entry's shortcut so the operator learns the key, so
+/// pressing it in the open row menu does what the same key does on the
+/// list with the same row selected. (The fixture TUI keeps the mux menu
+/// disabled; the snapshot tests check its shortcuts.)
+#[test]
+fn a_menu_shortcut_does_what_the_same_key_does_on_the_list() {
+    use ratatui::crossterm::event::KeyCode;
+    use tuikit::testkit::keys::press;
+    let mut checked = Vec::new();
+    for view in ENTITY_VIEWS {
+        let ids: Vec<RowId> = app_in(view)
+            .tree()
+            .rows
+            .iter()
+            .map(|row| row.id.clone())
+            .collect();
+        for id in &ids {
+            let opener = '.';
+            let fresh = || {
+                let mut app = app_in(view);
+                app.set_selection(id.clone());
+                app
+            };
+            let mut app = fresh();
+            route(&mut app, press(KeyCode::Char(opener)));
+            let Some(menu) = app.row_menu() else {
+                continue;
+            };
+            let shortcuts: Vec<_> = menu
+                .entries()
+                .iter()
+                .filter(|entry| entry.enabled)
+                .filter_map(|entry| entry.shortcut)
+                .collect();
+            for shortcut in shortcuts {
+                let key = shortcut.example();
+                let mut through_menu = fresh();
+                route(&mut through_menu, press(KeyCode::Char(opener)));
+                route(&mut through_menu, key);
+                let mut on_the_list = fresh();
+                route(&mut on_the_list, key);
+                assert_eq!(
+                    left_on_screen(&through_menu),
+                    left_on_screen(&on_the_list),
+                    "{}: `{opener}` then `{}`",
+                    describe(view, id),
+                    tuikit::keys::key_label(&shortcut)
+                );
+                checked.push((opener, tuikit::keys::key_label(&shortcut)));
+            }
+        }
+    }
+    assert!(checked.len() >= 3, "{checked:?}");
+}
+
+/// No menu shows a shortcut that the menu's own keys or an earlier entry
+/// take, which would never fire.
+#[test]
+fn no_menu_shows_a_shortcut_it_cannot_reach() {
+    let mut menus = vec![crate::tui::actions::mux_menu()];
+    for view in ALL_VIEWS {
+        let mut app = app_listing_all(view);
+        let ids: Vec<RowId> = app.tree().rows.iter().map(|row| row.id.clone()).collect();
+        for id in ids {
+            app.set_selection(id);
+            menus.extend(crate::tui::actions::row_menu_for(&app));
+        }
+    }
+    assert!(menus.len() > 10, "{}", menus.len());
+    for menu in menus {
+        assert!(
+            menu.shadowed_shortcuts().is_empty(),
+            "{}: {:?}",
+            menu.title(),
+            menu.shadowed_shortcuts()
+        );
+    }
+}

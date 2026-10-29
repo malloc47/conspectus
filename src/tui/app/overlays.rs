@@ -142,20 +142,13 @@ impl App {
 
     /// Open a menu that unpins whichever of `slots` is chosen.
     pub(crate) fn open_pin_menu(&mut self, slots: Vec<String>) {
-        use crate::tui::Msg;
-        use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
-        let entries: Vec<RowMenuEntry> = slots
-            .into_iter()
-            .map(|slot| {
-                RowMenuEntry::new(
-                    format!("Unpin {slot}"),
-                    "remove the pin; the entity and its history stay",
-                    Msg::Unpin(slot),
-                )
-            })
+        use tuikit::action_menu::ActionMenu;
+        let entries: Vec<_> = slots
+            .iter()
+            .map(|slot| crate::tui::actions::unpin_entry(slot))
             .collect();
         if !entries.is_empty() {
-            self.open_row_menu(RowMenuState::new("Pinned", entries));
+            self.open_row_menu(ActionMenu::new("Pinned", entries));
         }
     }
 
@@ -483,22 +476,25 @@ impl App {
     }
 
     /// Active mux action menu, if on top of stack.
-    pub fn mux_menu(&self) -> Option<&crate::tui::widgets::mux_menu::MuxMenuState> {
+    pub fn mux_menu(&self) -> Option<&tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
         match self.modal_stack.top()? {
-            crate::tui::Modal::MuxMenu(state) => Some(state),
+            crate::tui::Modal::MuxMenu(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
-    pub fn mux_menu_mut(&mut self) -> Option<&mut crate::tui::widgets::mux_menu::MuxMenuState> {
+    pub fn mux_menu_mut(
+        &mut self,
+    ) -> Option<&mut tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
         match self.modal_stack.top_mut()? {
-            crate::tui::Modal::MuxMenu(state) => Some(state),
+            crate::tui::Modal::MuxMenu(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_mux_menu(&mut self, state: crate::tui::widgets::mux_menu::MuxMenuState) {
-        self.modal_stack.push(crate::tui::Modal::MuxMenu(state));
+    pub fn open_mux_menu(&mut self, state: tuikit::action_menu::ActionMenu<crate::tui::Msg>) {
+        self.modal_stack
+            .push(crate::tui::Modal::MuxMenu(Box::new(state)));
     }
 
     pub fn close_mux_menu(&mut self) {
@@ -514,21 +510,23 @@ impl App {
     }
 
     /// Active row action menu, if on top of stack.
-    pub fn row_menu(&self) -> Option<&crate::tui::widgets::row_menu::RowMenuState> {
+    pub fn row_menu(&self) -> Option<&tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
         match self.modal_stack.top()? {
             crate::tui::Modal::RowMenu(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
-    pub fn row_menu_mut(&mut self) -> Option<&mut crate::tui::widgets::row_menu::RowMenuState> {
+    pub fn row_menu_mut(
+        &mut self,
+    ) -> Option<&mut tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
         match self.modal_stack.top_mut()? {
             crate::tui::Modal::RowMenu(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_row_menu(&mut self, state: crate::tui::widgets::row_menu::RowMenuState) {
+    pub fn open_row_menu(&mut self, state: tuikit::action_menu::ActionMenu<crate::tui::Msg>) {
         self.modal_stack
             .push(crate::tui::Modal::RowMenu(Box::new(state)));
     }

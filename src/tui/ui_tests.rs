@@ -5611,14 +5611,19 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
             .find(|entry| entry.label == label)
             .unwrap_or_else(|| panic!("no `{label}` entry"))
     };
-    assert!(entry("Forget").confirm, "forget asks twice");
+    assert_eq!(
+        entry("Forget").confirm,
+        tuikit::action_menu::Confirm::Inline,
+        "forget asks twice"
+    );
     // The pinned record offers to unpin its pin, also behind a confirm.
-    assert!(
-        !entry("Unpin config-agent3").confirm,
+    assert_eq!(
+        entry("Unpin config-agent3").confirm,
+        tuikit::action_menu::Confirm::None,
         "unpin acts at once, like p"
     );
     assert_eq!(
-        entry("Unpin config-agent3").msg,
+        entry("Unpin config-agent3").outcome,
         Msg::Unpin("config-agent3".into())
     );
     insta::assert_snapshot!("history_row_menu", trimmed(pinned_frame(&mut app, 100)));
@@ -5634,7 +5639,7 @@ fn the_history_view_menu_works_with_nothing_selected() {
     app.update(Msg::OpenRowMenu);
     let menu = app.row_menu().expect("the menu opened");
     assert_eq!(menu.entries().len(), 1);
-    assert_eq!(menu.entries()[0].msg, Msg::OpenCleanUp);
+    assert_eq!(menu.entries()[0].outcome, Msg::OpenCleanUp);
 }
 
 #[test]
@@ -5859,7 +5864,7 @@ fn actions_on_a_ghost_mux_rebuild_or_refuse_instead_of_erroring() {
     app.update(Msg::OpenRowMenu);
     let menu = app.row_menu().expect("menu");
     assert_eq!(
-        menu.entries()[0].msg,
+        menu.entries()[0].outcome,
         Msg::RebuildReference("config-agent3".into())
     );
     // Attach refuses by name, never reaching tmux.
@@ -6015,7 +6020,7 @@ fn the_row_menu_of_a_native_row_offers_pin_or_unpin() {
     let menu = app.row_menu().expect("menu");
     let labels: Vec<&str> = menu.entries().iter().map(|e| e.label.as_str()).collect();
     assert_eq!(labels, ["Pin", "Show rebuild plan"]);
-    assert!(matches!(menu.entries()[0].msg, Msg::PinNode(_)));
+    assert!(matches!(menu.entries()[0].outcome, Msg::PinNode(_)));
     app.close_row_menu();
 
     app.set_selection(mux_row("conspectus-main"));
@@ -6077,7 +6082,11 @@ fn the_slot_menu_offers_every_gesture() {
         ],
         "a running mux has nothing to rebuild"
     );
-    assert!(!menu.entries()[6].confirm, "unpin acts at once");
+    assert_eq!(
+        menu.entries()[6].confirm,
+        tuikit::action_menu::Confirm::None,
+        "unpin acts at once"
+    );
     insta::assert_snapshot!("slot_row_menu", trimmed(pinned_frame(&mut app, 100)));
 }
 
