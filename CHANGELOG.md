@@ -279,6 +279,18 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   keys on the status line. On a worktree with no branch checked out,
   **Remove worktree** and **Close down stream…** are shown but cannot be
   picked, and say why.
+- **Checklists select all or none, count, and show their keys.** The
+  harness, mux state, and PR state editors in Controls and the History
+  view's Clean up take `a` to check every item and `n` to uncheck every
+  item, say on their bottom border how many are checked (`3 of 4
+  selected`), and show their keys at the bottom: `↑/↓ move · Space
+  toggle · a select all · n select none · Enter confirm · Esc cancel`.
+  `PgUp`/`PgDn` move by a screen and `Home`/`End` (or `g`/`G`) go to the
+  first or last item. A checklist gains a blank row above its items,
+  like the menus, so it is a few rows taller; on a short terminal its
+  keys stay at the bottom and its items scroll with the cursor (at 40x10
+  it showed more items and no keys), and a long label still ends with
+  `…`.
 
 ### Fixed
 

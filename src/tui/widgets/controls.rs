@@ -11,8 +11,9 @@
 //!
 //! The overlay holds **only** what is unique to its UI: a cursor
 //! pointing at the currently-highlighted row and an optional
-//! sub-editor (multi-select list for harness / mux-state, text
-//! input for max-age). Live state — the active view, grouping,
+//! sub-editor (the framework's checklist for harness, mux state, and
+//! PR state, its text prompt for max age and contains). Live state —
+//! the active view, grouping,
 //! filter, and sort — lives on [`crate::tui::app::App`]. Each
 //! [`ControlsOverlayState::handle_key`] call takes a
 //! [`ControlsContext`] borrowed from the app so the overlay always
@@ -40,8 +41,8 @@ use crate::filter::{
     RowFilter,
 };
 use crate::tui::Theme;
-use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState};
 use crate::tui::{Grouping, Sort, View};
+use tuikit::checklist::{Checklist, Item};
 use tuikit::overlay::{Outcome, Overlay};
 use tuikit::text_prompt::{PromptResult, TextPrompt};
 
@@ -165,14 +166,34 @@ pub enum ControlsCursor {
 /// cancels.
 #[derive(Debug, Clone)]
 pub enum SubEditor {
-    Harness(MultiSelectState),
+    /// The harness filter's checklist, which commits the checked
+    /// harness keys.
+    Harness(Checklist<Vec<&'static str>>),
     /// The max-age filter's text, parsed by its prompt: no age, or the
     /// age to keep.
     MaxAge(TextPrompt<Option<std::time::Duration>>),
     /// The content query text: none clears the search.
     Content(TextPrompt<Option<String>>),
-    MuxState(MultiSelectState),
-    PrState(MultiSelectState),
+    /// The mux-state filter's checklist, which commits the checked
+    /// states.
+    MuxState(Checklist<Vec<MuxStateKey>>),
+    /// The PR-state filter's checklist, which commits the checked
+    /// states.
+    PrState(Checklist<Vec<PrStateKey>>),
+}
+
+impl SubEditor {
+    /// Draws the editor over `area`, keeping a checklist's scroll window
+    /// for its next key.
+    fn draw(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        match self {
+            Self::Harness(list) => list.draw(area, buf, theme),
+            Self::MuxState(list) => list.draw(area, buf, theme),
+            Self::PrState(list) => list.draw(area, buf, theme),
+            Self::MaxAge(prompt) => prompt.draw(area, buf, theme),
+            Self::Content(prompt) => prompt.draw(area, buf, theme),
+        }
+    }
 }
 
 /// What the controls overlay returned from a single key event.
@@ -454,126 +475,133 @@ impl ControlsOverlayState {
         let editor = slot
             .as_mut()
             .expect("dispatch called with no sub-editor open");
+        // An editor checks what it was given: a checklist commits its
+        // checked values, and a text editor's prompt the text it parsed
+        // (a refusal stays open with its reason). Closing an editor (Esc)
+        // steps back to the panel; dismissing it (Ctrl-C, taken above
+        // already, or `q` in a checklist) dismisses the panel.
         match editor {
-            SubEditor::Harness(state) => match state.handle_key(event) {
-                MultiSelectOutcome::Continue => ControlsOutcome::Continue,
-                MultiSelectOutcome::Cancel => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                MultiSelectOutcome::Confirm(indices) => {
-                    *slot = None;
-                    let new_filter =
-                        with_harness(ctx.filter.clone(), indices_to_harness_values(&indices));
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-                }
-            },
-            SubEditor::MuxState(state) => match state.handle_key(event) {
-                MultiSelectOutcome::Continue => ControlsOutcome::Continue,
-                MultiSelectOutcome::Cancel => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                MultiSelectOutcome::Confirm(indices) => {
-                    *slot = None;
-                    let new_filter =
-                        with_mux_state(ctx.filter.clone(), indices_to_mux_states(&indices));
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-                }
-            },
-            SubEditor::PrState(state) => match state.handle_key(event) {
-                MultiSelectOutcome::Continue => ControlsOutcome::Continue,
-                MultiSelectOutcome::Cancel => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                MultiSelectOutcome::Confirm(indices) => {
-                    *slot = None;
-                    let new_filter =
-                        with_pr_state(ctx.filter.clone(), indices_to_pr_states(&indices));
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-                }
-            },
-            // A text editor's prompt checks what was typed; a refusal
-            // stays open with its reason. Closing it (Esc) steps back to
-            // the panel; dismissing it (Ctrl-C, taken above already)
-            // dismisses the panel.
-            SubEditor::Content(prompt) => match prompt.handle(event, &()) {
-                Outcome::Commit(text) => {
-                    *slot = None;
-                    ControlsOutcome::ApplyAndStay(match text {
-                        None => crate::tui::Msg::ClearContentSearch,
-                        Some(text) => crate::tui::Msg::StartContentSearch {
-                            text,
-                            kinds: ctx.search_kinds,
-                        },
-                    })
-                }
-                Outcome::Close => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                Outcome::Dismiss => ControlsOutcome::Close,
-                Outcome::Consumed | Outcome::Stay(_) => ControlsOutcome::Continue,
-            },
-            SubEditor::MaxAge(prompt) => match prompt.handle(event, &()) {
-                Outcome::Commit(max_age) => {
-                    *slot = None;
-                    let new_filter = with_max_age(ctx.filter.clone(), max_age);
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-                }
-                Outcome::Close => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                Outcome::Dismiss => ControlsOutcome::Close,
-                Outcome::Consumed | Outcome::Stay(_) => ControlsOutcome::Continue,
-            },
+            SubEditor::Harness(list) => {
+                let outcome = list.handle(event, &());
+                settle_editor(slot, outcome, |keys| {
+                    let values = keys.into_iter().map(str::to_string).collect();
+                    crate::tui::Msg::SetFilter(with_harness(ctx.filter.clone(), values))
+                })
+            }
+            SubEditor::MuxState(list) => {
+                let outcome = list.handle(event, &());
+                settle_editor(slot, outcome, |values| {
+                    crate::tui::Msg::SetFilter(with_mux_state(ctx.filter.clone(), values))
+                })
+            }
+            SubEditor::PrState(list) => {
+                let outcome = list.handle(event, &());
+                settle_editor(slot, outcome, |values| {
+                    crate::tui::Msg::SetFilter(with_pr_state(ctx.filter.clone(), values))
+                })
+            }
+            SubEditor::Content(prompt) => {
+                let outcome = prompt.handle(event, &());
+                settle_editor(slot, outcome, |text| match text {
+                    None => crate::tui::Msg::ClearContentSearch,
+                    Some(text) => crate::tui::Msg::StartContentSearch {
+                        text,
+                        kinds: ctx.search_kinds,
+                    },
+                })
+            }
+            SubEditor::MaxAge(prompt) => {
+                let outcome = prompt.handle(event, &());
+                settle_editor(slot, outcome, |max_age| {
+                    crate::tui::Msg::SetFilter(with_max_age(ctx.filter.clone(), max_age))
+                })
+            }
         }
     }
 }
 
-fn build_harness_editor(filter: &RowFilter) -> MultiSelectState {
-    let selected: Vec<usize> = match &filter.harness {
-        Some(HarnessFilter::Any(values)) => harness_options()
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, opt)| values.iter().any(|v| v == opt).then_some(idx))
-            .collect(),
-        None => Vec::new(),
-    };
-    MultiSelectState::new(" harness ", harness_options().len(), &selected)
+/// What an editor's `outcome` means for the panel: a commit closes the
+/// editor and applies the message `apply` builds from the value while the
+/// panel stays open; a close steps back to the panel; a dismissal closes
+/// the panel; anything else keeps the editor open.
+fn settle_editor<T>(
+    slot: &mut Option<SubEditor>,
+    outcome: Outcome<T>,
+    apply: impl FnOnce(T) -> crate::tui::Msg,
+) -> ControlsOutcome {
+    match outcome {
+        Outcome::Commit(value) => {
+            *slot = None;
+            ControlsOutcome::ApplyAndStay(apply(value))
+        }
+        Outcome::Close => {
+            *slot = None;
+            ControlsOutcome::Continue
+        }
+        Outcome::Dismiss => ControlsOutcome::Close,
+        Outcome::Consumed | Outcome::Stay(_) => ControlsOutcome::Continue,
+    }
 }
 
-fn build_mux_state_editor(filter: &RowFilter) -> MultiSelectState {
-    let selected: Vec<usize> = match &filter.mux_state {
-        Some(MuxStateFilter::Any(values)) => MUX_STATE_OPTIONS
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, opt)| values.contains(opt).then_some(idx))
-            .collect(),
-        None => Vec::new(),
-    };
-    MultiSelectState::new(" mux state ", MUX_STATE_OPTIONS.len(), &selected)
-}
-
-fn build_pr_state_editor(filter: &RowFilter) -> MultiSelectState {
-    let selected: Vec<usize> = match &filter.pr_state {
-        Some(PrStateFilter::Any(values)) => PR_STATE_OPTIONS
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, opt)| values.contains(opt).then_some(idx))
-            .collect(),
-        None => Vec::new(),
-    };
-    MultiSelectState::new(" PR state ", PR_STATE_OPTIONS.len(), &selected)
-}
-
-fn indices_to_pr_states(indices: &[usize]) -> Vec<PrStateKey> {
-    indices
+/// A checklist over `options`, each labeled by `label` and checked when
+/// `checked` says so, that commits the checked options.
+fn checklist_of<T: Clone + Send + Sync + 'static>(
+    title: &str,
+    options: &'static [T],
+    label: impl Fn(&T) -> &str,
+    checked: impl Fn(&T) -> bool,
+) -> Checklist<Vec<T>> {
+    let items = options
         .iter()
-        .filter_map(|idx| PR_STATE_OPTIONS.get(*idx).copied())
-        .collect()
+        .map(|option| Item::new(label(option)).checked(checked(option)))
+        .collect();
+    Checklist::new(title, items, move |indices: Vec<usize>| {
+        Outcome::Commit(
+            indices
+                .into_iter()
+                .filter_map(|index| options.get(index).cloned())
+                .collect(),
+        )
+    })
+}
+
+fn build_harness_editor(filter: &RowFilter) -> Checklist<Vec<&'static str>> {
+    let values = match &filter.harness {
+        Some(HarnessFilter::Any(values)) => values.as_slice(),
+        None => &[],
+    };
+    checklist_of(
+        "harness",
+        harness_options(),
+        |key| key,
+        |key| values.iter().any(|value| value == key),
+    )
+}
+
+fn build_mux_state_editor(filter: &RowFilter) -> Checklist<Vec<MuxStateKey>> {
+    let values = match &filter.mux_state {
+        Some(MuxStateFilter::Any(values)) => values.as_slice(),
+        None => &[],
+    };
+    checklist_of(
+        "mux state",
+        MUX_STATE_OPTIONS,
+        |key| key.as_str(),
+        |key| values.contains(key),
+    )
+}
+
+fn build_pr_state_editor(filter: &RowFilter) -> Checklist<Vec<PrStateKey>> {
+    let values = match &filter.pr_state {
+        Some(PrStateFilter::Any(values)) => values.as_slice(),
+        None => &[],
+    };
+    checklist_of(
+        "PR state",
+        PR_STATE_OPTIONS,
+        |key| key.as_str(),
+        |key| values.contains(key),
+    )
 }
 
 fn with_pr_state(mut filter: RowFilter, values: Vec<PrStateKey>) -> RowFilter {
@@ -612,24 +640,6 @@ fn build_content_editor(initial: &str) -> TextPrompt<Option<String>> {
         let text = text.trim();
         PromptResult::Commit((!text.is_empty()).then(|| text.to_string()))
     })
-}
-
-fn indices_to_harness_values(indices: &[usize]) -> Vec<String> {
-    indices
-        .iter()
-        .filter_map(|idx| {
-            harness_options()
-                .get(*idx)
-                .map(std::string::ToString::to_string)
-        })
-        .collect()
-}
-
-fn indices_to_mux_states(indices: &[usize]) -> Vec<MuxStateKey> {
-    indices
-        .iter()
-        .filter_map(|idx| MUX_STATE_OPTIONS.get(*idx).copied())
-        .collect()
 }
 
 fn with_harness(mut filter: RowFilter, values: Vec<String>) -> RowFilter {
@@ -784,16 +794,17 @@ pub(crate) fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
 
 /// Centered modal widget for the controls overlay. Borrows the
 /// state plus a live context so the rendered values never lag
-/// behind the app.
+/// behind the app; the state is borrowed mutably so an open checklist
+/// keeps the scroll window it drew.
 pub struct ControlsOverlayWidget<'a> {
-    state: &'a ControlsOverlayState,
+    state: &'a mut ControlsOverlayState,
     ctx: ControlsContext<'a>,
     theme: &'a Theme,
 }
 
 impl<'a> ControlsOverlayWidget<'a> {
     pub fn new(
-        state: &'a ControlsOverlayState,
+        state: &'a mut ControlsOverlayState,
         ctx: ControlsContext<'a>,
         theme: &'a Theme,
     ) -> Self {
@@ -823,33 +834,9 @@ impl Widget for ControlsOverlayWidget<'_> {
         frame.render(area, buf, body);
 
         // If a sub-editor is open, render it on top of the overlay.
-        if let Some(editor) = self.state.sub_editor() {
-            render_sub_editor(editor, area, buf, self.theme);
+        if let Some(editor) = self.state.sub_editor.as_mut() {
+            editor.draw(area, buf, self.theme);
         }
-    }
-}
-
-fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &Theme) {
-    match editor {
-        SubEditor::Harness(state) => {
-            use crate::tui::widgets::multi_select::MultiSelectWidget;
-            MultiSelectWidget::new(state, harness_options(), theme).render(area, buf);
-        }
-        SubEditor::MuxState(state) => {
-            use crate::tui::widgets::multi_select::MultiSelectWidget;
-            let labels: Vec<&'static str> = MUX_STATE_OPTIONS.iter().map(|k| k.as_str()).collect();
-            // The MultiSelectWidget requires a slice that owns the
-            // items by reference; since `as_str` returns &'static
-            // str the temporary Vec is fine.
-            MultiSelectWidget::new(state, &labels, theme).render(area, buf);
-        }
-        SubEditor::PrState(state) => {
-            use crate::tui::widgets::multi_select::MultiSelectWidget;
-            let labels: Vec<&'static str> = PR_STATE_OPTIONS.iter().map(|k| k.as_str()).collect();
-            MultiSelectWidget::new(state, &labels, theme).render(area, buf);
-        }
-        SubEditor::MaxAge(prompt) => prompt.draw(area, buf, theme),
-        SubEditor::Content(prompt) => prompt.draw(area, buf, theme),
     }
 }
 

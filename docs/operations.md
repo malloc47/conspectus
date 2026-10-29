@@ -1342,8 +1342,11 @@ its snapshot), and **Clean up…**.
 
 Clean up lists what `conspectus history reap` would remove: gone records past
 their `[history.reap_after]` age, minus records a pin targets. All are
-selected; `Space` deselects, `Enter` forgets exactly the selected ones, and
-`Esc` cancels. With nothing past its age the modal says so. Forgetting and
+selected; `Space` deselects the record under the cursor, `n` deselects them
+all and `a` selects them all again, `Enter` forgets exactly the selected
+ones (with none selected it just closes), and `Esc` cancels. The bottom
+border counts the selected records (`3 of 4 selected`). With nothing past
+its age the modal says so. Forgetting and
 cleaning up only remove history records; they never touch tmux, git, or the
 filesystem, and they are the same writes as `history forget` and `history
 reap`.
@@ -1493,6 +1496,16 @@ entry from anywhere in the menu: `p` on **Pin** in the row menu, and `n` and
 asks for a second `Enter` says so on its row once armed. A menu taller than
 the screen keeps its keys at the bottom and scrolls its entries, with a
 scrollbar beside them, moving only as far as the cursor needs.
+
+Every checklist (Controls' harness, mux state, and PR state editors, and
+Clean up) works the same way. `Space` checks or unchecks the item under
+the cursor, `a` checks every item, `n` unchecks every item, and `Enter`
+takes what is checked; `Esc` goes back without it (in Controls, to the
+panel). The bottom border says how many items are checked (`2 of 5
+selected`). `PgUp` and `PgDn` move by the rows shown, and `Home`/`End`
+(or `g`/`G`) go to the first and last item. A checklist taller than the
+screen keeps its keys at the bottom and scrolls its items with the
+cursor.
 
 Every dialog takes the same keys. A confirmation (the worktree menu's
 merge, remove, and prune) goes ahead on `Enter` or `y` and goes back on

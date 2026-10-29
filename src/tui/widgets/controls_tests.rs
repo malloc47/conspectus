@@ -202,17 +202,17 @@ fn behind_an_open_sub_editor_the_cursor_row_takes_the_inactive_look() {
         Sort::Hierarchy,
     );
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    let row_style = |state: &ControlsOverlayState| {
+    let row_style = |state: &mut ControlsOverlayState| {
         let widget = ControlsOverlayWidget::new(state, ctx.clone(), &theme);
         let index = widget.cursor_line_index().expect("cursor row");
         let line = widget.body_lines()[index].clone();
         assert!(line.to_string().starts_with(marks::POINTER), "{line}");
         line.spans[1].style.add_modifier
     };
-    assert!(row_style(&state).contains(theme.selection_active));
+    assert!(row_style(&mut state).contains(theme.selection_active));
     state.handle_key(&ctx, press(KeyCode::Enter));
     assert!(state.sub_editor().is_some());
-    let behind = row_style(&state);
+    let behind = row_style(&mut state);
     assert!(behind.contains(theme.selection_inactive), "{behind:?}");
     assert!(!behind.contains(Modifier::REVERSED), "{behind:?}");
 }
@@ -244,6 +244,40 @@ fn harness_sub_editor_confirm_emits_set_filter() {
     }
     // Editor closed after commit.
     assert!(state.sub_editor().is_none());
+}
+
+#[test]
+fn harness_sub_editor_selects_every_harness_or_none() {
+    let filter = RowFilter {
+        harness: Some(HarnessFilter::from_values(["codex"])),
+        ..RowFilter::default()
+    };
+    let ctx = ctx_with(
+        View::Sessions,
+        Grouping::default_for(View::Sessions),
+        &filter,
+        Sort::Hierarchy,
+    );
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    state.handle_key(&ctx, press(KeyCode::Enter));
+    state.handle_key(&ctx, press(KeyCode::Char('a')));
+    match state.handle_key(&ctx, press(KeyCode::Enter)) {
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(next)) => {
+            let values = next
+                .harness
+                .map(|h| h.values().to_vec())
+                .unwrap_or_default();
+            assert_eq!(values.len(), harness_options().len(), "{values:?}");
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+    state.handle_key(&ctx, press(KeyCode::Enter));
+    state.handle_key(&ctx, press(KeyCode::Char('n')));
+    assert_eq!(
+        state.handle_key(&ctx, press(KeyCode::Enter)),
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(RowFilter::default())),
+        "nothing checked clears the filter"
+    );
 }
 
 #[test]
@@ -489,7 +523,7 @@ fn selected_last_sort_row_scrolls_into_short_controls_body() {
         &filter,
         Sort::Hierarchy,
     );
-    let state = ControlsOverlayState {
+    let mut state = ControlsOverlayState {
         cursor: ControlsCursor::Sort(1),
         sub_editor: None,
     };
@@ -497,7 +531,7 @@ fn selected_last_sort_row_scrolls_into_short_controls_body() {
     // Too short for every row: the body scrolls to the cursor's row.
     let area = Rect::new(0, 0, 80, 14);
     let mut buf = Buffer::empty(area);
-    ControlsOverlayWidget::new(&state, ctx, &theme).render(area, &mut buf);
+    ControlsOverlayWidget::new(&mut state, ctx, &theme).render(area, &mut buf);
     let rows: Vec<String> = (0..area.height)
         .map(|y| (0..area.width).map(|x| buf[(x, y)].symbol()).collect())
         .collect();
@@ -653,11 +687,11 @@ fn cursor_line_index_points_at_the_cursored_row_in_every_section() {
             Sort::Hierarchy,
         );
         for row in flatten_rows(&ctx) {
-            let state = ControlsOverlayState {
+            let mut state = ControlsOverlayState {
                 cursor: row,
                 sub_editor: None,
             };
-            let widget = ControlsOverlayWidget::new(&state, ctx.clone(), &theme);
+            let widget = ControlsOverlayWidget::new(&mut state, ctx.clone(), &theme);
             let lines = widget.body_lines();
             let index = widget.cursor_line_index().expect("cursor row is rendered");
             assert!(

@@ -366,7 +366,6 @@ dependencies = [
  "notify",
  "predicates",
  "ratatui",
- "ratatui-cheese",
  "rkyv",
  "rusqlite",
  "serde",
@@ -1615,16 +1614,6 @@ dependencies = [
  "ratatui-macros",
  "ratatui-termwiz",
  "ratatui-widgets",
-]
-
-[[package]]
-name = "ratatui-cheese"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e953118268177f5871053b7123a7053c6bafc445d0e9eaa2e43e7ea5994fae7b"
-dependencies = [
- "ratatui",
- "unicode-width",
 ]
 
 [[package]]

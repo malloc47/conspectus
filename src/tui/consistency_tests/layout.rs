@@ -145,8 +145,30 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
         ("RowMenu", View::Pinned, |app| {
             open_pinned(app, Msg::OpenRowMenu);
         }),
+        // Clean up over several records, so its cursor moves and wraps.
+        // It is built from candidates rather than by `Msg::OpenCleanUp`:
+        // the History world pins every gone record but one, which would
+        // give the cursor nowhere to go (the reducer's path is the ui
+        // tests').
         ("CleanUp", View::History, |app| {
-            app.update(Msg::OpenCleanUp);
+            use crate::history::reap::Candidate;
+            use crate::model::HistoryKind;
+            let record = |kind, id: &str, label: &str, days: i64| Candidate {
+                kind,
+                id: id.into(),
+                label: label.into(),
+                last_seen: 1_790_000_000 - days * 86_400,
+            };
+            let candidates = [
+                record(HistoryKind::Checkout, "h_a", "spike/cache", 12),
+                record(HistoryKind::Mux, "h_b", "docs-sweep", 9),
+                record(HistoryKind::Checkout, "h_c", "hotfix/login", 5),
+                record(HistoryKind::Mux, "h_d", "release-prep", 4),
+            ];
+            app.open_clean_up(crate::tui::widgets::clean_up::checklist(
+                &candidates,
+                1_790_000_000,
+            ));
         }),
         ("Picker", View::Pinned, |app| {
             open_pinned(app, Msg::OpenSlotRetarget("conspectus-main".into()));

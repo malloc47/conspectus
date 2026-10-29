@@ -103,6 +103,7 @@ const MOVES: &[&str] = &[
     "Picker",
     "MuxLaunch",
     "NewMux",
+    "CleanUp",
 ];
 
 /// The modal's row of the modal key convention.
@@ -175,6 +176,7 @@ fn case(name: &'static str, variant: &'static str, view: View, open: Open) -> Ca
         ("MuxMenu" | "RowMenu" | "WorktreeMenu", _) => case.footer(MENU_KEYS),
         ("MuxLaunch", _) => case.footer(MUX_LAUNCH_KEYS),
         ("PinEdit", _) => case.footer(PIN_EDIT_KEYS),
+        ("CleanUp", _) => case.footer(CHECKLIST_KEYS),
         // The prompts draw their keys on their bottom border.
         ("Rename" | "Prompt", _) => case.footer(TEXT_INPUT_KEYS),
         // A dialog's footer depends on its form: the one the dialog that
@@ -186,7 +188,7 @@ fn case(name: &'static str, variant: &'static str, view: View, open: Open) -> Ca
             };
             case.footer(dialog.footer())
         }
-        // Clean up and the picker draw no footer of their own.
+        // The picker draws no footer of its own.
         _ => case,
     }
 }

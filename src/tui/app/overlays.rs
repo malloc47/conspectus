@@ -532,21 +532,21 @@ impl App {
     }
 
     /// Active Clean up modal, if on top of stack.
-    pub fn clean_up(&self) -> Option<&crate::tui::widgets::clean_up::CleanUpState> {
+    pub fn clean_up(&self) -> Option<&tuikit::checklist::Checklist<crate::tui::Msg>> {
         match self.modal_stack.top()? {
             crate::tui::Modal::CleanUp(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
-    pub fn clean_up_mut(&mut self) -> Option<&mut crate::tui::widgets::clean_up::CleanUpState> {
+    pub fn clean_up_mut(&mut self) -> Option<&mut tuikit::checklist::Checklist<crate::tui::Msg>> {
         match self.modal_stack.top_mut()? {
             crate::tui::Modal::CleanUp(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_clean_up(&mut self, state: crate::tui::widgets::clean_up::CleanUpState) {
+    pub fn open_clean_up(&mut self, state: tuikit::checklist::Checklist<crate::tui::Msg>) {
         self.modal_stack
             .push(crate::tui::Modal::CleanUp(Box::new(state)));
     }

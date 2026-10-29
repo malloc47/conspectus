@@ -31,6 +31,7 @@ const LISTS: &[&str] = &[
     "PinEdit",
     "RowMenu",
     "Picker",
+    "CleanUp",
 ];
 
 /// The list modals, with Messages holding entries so it lists some.
@@ -165,6 +166,7 @@ fn short_choice_lists_wrap_from_the_first_row_to_the_last() {
         "Picker",
         "PinEdit",
         "MuxLaunch",
+        "CleanUp",
     ] {
         assert!(checked.contains(&name), "{name}: no wrap was checked");
     }

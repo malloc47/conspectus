@@ -1907,8 +1907,9 @@ impl App {
                         let notice = crate::tui::widgets::clean_up::empty_notice();
                         self.open_modal(crate::tui::Modal::Dialog(Box::new(notice)));
                     } else {
-                        self.open_clean_up(crate::tui::widgets::clean_up::CleanUpState::new(
-                            candidates, now,
+                        self.open_clean_up(crate::tui::widgets::clean_up::checklist(
+                            &candidates,
+                            now,
                         ));
                     }
                 }

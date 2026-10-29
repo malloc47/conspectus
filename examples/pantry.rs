@@ -2,21 +2,18 @@
 //!
 //! Boots [`tui_pantry`] with a hand-built ingredient list so the
 //! widget-iteration loop can be evaluated without going through
-//! `conspectus tui --snapshot`. The smoke-test ingredient is
-//! [`conspectus::tui::widgets::multi_select::MultiSelectWidget`] in
-//! three prop variants: empty list, mid-selection, large list with
-//! scroll.
+//! `conspectus tui --snapshot`. The smoke-test ingredient is the
+//! framework's [`tuikit::checklist::Checklist`] in three prop variants:
+//! empty list, mid-selection, large list with scroll.
 //!
 //! Run with: `cargo run --example pantry`.
 //!
-//! Implementation note: `Ingredient` requires `Send`, and our
-//! `MultiSelectState` carries the upstream `ratatui_cheese`
-//! `Option<Box<dyn Fn>>` validator which is `!Send`. The ingredients
-//! therefore hold only the **configuration data** (items + initial
-//! selections + cursor position) and build the state fresh inside
-//! `render()`. That's cheap for a preview surface, and it
-//! sidesteps the Send bound without polluting the in-tree
-//! `MultiSelectState` API for a spike.
+//! Implementation note: an ingredient renders through `&self`, and a
+//! checklist draws through `&mut self` (it keeps the scroll window it
+//! drew). The ingredients therefore hold only the **configuration data**
+//! (items + initial selections + cursor position) and build the
+//! checklist fresh inside `render()`, which is cheap for a preview
+//! surface.
 //!
 //! If the spike lands "go", the ingredient list grows beyond the
 //! single-file demo and migrates to the `pantry.toml` /
@@ -33,7 +30,6 @@ use conspectus::tui::rows::RowId;
 use conspectus::tui::search::SearchItem;
 use conspectus::tui::theme::{KeyOrigin, TokenValue};
 use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
-use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
 use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
 use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
 use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
@@ -44,14 +40,14 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_pantry::Ingredient;
-use tuikit::overlay::Overlay;
+use tuikit::checklist::{Checklist, Item};
+use tuikit::overlay::{Outcome, Overlay};
 use tuikit::testkit::keys::press;
 use tuikit::text_prompt::{PromptResult, TextPrompt};
 
-/// Configuration for one multi-select preview variant. The state is
-/// rebuilt per `render` so the ingredient struct stays `Send`-clean
-/// regardless of the upstream `ratatui_cheese` validator's bound.
-struct MultiSelectVariant {
+/// Configuration for one checklist preview variant. The checklist is
+/// rebuilt per `render`, since drawing it needs `&mut`.
+struct ChecklistVariant {
     title: &'static str,
     items: Vec<String>,
     initial_selected: Vec<usize>,
@@ -63,18 +59,26 @@ struct MultiSelectVariant {
     description_text: &'static str,
 }
 
-impl MultiSelectVariant {
-    fn build_state(&self) -> MultiSelectState {
-        let mut state = MultiSelectState::new(self.title, self.items.len(), &self.initial_selected);
+impl ChecklistVariant {
+    fn build_state(&self) -> Checklist<Vec<usize>> {
+        let items = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, label)| {
+                Item::new(label.as_str()).checked(self.initial_selected.contains(&index))
+            })
+            .collect();
+        let mut state = Checklist::new(self.title, items, Outcome::Commit);
         let down = press(KeyCode::Down);
         for _ in 0..self.cursor_advance {
-            state.handle_key(down);
+            state.handle(down, &());
         }
         state
     }
 }
 
-impl Ingredient for MultiSelectVariant {
+impl Ingredient for ChecklistVariant {
     fn group(&self) -> &str {
         self.group_label
     }
@@ -84,7 +88,7 @@ impl Ingredient for MultiSelectVariant {
     }
 
     fn source(&self) -> &str {
-        "conspectus::tui::widgets::multi_select"
+        "tuikit::checklist"
     }
 
     fn description(&self) -> &str {
@@ -92,13 +96,9 @@ impl Ingredient for MultiSelectVariant {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let state = self.build_state();
+        let mut state = self.build_state();
         let theme = Theme::default();
-        // `MultiSelectItem` is impl'd for `String` directly, so we
-        // can hand the items slice through without converting to
-        // borrowed `&str` — that would lose the static lifetime
-        // the `&'static str` impl needs.
-        MultiSelectWidget::new(&state, self.items.as_slice(), &theme).render(area, buf);
+        state.draw(area, buf, &theme);
     }
 }
 
@@ -112,22 +112,21 @@ enum ControlsOpenState {
     /// Default open: cursor at View > active, no sub-editor.
     Closed,
     /// Cursor parked on Filters > Harness; press Enter to open
-    /// the harness multi-select.
+    /// the harness checklist.
     HarnessOpen,
     /// Cursor at Filters > Max Age; Enter opens the max-age
     /// text input pre-seeded from `filter.max_age`.
     MaxAgeOpen,
     /// Cursor at Filters > Mux State; Enter opens the mux-state
-    /// multi-select pre-seeded from `filter.mux_state`.
+    /// checklist pre-seeded from `filter.mux_state`.
     MuxStateOpen,
 }
 
 /// Configuration for one controls-overlay preview variant. The
-/// state is rebuilt fresh per `render` so the ingredient struct
-/// stays `Send`-clean even when the sub-editor wraps `!Send`
-/// MultiSelectState payloads. The `RowFilter` lives on the
-/// variant; the `ControlsContext` borrows from it transiently
-/// each frame.
+/// state is rebuilt fresh per `render`, since drawing it needs
+/// `&mut` (an open checklist keeps its scroll window). The
+/// `RowFilter` lives on the variant; the `ControlsContext` borrows
+/// from it transiently each frame.
 struct ControlsVariant {
     view: View,
     grouping: Grouping,
@@ -207,7 +206,7 @@ impl Ingredient for ControlsVariant {
             }
         }
 
-        ControlsOverlayWidget::new(&state, ctx, &theme).render(area, buf);
+        ControlsOverlayWidget::new(&mut state, ctx, &theme).render(area, buf);
     }
 }
 
@@ -491,37 +490,37 @@ impl Ingredient for ThemeHarnessIngredient {
 
 fn main() -> std::io::Result<()> {
     let ingredients: Vec<Box<dyn Ingredient>> = vec![
-        Box::new(MultiSelectVariant {
-            title: " harness (empty) ",
+        Box::new(ChecklistVariant {
+            title: "harness (empty)",
             items: Vec::new(),
             initial_selected: Vec::new(),
             cursor_advance: 0,
-            group_label: "MultiSelect",
+            group_label: "Checklist",
             variant_name: "Empty list",
             description_text: "Sub-editor with zero items — exercises the empty-state render path.",
         }),
-        Box::new(MultiSelectVariant {
-            title: " harness ",
+        Box::new(ChecklistVariant {
+            title: "harness",
             items: ["claude-code", "codex", "opencode", "aider"]
                 .into_iter()
                 .map(String::from)
                 .collect(),
             initial_selected: vec![0, 2],
             cursor_advance: 2,
-            group_label: "MultiSelect",
+            group_label: "Checklist",
             variant_name: "Mid-selection",
             description_text: "Typical sub-editor state: two items checked, cursor mid-list.",
         }),
-        Box::new(MultiSelectVariant {
-            title: " 40 options ",
+        Box::new(ChecklistVariant {
+            title: "40 options",
             items: (0..40)
                 .map(|i| format!("option-{i:02} — long enough label to test wrapping"))
                 .collect(),
             initial_selected: vec![3, 7, 11, 17, 23, 29, 35, 39],
             cursor_advance: 0,
-            group_label: "MultiSelect",
+            group_label: "Checklist",
             variant_name: "Large list (scroll)",
-            description_text: "40-option set with 8 checked entries — exercises the upstream scroll path.",
+            description_text: "40-option set with 8 checked entries — exercises the scroll window and the scrollbar.",
         }),
         Box::new(ControlsVariant {
             view: View::Sessions,
@@ -545,7 +544,7 @@ fn main() -> std::io::Result<()> {
             sort: Sort::Hierarchy,
             open_state: ControlsOpenState::HarnessOpen,
             variant_name: "Harness sub-editor (two selected)",
-            description_text: "Harness multi-select open with claude-code + opencode pre-checked; previews the modal-on-modal stacking.",
+            description_text: "Harness checklist open with claude-code + opencode pre-checked; previews the modal-on-modal stacking.",
         }),
         Box::new(ControlsVariant {
             view: View::Sessions,
@@ -572,7 +571,7 @@ fn main() -> std::io::Result<()> {
             sort: Sort::Hierarchy,
             open_state: ControlsOpenState::MuxStateOpen,
             variant_name: "Mux-state sub-editor (attached + ambiguous)",
-            description_text: "Mux-state multi-select open with attached + ambiguous pre-checked; the third filter sub-editor.",
+            description_text: "Mux-state checklist open with attached + ambiguous pre-checked; the third filter sub-editor.",
         }),
         Box::new(ValueModalVariant {
             label: "cwd",

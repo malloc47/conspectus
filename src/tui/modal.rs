@@ -162,9 +162,11 @@ modals! {
     /// row, each committing a [`Msg`].
     RowMenu(Box<tuikit::action_menu::ActionMenu<Msg>>),
     /// The History view's Clean up checklist (ADR 0140), when there is
-    /// something to clean up; a [`Modal::Dialog`] notice says when there
-    /// is not.
-    CleanUp(Box<crate::tui::widgets::clean_up::CleanUpState>),
+    /// something to clean up: the framework's checklist over the records
+    /// past their reap age, whose confirm forgets the checked ones; a
+    /// [`Modal::Dialog`] notice says when there is nothing. Boxed to keep
+    /// [`Modal`] small.
+    CleanUp(Box<tuikit::checklist::Checklist<Msg>>),
     /// A pick-one list with type-to-filter: where a pin points next, or a
     /// remembered search.
     Picker(Box<crate::tui::widgets::picker::PickerState>),

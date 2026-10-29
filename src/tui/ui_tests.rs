@@ -5711,13 +5711,18 @@ fn clean_up_lists_what_has_aged_out_and_nothing_pinned() {
     let mut app = history_app_over(&snapshot, crate::tui::HistoryGrouping::None, config.clone());
     app.update(Msg::OpenCleanUp);
     let clean_up = app.clean_up().expect("the modal opened");
-    let ids: Vec<&str> = clean_up
-        .candidates()
-        .iter()
-        .map(|c| c.id.as_str())
-        .collect();
-    assert_eq!(ids, ["h_agent", "h_wt"], "oldest sighting first");
     assert_eq!(clean_up.selected(), [0, 1], "all preselected");
+    // Confirming as it opened forgets both, oldest sighting first.
+    let confirmed = tuikit::overlay::Overlay::<Msg, ()>::handle(
+        &mut clean_up.clone(),
+        tuikit::testkit::keys::press(ratatui::crossterm::event::KeyCode::Enter),
+        &(),
+    );
+    assert_eq!(
+        confirmed,
+        tuikit::overlay::Outcome::Commit(Msg::ReapRecords(vec!["h_agent".into(), "h_wt".into()])),
+        "oldest sighting first"
+    );
     let frame = pinned_frame(&mut app, 100);
     assert!(frame.contains("Clean up: forget these records"), "{frame}");
     assert!(frame.contains("config-agent3"), "{frame}");
@@ -6453,8 +6458,8 @@ fn clean_up_shows_a_deselected_record_unticked() {
     {
         let state = app.clean_up_mut().expect("the modal opened");
         let press = |code| KeyEvent::new(code, KeyModifiers::NONE);
-        state.handle_key(press(KeyCode::Down));
-        state.handle_key(press(KeyCode::Char(' ')));
+        tuikit::overlay::Overlay::<Msg, ()>::handle(state, press(KeyCode::Down), &());
+        tuikit::overlay::Overlay::<Msg, ()>::handle(state, press(KeyCode::Char(' ')), &());
         assert_eq!(state.selected(), [0], "the second record was deselected");
     }
     let frame = pinned_frame(&mut app, 100);
