@@ -1060,7 +1060,7 @@ pub fn dead_pane_output(runner: &dyn MuxBackend, socket: Option<&str>, name: &st
     let Ok(TmuxCaptureOutcome::Captured(capture)) = runner.capture_pane(socket, name) else {
         return String::new();
     };
-    let plain = strip_ansi(&capture.text);
+    let plain = tuikit::text::strip_ansi(&capture.text);
     let mut lines: Vec<&str> = plain
         .lines()
         .map(str::trim_end)
@@ -1073,41 +1073,6 @@ pub fn dead_pane_output(runner: &dyn MuxBackend, socket: Option<&str>, name: &st
     let kept = &lines[start..];
     let first = kept.iter().position(|line| !line.is_empty()).unwrap_or(0);
     kept[first..].join("\n")
-}
-
-/// Drop ANSI escape sequences (CSI, OSC, and two-byte escapes) from
-/// captured pane text, for places that show it as plain text.
-pub fn strip_ansi(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch != '\u{1b}' {
-            out.push(ch);
-            continue;
-        }
-        match chars.next() {
-            Some('[') => {
-                for c in chars.by_ref() {
-                    if ('@'..='~').contains(&c) {
-                        break;
-                    }
-                }
-            }
-            Some(']') => {
-                while let Some(c) = chars.next() {
-                    if c == '\u{7}' {
-                        break;
-                    }
-                    if c == '\u{1b}' && chars.peek() == Some(&'\\') {
-                        chars.next();
-                        break;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
 }
 
 fn looks_like_no_target(stderr: &str) -> bool {

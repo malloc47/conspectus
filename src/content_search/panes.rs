@@ -18,11 +18,9 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use crate::discovery::tmux::{
-    MuxBackend, TMUX_BACKEND, TmuxCaptureOutcome, TmuxOutcome, strip_ansi,
-};
+use crate::discovery::tmux::{MuxBackend, TMUX_BACKEND, TmuxCaptureOutcome, TmuxOutcome};
 use crate::model::{AgentSessionId, GraphNode, GraphSnapshot, NodeId};
-use tuikit::text::{find_ci, fit_snippet};
+use tuikit::text::{find_ci, fit_snippet, strip_ansi};
 
 use crate::viewer::search::{ContentQuery, SNIPPET_MAX_CELLS};
 

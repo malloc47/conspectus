@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use assert_cmd::Command;
+use tuikit::testkit::strip_ansi;
 
 /// `SHOWCASE_NOW_EPOCH` in `src/dev_scenarios.rs`.
 const SHOWCASE_NOW: &str = "1790769600";
@@ -59,23 +60,6 @@ fn frame_with(scratch: &Path, keys: &str, extra: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     strip_ansi(&String::from_utf8_lossy(&output.stdout))
-}
-
-fn strip_ansi(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            for next in chars.by_ref() {
-                if next.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
 }
 
 #[test]
