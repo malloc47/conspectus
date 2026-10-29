@@ -7,17 +7,17 @@
 //! width (blank) + separator on each visual line so the body's
 //! left edge is always at the same column.
 //!
-//! Theme integration goes through [`crate::viewer::theme::Theme`]
-//! (the ADR 0052 carve-out re-export); chip colours come from the
-//! palette so operators can override via `[tui.theme]`.
+//! Every style comes from the framework theme the viewer is given
+//! ([`crate::viewer::theme`] says which token or named style each role
+//! takes), so operators can override them via `[tui.theme]`.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tuikit::text;
+use tuikit::theme::Theme;
 
 use crate::viewer::model::{TranscriptTurn, TurnKind, TurnRole};
 use crate::viewer::state::ToolDetail;
-use crate::viewer::theme::Theme;
 
 /// Total chip pill width in cells: 1 lead space + inner label +
 /// 1 trail space.
@@ -267,20 +267,16 @@ pub fn chip_label_width(label: &str) -> usize {
     tuikit::text::width(label)
 }
 
-/// Color associated with a turn's chip (and therefore its
-/// separator thread). Routed through the viewer's [`Theme`]
-/// re-export so users can override via `[tui.theme]` config.
+/// Color associated with a turn's chip (and therefore its separator
+/// thread): a framework token for each role, and the compaction summary's
+/// own named style (see [`crate::viewer::theme`]).
 fn chip_color(turn: &TranscriptTurn, theme: &Theme) -> ratatui::style::Color {
     match (turn.role, turn.kind) {
-        (_, TurnKind::CompactionSummary) => theme.pr_merged(),
+        (_, TurnKind::CompactionSummary) => crate::viewer::theme::compaction(theme),
         (_, TurnKind::Thinking) => theme.inert,
         (_, TurnKind::ToolUse) => theme.warning,
         (_, TurnKind::ToolResult) => theme.warning,
-        // Semantic reuse of the codex identity color
-        // for user turns. Kept in one place via the theme's
-        // registry-aware lookup so a theme override to
-        // `[tui.theme.harness].codex` also recolors user turns.
-        (TurnRole::User, _) => theme.harness_color("codex"),
+        (TurnRole::User, _) => theme.accent,
         (TurnRole::Assistant, _) => theme.success,
         (TurnRole::System, _) => theme.inert,
     }

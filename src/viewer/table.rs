@@ -29,8 +29,7 @@
 use comfy_table::{Cell, CellAlignment, ContentArrangement, Table, presets};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-
-use crate::viewer::theme::Theme;
+use tuikit::theme::Theme;
 
 /// One piece of a message body. Either a slice of source Markdown
 /// the caller should run through `tui-markdown`, or a parsed
@@ -327,7 +326,7 @@ pub fn render_table(parsed: &ParsedTable, content_width: u16, theme: &Theme) -> 
     }
 
     let rendered = table.to_string();
-    let border_style = Style::new().fg(theme.inert).add_modifier(theme.muted);
+    let border_style = tuikit::chip::Tone::Inert.style(theme);
     let body_style = Style::new();
 
     rendered

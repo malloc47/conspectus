@@ -304,6 +304,7 @@ node_branch        = "green"
 node_fork          = "bright_magenta"
 edge_alt_of        = "dark_gray"       # a non-winning alternative link row
 edge_conflict      = "yellow"          # a conflicting link row
+transcript_compaction = "magenta"      # a compaction summary's chip in the transcript viewer
 pin_placeholder    = "bright_yellow"   # no longer drawn; kept so older files load
 
 [tui.theme.harness]

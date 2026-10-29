@@ -2,8 +2,8 @@ use super::*;
 use crate::viewer::model::{
     TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
-use crate::viewer::theme::Theme;
 use crate::viewer::widget::body_lines;
+use tuikit::theme::Theme;
 
 fn state() -> ViewerState {
     let turns = (0..12)

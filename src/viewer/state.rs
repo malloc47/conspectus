@@ -161,6 +161,9 @@ pub struct ViewerState {
     /// Footer hint for the find prompt, generated from the prompt's key
     /// table by whoever opens the viewer. Empty shows no hint.
     pub find_hint: String,
+    /// The named style the header's title is drawn in, which the opener
+    /// chooses (a harness's identity color); empty for the accent.
+    pub title_role: String,
 }
 
 impl ViewerState {
@@ -184,6 +187,7 @@ impl ViewerState {
             rendered: None,
             find: FindState::default(),
             find_hint: String::new(),
+            title_role: String::new(),
         }
     }
 

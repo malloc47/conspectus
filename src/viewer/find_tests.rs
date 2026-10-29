@@ -3,9 +3,9 @@ use crate::viewer::input::{ViewerMsg, reduce};
 use crate::viewer::model::{
     TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
-use crate::viewer::theme::Theme;
 use crate::viewer::widget::{buffer_to_string, render_to_buffer};
 use tuikit::text_edit::EditKey;
+use tuikit::theme::Theme;
 
 fn turn(role: TurnRole, kind: TurnKind, body: &str) -> TranscriptTurn {
     TranscriptTurn {

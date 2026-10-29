@@ -5,6 +5,7 @@ use crate::viewer::model::{
 use crate::viewer::state::ViewerState;
 use crate::viewer::widget::render_to_buffer;
 use ratatui::buffer::Buffer;
+use ratatui::style::Modifier;
 
 fn document() -> TranscriptDocument {
     let turn = |role, body: &str| TranscriptTurn {

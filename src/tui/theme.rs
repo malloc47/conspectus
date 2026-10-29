@@ -81,6 +81,9 @@ pub mod role {
     pub const EDGE_ALT_OF: &str = "edge_alt_of";
     /// A `Conflict` link row in the detail pane.
     pub const EDGE_CONFLICT: &str = "edge_conflict";
+    /// A compaction summary's chip in the transcript viewer; the name is
+    /// the viewer's own.
+    pub const TRANSCRIPT_COMPACTION: &str = crate::viewer::theme::COMPACTION;
     /// No longer drawn; kept so older theme files load.
     pub const PIN_PLACEHOLDER: &str = "pin_placeholder";
 }
@@ -163,6 +166,11 @@ pub const ROLES: &[Role] = &[
         "a conflicting link row in the detail pane",
     ),
     color(
+        role::TRANSCRIPT_COMPACTION,
+        Color::Magenta,
+        "the chip of a compaction summary in the transcript viewer",
+    ),
+    color(
         role::PIN_PLACEHOLDER,
         Color::LightYellow,
         "no longer drawn; kept so older theme files load",
@@ -197,6 +205,20 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("harness_aider", "harness.aider"),
     ("harness_pi", "harness.pi"),
 ];
+
+/// The name of a harness's color in the theme, `harness.<key>`, for the
+/// harness key (`claude-code`) or display label (`claude`) of a
+/// registered adapter, or [`role::HARNESS_UNKNOWN`] for any other: what a
+/// surface that reads named styles (the transcript viewer's title) is
+/// handed.
+pub fn harness_role(label_or_key: &str) -> String {
+    crate::discovery::harness::registered_adapters()
+        .find(|a| a.harness_key() == label_or_key || a.display_label() == label_or_key)
+        .map_or_else(
+            || role::HARNESS_UNKNOWN.to_string(),
+            |adapter| format!("{}{}", role::HARNESS_PREFIX, adapter.harness_key()),
+        )
+}
 
 /// The TUI's theme: the framework theme with Conspectus's roles and
 /// aliases registered, plus the node-kind glyph overrides from
@@ -260,11 +282,8 @@ impl Theme {
     /// resolve to the same `harness.<key>` entry by walking the adapter
     /// registry. Unknown harnesses take [`Self::harness_unknown`].
     pub fn harness_color(&self, label_or_key: &str) -> Color {
-        let key = crate::discovery::harness::registered_adapters()
-            .find(|a| a.harness_key() == label_or_key || a.display_label() == label_or_key)
-            .map_or(label_or_key, |adapter| adapter.harness_key());
         self.kit
-            .color(&format!("{}{key}", role::HARNESS_PREFIX))
+            .color(&harness_role(label_or_key))
             .unwrap_or_else(|| self.harness_unknown())
     }
 

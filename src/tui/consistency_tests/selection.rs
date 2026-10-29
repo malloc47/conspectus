@@ -216,10 +216,9 @@ struct Reversed {
     reason: &'static str,
 }
 
-const REVERSED_ELSEWHERE: &[Reversed] = &[Reversed {
-    path: "src/viewer/highlight.rs",
-    reason: "the current find match in the reader",
-}];
+/// None today: the readers' current find match takes the theme's
+/// `selection_active` look through the framework's find.
+const REVERSED_ELSEWHERE: &[Reversed] = &[];
 
 const DRAWING_SOURCE: &[Tree] = &[Tree::new("src/tui", 100), Tree::new("src/viewer", 15)];
 

@@ -40,7 +40,7 @@ use crate::viewer::render::{
     tool_name_from_body,
 };
 use crate::viewer::state::{RenderCache, ToolDetail, TurnStart, ViewerState};
-use crate::viewer::theme::Theme;
+use tuikit::theme::Theme;
 
 /// Draw the transcript viewer onto `area`. Mutates `state` to
 /// record the layout it observed (viewport height, total line
@@ -56,16 +56,22 @@ pub fn draw(state: &mut ViewerState, theme: &Theme, buf: &mut Buffer, area: Rect
     ])
     .split(area);
 
-    draw_header(&state.document, theme, buf, chunks[0]);
+    draw_header(&state.document, &state.title_role, theme, buf, chunks[0]);
     draw_separator(theme, buf, chunks[1]);
     draw_body(state, theme, buf, chunks[2]);
     draw_separator(theme, buf, chunks[3]);
     draw_footer(state, theme, buf, chunks[4]);
 }
 
-fn draw_header(document: &TranscriptDocument, theme: &Theme, buf: &mut Buffer, area: Rect) {
+fn draw_header(
+    document: &TranscriptDocument,
+    title_role: &str,
+    theme: &Theme,
+    buf: &mut Buffer,
+    area: Rect,
+) {
     let title = format!("{}:{}", document.meta.harness, document.meta.session_key);
-    let title_style = harness_chip_style(&document.meta.harness, theme);
+    let title_style = title_style(title_role, theme);
 
     let cwd_text = document.meta.cwd.as_deref().unwrap_or("(no cwd)");
     let turn_count_text = format!(
@@ -78,7 +84,7 @@ fn draw_header(document: &TranscriptDocument, theme: &Theme, buf: &mut Buffer, a
         }
     );
     let sep = " · ";
-    let sep_style = Style::new().fg(theme.inert).add_modifier(theme.muted);
+    let sep_style = Tone::Inert.style(theme);
 
     let spans: Vec<Span<'_>> = vec![
         Span::raw(" "),
@@ -86,7 +92,7 @@ fn draw_header(document: &TranscriptDocument, theme: &Theme, buf: &mut Buffer, a
         Span::styled(sep, sep_style),
         Span::styled(
             cwd_text.to_string(),
-            Style::new().fg(theme.cwd_mark()).add_modifier(theme.muted),
+            Style::new().fg(theme.accent).add_modifier(theme.muted),
         ),
         Span::styled(sep, sep_style),
         Span::styled(turn_count_text, sep_style),
@@ -106,7 +112,7 @@ fn draw_header(document: &TranscriptDocument, theme: &Theme, buf: &mut Buffer, a
             Span::raw(" "),
             Span::styled(
                 format!("{}:{}", document.meta.harness, document.meta.session_key),
-                harness_chip_style(&document.meta.harness, theme),
+                title_style,
             ),
         ])
     };
@@ -116,10 +122,7 @@ fn draw_header(document: &TranscriptDocument, theme: &Theme, buf: &mut Buffer, a
 fn draw_separator(theme: &Theme, buf: &mut Buffer, area: Rect) {
     let rule: String = marks::RULE.repeat(area.width as usize);
     Widget::render(
-        Paragraph::new(Line::from(Span::styled(
-            rule,
-            Style::new().fg(theme.inert).add_modifier(theme.muted),
-        ))),
+        Paragraph::new(Line::from(Span::styled(rule, Tone::Inert.style(theme)))),
         area,
         buf,
     );
@@ -425,10 +428,7 @@ pub(crate) fn draw_find_prompt(
     let mut spans = tuikit::text_edit::TextField::new(prompt)
         .prefix(Span::styled("/", Style::new().add_modifier(Modifier::BOLD)))
         .spans(1 + room, theme);
-    spans.push(Span::styled(
-        hint_text,
-        Style::new().fg(theme.inert).add_modifier(theme.muted),
-    ));
+    spans.push(Span::styled(hint_text, Tone::Inert.style(theme)));
     Widget::render(Paragraph::new(Line::from(spans)), area, buf);
 }
 
@@ -604,13 +604,10 @@ fn passes_turn_filters(turn: &crate::viewer::model::TranscriptTurn, state: &View
     (state.show_aborted || !turn.aborted) && (state.show_hidden || !turn.hidden)
 }
 
-/// Pick a harness-identity color for the title chip. Delegates to
-/// [`Theme::harness_color`] so the per-harness color
-/// lookup lives in one place (the theme + adapter registry) rather
-/// than a match table here.
-fn harness_chip_style(harness: &str, theme: &Theme) -> Style {
+/// The title's look: bold, in the named style the opener chose for it.
+fn title_style(role: &str, theme: &Theme) -> Style {
     Style::new()
-        .fg(theme.harness_color(harness))
+        .fg(crate::viewer::theme::title(theme, role))
         .add_modifier(Modifier::BOLD)
 }
 

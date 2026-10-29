@@ -57,6 +57,7 @@ pub fn build_viewer_state_at(
         .unwrap_or_else(|| TranscriptDocument::unavailable(&locator));
     let mut state = ViewerState::new(document);
     state.find_hint = tuikit::keys::footer(VIEWER_FIND_KEYS);
+    state.title_role = crate::tui::theme::harness_role(&session.harness_key);
     if let Some(open) = open {
         state.open_at(open);
     }
