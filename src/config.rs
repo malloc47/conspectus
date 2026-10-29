@@ -315,7 +315,7 @@ pub struct TuiConfig {
     pub default_view: Option<crate::tui::View>,
     /// Starting preview-pane wrap mode (ADR 0106). Sourced from
     /// `[tui] preview_wrap`; defaults to smart wrap.
-    pub preview_wrap: crate::tui::PreviewWrap,
+    pub preview_wrap: crate::tui::WrapMode,
     /// Starting preview for agent sessions in tmux (ADR 0112). Sourced
     /// from `[tui] session_preview`; defaults to the transcript.
     pub session_preview: crate::tui::SessionPreview,
@@ -331,7 +331,7 @@ impl Default for TuiConfig {
             show_harness_chips: false,
             narrow_layout_threshold: DEFAULT_NARROW_LAYOUT_THRESHOLD,
             default_view: None,
-            preview_wrap: crate::tui::PreviewWrap::default(),
+            preview_wrap: crate::tui::WrapMode::default(),
             session_preview: crate::tui::SessionPreview::default(),
         }
     }
@@ -1313,7 +1313,7 @@ fn merge_tui(
     }
 
     if let Some(raw) = file.preview_wrap {
-        match crate::tui::PreviewWrap::parse(&raw) {
+        match crate::tui::preview_wrap::parse(&raw) {
             Some(wrap) => config.preview_wrap = wrap,
             None => diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),

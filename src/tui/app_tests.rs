@@ -1905,7 +1905,7 @@ fn restore_persisted_state_applies_state_and_mirrors_config() {
         last_view: Some(View::Sessions),
         sort: Some(crate::tui::Sort::Recency),
         mux_recency: None,
-        preview_wrap: Some(crate::tui::PreviewWrap::None),
+        preview_wrap: Some(crate::tui::WrapMode::None),
         session_preview: None,
         view_states: BTreeMap::new(),
     };
@@ -1929,7 +1929,7 @@ fn restore_persisted_state_applies_state_and_mirrors_config() {
     app.restore_persisted_state();
 
     assert_eq!(app.sort(), crate::tui::Sort::Recency);
-    assert_eq!(app.preview_wrap(), crate::tui::PreviewWrap::None);
+    assert_eq!(app.preview_wrap(), crate::tui::WrapMode::None);
     assert_eq!(app.filter(), &filter);
     assert_eq!(
         app.grouping(),
@@ -2803,16 +2803,16 @@ mod reducer_effects {
 #[test]
 fn set_preview_wrap_updates_the_mode_and_persists() {
     let mut app = App::new(RunConfig::defaults());
-    assert_eq!(app.preview_wrap(), crate::tui::PreviewWrap::Smart);
-    let effects = app.update(Msg::SetPreviewWrap(crate::tui::PreviewWrap::Plain));
-    assert_eq!(app.preview_wrap(), crate::tui::PreviewWrap::Plain);
+    assert_eq!(app.preview_wrap(), crate::tui::WrapMode::Smart);
+    let effects = app.update(Msg::SetPreviewWrap(crate::tui::WrapMode::Plain));
+    assert_eq!(app.preview_wrap(), crate::tui::WrapMode::Plain);
     assert!(
         effects.contains(&crate::tui::Effect::Persist),
         "{effects:?}"
     );
     assert_eq!(
         app.build_persisted_state().preview_wrap,
-        Some(crate::tui::PreviewWrap::Plain)
+        Some(crate::tui::WrapMode::Plain)
     );
 }
 

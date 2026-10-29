@@ -20,12 +20,14 @@
 //! (ADR 0180): the pager owns scrolling, the find prompt and stepping,
 //! the help page, the footer, and the chrome. This module owns what is
 //! the transcript's: the normalized model ([`model`]) and the parsers
-//! that build it ([`parser`]), the rendering of turns ([`render`],
-//! [`table`]) and their layout as rows ([`widget`]), a find whose unit
-//! is a turn and the count of matches the toggles hide, the four
-//! toggles and their keys ([`keys`], [`help`]), opening at a search
-//! result ([`find`]), the shared content matcher ([`search`]), and the
-//! painter for a transcript's matches ([`highlight`]).
+//! that build it ([`parser`]), the rendering of turns ([`render`]) and
+//! their layout as rows ([`widget`]), a find whose unit is a turn and the
+//! count of matches the toggles hide, the four toggles and their keys
+//! ([`keys`], [`help`]), opening at a search result ([`find`]), the shared
+//! content matcher ([`search`]), and the painter for a transcript's
+//! matches ([`highlight`]). A turn's Markdown, its tables, and its
+//! highlighted code are the framework's rich text (`tuikit::richtext`,
+//! ADR 0181).
 //!
 //! # Dependency surface
 //!
@@ -43,7 +45,6 @@ pub mod parser;
 pub mod render;
 pub mod search;
 pub mod state;
-pub mod table;
 pub mod theme;
 pub mod widget;
 

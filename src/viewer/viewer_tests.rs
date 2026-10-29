@@ -7,18 +7,14 @@
 /// versions are tracked in `Cargo.toml` and the manifest doc; this
 /// list is just the names.
 const ALLOWED_EXTERNAL_DEPS: &[&str] = &[
-    "ansi-to-tui",
     "anyhow",
     "chrono",
-    "comfy-table",
     "crossterm",
     "ratatui",
     "rusqlite",
     "serde",
     "serde_json",
-    "syntect",
     "thiserror",
-    "tui-markdown",
     "tuikit",
     "unicode-width",
 ];

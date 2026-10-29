@@ -92,7 +92,7 @@ pub struct ControlsContext<'a> {
     pub mux_recency: crate::tui::MuxRecency,
     /// Preview-pane wrap mode, marked active in the Preview wrap
     /// section (ADR 0106).
-    pub preview_wrap: crate::tui::PreviewWrap,
+    pub preview_wrap: crate::tui::WrapMode,
     /// What the Preview shows for agent sessions in tmux, marked
     /// active in the Session preview section (ADR 0112).
     pub session_preview: crate::tui::SessionPreview,
@@ -152,7 +152,7 @@ pub enum ControlsCursor {
     /// Mux-view-only recency basis at index in
     /// [`crate::tui::MuxRecency::ALL`].
     MuxRecency(usize),
-    /// Preview wrap mode at index in [`crate::tui::PreviewWrap::ALL`].
+    /// Preview wrap mode at index in [`crate::tui::WrapMode::ALL`].
     PreviewWrap(usize),
     /// Session preview at index in [`crate::tui::SessionPreview::ALL`].
     SessionPreview(usize),
@@ -285,13 +285,13 @@ pub fn sections(ctx: &ControlsContext<'_>) -> Vec<Section<ControlsCursor, Msg>> 
     }
     sections.push(Section::new(
         "Preview wrap",
-        crate::tui::PreviewWrap::ALL
+        crate::tui::WrapMode::ALL
             .iter()
             .enumerate()
             .map(|(index, wrap)| {
                 Row::choice(
                     ControlsCursor::PreviewWrap(index),
-                    wrap.label(),
+                    crate::tui::preview_wrap::label(*wrap),
                     *wrap == ctx.preview_wrap,
                     Some(Msg::SetPreviewWrap(*wrap)),
                 )

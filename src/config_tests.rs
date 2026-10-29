@@ -1478,23 +1478,17 @@ fn tui_views_tables_for_removed_views_diagnose_and_name_the_valid_views() {
 fn tui_preview_wrap_defaults_to_smart_and_loads_from_config() {
     assert_eq!(
         load_tui_config("[tui]\n").config.tui.preview_wrap,
-        crate::tui::PreviewWrap::Smart
+        crate::tui::WrapMode::Smart
     );
     let outcome = load_tui_config("[tui]\npreview_wrap = \"none\"\n");
     assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
-    assert_eq!(
-        outcome.config.tui.preview_wrap,
-        crate::tui::PreviewWrap::None
-    );
+    assert_eq!(outcome.config.tui.preview_wrap, crate::tui::WrapMode::None);
 }
 
 #[test]
 fn tui_preview_wrap_unknown_value_diagnoses_and_keeps_the_default() {
     let outcome = load_tui_config("[tui]\npreview_wrap = \"fancy\"\n");
-    assert_eq!(
-        outcome.config.tui.preview_wrap,
-        crate::tui::PreviewWrap::Smart
-    );
+    assert_eq!(outcome.config.tui.preview_wrap, crate::tui::WrapMode::Smart);
     assert!(
         outcome
             .diagnostics

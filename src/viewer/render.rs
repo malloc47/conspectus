@@ -292,29 +292,12 @@ fn build_body_lines<'a>(
 ) -> Vec<Line<'a>> {
     match turn.kind {
         TurnKind::Message | TurnKind::CompactionSummary => {
-            // Markdown body, possibly with GFM tables interleaved.
-            // We pre-segment with `table::segment_body` so each
-            // table block routes through comfy-table (ADR 0054)
-            // while the surrounding prose still flows through
-            // tui-markdown. Continuation lines stay within
-            // `content_width` so the gutter+separator never breaks.
-            let mut out: Vec<Line<'a>> = Vec::new();
-            for segment in crate::viewer::table::segment_body(&turn.body) {
-                match segment {
-                    crate::viewer::table::BodySegment::Markdown(src) => {
-                        let text = tui_markdown::from_str(src);
-                        for line in join_orphan_list_markers(text.lines) {
-                            out.extend(text::wrap_line(&line, usize::from(content_width), 0));
-                        }
-                    }
-                    crate::viewer::table::BodySegment::Table(parsed) => {
-                        let rendered =
-                            crate::viewer::table::render_table(&parsed, content_width, theme);
-                        out.extend(rendered);
-                    }
-                }
-            }
-            out
+            // Markdown body, possibly with GFM tables interleaved and
+            // fenced code highlighted (ADR 0051, ADR 0054), rendered by
+            // the framework's rich text (ADR 0181). Continuation lines
+            // stay within `content_width` so the gutter+separator never
+            // breaks.
+            tuikit::richtext::markdown(&turn.body, content_width, theme)
         }
         TurnKind::Thinking => {
             // Plain text, italicised for visual hint that the
@@ -328,44 +311,6 @@ fn build_body_lines<'a>(
             render_tool_body(turn, theme, content_width, tool_detail)
         }
     }
-}
-
-/// Put a list marker back on the line of its item's text.
-///
-/// For a loose list (items separated by blank lines, which agents
-/// often write) the Markdown renderer emits the `1. ` marker as a line
-/// of its own and the item's paragraph on the next. Join the two so the
-/// number sits beside its text, as it does in a tight list.
-fn join_orphan_list_markers(lines: Vec<Line<'_>>) -> Vec<Line<'_>> {
-    let mut out: Vec<Line<'_>> = Vec::with_capacity(lines.len());
-    let mut iter = lines.into_iter().peekable();
-    while let Some(line) = iter.next() {
-        if is_bare_list_marker(&line)
-            && let Some(next) = iter.next_if(|next| !next.spans.is_empty())
-        {
-            let mut joined = line;
-            joined.spans.extend(next.spans);
-            out.push(joined);
-        } else {
-            out.push(line);
-        }
-    }
-    out
-}
-
-/// A line holding only a list marker such as `1. `, `2) `, or `- `.
-fn is_bare_list_marker(line: &Line<'_>) -> bool {
-    let [span] = line.spans.as_slice() else {
-        return false;
-    };
-    let text = span.content.trim_start();
-    let Some(marker) = text.strip_suffix(' ') else {
-        return false;
-    };
-    matches!(marker, "-" | "*" | "+")
-        || marker
-            .strip_suffix(['.', ')'])
-            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Render a tool turn's body according to the detail level.

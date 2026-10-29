@@ -175,12 +175,10 @@ workspace = true
 snapshot = ["tuikit/testkit"]
 
 [dependencies]
-ansi-to-tui = { workspace = true }
 anstyle = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
-comfy-table = { workspace = true }
 indexmap = { workspace = true }
 notify = { workspace = true }
 libc = { workspace = true }
@@ -196,10 +194,12 @@ terminal_size = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true }
-tui-markdown = { workspace = true }
 # The TUI framework crate (ADR 0150): design tokens, controls, and
-# interaction conventions. It depends on nothing from this package.
-tuikit = { path = "crates/tuikit" }
+# interaction conventions. It depends on nothing from this package. Its
+# `richtext` feature owns the rich-text crates the Preview and the
+# transcript viewer draw with: ANSI captures, Markdown with highlighted
+# code, and tables (ADR 0152, ADR 0181).
+tuikit = { path = "crates/tuikit", features = ["richtext"] }
 unicode-width = { workspace = true }
 
 [dev-dependencies]

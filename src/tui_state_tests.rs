@@ -188,13 +188,13 @@ fn preview_wrap_round_trips_and_ignores_unknown_tokens() {
         last_view: None,
         sort: None,
         mux_recency: None,
-        preview_wrap: Some(crate::tui::PreviewWrap::None),
+        preview_wrap: Some(crate::tui::WrapMode::None),
         session_preview: None,
         view_states: BTreeMap::new(),
     };
     write_tui_state(&cache, &state).expect("write");
     let read = read_tui_state(&cache).expect("read");
-    assert_eq!(read.preview_wrap, Some(crate::tui::PreviewWrap::None));
+    assert_eq!(read.preview_wrap, Some(crate::tui::WrapMode::None));
 
     let path = cache.path().expect("path");
     fs::write(&path, r#"{"schema_version": 1, "preview_wrap": "fancy"}"#).expect("write");

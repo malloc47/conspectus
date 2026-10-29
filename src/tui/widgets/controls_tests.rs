@@ -48,7 +48,7 @@ impl Fixture {
             filter: &self.filter,
             sort: self.sort,
             mux_recency: crate::tui::MuxRecency::default(),
-            preview_wrap: crate::tui::PreviewWrap::default(),
+            preview_wrap: crate::tui::WrapMode::default(),
             session_preview: crate::tui::SessionPreview::default(),
             content: self.content.as_deref().map(|text| {
                 (
@@ -559,12 +559,12 @@ fn preview_wrap_section_lists_every_mode_and_applies_the_pick() {
             .iter()
             .filter(|row| matches!(row, ControlsCursor::PreviewWrap(_)))
             .count();
-        assert_eq!(wrap_rows, crate::tui::PreviewWrap::ALL.len(), "{view:?}");
+        assert_eq!(wrap_rows, crate::tui::WrapMode::ALL.len(), "{view:?}");
 
         let mut panel = panel_at(ControlsCursor::PreviewWrap(2));
         assert_eq!(
             key(&mut panel, &fixture, press(KeyCode::Char(' '))),
-            Outcome::Stay(Msg::SetPreviewWrap(crate::tui::PreviewWrap::ALL[2]))
+            Outcome::Stay(Msg::SetPreviewWrap(crate::tui::WrapMode::ALL[2]))
         );
     }
 }

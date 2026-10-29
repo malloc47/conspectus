@@ -24,7 +24,6 @@
 //! - Empty/loading frames render minimal copy when no row tree is
 //!   loaded yet.
 
-use ansi_to_tui::IntoText;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::macros::{horizontal, span, vertical};

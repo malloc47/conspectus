@@ -480,7 +480,7 @@ pub enum Msg {
     SetMuxRecency(crate::tui::MuxRecency),
     /// Change how the preview pane fits a captured mux pane
     /// (ADR 0106). Render-only: the tree is untouched.
-    SetPreviewWrap(crate::tui::PreviewWrap),
+    SetPreviewWrap(crate::tui::WrapMode),
     /// Choose what the Preview shows for agent sessions in tmux
     /// (ADR 0112). Render-only: the tree is untouched.
     SetSessionPreview(crate::tui::SessionPreview),

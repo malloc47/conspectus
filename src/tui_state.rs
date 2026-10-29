@@ -75,7 +75,7 @@ struct RawState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mux_recency: Option<String>,
     /// Preview-pane wrap mode (ADR 0106). Token from
-    /// [`crate::tui::PreviewWrap::as_str`]; absent or unknown falls
+    /// [`crate::tui::preview_wrap::token`]; absent or unknown falls
     /// back to the configured default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preview_wrap: Option<String>,
@@ -125,7 +125,7 @@ pub struct PersistedState {
     pub last_view: Option<View>,
     pub sort: Option<Sort>,
     pub mux_recency: Option<crate::tui::MuxRecency>,
-    pub preview_wrap: Option<crate::tui::PreviewWrap>,
+    pub preview_wrap: Option<crate::tui::WrapMode>,
     pub session_preview: Option<crate::tui::SessionPreview>,
     pub view_states: BTreeMap<View, PersistedViewSlot>,
 }
@@ -235,7 +235,7 @@ pub fn read_tui_state(cache: &TuiStateCache) -> Option<PersistedState> {
     let preview_wrap = raw
         .preview_wrap
         .as_deref()
-        .and_then(crate::tui::PreviewWrap::parse);
+        .and_then(crate::tui::preview_wrap::parse);
     let session_preview = raw
         .session_preview
         .as_deref()
@@ -287,7 +287,9 @@ pub fn write_tui_state(cache: &TuiStateCache, state: &PersistedState) -> io::Res
     raw.last_view = state.last_view.map(|v| view_to_snake_case(v).to_string());
     raw.sort = state.sort.map(|s| sort_to_str(s).to_string());
     raw.mux_recency = state.mux_recency.map(|b| b.as_str().to_string());
-    raw.preview_wrap = state.preview_wrap.map(|w| w.as_str().to_string());
+    raw.preview_wrap = state
+        .preview_wrap
+        .map(|w| crate::tui::preview_wrap::token(w).to_string());
     raw.session_preview = state.session_preview.map(|p| p.as_str().to_string());
     raw.view_states.clear();
     for (view, slot) in &state.view_states {

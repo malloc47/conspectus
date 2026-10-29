@@ -282,7 +282,7 @@ pub struct App {
     mux_recency: super::MuxRecency,
     /// How the preview pane fits a captured mux pane (ADR 0106).
     /// Seeded from [`RunConfig::default_preview_wrap`].
-    preview_wrap: super::PreviewWrap,
+    preview_wrap: super::WrapMode,
     /// What the Preview shows for agent sessions in tmux (ADR 0112).
     /// Seeded from [`RunConfig::default_session_preview`].
     session_preview: super::SessionPreview,
@@ -793,7 +793,7 @@ impl App {
     }
 
     /// Preview-pane wrap mode.
-    pub fn preview_wrap(&self) -> super::PreviewWrap {
+    pub fn preview_wrap(&self) -> super::WrapMode {
         self.preview_wrap
     }
 

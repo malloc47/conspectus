@@ -383,8 +383,11 @@ pub(super) fn format_preview_for_mux(
     match app.mux_preview(mux) {
         Some(entry) => match &entry.content {
             PreviewContent::Text(capture) => {
-                let parsed = render_captured_pane(&capture.text, color);
-                let rows = crate::tui::preview_wrap::layout_capture(
+                // ADR 0025 and ADR 0106, through the framework's rich
+                // text (ADR 0181): the escapes parsed (or dropped without
+                // color), then the capture fitted in the active wrap mode.
+                let parsed = tuikit::richtext::ansi_text(&capture.text, color);
+                let rows = tuikit::richtext::layout_capture(
                     &parsed.lines,
                     app.preview_wrap(),
                     capture.width,
@@ -437,25 +440,6 @@ pub(super) fn render_pin_summary(
         text.push_str(&hint);
     }
     Some(text)
-}
-
-/// Translate a raw `tmux capture-pane -e` payload into styled
-/// `Text` for the preview pane. ADR 0025: `ansi-to-tui` does the
-/// CSI/SGR parsing; we keep ownership of the colour-disabled
-/// path and the malformed-input fallback.
-pub(super) fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
-    if !color {
-        // `Text::to_string` flattens spans back to plain bytes,
-        // which is the natural way to strip styling regardless of
-        // how the upstream parser would group the escape bytes.
-        // On a parse error there's nothing to strip — return as is.
-        return match text.into_text() {
-            Ok(parsed) => Text::raw(parsed.to_string()),
-            Err(_) => Text::raw(text.to_string()),
-        };
-    }
-    text.into_text()
-        .unwrap_or_else(|_| Text::raw(text.to_string()))
 }
 
 /// Build the chip-style divider above the preview body. It sits in the

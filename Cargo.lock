@@ -351,14 +351,12 @@ dependencies = [
 name = "conspectus"
 version = "0.1.0"
 dependencies = [
- "ansi-to-tui",
  "anstyle",
  "anyhow",
  "assert_cmd",
  "base64",
  "chrono",
  "clap",
- "comfy-table",
  "indexmap",
  "insta",
  "libc",
@@ -376,7 +374,6 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "toml_edit 0.22.27",
- "tui-markdown",
  "tui-pantry",
  "tuikit",
  "unicode-width",

@@ -57,11 +57,9 @@ struct Exception {
     reason: &'static str,
 }
 
-const EXCEPTIONS: &[Exception] = &[Exception {
-    path: "src/viewer/table.rs",
-    glyph: marks::RULE,
-    reason: "one of the border characters the table reader recognizes in rendered cells",
-}];
+/// None today: the table reader that recognized border characters in
+/// rendered cells moved to the framework's rich text.
+const EXCEPTIONS: &[Exception] = &[];
 
 /// Every use of a guarded character in drawing code, and every string that
 /// is exactly a bare mark, as `path:line: ...` findings. A reviewed
