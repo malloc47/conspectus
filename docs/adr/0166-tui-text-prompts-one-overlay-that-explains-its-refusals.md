@@ -13,7 +13,10 @@ prompt and the `Enter`/`Esc`/`Ctrl-C`/`Tab` contract are the framework's
 [ADR 0158](0158-tui-modals-one-frame-and-named-sizes.md) decision 4: a
 frame may carry a footer on its bottom border, in the title's form.
 Extends [ADR 0150](0150-tui-framework-workspace-crate.md) with the
-framework's `text_prompt` module.
+framework's `text_prompt` module. Amended by
+[ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md):
+`PromptResult` gains `Back(M)`, a confirm that steps back to the overlay
+the prompt is a step of.
 
 ## Context
 

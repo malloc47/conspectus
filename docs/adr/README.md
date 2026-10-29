@@ -136,7 +136,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0024](0024-tui-runtime-and-architecture.md) | TUI Runtime, App Architecture, And Dependency Policy | Accepted |
 | [0025](0025-tui-preview-ansi-rendering-dependency.md) | TUI Preview ANSI Rendering Dependency | Accepted |
 | [0030](0030-tui-text-input-primitive.md) | TUI Text-Input Primitive | Accepted (narrowed by 0165, 0166) |
-| [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149, 0173) |
+| [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149, 0173, 0176) |
 | [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted (amended by 0153, 0159) |
 | [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Superseded by 0074 |
 | [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
@@ -182,22 +182,23 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted |
 | [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted (amended by 0166, 0174) |
 | [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted |
-| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174) |
-| [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted (amended by 0172) |
+| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176) |
+| [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted (amended by 0172, 0176) |
 | [0162](0162-tui-help-pages-one-page-generated-from-key-tables.md) | Help Pages Are One Page, Generated From The Key Tables | Accepted |
 | [0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md) | Feedback Is One Type With Four Severities, And Toasts Are In-Tree | Accepted |
-| [0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md) | The Test Kit Drives Frames, Keeps Colors In Goldens, And Holds Every Modal To The Conventions | Accepted |
+| [0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md) | The Test Kit Drives Frames, Keeps Colors In Goldens, And Holds Every Modal To The Conventions | Accepted (amended by 0176) |
 | [0165](0165-tui-text-entry-one-line-editor-and-one-text-field.md) | Text Entry Has One Line Editor And One Text Field | Accepted |
-| [0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md) | Text Prompts Are One Overlay That Explains Its Refusals | Accepted |
+| [0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md) | Text Prompts Are One Overlay That Explains Its Refusals | Accepted (amended by 0176) |
 | [0167](0167-tui-path-fields-complete-behind-a-source-and-expand-tilde-on-commit.md) | Path Fields Complete Behind A Source, Ask For A Kind, And Expand `~` On Commit | Accepted |
 | [0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md) | Forms Move On One Ring, Submit From Any Field, And Keep Their Keys In View | Accepted (amended by 0170) |
 | [0169](0169-tui-launch-form-is-a-form-and-one-grammar-splits-every-argv.md) | The Launch Form Is A `Form`, And One Grammar Splits Every Argv | Accepted |
 | [0170](0170-tui-pin-edit-form-is-a-form-with-override-rows.md) | The Pin Edit Form Is A `Form` With Override Rows | Accepted |
 | [0171](0171-tui-menus-one-control-entries-as-data.md) | Menus Are One Control Whose Entries Are Data | Accepted (amended by 0172) |
-| [0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md) | Dialogs Are One Control, And A Menu's Questions Are Steps On The Stack | Accepted |
+| [0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md) | Dialogs Are One Control, And A Menu's Questions Are Steps On The Stack | Accepted (amended by 0176) |
 | [0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md) | Checklists Are One Control That Selects All Or None And Counts | Accepted |
 | [0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md) | Palettes Are One Control, A Query Over Results The Host Ranks | Accepted (amended by 0175) |
 | [0175](0175-tui-search-is-two-palettes-and-a-hit-is-one-column-plan.md) | Search Is Two Palettes, And A Hit's Cells Are One Column Plan | Accepted |
+| [0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md) | Settings Panels Are One Control That Applies Each Change As It Is Made, And Their Editors Are Steps | Accepted |
 
 ## Transcript viewer
 

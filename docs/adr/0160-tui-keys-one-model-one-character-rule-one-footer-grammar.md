@@ -25,7 +25,11 @@ footer, and `PgUp`/`PgDn`, `Home`/`g`, and `End`/`G` as aliases. Amended by
 [ADR 0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md):
 `PALETTE_KEYS` (`PaletteKey`) and `PALETTE_OPTION_KEYS`
 (`PaletteOptionKey`) are standard tables, and the picker resolves the
-former, so the host's `PICKER_KEYS` is gone.
+former, so the host's `PICKER_KEYS` is gone. Amended by
+[ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md):
+`SETTINGS_KEYS` (`SettingsKey`) is the standard settings table, with
+`PgUp`/`PgDn`, `Home`/`g`, and `End`/`G` as aliases, and the host's
+`CONTROLS_KEYS` is gone.
 
 ## Context
 

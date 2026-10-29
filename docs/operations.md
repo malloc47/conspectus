@@ -1484,7 +1484,13 @@ The controls dialog (`f`) applies each change as you make it, so `Esc`
 closes it and keeps what you already changed. In it `Space` selects the
 focused choice, toggles a checkbox, steps a cycle, or opens a filter's
 editor; `Enter` applies the focused choice and closes (on a filter row it
-opens the editor, and on a checkbox it just closes). Scrolling dialogs
+opens the editor, and on a checkbox it just closes). Its keys stay at the
+bottom while its sections scroll, with a scrollbar beside them; `PgUp` and
+`PgDn` move by the rows shown, and `Home`/`End` (or `g`/`G`) go to the
+first and last row. A filter's editor opens over it: `Enter` there applies
+the filter and comes back to the panel, `Esc` comes back without it, and
+`Ctrl-C` (or `q`, except while typing an age or a search) closes both.
+Scrolling dialogs
 (help, the full-value viewer, messages, the transcript viewer) use
 `Space` to page down, as pagers do. A page is the rows the dialog shows,
 as it is for `PgDn`/`PgUp` in the tree, and scrolling stops at the last

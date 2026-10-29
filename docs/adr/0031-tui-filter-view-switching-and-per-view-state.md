@@ -17,6 +17,10 @@ the `conspectus table union|forks` projections stay. Amended by
 the harness, mux-state, and PR-state editors are the framework's
 `Checklist`, which also selects all or none and counts what is checked;
 the multi-select primitive named under the module layout below is gone.
+Amended by [ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md): the Controls
+overlay is the framework's `SettingsPanel`, its rows built from the App on
+every key and frame, and its editors open as steps over it whose answers
+step back to it.
 
 ## Context
 

@@ -1268,6 +1268,21 @@ gaps, and the order they give way in), which the Search view's hit rows can
 lay out too. Quick select keeps its cursor's position across an edit while
 it is still a result.
 
+Settings panels are one control (ADR 0176). The Controls overlay is the
+framework's `SettingsPanel`: titled sections of rows that the host's row
+model builds from the App on every key and every frame, in five kinds (a
+choice, a checkbox, an editor, a cycle, a button), each carrying the `Msg`
+the panel reports as soon as the row is acted on, so every change applies
+as it is made and `Esc` keeps it; a cursor that skips the headings and
+keeps its row's id, page and ends keys, and the footer generated from the
+settings key table kept in view while the sections scroll. An editor row
+opens its checklist or prompt as a step over the panel, which answers with
+`Outcome::Back` (close one level, then the host handles the message), so
+the filter applies and the panel stays open; under its editor the panel's
+cursor row recedes (`Overlay::render_under_step`). `conspectus` keeps
+`ControlsContext`, which rows each view shows, the filter mappings, every
+`Msg`, and the editors.
+
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
 argv someone types (the forms, `pin edit --set`) is refused when it ends

@@ -18,7 +18,10 @@ keys, and a footer can keep some of a table's actions (`Footer::only`) or
 take a control's own segments. Amends
 [ADR 0171](0171-tui-menus-one-control-entries-as-data.md) decision 8: the
 worktree menu is an `ActionMenu<Msg>` whose entries open steps
-(`Entry::opens_step`), and its mode machine is gone.
+(`Entry::opens_step`), and its mode machine is gone. Amended by
+[ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md):
+the seam for a step that applies its answer and returns to the entry
+under it is built as `Outcome::Back`.
 
 ## Context
 

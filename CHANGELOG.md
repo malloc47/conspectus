@@ -310,6 +310,19 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   arrive, and the list scrolls only as far as the cursor needs (moving
   back up no longer drags it to the top). Searching itself, the keys,
   and the rest of the look are unchanged.
+- **The controls dialog keeps its keys in view and pages.** The controls
+  dialog (`f`) shows its keys at the bottom while its sections scroll
+  (they were the last lines of the list, so on most screens they never
+  showed), with a scrollbar beside a list taller than the dialog, which
+  scrolls only as far as the cursor needs and shows a section's heading
+  with its first row. `PgUp`/`PgDn` move by a screen and `Home`/`End` (or
+  `g`/`G`) go to the first or last row. A row too long for the dialog
+  ends with `…`, and the keys are drawn plain rather than dimmed. On a
+  short terminal the keys take their rows, so fewer lines of settings
+  show at once (three at 40x10, where six showed). Leaving a filter's
+  editor clears the status line, as leaving a worktree menu's question
+  does. Every setting, its words, and what `Space`, `Enter`, `Esc`, `q`,
+  and `Ctrl-C` do are unchanged.
 
 ### Fixed
 
