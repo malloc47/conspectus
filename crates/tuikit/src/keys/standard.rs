@@ -311,6 +311,32 @@ impl KeyAction for EditKey {
     }
 }
 
+/// What a path field's own key does. Keys no row binds edit the path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PathKey {
+    /// Add what the best completion adds to the typed path.
+    Complete,
+}
+
+/// A path field's own key: `Tab` completes the path
+/// ([`PathField::handle`](crate::path_field::PathField::handle)).
+///
+/// A part of a field, not an overlay's whole table: a form resolves its
+/// own `Tab` row first and asks the field to complete, moving on to the
+/// next field when there is nothing to complete, and the field's other
+/// keys are [`LINE_EDIT_KEYS`]. The row is an alias because the form's
+/// footer names `Tab` (`Tab complete/next`); the field's hint writes the
+/// key from this row.
+pub const PATH_FIELD_KEYS: &[KeyRow<PathKey>] = &[alias(key(KeyCode::Tab), PathKey::Complete)];
+
+impl KeyAction for PathKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Complete => KeyRole::Other,
+        }
+    }
+}
+
 /// What a checklist's keys do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChecklistKey {

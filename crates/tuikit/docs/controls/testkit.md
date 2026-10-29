@@ -31,6 +31,10 @@ places.
 - **`conformance`**: `assert_conventions` over a host's `Registry` of
   modals.
 - **`source`**: the source-scan helpers hygiene tests build on.
+- **`paths`**: `MemoryPaths`, an in-memory file system for path fields
+  (directories, files, a home) that counts the questions a field asks it,
+  so a test needs no real directory and can check that drawing asks none
+  (see [path_field.md](path_field.md)).
 
 The host keeps what a key means, how its screen is drawn and its keys
 routed (its `Rig`), which modals it has and what each needs the checks to

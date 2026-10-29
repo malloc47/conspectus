@@ -1,0 +1,18 @@
+frame 40x5
+text  |  ~/pro            ▲ Tab: jects         |
+style |  aaaaabaaaaaaaa   c dddddddddd         |
+text  |  ~/pro                                ▲|
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   c|
+text  |  ~/projects                           √|
+style |  aaaaaaaaaabaaaaaaaaaaaaaaaaaaaaaaa   e|
+text  |  ~/notes.txt                          ▲|
+style |  aaaaaaaaaaabaaaaaaaaaaaaaaaaaaaaaa   c|
+text  |  -                                    ?|
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   f|
+legend
+  a  fg Gray
+  b  fg Black, bg White
+  c  fg Yellow
+  d  fg Cyan
+  e  fg Green
+  f  fg DarkGray

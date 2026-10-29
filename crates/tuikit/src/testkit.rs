@@ -33,6 +33,8 @@
 //! - **[`source`]**: the source-scan helpers hygiene tests build on: the
 //!   crate's Rust lexer (comments, literals, and test items blanked or
 //!   read), word-start matching, and a read-only file walk.
+//! - **[`paths`]**: an in-memory file system for path fields, which counts
+//!   the questions a field asks it.
 //!
 //! Like the rest of the crate, the kit starts no process and writes no
 //! file: accepting a new golden goes through a writer the host supplies.
@@ -54,6 +56,7 @@ pub mod buffer;
 pub mod conformance;
 pub mod golden;
 pub mod keys;
+pub mod paths;
 pub mod render;
 pub mod source;
 
