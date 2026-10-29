@@ -6831,3 +6831,46 @@ fn form_rows_with_wide_values_fit_the_form() {
         assert!(line.to_string().ends_with('…'), "{inner}: {line:?}");
     }
 }
+
+#[test]
+fn the_tree_window_follows_the_copy_of_a_duplicated_row_the_cursor_is_on() {
+    use crate::model::WorkspaceId;
+    use crate::tui::rows::{GroupRow, Row, RowTree, ViewLabel};
+    let workspace = |key: &str| NodeId::Workspace(WorkspaceId::new(key));
+    let group_row = |id: NodeId, label: &str| Row {
+        id: RowId::Group(id.clone()),
+        depth: 0,
+        expandable: false,
+        kind: RowKind::Group(GroupRow {
+            display_path: label.to_string(),
+            primary_node: Some(id),
+            is_launch_context: false,
+        }),
+    };
+    let mut rows = vec![group_row(workspace("dup"), "dup-first")];
+    rows.extend((0..30).map(|n| group_row(workspace(&format!("w{n}")), &format!("w{n}"))));
+    rows.push(group_row(workspace("dup"), "dup-second"));
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&GraphSnapshot::empty()),
+        tree: RowTree {
+            rows,
+            view: ViewLabel::Mux,
+        },
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    for _ in 0..31 {
+        app.update(Msg::NavDown);
+    }
+    assert_eq!(app.tree_state().position(), Some(31));
+    let text = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 120, 14)));
+    assert!(
+        text.contains("dup-second"),
+        "the cursor's copy is on screen:\n{text}"
+    );
+    assert!(
+        !text.contains("dup-first"),
+        "the first copy is scrolled away:\n{text}"
+    );
+}
