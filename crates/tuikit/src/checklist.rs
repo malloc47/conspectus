@@ -86,10 +86,11 @@
 //! details, which start checked and which cannot change, and what a
 //! confirm means: a host builds the items from its own state when it
 //! opens the checklist, and its `on_confirm` turns the checked indices
-//! into its own message (looking up the values it listed). A host that
-//! holds the checklist as a level of its own overlay (a settings panel's
-//! editor) routes keys to it, takes `Close` as stepping back to its own
-//! level, and takes `Dismiss` as dismissing the whole overlay.
+//! into its own message (looking up the values it listed). A checklist
+//! that edits one value of an overlay that stays open (a settings panel's
+//! editor) opens as a step of that overlay and has `on_confirm` answer
+//! [`Outcome::Back`], so the value applies and the overlay has the keys
+//! again; `Esc` steps back to it and `Ctrl-C` dismisses both.
 
 mod body;
 mod item;

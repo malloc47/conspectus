@@ -83,13 +83,19 @@ compiles. The doctest on `Checklist` shows a host that maps the indices
 back to its own values, disables an item with a reason, and closes when
 nothing is checked.
 
-### A level of another overlay
+### A step of another overlay
 
-A host that holds the checklist as one level of an overlay of its own (a
-settings panel's editor for a filter) routes keys to it and draws it over
-its own frame with `Checklist::draw`, which keeps the scroll window. It
-takes `Commit` as the value to apply, `Close` as stepping back to its own
-level, and `Dismiss` as dismissing the whole overlay.
+A checklist that edits one value of an overlay that stays open (a
+settings panel's editor for a filter, see
+[settings_panel.md](settings_panel.md)) opens as a step of that overlay
+(`ModalStack::push_step`), and its `on_confirm` answers `Outcome::Back`:
+the stack closes the checklist only, the host applies the message, and
+the overlay under it has the keys again. `Esc` steps back to it without
+applying, and `Ctrl-C` or `q` dismisses both. A host that holds the
+checklist as one level of an overlay of its own instead routes keys to it,
+draws it over its own frame with `Checklist::draw` (which keeps the scroll
+window), and takes `Close` as stepping back to its own level and
+`Dismiss` as dismissing the whole overlay.
 
 ### Rows
 
