@@ -47,7 +47,9 @@ its keys in view), the `action_menu` module (the action menu whose entries
 are data, with shortcuts, entries that cannot run, an inline confirmation,
 entries that open a step, and a footer that stays in view while the
 entries scroll), the `dialog` module (the dialog that confirms, offers a
-choice of named verbs, or tells, on one key table), the `scroll`
+choice of named verbs, or tells, on one key table), the `checklist`
+module (the checklist that checks one item, all, or none, counts what is
+checked, and hands the checked indices to its host), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
 scrollbar gutter, and wrapped-row counts), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age

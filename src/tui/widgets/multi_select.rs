@@ -137,7 +137,9 @@ impl MultiSelectState {
                 self.inner.toggle_current(None);
                 MultiSelectOutcome::Continue
             }
-            None => MultiSelectOutcome::Continue,
+            // Paging, the ends, and select all or none are the
+            // framework checklist's; this list ignores them.
+            _ => MultiSelectOutcome::Continue,
         }
     }
 

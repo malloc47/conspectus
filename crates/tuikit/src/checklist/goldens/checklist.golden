@@ -1,0 +1,38 @@
+frame 64x16
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |  ┌ Toppings ────────────────────────────────────────────────┐  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │  √ cheese                                                │  |
+style |  a  b bbbbbb                                                a  |
+text  |  │► • onion                                                 │  |
+style |  accccccccc                                                 a  |
+text  |  │  √ salt · always added                                   │  |
+style |  a  d dddd                                                  a  |
+text  |  │  √ pepper                                                │  |
+style |  a  b bbbbbb                                                a  |
+text  |  │  • olive                                                 │  |
+style |  a                                                          a  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │↑/↓ move · Space toggle · a select all · n select none    │  |
+style |  a                                                          a  |
+text  |  │Enter confirm · Esc cancel                                │  |
+style |  a                                                          a  |
+text  |  └ 3 of 5 selected ─────────────────────────────────────────┘  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+legend
+  a  fg Cyan
+  b  fg Cyan, bold
+  c  bold, reversed
+  d  fg DarkGray, dim

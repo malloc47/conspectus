@@ -332,16 +332,30 @@ pub enum ChecklistKey {
     Up,
     /// Move the cursor to the next item.
     Down,
+    /// Move the cursor up by the rows the list shows.
+    PageUp,
+    /// Move the cursor down by the rows the list shows.
+    PageDown,
+    /// Move the cursor to the first item.
+    Top,
+    /// Move the cursor to the last item.
+    Bottom,
     /// Check or uncheck the item under the cursor.
     Toggle,
+    /// Check every item that can change.
+    SelectAll,
+    /// Uncheck every item that can change.
+    SelectNone,
     /// Take the checked items.
     Confirm,
     /// Leave without taking them.
     Cancel,
 }
 
-/// A checklist: `↑/↓ move · Space toggle · Enter confirm · Esc cancel`.
-/// `q` dismisses it, as `Ctrl-C` does.
+/// A checklist: `↑/↓ move · Space toggle · a select all · n select none ·
+/// Enter confirm · Esc cancel`. `q` dismisses it, as `Ctrl-C` does;
+/// `PgUp`/`PgDn` move by the rows shown, and `g`/`Home` and `G`/`End` go
+/// to the ends.
 pub const CHECKLIST_KEYS: &[KeyRow<ChecklistKey>] = &[
     alias(ctrl('c'), ChecklistKey::Abort),
     alias(ch('q'), ChecklistKey::Abort),
@@ -356,7 +370,15 @@ pub const CHECKLIST_KEYS: &[KeyRow<ChecklistKey>] = &[
     ),
     alias(ch('j'), ChecklistKey::Down),
     alias(ctrl('n'), ChecklistKey::Down),
+    alias(key(KeyCode::PageUp), ChecklistKey::PageUp),
+    alias(key(KeyCode::PageDown), ChecklistKey::PageDown),
+    alias(ch('g'), ChecklistKey::Top),
+    alias(key(KeyCode::Home), ChecklistKey::Top),
+    alias(ch('G'), ChecklistKey::Bottom),
+    alias(key(KeyCode::End), ChecklistKey::Bottom),
     shown(ch(' '), ChecklistKey::Toggle, "Space", "toggle"),
+    shown(ch('a'), ChecklistKey::SelectAll, "a", "select all"),
+    shown(ch('n'), ChecklistKey::SelectNone, "n", "select none"),
     shown(
         key(KeyCode::Enter),
         ChecklistKey::Confirm,
@@ -370,8 +392,9 @@ impl KeyAction for ChecklistKey {
     fn role(self) -> KeyRole {
         match self {
             Self::Abort => KeyRole::Abort,
-            Self::Up | Self::Down => KeyRole::Move,
-            Self::Toggle => KeyRole::Change,
+            Self::Up | Self::Down | Self::Top | Self::Bottom => KeyRole::Move,
+            Self::PageUp | Self::PageDown => KeyRole::Page,
+            Self::Toggle | Self::SelectAll | Self::SelectNone => KeyRole::Change,
             Self::Confirm => KeyRole::Apply,
             Self::Cancel => KeyRole::Leave,
         }

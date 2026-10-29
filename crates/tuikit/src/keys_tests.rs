@@ -515,7 +515,15 @@ fn the_standard_footers_read_in_the_one_grammar() {
     );
     assert_eq!(
         footer(CHECKLIST_KEYS),
-        ["↑/↓ move", "Space toggle", "Enter confirm", "Esc cancel"].join(sep)
+        [
+            "↑/↓ move",
+            "Space toggle",
+            "a select all",
+            "n select none",
+            "Enter confirm",
+            "Esc cancel"
+        ]
+        .join(sep)
     );
     assert_eq!(
         footer(FORM_KEYS),

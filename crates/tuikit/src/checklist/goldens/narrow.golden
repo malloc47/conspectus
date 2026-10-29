@@ -1,0 +1,26 @@
+frame 40x10
+text  |                                        |
+style |                                        |
+text  |  ┌ Many ────────────────────────────┐  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |  │  √ Item 11                       │  |
+style |  a  b bbbbbbb                       a  |
+text  |  │  √ Item 12                       │  |
+style |  a  b bbbbbbb                       a  |
+text  |  │► √ Item 13                       │  |
+style |  accdcddddddd                       a  |
+text  |  │↑/↓ move · Space toggle           │  |
+style |  a                                  a  |
+text  |  │a select all · n select none      │  |
+style |  a                                  a  |
+text  |  │Enter confirm · Esc cancel        │  |
+style |  a                                  a  |
+text  |  └ 14 of 14 selected ───────────────┘  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |                                        |
+style |                                        |
+legend
+  a  fg Cyan
+  b  fg Cyan, bold
+  c  bold, reversed
+  d  fg Cyan, bold, reversed

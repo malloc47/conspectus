@@ -172,7 +172,7 @@ not shown in the footer.
 | `TEXT_INPUT_KEYS` (`TextInputKey`) | `Ctrl-C` abort; `Enter` confirm; `Esc` cancel; `Tab` swallowed; every other key goes to the line editor (the table of `TextPrompt`) | `Enter confirm · Esc cancel` |
 | `LINE_EDIT_KEYS` (`EditKey`) | the editing keys every text field shares, all aliases: arrows and `Home`/`End` with their readline chords, word motion on `Alt-b`/`Alt-f` and the Control and Alt arrows, the delete, kill, and yank keys (see [text_edit.md](text_edit.md)) | none |
 | `PATH_FIELD_KEYS` (`PathKey`) | `Tab` completes the path, an alias (a path field's own key, consulted after its form's table; see [path_field.md](path_field.md)) | none |
-| `CHECKLIST_KEYS` (`ChecklistKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Space` toggle; `Enter` confirm; `Esc` cancel | `↑/↓ move · Space toggle · Enter confirm · Esc cancel` |
+| `CHECKLIST_KEYS` (`ChecklistKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `PgUp`/`PgDn` page; `g`/`Home` top and `G`/`End` bottom (aliases); `Space` toggle; `a` select all; `n` select none; `Enter` confirm; `Esc` cancel | `↑/↓ move · Space toggle · a select all · n select none · Enter confirm · Esc cancel` |
 | `FORM_KEYS` (`FormKey`) | `Ctrl-C` abort; `↑`/`Ctrl-P` previous field; `↓`/`Ctrl-N` next field; `Tab` complete or next; `S-Tab` back | `↑/↓ move · Tab complete/next · S-Tab back` |
 | `FORM_OPTION_KEYS` (`FormKey`) | `←` option back; `→` option on; `Space` toggle | `←/→/Space change` |
 
@@ -206,7 +206,7 @@ the style the control draws its footer in.
 | 4 | Close keys | `Esc` leaves one level in every standard table; `Ctrl-C` comes first and dismisses (`ctrl_c_first`); `q` dismisses too in every table where nothing is typed (menus, dialogs, checklists, pagers) and types in the text and form tables |
 | 6 | Forms | `FORM_KEYS`: `Tab`/`↓`/`Ctrl-N` next and `S-Tab`/`↑`/`Ctrl-P` previous; `Enter` is the form's submit row |
 | 8 | Footers and hints | every footer is generated from its table in one grammar; `unresolved` fails a footer that names a key an earlier row takes |
-| 12 | Paging | `PAGER_KEYS` binds `PgUp`/`PgDn`, `Home`/`End`, and `g`/`G` as typed; the control sizes the page |
+| 12 | Paging | `PAGER_KEYS` and `CHECKLIST_KEYS` bind `PgUp`/`PgDn`, `Home`/`End`, and `g`/`G` as typed; the control sizes the page |
 | 13 | Theme | the one look it adds, for an unavailable action, comes from `inert` and `muted` |
 | 14 | Width | `Footer::lines` measures segments in cells and wraps only between them |
 
