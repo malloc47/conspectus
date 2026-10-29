@@ -133,8 +133,9 @@ modals! {
     /// and the close-down choice, with the worktree facts captured when
     /// it opened.
     WorktreeMenu(Box<crate::tui::widgets::worktree_menu::WorktreeMenuState>),
-    /// `n` bare tmux new-session form (ADR 0095).
-    NewMux(crate::tui::widgets::new_mux::NewMuxFormState),
+    /// `n` bare tmux new-session form (ADR 0095): the framework's form,
+    /// whose submit its closure turns into the new mux.
+    NewMux(tuikit::form::Form<Msg>),
     /// `m` mux action menu (ADR 0096).
     MuxMenu(crate::tui::widgets::mux_menu::MuxMenuState),
     /// Mux launch form: a harness in a fresh mux (ADR 0096). Boxed to keep

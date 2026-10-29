@@ -1,69 +1,32 @@
-//! Row rendering shared by the multi-field forms: the mux launch form,
-//! the new mux form, and the pin edit form.
+//! The host's side of the form row kit, for the forms that still lay
+//! their rows out themselves: the mux launch form and the pin edit form.
+//! The new mux form is a `tuikit::form::Form`.
 //!
-//! Every form draws the same kinds of rows: a text value with a cursor
-//! and scroll indicators, a path field (the framework's `PathField`, with
-//! its validity mark and its Tab completion hint), the harness choices as
-//! a row of chips, a row of
-//! launch option checkboxes, and one-of-N choice rows. Sharing them keeps
-//! the forms looking and behaving alike.
-//!
-//! Every row takes the theme: a field's value is drawn in the `field`
-//! token, a focused field's in `field_active` with the cursor cell in
-//! `field_cursor`, scroll markers and hints in `accent`, notes and
-//! footers `muted`, and path marks in `success`, `warning`, and `inert`
-//! (the framework's path look).
-//! Every row starts with the cursor gutter, and the focused field's row
-//! takes the list cursor's marker and highlight ([`row`]); the fills of
-//! its value keep their look inside the highlight.
+//! The rows are the framework's (`tuikit::form`): a text value with a
+//! cursor and scroll marks, a path field with its validity mark and Tab
+//! hint, the harness choices as a row of chips, checkbox and one-of-N
+//! rows, notes and derived lines, the fixed footer, and the body whose
+//! footer never scrolls away. What stays here is what only Conspectus
+//! knows (a harness's launch options as checkboxes, the argv an empty
+//! argv field means, how an argv reads back) and the two layouts the
+//! framework's `Form` does not have yet: a checkbox sharing the name row,
+//! and the pin edit form's tag column.
 
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
-use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
-use tuikit::scroll::ScrollWindow;
+use tuikit::frame::ModalFrame;
 use tuikit::selection::{self, Cursor};
-use tuikit::text;
-use tuikit::text_edit::{LineEdit, TextField};
-
-use tuikit::path_field::PathField;
+use tuikit::text_edit::LineEdit;
 
 use crate::discovery::harness::{HarnessLaunchOption, argv_contains_fragment};
 use crate::tui::Theme;
 
-pub const LABEL_WIDTH: usize = 11;
+pub use tuikit::form::{
+    Cols, Tone, checkbox, field_style as entry_style, footer_lines, path_cells, path_row, row,
+    text_cells as value_cells, text_row as input_row, toggle_row,
+};
 
-/// Cells the harness value gets before the chips.
-const VALUE_SLOT_WIDTH: usize = 18;
-
-/// The widths a row is drawn into: the popup's inner width and the
-/// label column.
-#[derive(Debug, Clone, Copy)]
-pub struct Cols {
-    pub inner: usize,
-    pub label: usize,
-}
-
-impl Cols {
-    pub fn new(inner: usize) -> Self {
-        Self {
-            inner,
-            label: LABEL_WIDTH,
-        }
-    }
-
-    #[must_use]
-    pub fn with_label(mut self, label: usize) -> Self {
-        self.label = label;
-        self
-    }
-}
-const VALUE_GAP: &str = "  ";
-const TEXT_GUTTER: &str = "  ";
-/// What an empty field shows.
-const EMPTY_VALUE: &str = "-";
+/// The label column of the forms whose labels are short.
+pub const LABEL_WIDTH: usize = tuikit::form::LABEL_MIN;
 
 /// Spans drawn after a row's value, and the width they take.
 pub struct Suffix {
@@ -71,22 +34,10 @@ pub struct Suffix {
     pub spans: Vec<Span<'static>>,
 }
 
-/// The label that starts a row, padded to the label column, and the gap
-/// before the value. The cursor gutter goes before it ([`row`]).
+/// The label that starts a row, in the label column, and the gap before
+/// the value. The cursor gutter goes before it ([`row`]).
 pub fn prefix(label: &str, label_width: usize) -> String {
-    format!("{label:label_width$}{VALUE_GAP}")
-}
-
-/// The cells a row's lead takes: the cursor gutter and `prefix`.
-fn lead_width(prefix: &str) -> usize {
-    selection::GUTTER_WIDTH + text::width(prefix)
-}
-
-/// A form row: the cursor gutter, then `spans`. The focused field's row
-/// carries the cursor's marker and highlight, as a list's cursor row
-/// does.
-pub fn row(spans: Vec<Span<'static>>, active: bool, theme: &Theme) -> Line<'static> {
-    selection::row(spans, Cursor::of(active, true), theme)
+    tuikit::form::label(label, label_width)
 }
 
 /// `line`, a row drawn without the cursor, given the cursor's marker and
@@ -99,39 +50,8 @@ pub fn with_cursor(mut line: Line<'static>, theme: &Theme) -> Line<'static> {
     line
 }
 
-/// A field's value: filled when the field has focus, plain otherwise.
-pub fn entry_style(active: bool, theme: &Theme) -> Style {
-    if active {
-        theme.field_active.into_style()
-    } else {
-        theme.field.into_style()
-    }
-}
-
-/// A form field over `edit`, `width` cells wide: the value in the field's
-/// fill (`field_active` when focused, `field` otherwise), windowed around
-/// the cursor with `<` and `>` marking what scrolled out of view, the
-/// caret drawn while the field has focus, and `-` for an empty value.
-///
-/// The field always takes exactly `width` cells, focused or not: the cell
-/// the cursor sits on exists either way, so moving the focus never shifts
-/// what follows the value.
-pub fn value_cells(
-    edit: &LineEdit,
-    width: usize,
-    active: bool,
-    theme: &Theme,
-) -> Vec<Span<'static>> {
-    TextField::new(edit)
-        .focused(active)
-        .marks(true)
-        .fill(true)
-        .placeholder(EMPTY_VALUE)
-        .style(entry_style(active, theme))
-        .spans(width.max(1), theme)
-}
-
-/// A text value row, with an optional suffix after the value.
+/// A text value row with `suffix` after the value: the name row and the
+/// socket checkbox that shares it.
 pub fn value_row(
     label: &str,
     edit: &LineEdit,
@@ -140,14 +60,9 @@ pub fn value_row(
     suffix: Option<Suffix>,
     theme: &Theme,
 ) -> Line<'static> {
-    let inner_width = cols.inner;
-    let prefix = prefix(label, cols.label);
     let suffix_width = suffix.as_ref().map_or(0, |s| s.width);
-    let value_width = inner_width
-        .saturating_sub(lead_width(&prefix))
-        .saturating_sub(suffix_width)
-        .max(1);
-    let mut spans = vec![Span::raw(prefix)];
+    let value_width = cols.value().saturating_sub(suffix_width).max(1);
+    let mut spans = vec![Span::raw(prefix(label, cols.label))];
     spans.extend(value_cells(edit, value_width, active, theme));
     if let Some(suffix) = suffix {
         spans.extend(suffix.spans);
@@ -155,54 +70,9 @@ pub fn value_row(
     row(spans, active, theme)
 }
 
-pub fn input_row(
-    label: &str,
-    edit: &LineEdit,
-    active: bool,
-    cols: Cols,
-    theme: &Theme,
-) -> Line<'static> {
-    value_row(label, edit, active, cols, None, theme)
-}
-
-/// A path field's row: the label, then the field drawn by the framework's
-/// one path look ([`path_cells`]).
-pub fn path_row(
-    label: &str,
-    field: &PathField,
-    active: bool,
-    cols: Cols,
-    theme: &Theme,
-) -> Line<'static> {
-    let prefix = prefix(label, cols.label);
-    let width = cols.inner.saturating_sub(lead_width(&prefix)).max(1);
-    let mut spans = vec![Span::raw(prefix)];
-    spans.extend(path_cells(field, width, active, theme));
-    row(spans, active, theme)
-}
-
-/// A path field in exactly `width` cells, in a form's field look: the
-/// value as [`value_cells`] draws it, the validity mark, and while the
-/// field is focused and has a completion, the `Tab:` hint. Every form
-/// draws its path fields with this, so each shows the hint by one rule.
-pub fn path_cells(
-    field: &PathField,
-    width: usize,
-    active: bool,
-    theme: &Theme,
-) -> Vec<Span<'static>> {
-    field
-        .view()
-        .focused(active)
-        .marks(true)
-        .placeholder(EMPTY_VALUE)
-        .style(entry_style(active, theme))
-        .spans(width, theme)
-}
-
-/// The harness field: its value with a chip for every known harness,
-/// the selected one highlighted, or a `[custom]` mark for a value that
-/// isn't one of them.
+/// The harness field: its value with a chip for every known harness, the
+/// selected one highlighted, or a `[custom]` mark for a value that isn't
+/// one of them (the framework's choice row).
 pub fn harness_row(
     label: &str,
     edit: &LineEdit,
@@ -211,65 +81,17 @@ pub fn harness_row(
     cols: Cols,
     theme: &Theme,
 ) -> Line<'static> {
-    let inner_width = cols.inner;
-    let prefix = prefix(label, cols.label);
-    let available = inner_width.saturating_sub(lead_width(&prefix));
-    let value = edit.value().trim();
-    if !value.is_empty() && !known.iter().any(|k| k == value) {
-        let suffix = " [custom]";
-        let value_width = available.saturating_sub(suffix.len()).max(1);
-        let mut spans = vec![Span::raw(prefix)];
-        spans.extend(value_cells(edit, value_width, active, theme));
-        spans.push(Span::styled(suffix, Style::default().fg(theme.warning)));
-        return row(spans, active, theme);
-    }
-    let value_width = VALUE_SLOT_WIDTH.min(available).max(1);
-    let chips_budget = available.saturating_sub(value_width).min(48);
-    let mut spans = vec![Span::raw(prefix)];
-    spans.extend(value_cells(edit, value_width, active, theme));
-    spans.extend(harness_chips(value, known, chips_budget, theme));
-    row(spans, active, theme)
+    tuikit::form::choice_row(label, edit, known, active, cols, theme)
 }
 
+/// A chip for each known harness that fits in `width` cells.
 pub fn harness_chips(
     selected: &str,
     known: &[String],
     width: usize,
     theme: &Theme,
 ) -> Vec<Span<'static>> {
-    if width < 3 {
-        return Vec::new();
-    }
-    let mut spans = Vec::new();
-    let mut remaining = width;
-    for key in known {
-        let token = format!(" [{key}]");
-        let needed = token.chars().count();
-        if needed > remaining {
-            if remaining >= 2 {
-                spans.push(Span::styled(
-                    " …",
-                    Style::default().add_modifier(theme.muted),
-                ));
-            }
-            break;
-        }
-        if key == selected {
-            spans.push(Span::styled(
-                token,
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            spans.push(Span::styled(
-                token,
-                Style::default().add_modifier(theme.muted),
-            ));
-        }
-        remaining -= needed;
-    }
-    spans
+    tuikit::form::chips(selected, known, width, theme)
 }
 
 /// The harness's launch options as checkboxes, checked when the
@@ -282,20 +104,19 @@ pub fn options_row(
     cols: Cols,
     theme: &Theme,
 ) -> Line<'static> {
-    let value = options
+    let items: Vec<(String, bool)> = options
         .iter()
         .map(|option| {
-            checkbox(
-                option.label,
+            (
+                option.label.to_string(),
                 argv_contains_fragment(effective_argv, option.argv),
             )
         })
-        .collect::<Vec<_>>()
-        .join(" ");
-    static_value_row(label, &value, active, cols, theme)
+        .collect();
+    tuikit::form::check_row(label, &items, None, active, cols, theme)
 }
 
-/// One-of-N choices: `[x] a  [ ] b`.
+/// One-of-N choices, the chosen one marked: `(•) a ( ) b`.
 pub fn choice_row(
     label: &str,
     choices: &[(&str, bool)],
@@ -303,56 +124,26 @@ pub fn choice_row(
     cols: Cols,
     theme: &Theme,
 ) -> Line<'static> {
-    let value = choices
+    let options: Vec<String> = choices
         .iter()
-        .map(|(text, selected)| checkbox(text, *selected))
-        .collect::<Vec<_>>()
-        .join(" ");
-    static_value_row(label, &value, active, cols, theme)
+        .map(|(text, _)| (*text).to_string())
+        .collect();
+    let chosen = choices
+        .iter()
+        .position(|(_, selected)| *selected)
+        .unwrap_or(0);
+    tuikit::form::one_of_row(label, &options, chosen, active, cols, theme)
 }
 
-/// A row of text that isn't edited in place (a toggle, a choice).
-pub fn static_value_row(
-    label: &str,
-    value: &str,
-    active: bool,
-    cols: Cols,
-    theme: &Theme,
-) -> Line<'static> {
-    let inner_width = cols.inner;
-    let prefix = prefix(label, cols.label);
-    let width = inner_width
-        .saturating_sub(lead_width(&prefix))
-        .saturating_sub(text::width(TEXT_GUTTER));
-    let spans = vec![
-        Span::raw(prefix),
-        Span::raw(TEXT_GUTTER),
-        Span::styled(text::truncate_end(value, width), entry_style(active, theme)),
-    ];
-    row(spans, active, theme)
-}
-
-/// A dimmed, read-only row, such as the command a form will run.
+/// A dimmed, read-only row, such as the pin a form edits.
 pub fn note_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<'static> {
-    let inner_width = cols.inner;
-    let prefix = prefix(label, cols.label);
-    let width = inner_width
-        .saturating_sub(lead_width(&prefix))
-        .saturating_sub(text::width(TEXT_GUTTER))
-        .max(1);
-    let note = Style::default().add_modifier(theme.muted | Modifier::ITALIC);
-    let spans = vec![
-        Span::styled(prefix, note),
-        Span::raw(TEXT_GUTTER),
-        Span::styled(text::truncate_end(value, width), note),
-    ];
-    row(spans, false, theme)
+    tuikit::form::read_only_row(label, value, Tone::Note, cols, theme)
 }
 
 /// A line derived from the fields above it, such as the command the form
-/// will run. It sits two cells in with a dim `└` lead-in, in dim italic,
-/// and carries no focus marker, so it reads as output and not as another
-/// input. The value starts in the same column as the field values.
+/// will run: led in by the dim corner two cells deeper than the labels,
+/// with no focus marker, so it reads as output and not as another input;
+/// in the warning color when `warn`.
 pub fn derived_row(
     label: &str,
     value: &str,
@@ -360,56 +151,8 @@ pub fn derived_row(
     cols: Cols,
     theme: &Theme,
 ) -> Line<'static> {
-    let dim = Style::default().add_modifier(theme.muted | Modifier::ITALIC);
-    let lead = format!(
-        "  └ {label:width$}{VALUE_GAP}",
-        width = cols.label.saturating_sub(2)
-    );
-    let width = cols
-        .inner
-        .saturating_sub(text::width(&lead))
-        .saturating_sub(text::width(TEXT_GUTTER))
-        .max(1);
-    let value_style = if warn {
-        Style::default()
-            .fg(theme.warning)
-            .add_modifier(Modifier::ITALIC)
-    } else {
-        dim
-    };
-    Line::from(vec![
-        Span::styled(lead, dim),
-        Span::raw(TEXT_GUTTER),
-        Span::styled(text::truncate_end(value, width), value_style),
-    ])
-}
-
-pub fn warning_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<'static> {
-    let inner_width = cols.inner;
-    let prefix = prefix(label, cols.label);
-    let width = inner_width
-        .saturating_sub(lead_width(&prefix))
-        .saturating_sub(text::width(TEXT_GUTTER))
-        .max(1);
-    let spans = vec![
-        Span::styled(prefix, Style::default().add_modifier(theme.muted)),
-        Span::raw(TEXT_GUTTER),
-        Span::styled(
-            text::truncate_end(value, width),
-            Style::default().fg(theme.warning),
-        ),
-    ];
-    row(spans, false, theme)
-}
-
-/// A key hint footer as muted lines that fit `width` cells, wrapped only
-/// between hints so a key stays beside its verb.
-pub fn footer_lines(footer: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-    let dim = Style::default().add_modifier(theme.muted);
-    text::wrap_at(footer, tuikit::keys::HINT_SEPARATOR, width)
-        .into_iter()
-        .map(|row| Line::styled(row, dim))
-        .collect()
+    let tone = if warn { Tone::Warning } else { Tone::Derived };
+    tuikit::form::read_only_row(label, value, tone, cols, theme)
 }
 
 /// The argv an empty argv field means for `harness`: a launch profile or
@@ -436,14 +179,6 @@ pub fn default_argv(
         .collect()
 }
 
-pub fn checkbox(label: &str, selected: bool) -> String {
-    if selected {
-        format!("[x] {label}")
-    } else {
-        format!("[ ] {label}")
-    }
-}
-
 /// An argv shown the way a shell would take it back.
 pub fn display_argv(argv: &[String]) -> String {
     argv.iter()
@@ -464,62 +199,12 @@ fn shell_display_arg(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "'\\''"))
 }
 
-/// The frame every form draws in: a form's size, with `title`. A form
+/// The frame every form draws in: the form size, with `title`. A form
 /// lays its rows out for the frame's
-/// [`inner_width`](ModalFrame::inner_width) and draws them as the body.
+/// [`inner_width`](ModalFrame::inner_width) and draws them as the body,
+/// a `tuikit::form::FormBody`, so its footer stays in view.
 pub fn modal_frame<'a>(theme: &'a Theme, title: &'a str) -> ModalFrame<'a> {
-    ModalFrame::new(theme, ModalSize::FORM).title(title)
-}
-
-/// A form body in three bands: lines that stay put at the top and bottom,
-/// and between them rows that scroll to keep the cursor row visible.
-/// The fixed bands keep their place however many rows there are.
-pub struct SplitBody {
-    pub top: Vec<Line<'static>>,
-    pub rows: Vec<Line<'static>>,
-    pub bottom: Vec<Line<'static>>,
-    pub cursor_row: usize,
-}
-
-impl ModalBody for SplitBody {
-    type Output = ();
-
-    fn measure(&mut self, _width: u16) -> u16 {
-        u16::try_from(self.top.len() + self.rows.len() + self.bottom.len()).unwrap_or(u16::MAX)
-    }
-
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let height = usize::from(area.height);
-        let bottom = self.bottom.len().min(height);
-        let top = self.top.len().min(height - bottom);
-        let rows_height = height - bottom - top;
-        let window = ScrollWindow::new(rows_height, self.rows.len())
-            .following(self.cursor_row..self.cursor_row + 1);
-        let line_at = |y: usize| {
-            Rect::new(
-                area.x,
-                area.y + u16::try_from(y).unwrap_or(0),
-                area.width,
-                1,
-            )
-        };
-        for (i, line) in self.top.into_iter().take(top).enumerate() {
-            Paragraph::new(line).render(line_at(i), buf);
-        }
-        for (i, line) in self
-            .rows
-            .into_iter()
-            .skip(window.offset())
-            .take(rows_height)
-            .enumerate()
-        {
-            Paragraph::new(line).render(line_at(top + i), buf);
-        }
-        let first = height - bottom;
-        for (i, line) in self.bottom.into_iter().take(bottom).enumerate() {
-            Paragraph::new(line).render(line_at(first + i), buf);
-        }
-    }
+    ModalFrame::new(theme, tuikit::form::FORM_SIZE).title(title)
 }
 
 #[cfg(test)]

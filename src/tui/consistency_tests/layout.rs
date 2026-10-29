@@ -84,9 +84,10 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
             app.open_worktree_menu(state);
         }),
         ("NewMux", View::Pinned, |app| {
-            app.open_new_mux_form(crate::tui::widgets::new_mux::NewMuxFormState::new(
+            app.open_new_mux_form(crate::tui::widgets::new_mux::form(
                 "scratch",
                 "/home/operator/src/conspectus",
+                Vec::new(),
             ));
         }),
         ("MuxMenu", View::Pinned, |app| {

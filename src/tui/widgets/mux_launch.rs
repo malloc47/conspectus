@@ -26,17 +26,15 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::macros::line;
-use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
-use tuikit::frame::Lines;
+use tuikit::form::FormBody;
 
 use crate::tui::Msg;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
     self, choice_row, derived_row, footer_lines, harness_row, input_row, options_row, path_row,
-    static_value_row,
+    toggle_row,
 };
 use crate::tui::widgets::launch_spec_form::{
     LaunchSpecFormState, LaunchSpecInit, SpecTextField, optional_string, parse_launch_argv,
@@ -46,9 +44,9 @@ use tuikit::path_field::{Candidate, PathField};
 
 const HARNESS_LABEL: &str = "harness";
 const CWD_LABEL: &str = "cwd";
-const MUX_NAME_LABEL: &str = "mux name";
-const MUX_SOCKET_LABEL: &str = "mux socket";
-const LAUNCH_ARGV_LABEL: &str = "launch argv";
+const MUX_NAME_LABEL: &str = "name";
+const MUX_SOCKET_LABEL: &str = "socket";
+const LAUNCH_ARGV_LABEL: &str = "argv";
 const WORKTREE_BRANCH_LABEL: &str = "branch";
 const WORKTREE_REPO_LABEL: &str = "repo";
 
@@ -495,7 +493,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
         let frame = form::modal_frame(self.theme, "Launch harness in new mux");
         let inner_width = usize::from(frame.inner_width(area));
         let footer = footer_lines(
-            &tuikit::keys::footer(crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS),
+            crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS,
             inner_width,
             self.theme,
         );
@@ -585,12 +583,13 @@ impl Widget for MuxLaunchFormWidget<'_> {
         row(
             &mut lines,
             MuxLaunchField::WorktreeToggle,
-            static_value_row(
+            toggle_row(
                 "worktree",
+                spec.worktree_enabled(),
                 if spec.worktree_enabled() {
-                    "[x] create or reuse a worktree for the branch"
+                    "create or reuse a worktree for the branch"
                 } else {
-                    "[ ] no worktree"
+                    "no worktree"
                 },
                 focus == MuxLaunchField::WorktreeToggle,
                 cols,
@@ -639,23 +638,15 @@ impl Widget for MuxLaunchFormWidget<'_> {
                 self.theme,
             ),
         );
-        if let Some(err) = spec.error() {
-            lines.push(line![""]);
-            lines.push(line![ratatui::text::Span::styled(
-                err.to_string(),
-                Style::default().fg(self.theme.error)
-            )]);
-        }
-        lines.push(line![""]);
-        for footer_line in footer {
-            lines.push(footer_line);
-        }
-
-        frame.render(
-            area,
-            buf,
-            Lines::new(lines).following(cursor_line..cursor_line + 1),
-        );
+        // The rows scroll; the error line and the keys stay in view.
+        let error = spec
+            .error()
+            .map(|err| tuikit::form::error_line(err, inner_width, self.theme));
+        let body = FormBody::new(lines, cursor_line)
+            .notes(vec![Line::default()])
+            .error(error)
+            .footer(footer);
+        frame.render(area, buf, body);
     }
 }
 

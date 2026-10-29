@@ -1516,22 +1516,22 @@ fn worktree_mutation_available() -> bool {
     .is_some()
 }
 
-/// Open the bare-tmux new-session form (`n`), seeding cwd from the
-/// selected row's cwd when it resolves to a repo, checkout, mux, or
-/// agent-session row; otherwise fall back to `$HOME`. Name defaults
-/// to a unique-per-live-mux slug derived from the selected row when
-/// possible, else empty (operator types it in).
+/// Open the bare-tmux new-session form (`n`) the way the mux menu does,
+/// through the reducer, which seeds it ([`new_mux_form`]). The form shows
+/// its own keys, so nothing goes on the status line.
 pub(super) fn open_new_mux_form_action(app: &mut App) {
-    use crate::tui::widgets::new_mux::NewMuxFormState;
-    let seeded_cwd = derive_new_mux_cwd(app).unwrap_or_else(default_new_mux_cwd);
-    let seeded_name = derive_new_mux_name(app);
-    let candidates = known_cwd_candidates(app, Some(&seeded_cwd));
-    app.open_new_mux_form(
-        NewMuxFormState::new(seeded_name, seeded_cwd).with_cwd_candidates(candidates),
-    );
-    app.update(Msg::SetStatus(Some(Feedback::info(
-        "mux: ↑/↓ move · Tab complete/next · Enter next/commit · Esc cancel",
-    ))));
+    app.update(Msg::OpenNewMuxForm);
+}
+
+/// The bare-tmux new-session form, seeded: the cwd from the selected
+/// row's cwd when it resolves to a repo, checkout, mux, or agent-session
+/// row, otherwise `$HOME`; the name from [`derive_new_mux_name`] (empty,
+/// so the operator types it); and the known directories the cwd field
+/// completes with.
+pub(crate) fn new_mux_form(app: &App) -> tuikit::form::Form<Msg> {
+    let cwd = derive_new_mux_cwd(app).unwrap_or_else(default_new_mux_cwd);
+    let candidates = known_cwd_candidates(app, Some(&cwd));
+    crate::tui::widgets::new_mux::form(derive_new_mux_name(app), cwd, candidates)
 }
 
 /// Public alias for [`derive_new_mux_cwd`] so the reducer's

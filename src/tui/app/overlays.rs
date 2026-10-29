@@ -455,7 +455,7 @@ impl App {
     }
 
     /// Active bare mux form, if on top of the stack.
-    pub fn new_mux_form(&self) -> Option<&crate::tui::widgets::new_mux::NewMuxFormState> {
+    pub fn new_mux_form(&self) -> Option<&tuikit::form::Form<crate::tui::Msg>> {
         match self.modal_stack.top()? {
             crate::tui::Modal::NewMux(state) => Some(state),
             _ => None,
@@ -463,9 +463,7 @@ impl App {
     }
 
     /// Mutable access for the runtime's per-key forwarding.
-    pub fn new_mux_form_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::new_mux::NewMuxFormState> {
+    pub fn new_mux_form_mut(&mut self) -> Option<&mut tuikit::form::Form<crate::tui::Msg>> {
         match self.modal_stack.top_mut()? {
             crate::tui::Modal::NewMux(state) => Some(state),
             _ => None,
@@ -473,7 +471,7 @@ impl App {
     }
 
     /// Push the bare mux form onto the modal stack.
-    pub fn open_new_mux_form(&mut self, state: crate::tui::widgets::new_mux::NewMuxFormState) {
+    pub fn open_new_mux_form(&mut self, state: tuikit::form::Form<crate::tui::Msg>) {
         self.modal_stack.push(crate::tui::Modal::NewMux(state));
     }
 

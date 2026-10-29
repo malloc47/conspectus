@@ -1,4 +1,4 @@
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier, Style};
 
 use super::*;
 use crate::tui::theme::OverrideValue::Text as OverrideText;
@@ -172,15 +172,36 @@ fn launch_options_show_checked_when_the_argv_carries_the_flags() {
 
 #[test]
 fn the_footer_wraps_at_separators_without_breaking_a_hint() {
-    let footer =
-        "↑/↓ move · Tab complete/next · S-Tab back · ←/→/Space option · Enter launch · Esc cancel";
-    let lines = footer_lines(footer, 40, &theme());
+    let keys = crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS;
+    let footer = tuikit::keys::footer(keys);
+    let lines = footer_lines(keys, 40, &theme());
     assert!(lines.len() >= 2);
     for line in &lines {
-        assert!(text(line).chars().count() <= 40, "{}", text(line));
+        assert!(tuikit::text::width(&text(line)) <= 40, "{}", text(line));
     }
     let joined: Vec<String> = lines.iter().map(text).collect();
     assert_eq!(joined.join(" · "), footer, "nothing lost or reordered");
+}
+
+#[test]
+fn a_one_of_n_row_draws_choices_not_checkboxes() {
+    let line = choice_row(
+        "pin",
+        &[("don't pin", false), ("launch, then pin", true)],
+        false,
+        Cols::new(70),
+        &theme(),
+    );
+    let rendered = text(&line);
+    assert!(
+        rendered.contains(&format!(
+            "{} don't pin {} launch, then pin",
+            marks::NOT_CHOSEN,
+            marks::CHOSEN
+        )),
+        "{rendered}"
+    );
+    assert!(!rendered.contains(marks::CHECKED) && !rendered.contains(marks::UNCHECKED));
 }
 
 #[test]
@@ -269,7 +290,7 @@ fn chips_notes_footers_and_warnings_follow_the_theme() {
         style_of(&note.spans, "a note"),
         Style::default().add_modifier(Modifier::ITALIC)
     );
-    let footer = footer_lines("Enter save · Esc cancel", 40, &theme);
+    let footer = footer_lines(crate::tui::keybindings::overlay::PIN_EDIT_KEYS, 40, &theme);
     assert_eq!(
         footer[0].style,
         Style::default().add_modifier(Modifier::ITALIC)

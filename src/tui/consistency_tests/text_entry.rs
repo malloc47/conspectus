@@ -1,7 +1,7 @@
 //! Every text field edits the same way: Alt-B and Alt-F move by word, a
 //! pasted value cannot submit the field it lands in, a path typed with
 //! `~` reaches the command expanded, and input a field refuses says why
-//! (in a prompt, on its error line).
+//! (in a prompt or a form, on its error line).
 //!
 //! Each field is opened the way the operator opens it and driven by the
 //! keys the live loop routes to it (`action_for_event`), and the checks
@@ -295,7 +295,7 @@ fn word_motion_works_in_every_text_field() {
 fn the_new_mux_form_runs_the_command_in_the_expanded_directory() {
     let mut app = opened(open_new_mux_name);
     type_text(&mut app, "dev");
-    send(&mut app, press(KeyCode::Enter));
+    send(&mut app, press(KeyCode::Down));
     clear(&mut app);
     type_text(&mut app, "~/projects");
     let effects = send(&mut app, press(KeyCode::Enter));
@@ -399,8 +399,8 @@ fn an_invalid_max_age_says_why_and_keeps_the_editor_open() {
     assert!(!screen(&mut app).contains("missing unit"));
 }
 
-/// The prompt on top explains a refusal on its own error line: the
-/// reason is drawn inside the prompt's frame and no toast is posted.
+/// The prompt or form on top explains a refusal on its own error line:
+/// the reason is drawn inside its frame and no toast is posted.
 fn says_in_the_prompt(app: &mut App, reason: &str) {
     let frame = screen(app);
     let row = frame
@@ -426,24 +426,17 @@ fn an_empty_branch_name_says_why_and_keeps_the_prompt_open() {
 #[test]
 fn the_new_mux_form_says_which_field_is_missing() {
     let mut app = opened(open_new_mux_name);
-    send(&mut app, press(KeyCode::Enter));
-    let frame = screen(&mut app);
-    assert!(
-        frame.contains("mux: name is required"),
-        "Enter on an empty name:\n{frame}"
-    );
+    let effects = send(&mut app, press(KeyCode::Enter));
+    assert!(!acts(&effects), "nothing is launched: {effects:?}");
+    says_in_the_prompt(&mut app, "mux: name is required");
 
     type_text(&mut app, "dev");
-    send(&mut app, press(KeyCode::Enter));
+    send(&mut app, press(KeyCode::Down));
     clear(&mut app);
     let effects = send(&mut app, press(KeyCode::Enter));
     assert!(!acts(&effects), "nothing is launched: {effects:?}");
     assert!(app.new_mux_form().is_some(), "the form stays open");
-    let frame = screen(&mut app);
-    assert!(
-        frame.contains("mux: cwd is required"),
-        "Enter on an empty cwd:\n{frame}"
-    );
+    says_in_the_prompt(&mut app, "mux: cwd is required");
 }
 
 #[test]
@@ -490,7 +483,7 @@ fn a_multi_line_paste_types_one_line_and_submits_nothing() {
 fn a_pasted_value_commits_like_a_typed_one() {
     let mut app = opened(open_new_mux_name);
     paste(&mut app, "dev\n");
-    send(&mut app, press(KeyCode::Enter));
+    send(&mut app, press(KeyCode::Down));
     clear(&mut app);
     paste(&mut app, "~/projects\n");
     let effects = send(&mut app, press(KeyCode::Enter));

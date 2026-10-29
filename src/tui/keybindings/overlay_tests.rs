@@ -197,7 +197,7 @@ fn generated_footers_read_in_the_one_grammar() {
             "↑/↓ move",
             "Tab complete/next",
             "S-Tab back",
-            "Enter next/commit",
+            "Enter create",
             "Esc cancel",
         ])
     );

@@ -356,14 +356,15 @@ pub const CLOSE_DOWN_KEYS: &[KeyRow<ChoiceKey<CloseDown>>] = &[
 // ---------------------------------------------------------------------
 // Multi-field forms: the new bare mux form, the mux launch form, and the
 // pin edit form, on the standard form rows. Up and Down always move
-// between fields; Tab completes in a path field and moves on elsewhere.
-// Option keys act on the choice and toggle rows; on a text field they
-// edit the text. Unbound keys edit the focused field.
+// between fields; Tab completes in a path field and moves on elsewhere;
+// Enter submits from any field, with the form's own verb. Option keys act
+// on the choice and toggle rows; on a text field they edit the text.
+// Unbound keys edit the focused field.
 // ---------------------------------------------------------------------
 
 pub const NEW_MUX_KEYS: &[KeyRow<FormKey>] = &[
     include(FORM_KEYS),
-    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "next/commit"),
+    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "create"),
     shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];
 

@@ -27,10 +27,9 @@ use crate::discovery::harness::{
 use crate::model::{FieldSource, FieldValue, PinKind, RecipeField, SlotFields};
 use crate::tui::Msg;
 use crate::tui::theme::Theme;
-use crate::tui::widgets::form::{
-    self, Cols, SplitBody, display_argv, footer_lines, note_row, options_row,
-};
+use crate::tui::widgets::form::{self, Cols, display_argv, footer_lines, note_row, options_row};
 use crate::tui::widgets::launch_spec_form::parse_launch_argv;
+use tuikit::form::FormBody;
 use tuikit::overlay::Outcome;
 use tuikit::path_field::{Candidate, PathField};
 use tuikit::text_edit::LineEdit;
@@ -732,17 +731,14 @@ impl Widget for PinEditFormWidget<'_> {
         }
         bottom.push(line![""]);
         bottom.extend(footer_lines(
-            &tuikit::keys::footer(crate::tui::keybindings::overlay::PIN_EDIT_KEYS),
+            crate::tui::keybindings::overlay::PIN_EDIT_KEYS,
             inner_width,
             self.theme,
         ));
 
-        let body = SplitBody {
-            top,
-            rows,
-            bottom,
-            cursor_row,
-        };
+        // The rows scroll; the summary above them and the explanation,
+        // error, and keys below stay in view.
+        let body = FormBody::new(rows, cursor_row).top(top).notes(bottom);
         frame.render(area, buf, body);
     }
 }

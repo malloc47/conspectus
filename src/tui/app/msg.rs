@@ -117,10 +117,6 @@ pub enum Msg {
     /// Set or clear the transient status-bar message, drawn in its
     /// severity's color. `None` clears any prior message.
     SetStatus(Option<tuikit::feedback::Feedback>),
-    /// Show a short notice in a toast. An overlay that refuses input
-    /// and stays open sends this to say why: the toast draws over every
-    /// overlay, where the status line can be covered.
-    Toast(tuikit::feedback::Feedback),
     /// Copy `text` to the clipboard and, when it worked, say `done` in a
     /// toast. Overlays that copy (the value modal, Messages) send this:
     /// the clipboard write is the executor's.

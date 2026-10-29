@@ -421,10 +421,22 @@ fn a_missing_cwd_is_flagged_in_the_form() {
     assert!(rendered(&state).contains(tuikit::glyphs::marks::WARNING));
 }
 
+/// Whether `line` is the row labelled `label`: the label follows the
+/// frame's border and the cursor gutter.
+fn is_labelled(line: &str, label: &str) -> bool {
+    line.split_once('│').is_some_and(|(_, inside)| {
+        inside
+            .chars()
+            .skip(2)
+            .collect::<String>()
+            .starts_with(&format!("{label} "))
+    })
+}
+
 fn name_row(frame: &str) -> String {
     frame
         .lines()
-        .find(|line| line.contains("mux name"))
+        .find(|line| is_labelled(line, "name"))
         .unwrap_or_default()
         .to_string()
 }
@@ -435,7 +447,7 @@ fn the_name_is_the_first_field_with_the_socket_hidden_behind_a_checkbox() {
     assert_eq!(state.focus(), MuxLaunchField::MuxName);
     let frame = rendered(&state);
     let lines: Vec<&str> = frame.lines().collect();
-    let name = lines.iter().position(|l| l.contains("mux name")).unwrap();
+    let name = lines.iter().position(|l| is_labelled(l, "name")).unwrap();
     let harness = lines.iter().position(|l| l.contains("harness  ")).unwrap();
     assert!(
         name < harness,
@@ -443,8 +455,38 @@ fn the_name_is_the_first_field_with_the_socket_hidden_behind_a_checkbox() {
     );
     assert!(name_row(&frame).contains("[ ] socket"), "{frame}");
     assert!(
-        !frame.contains("mux socket"),
+        !lines.iter().any(|line| is_labelled(line, "socket")),
         "the field is hidden:\n{frame}"
+    );
+}
+
+#[test]
+fn the_labels_are_the_short_forms() {
+    let frame = rendered(&claude_form());
+    let lines: Vec<&str> = frame.lines().collect();
+    for label in [
+        "name", "harness", "options", "cwd", "argv", "worktree", "pin",
+    ] {
+        assert!(
+            lines.iter().any(|line| is_labelled(line, label)),
+            "no `{label}` row:\n{frame}"
+        );
+    }
+    for long in ["mux name", "launch argv"] {
+        assert!(!frame.contains(long), "`{long}` is the long form:\n{frame}");
+    }
+}
+
+#[test]
+fn the_pin_row_offers_one_of_three_not_checkboxes() {
+    let frame = rendered(&claude_form());
+    let pin = frame
+        .lines()
+        .find(|line| is_labelled(line, "pin"))
+        .expect("a pin row");
+    assert!(
+        pin.contains("(•) don't pin ( ) launch, then pin"),
+        "{frame}"
     );
 }
 
@@ -457,9 +499,9 @@ fn the_checkbox_reveals_the_socket_field_under_the_name() {
     let frame = rendered(&state);
     assert!(name_row(&frame).contains("[x] socket"), "{frame}");
     let lines: Vec<&str> = frame.lines().collect();
-    let name = lines.iter().position(|l| l.contains("mux name")).unwrap();
+    let name = lines.iter().position(|l| is_labelled(l, "name")).unwrap();
     assert!(
-        lines[name + 1].contains("mux socket"),
+        is_labelled(lines[name + 1], "socket"),
         "the socket row is directly beneath:\n{frame}"
     );
     // Down from the checkbox moves to the next row, the socket field.
@@ -480,7 +522,7 @@ fn the_checkbox_keeps_its_place_and_the_row_keeps_its_width_when_toggled() {
     assert_eq!(off.find("[ ] socket"), focused.find("[ ] socket"));
     assert_eq!(off.find("[ ] socket"), on.find("[x] socket"));
     assert!(
-        focused.contains(&format!("{} mux name", tuikit::glyphs::marks::POINTER)),
+        focused.contains(&format!("{} name ", tuikit::glyphs::marks::POINTER)),
         "the row is marked: {focused}"
     );
 }

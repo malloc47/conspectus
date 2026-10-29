@@ -3,15 +3,15 @@ source: src/tui/widgets/mux_launch_tests.rs
 expression: "frame_at(&state, 100, 20)"
 ---
           ┌ Launch harness in new mux ───────────────────────────────────────────────────┐
-          │► mux name       adhoc                                              [x] socket│
-          │  mux socket     -                                                            │
+          │► name           adhoc                                              [x] socket│
+          │  socket         -                                                            │
           │  harness        claude-code      [claude-code] [codex] [opencode]            │
           │  options        [ ] skip permissions                                         │
           │  cwd            /tmp                                                        √│
-          │  launch argv    -                                                            │
+          │  argv           -                                                            │
           │  └ command      claude                                                       │
           │  worktree       [ ] no worktree                                              │
-          │  pin            [x] don't pin [ ] launch, then pin [ ] pin, don't launch     │
+          │  pin            (•) don't pin ( ) launch, then pin ( ) pin, don't launch     │
           │                                                                              │
           │↑/↓ move · Tab complete/next · S-Tab back · ←/→/Space change · Enter launch   │
           │Esc cancel                                                                    │

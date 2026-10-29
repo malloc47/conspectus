@@ -1372,7 +1372,6 @@ impl App {
             Msg::SetStatus(message) => {
                 self.status_message = message;
             }
-            Msg::Toast(feedback) => effects.push(Effect::Toast(feedback)),
             Msg::Copy { text, done } => effects.push(Effect::Copy { text, done }),
             Msg::Report(entry) => {
                 let text = if entry.severity.needs_attention() {
@@ -1901,13 +1900,8 @@ impl App {
                 }
             }
             Msg::OpenNewMuxForm => {
-                let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
-                    .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
-                let candidates = crate::tui::runtime::known_cwd_candidates(self, Some(&seeded_cwd));
-                self.open_new_mux_form(
-                    crate::tui::widgets::new_mux::NewMuxFormState::new(String::new(), seeded_cwd)
-                        .with_cwd_candidates(candidates),
-                );
+                let form = crate::tui::runtime::new_mux_form(self);
+                self.open_new_mux_form(form);
             }
             Msg::OpenMuxLaunchForm => {
                 let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
