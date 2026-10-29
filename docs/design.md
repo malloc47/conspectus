@@ -1193,6 +1193,19 @@ commits. The field reads the file system only through a read-only source
 `conspectus` supplies, and only when its text changes, so drawing does no
 I/O. The pin store and the config loader expand `~` with the same rule.
 
+Forms are one control (ADR 0168). A form is the framework's `Form`: an
+ordered list of fields (text, path, a choice of chips with an optional custom
+value, toggles, check groups, one-of-N rows drawn `(•)`, and read-only notes
+and derived lines), some shown only while a condition over the others holds.
+`Tab`/`↓` and `S-Tab`/`↑` move over one ring of fields, `Enter` submits from
+any of them (each field's check first, then a closure `conspectus` supplies
+that commits a message or refuses with a reason), a refusal shows on one
+error line directly above the footer until the next edit, and the footer,
+generated from the form's key table, stays in view while only the rows
+scroll. Labels take the short forms (`name`, `socket`, `argv`, `branch`).
+The new mux form is a `Form`; the launch and pin edit forms draw their rows
+through the same row kit and body until they move onto it.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

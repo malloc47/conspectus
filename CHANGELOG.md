@@ -198,6 +198,20 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   half the row), only while the field is focused and `Tab` has something
   to add, and the pin edit form's path rows show it too. The hint names
   exactly what `Tab` adds, and a long one is shortened in the middle.
+- **Forms submit from any field and keep their keys in view.** `Enter`
+  in the new tmux session form creates the session from either field (it
+  used to move from the name to the cwd first; the footer reads `Enter
+  create`), and opening it with `n` no longer puts its keys on the status
+  line, since the form shows them. An empty name or cwd is explained on
+  the form's error line, just above its keys, until the next edit (it was
+  a toast), and the launch form's error line no longer has a blank line
+  between it and its keys. On a short terminal the new tmux session and
+  launch forms scroll only their fields and keep their keys in view, as
+  the pin edit form did; their keys used to scroll away. The launch form's
+  fields read `name`, `socket`, and `argv` (they read `mux name`, `mux
+  socket`, and `launch argv`), and its `pin` choices are drawn as a choice
+  of one, `(•) don't pin ( ) launch, then pin ( ) pin, don't launch`,
+  instead of as checkboxes.
   The launch form's worktree repo completes and is marked like the cwd.
   A path that is missing or not a directory is marked `▲` (it was `!`).
   Typing a name that only appears inside a known directory (`src` for
@@ -288,9 +302,8 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `~/…` path the form had shown as valid.
 - **Refused input says why.** An invalid max age in the controls, an
   empty branch name for a new worktree, and an empty name or cwd in the
-  new tmux session form say what is wrong (the prompts on their error
-  line, the form in a toast), where they used to do nothing; the field
-  stays open for a fix.
+  new tmux session form say what is wrong (each on its error line), where
+  they used to do nothing; the field stays open for a fix.
 - **The view tabs fit their pane.** At 100 to 104 columns, and below 53
   in the stacked layout, the pane's border cut the last view's name in
   half (`sea`, `his`), the active one included. Names that don't fit now

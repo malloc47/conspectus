@@ -8,7 +8,10 @@ character binding no longer ignores its chords (ADR 0123 kept each key's
 old modifier handling), and footers take one grammar. Applies house rules
 3, 4, 6, 8, and 12 of [ADR 0151](0151-tui-framework-control-set-and-house-rules.md)
 and extends [ADR 0150](0150-tui-framework-workspace-crate.md) with the
-framework's `keys` module.
+framework's `keys` module. Amended by
+[ADR 0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md):
+`Space` in `FORM_OPTION_KEYS` binds its own `FormKey::Toggle` under the same
+`change` verb, so a row of several checkboxes can tell moving from flipping.
 
 ## Context
 

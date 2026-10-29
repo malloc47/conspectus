@@ -1204,7 +1204,11 @@ cancels.
 The launch and new mux forms work the same way: `↑`/`↓` move between fields,
 `Tab` completes a directory in a path field and moves on elsewhere,
 `←`/`→`/`Space` choose among the harnesses, options, and toggles, and a line
-shows the command the form will run.
+shows the command the form will run. `Enter` launches or creates from
+whichever field has the cursor. A choice of one among several, such as the
+launch form's `pin` row, is drawn as `(•) chosen ( ) other`; a checkbox is
+`[x]` or `[ ]`. On a terminal too short for the whole form, its fields
+scroll to keep the focused one in view and its keys stay at the bottom.
 
 Every path field (the forms' cwd, the launch form's worktree repo, and a
 pin's path rows) asks for a directory. `Tab` adds the rest of the best
@@ -1220,14 +1224,14 @@ the form saves or runs the expanded path.
 
 `N`, or `m` then **Launch harness in new mux…**, opens the mux launch form
 with the worktree toggle off (switch it on to create or reuse a worktree). The
-mux name is the first field. A **socket** checkbox to the right of the name
-reveals a **mux socket** field beneath it, for a tmux server other than the
+mux's **name** is the first field. A **socket** checkbox to the right of the
+name reveals a **socket** field beneath it, for a tmux server other than the
 default; `Tab` reaches the checkbox right after the name and `Space` (or `←`/`→`)
 toggles it. With it off the launch uses the default server, and the socket text
 you typed is kept if you switch it back on. The `command` row shows what will
 run; it is derived output, drawn dim and italic and indented under a `└`, and
-never takes focus. An empty `launch
-argv` resolves to the harness's default (a project or user `[launch.*]`
+never takes focus. An empty `argv`
+resolves to the harness's default (a project or user `[launch.*]`
 profile, `atelier exec`, or the harness default) and the form shows the
 command and where it came from. The last field, **pin**, can also pin the new
 mux or, with *pin, don't launch*, write a planned pin and start nothing.
@@ -1502,8 +1506,10 @@ your next edit: an invalid max age (`max age: missing unit (expected
 ms/s/m/h/d)`), an empty branch name for a new worktree (`worktree:
 branch name is required`), and renaming a pin or a tmux session to
 nothing (`pin: nothing entered`, `mux rename: name cannot be empty`).
-An empty name or cwd in the new tmux session form is explained in a
-toast.
+The new tmux session and launch forms say why on an error line just above
+their keys, until your next edit: an empty name or cwd in the new tmux
+session form (`mux: name is required`, `mux: cwd is required`) also moves
+the cursor to the field to fill in.
 
 A prompt shows its keys on its bottom border (`Enter confirm · Esc
 cancel`). `Esc` leaves it without saying anything; from the worktree

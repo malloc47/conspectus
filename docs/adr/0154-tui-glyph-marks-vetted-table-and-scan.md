@@ -5,7 +5,11 @@
 Accepted. Amends ADR 0073 (node-kind visual identity): the table of
 measured glyphs that ADR names, `icons::VETTED`, moves into the framework
 crate's `glyphs` module (ADR 0150) and the host adds its own glyphs to it.
-Applies house rule 14 of ADR 0151 to glyph widths.
+Applies house rule 14 of ADR 0151 to glyph widths. Amended by
+[ADR 0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md):
+the marks gain the derived-line corner `└`, and the module names the
+three-cell option boxes built from vetted glyphs (`[x]`, `[ ]`, `(•)`,
+`( )`).
 
 ## Context
 
