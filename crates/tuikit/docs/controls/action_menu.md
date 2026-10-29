@@ -6,7 +6,7 @@
 | Layer | 1 (control) |
 | Type parameters | `M`, the host's message, which each entry carries and a pick commits (`Clone`, since the menu keeps its entries); the menu implements `Overlay<M, Cx>` for every context `Cx` and reads none |
 | Cargo feature | none |
-| Outcomes | `Commit(M)` when an entry is picked (`Enter`, its shortcut, or the second `Enter` on an armed entry); `Close` for `Esc`, `q`, and `Ctrl-C`; `Consumed` for a move, an arm, a disabled entry's shortcut, and every other key; never `Stay(M)` |
+| Outcomes | `Commit(M)` when an entry is picked (`Enter`, its shortcut, or the second `Enter` on an armed entry); `Stay(M)` instead when the picked entry opens a step; `Close` for `Esc`; `Dismiss` for `q` and `Ctrl-C`; `Consumed` for a move, an arm, a disabled entry's shortcut, and every other key |
 
 ## Purpose
 
@@ -101,12 +101,56 @@ assert!(menu.shadowed_shortcuts().is_empty());
 
 The same example is the doctest on `ActionMenu`, so it compiles.
 
-A host whose overlay holds a menu as one of its levels (a list whose
-entries lead to further questions) makes the menu's `M` a value of its
-own, routes keys to it with `Overlay::handle`, takes a `Commit` as the
-pick (opening its next level instead of closing), takes `Close` as
-leaving, and draws it with `ActionMenu::draw`, which keeps the scroll
-window as the stack's draw does.
+### Entries that open a step
+
+An entry whose action needs more than a pick (a dialog with something to
+say, a prompt for a value) is marked with `Entry::opens_step`. Picking it
+reports its message as `Stay(M)`, so the menu stays open, and the host
+builds the question from the message and opens it over the menu with
+`ModalStack::push_step`. The menu and its step are one flow: `Esc` in the
+step closes it and the menu has the keys again, with its cursor where it
+was; a commit in the step, or `Ctrl-C` (and `q` where nothing is typed),
+closes the step and the menu together.
+
+```rust
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tuikit::action_menu::{ActionMenu, Entry};
+use tuikit::dialog::Dialog;
+use tuikit::overlay::{ModalStack, Outcome, Overlay};
+
+#[derive(Clone, Debug, PartialEq)]
+enum Msg {
+    AskDelete,
+    Delete,
+}
+
+/// The host's entries: the menu, or the question one of its entries asks.
+enum Modal {
+    Menu(ActionMenu<Msg>),
+    Ask(Dialog<Msg>),
+}
+// ... `impl Overlay<Msg, ()> for Modal` delegates to each ...
+
+let menu = ActionMenu::new(
+    "plan.txt",
+    vec![Entry::new("Delete…", Msg::AskDelete).opens_step()],
+);
+let mut stack = ModalStack::new();
+stack.push(Modal::Menu(menu));
+// Enter on the entry reports `Stay(Msg::AskDelete)`; the host answers it
+// by opening the question as a step of the menu.
+stack.push_step(Modal::Ask(
+    Dialog::confirm("Delete", Msg::Delete).body(["Delete plan.txt?"]),
+));
+// Esc in the dialog gives the menu its keys back; `y` would have closed
+// both and handed the host `Msg::Delete`.
+```
+
+A host that holds a menu as a level inside an overlay of its own routes
+keys to it with `Overlay::handle`, takes a `Commit` as the pick, `Close`
+as leaving that level, and `Dismiss` as dismissing its whole overlay, and
+draws it with `ActionMenu::draw`, which keeps the scroll window as the
+stack's draw does.
 
 ### Rows
 
@@ -186,12 +230,12 @@ then the entries' shortcuts.
 
 | Key | Action | Notes |
 | --- | --- | --- |
-| `Ctrl-C` | Abort | closes the menu, saying nothing; an alias, not in the footer |
-| `q` | Abort | closes the menu, saying nothing; nothing is typed in a menu |
+| `Ctrl-C` | Abort | dismisses the menu (`Dismiss`), saying nothing; an alias, not in the footer |
+| `q` | Abort | dismisses the menu, saying nothing; nothing is typed in a menu |
 | `↑`, `k`, `Ctrl-P` | Up | the previous entry that can run, wrapping from the first to the last |
 | `↓`, `j`, `Ctrl-N` | Down | the next entry that can run, wrapping from the last to the first |
-| `Enter` | Pick | commits the cursor's entry, or arms it when it confirms inline and is not armed |
-| `Esc` | Close | closes the menu, saying nothing; a menu has one level |
+| `Enter` | Pick | commits the cursor's entry (or reports it and stays open, for an entry that opens a step), or arms it when it confirms inline and is not armed |
+| `Esc` | Close | closes the menu (`Close`), saying nothing; a menu has one level, and its steps are entries of their own |
 | an entry's shortcut | (pick that entry) | moves the cursor to it and picks it; does nothing for an entry that cannot run |
 | any other key | (none) | swallowed |
 
@@ -217,9 +261,9 @@ Detail rows and the footer are unstyled. The scrollbar is the shared
 | --- | --- | --- |
 | 1 | List cursor and highlight | each label row goes through `selection::row`: the pointer in the 2-cell gutter and the theme's selection pair over the gutter, key, and label |
 | 2 | List ends | a menu is a short choice list: `Ends::Wrap`, stepping over entries that cannot run |
-| 3 | Confirmation | `Confirm::Inline` is the inline arm, for an action with nothing more to say; the armed row says what `Enter` will do. A dialog is the idiom when a body helps |
-| 4 | Close keys | `Esc` closes the menu's one level; `Ctrl-C` and `q` dismiss it, armed or not; nothing is typed in a menu |
-| 5 | Close feedback | closing returns `Close` and carries no message |
+| 3 | Confirmation | `Confirm::Inline` is the inline arm, for an action with nothing more to say; the armed row says what `Enter` will do. A dialog is the idiom when a body helps, opened by an entry that opens a step |
+| 4 | Close keys | `Esc` closes the menu's one level; `Ctrl-C` and `q` dismiss it, armed or not, and with it any step over it; nothing is typed in a menu |
+| 5 | Close feedback | closing returns `Close` or `Dismiss` and carries no message |
 | 8 | Footers and hints | the footer is generated from `MENU_KEYS` in the one grammar; a shortcut is shown in the menu's key column, written as `key_label` writes keys, never in prose |
 | 10 | Unfocused cursor | an open menu has the keys, so its cursor row takes `selection_active` |
 | 13 | Theme | the frame, highlight, armed row, and disabled entries take theme tokens; no raw color or reversed cell |

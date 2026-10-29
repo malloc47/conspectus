@@ -1,0 +1,36 @@
+frame 64x16
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |  ┌ Delete ──────────────────────────────────────────────────┐  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │Delete `plan.txt` and its history?                        │  |
+style |  a                                                          a  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │▲ open in 2 windows:                                      │  |
+style |  abbbbbbbbbbbbbbbbbbbb                                      a  |
+text  |  │  - the left window                                       │  |
+style |  a                                                          a  |
+text  |  │  - the right window                                      │  |
+style |  a                                                          a  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │Enter/y confirm · Esc/n cancel                            │  |
+style |  a                                                          a  |
+text  |  └──────────────────────────────────────────────────────────┘  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+legend
+  a  fg Cyan
+  b  fg Yellow, bold

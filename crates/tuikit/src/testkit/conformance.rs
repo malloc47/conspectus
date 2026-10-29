@@ -330,10 +330,12 @@ impl<S> Case<S> {
         self
     }
 
-    /// The modal draws the footer `table` generates.
+    /// The modal draws `footer`: the one a key table generates (pass the
+    /// table), or one a control composes from its table and its own keys
+    /// (pass the control's [`Footer`]).
     #[must_use]
-    pub fn footer<A>(mut self, table: &[KeyRow<A>]) -> Self {
-        self.footer = Some(Footer::new(table));
+    pub fn footer(mut self, footer: impl Into<Footer>) -> Self {
+        self.footer = Some(footer.into());
         self
     }
 

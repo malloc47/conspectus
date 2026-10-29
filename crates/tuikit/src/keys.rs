@@ -86,9 +86,9 @@ pub use footer::{Footer, HINT_SEPARATOR, Segment, footer, unavailable_style};
 pub use matcher::{KeyMatcher, alt, alt_key, ch, ctrl, ctrl_key, key, key_label};
 pub use role::{Convention, EnterMeans, KeyAction, KeyRole, SpaceMeans, ctrl_c_first};
 pub use standard::{
-    CHECKLIST_KEYS, CONFIRM_KEYS, ChecklistKey, ChoiceKey, ConfirmKey, EditKey, FORM_KEYS,
-    FORM_OPTION_KEYS, FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PATH_FIELD_KEYS,
-    PagerKey, PathKey, TEXT_INPUT_KEYS, TextInputKey,
+    CHECKLIST_KEYS, CONFIRM_KEYS, ChecklistKey, ChoiceKey, ConfirmKey, DIALOG_KEYS, DialogKey,
+    EditKey, FORM_KEYS, FORM_OPTION_KEYS, FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS,
+    PATH_FIELD_KEYS, PagerKey, PathKey, TEXT_INPUT_KEYS, TextInputKey,
 };
 pub use table::{
     Hint, KeyRow, Rows, alias, include, loose_characters, mislabeled, resolve, rows, shown,

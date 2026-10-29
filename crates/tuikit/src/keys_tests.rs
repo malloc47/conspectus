@@ -222,6 +222,27 @@ fn footer_groups_labels_by_verb_in_order_and_skips_aliases() {
     assert!(Footer::new(aliases).is_empty());
     assert_eq!(footer(aliases), "");
     assert_eq!(Footer::new(ROWS).to_string(), text);
+    assert_eq!(Footer::from(ROWS), Footer::new(ROWS));
+}
+
+#[test]
+fn a_footer_can_show_some_actions_and_take_segments_of_a_control_own() {
+    let leaving = Footer::only(MORE, |action| matches!(action, Key::Close | Key::Copy));
+    assert_eq!(
+        leaving.text(),
+        ["type to filter", "Esc/q close", "y copy"].join(HINT_SEPARATOR),
+        "notes stay; rows of other actions go"
+    );
+    let composed: Footer = std::iter::once(Segment {
+        text: "m merge".into(),
+        available: true,
+    })
+    .chain(leaving.segments()[1..].iter().cloned())
+    .collect();
+    assert_eq!(
+        composed.text(),
+        ["m merge", "Esc/q close", "y copy"].join(HINT_SEPARATOR)
+    );
 }
 
 #[test]
@@ -450,6 +471,11 @@ fn the_standard_tables_keep_the_rules() {
         "confirm",
         CONFIRM_KEYS,
         Convention::new("confirm", Submits, Types, ""),
+    );
+    check(
+        "dialog",
+        DIALOG_KEYS,
+        Convention::new("dialog", Submits, Types, ""),
     );
     check(
         "pager",

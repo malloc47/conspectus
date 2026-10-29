@@ -45,7 +45,9 @@ that commits, refuses with a reason, or stays), the `path_field` module
 `form` module (the multi-field form that submits from any field and keeps
 its keys in view), the `action_menu` module (the action menu whose entries
 are data, with shortcuts, entries that cannot run, an inline confirmation,
-and a footer that stays in view while the entries scroll), the `scroll`
+entries that open a step, and a footer that stays in view while the
+entries scroll), the `dialog` module (the dialog that confirms, offers a
+choice of named verbs, or tells, on one key table), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
 scrollbar gutter, and wrapped-row counts), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age
@@ -55,7 +57,8 @@ marker and highlight, the ghost and pending looks, and the wrap-or-clamp
 rule), the `keys` module (key tables, footers, key labels, roles, and the
 standard tables for menus, dialogs, pagers, prompts, checklists, and
 forms), the `overlay` module (the overlay contract, its outcomes, and the
-host-owned modal stack that routes keys to its top entry and draws every
+host-owned modal stack that routes keys to its top entry, opens a
+follow-up question as a step of the overlay that asks it, and draws every
 entry), the `help` and `feedback` modules, the `testkit` module behind its
 feature (key scripts, the one-frame driver, buffer probes, ANSI text,
 style-aware goldens, the conformance suite, and source-scan helpers), the

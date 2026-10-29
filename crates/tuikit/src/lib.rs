@@ -18,6 +18,7 @@
 pub mod action_menu;
 pub mod age;
 pub mod chip;
+pub mod dialog;
 pub mod feedback;
 pub mod form;
 pub mod frame;

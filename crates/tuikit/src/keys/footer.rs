@@ -38,6 +38,13 @@ pub struct Footer {
 impl Footer {
     /// The footer of `table`, included tables spliced in.
     pub fn new<A>(table: &[KeyRow<A>]) -> Self {
+        Self::only(table, |_| true)
+    }
+
+    /// The footer of the rows of `table` whose action `keep` accepts (and
+    /// of its notes): how a control whose keys depend on its state shows
+    /// only those that apply, from the one table it resolves with.
+    pub fn only<A>(table: &[KeyRow<A>], keep: impl Fn(&A) -> bool) -> Self {
         enum Part {
             Keys {
                 verb: &'static str,
@@ -52,8 +59,9 @@ impl Footer {
                 KeyRow::Bind {
                     hint: Hint::Shown { label, verb },
                     available,
+                    action,
                     ..
-                } => {
+                } if keep(action) => {
                     let existing = parts
                         .iter_mut()
                         .find(|part| matches!(part, Part::Keys { verb: v, .. } if v == verb));
@@ -170,6 +178,24 @@ impl Footer {
             out.push(Line::from(current));
         }
         out
+    }
+}
+
+/// The footer of a table: [`Footer::new`].
+impl<A> From<&[KeyRow<A>]> for Footer {
+    fn from(table: &[KeyRow<A>]) -> Self {
+        Self::new(table)
+    }
+}
+
+/// A footer of segments a control composed itself, in order: keys that
+/// are the control's data (a dialog's verbs) beside segments of a
+/// table's footer ([`Footer::segments`]).
+impl FromIterator<Segment> for Footer {
+    fn from_iter<I: IntoIterator<Item = Segment>>(segments: I) -> Self {
+        Self {
+            segments: segments.into_iter().collect(),
+        }
     }
 }
 

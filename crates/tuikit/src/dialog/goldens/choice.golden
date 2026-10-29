@@ -1,0 +1,23 @@
+frame 40x10
+text  |                                        |
+style |                                        |
+text  |┌ Close plan.txt ──────────────────────┐|
+style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+text  |│Close `plan.txt`                      │|
+style |a                                      a|
+text  |│Archives or deletes it, then closes   │|
+style |a                                      a|
+text  |│every window it is open in.           │|
+style |a                                      a|
+text  |│                                      │|
+style |a                                      a|
+text  |│a archive & close · d delete & close  │|
+style |a                                      a|
+text  |│Esc/n cancel                          │|
+style |a                                      a|
+text  |└──────────────────────────────────────┘|
+style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+text  |                                        |
+style |                                        |
+legend
+  a  fg Cyan

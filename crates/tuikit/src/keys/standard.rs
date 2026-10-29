@@ -89,6 +89,51 @@ impl KeyAction for ConfirmKey {
     }
 }
 
+/// What a dialog's keys do: the one table every
+/// [`Dialog`](crate::dialog::Dialog) resolves with, whatever its form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DialogKey {
+    /// Dismiss the dialog and the overlay it is a step of (`Ctrl-C`,
+    /// `q`).
+    Abort,
+    /// Scroll a body taller than the dialog up a row.
+    Up,
+    /// Scroll a body taller than the dialog down a row.
+    Down,
+    /// Go ahead: a confirmation's yes, a notice's dismissal.
+    Confirm,
+    /// Do not go ahead: leave the dialog, one level back.
+    Cancel,
+}
+
+/// Every dialog: `Enter/y confirm · Esc/n cancel` in a confirmation.
+/// `Ctrl-C` and `q` dismiss it; the arrows and `k`/`j` scroll a body
+/// taller than the dialog. A choice dialog shows its verbs' own keys and
+/// then `Esc/n cancel`; a notice shows `Enter/Esc close`.
+pub const DIALOG_KEYS: &[KeyRow<DialogKey>] = &[
+    alias(ctrl('c'), DialogKey::Abort),
+    alias(ch('q'), DialogKey::Abort),
+    alias(key(KeyCode::Up), DialogKey::Up),
+    alias(ch('k'), DialogKey::Up),
+    alias(key(KeyCode::Down), DialogKey::Down),
+    alias(ch('j'), DialogKey::Down),
+    shown(key(KeyCode::Enter), DialogKey::Confirm, "Enter", "confirm"),
+    shown(ch('y'), DialogKey::Confirm, "y", "confirm"),
+    shown(key(KeyCode::Esc), DialogKey::Cancel, "Esc", "cancel"),
+    shown(ch('n'), DialogKey::Cancel, "n", "cancel"),
+];
+
+impl KeyAction for DialogKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Abort => KeyRole::Abort,
+            Self::Up | Self::Down => KeyRole::Move,
+            Self::Confirm => KeyRole::Apply,
+            Self::Cancel => KeyRole::Leave,
+        }
+    }
+}
+
 /// What a choice dialog's keys do: one of the host's choices `C`, or
 /// none.
 ///
