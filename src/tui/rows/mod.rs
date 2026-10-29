@@ -367,6 +367,28 @@ pub enum PinMarker {
     Stopped,
 }
 
+/// The tree hands a row's pin marker to the row's producer as its mark:
+/// on for a running pinned entity, off for one that isn't.
+impl From<PinMarker> for tuikit::tree::RowMark {
+    fn from(marker: PinMarker) -> Self {
+        match marker {
+            PinMarker::None => Self::None,
+            PinMarker::Running => Self::On,
+            PinMarker::Stopped => Self::Off,
+        }
+    }
+}
+
+impl From<tuikit::tree::RowMark> for PinMarker {
+    fn from(mark: tuikit::tree::RowMark) -> Self {
+        match mark {
+            tuikit::tree::RowMark::None => Self::None,
+            tuikit::tree::RowMark::On => Self::Running,
+            tuikit::tree::RowMark::Off => Self::Stopped,
+        }
+    }
+}
+
 /// The state a primary-entity row draws as a glyph: sessions and
 /// muxes link or don't, and a mux can also be stopped or unchecked.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

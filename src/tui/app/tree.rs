@@ -86,6 +86,44 @@ impl App {
         }
     }
 
+    /// What the left pane's tree needs to know about `row` that only the
+    /// snapshot and the hand-off can say: whether it stands for an entity
+    /// that is gone or unknown (a non-mixed row wears the ghost look; a
+    /// mixed row dims its own cells by its tone), whether it still shows
+    /// the values from before the hand-off (ADR 0108), and the pin marker
+    /// the Sessions, Mux, PRs, and Search views put on a pinned entity's
+    /// row (the Pinned and History rows carry theirs).
+    pub(crate) fn tree_row_state(&self, row: &Row) -> RowState {
+        let node = crate::tui::rows::row_node(&row.id);
+        let lookup = self.handle.as_ref().zip(node);
+        let ghost = !matches!(row.kind, RowKind::Mixed(_))
+            && lookup.is_some_and(|(handle, node)| handle.snapshot().presence(node).is_some());
+        let native = matches!(
+            self.active_view,
+            View::Sessions | View::Mux | View::Prs | View::Search
+        );
+        let marker = lookup
+            .filter(|_| native)
+            .and_then(|(handle, node)| handle.pinned_nodes().get(node).copied())
+            .unwrap_or(crate::tui::rows::PinMarker::None);
+        RowState {
+            ghost,
+            pending: self.row_is_frozen(row),
+            mark: marker.into(),
+        }
+    }
+
+    /// [`Self::tree_row_state`] for every row of the tree, index for
+    /// index. The left pane works these out before each frame, so laying
+    /// a row out looks nothing up.
+    pub(crate) fn tree_row_states(&self) -> Vec<RowState> {
+        self.tree
+            .rows
+            .iter()
+            .map(|row| self.tree_row_state(row))
+            .collect()
+    }
+
     #[cfg(test)]
     pub(super) fn visible_rows_owned(&self) -> Vec<RowId> {
         self.visible_rows().iter().map(|r| r.id.clone()).collect()

@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use tuikit::feedback::{Feedback, Toasts};
 use tuikit::scroll::{Anchor, ScrollRegion, ScrollWindow};
-use tuikit::tree::TreeState;
+use tuikit::tree::{RowState, TreeState};
 
 use crate::model::{AgentSessionId, GraphSnapshot, MuxSessionId, NodeId, PinId};
 use crate::tui::explorer::{

@@ -1,10 +1,22 @@
-//! Left panel: the row tree, its scrollbar, and per-row spans.
+//! Left panel: the row tree in the framework's `TreeView`, and the
+//! per-row spans it is drawn from.
+//!
+//! The framework draws the pane (its title, the Search header, the
+//! Pinned banner, the placeholder, the window over the showing rows, the
+//! scrollbar) and gives each row its looks (the hand-off's pending look,
+//! the ghost look, the selection highlight). This module lays each row's
+//! cells out: [`LeftRows::line`] is the producer, from the row and its
+//! `RowCtx`. What only the snapshot and the hand-off can say about a row
+//! (ghost, pending, pin marker) is worked out by the App before the
+//! frame, so laying a row out looks nothing up.
 
-use tuikit::selection::{self, Cursor};
+use tuikit::selection;
+use tuikit::tree::{RowCtx, RowMark, RowState, TreeView};
 
 use super::*;
 
 use crate::tui::icons::state;
+use crate::tui::rows::{PinMarker, Row};
 
 /// Draw the left pane and return the window its tree drew, or `None`
 /// when the tree is empty, so the window it had is kept for when rows
@@ -14,98 +26,74 @@ pub(super) fn draw_left_panel(
     frame: &mut Frame<'_>,
     area: Rect,
 ) -> Option<ScrollWindow> {
-    // The corners take a cell each from the top border.
-    let title_width = usize::from(area.width.saturating_sub(2));
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(left_panel_title(app, title_width));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
+    // The corners take a cell each from the top border; the body is as
+    // wide.
+    let inner_width = usize::from(area.width.saturating_sub(2));
+    let states = app.tree_row_states();
+    let rows = LeftRows::of(app, &states);
+    let line = |row: &Row, cx: &RowCtx<'_>| rows.line(row, cx);
+    let mut view = TreeView::new(&app.tree().rows, app.tree_state(), line, app.theme())
+        .focused(app.focus() == Focus::Left)
+        .states(&states)
+        .title(left_panel_title(app, inner_width));
     // The Pinned view advertises legacy pins that still need
     // `pin migrate` on the last line of the pane.
-    let inner = match pinned_banner(app) {
-        Some(banner) if inner.height > 4 => {
-            let lines: Vec<Line<'_>> = banner.split('\n').map(Line::from).collect();
-            let rows = WrappedRows::new(&lines, usize::from(inner.width));
-            let wrapped = u16::try_from(rows.len()).unwrap_or(u16::MAX).clamp(1, 3);
-            let banner_area = Rect {
-                y: inner.y + inner.height - wrapped,
-                height: wrapped,
-                ..inner
-            };
-            let widget =
-                Paragraph::new(rows.into_rows()).style(Style::default().fg(app.theme().warning));
-            frame.render_widget(widget, banner_area);
-            Rect {
-                height: inner.height - wrapped,
-                ..inner
-            }
-        }
-        _ => inner,
-    };
-
+    if let Some(banner) = pinned_banner(app) {
+        let lines = banner
+            .split('\n')
+            .map(|line| Line::from(line.to_string()))
+            .collect();
+        view = view.footer(lines, Style::default().fg(app.theme().warning));
+    }
     // The Search view says which remembered search it shows on its first
     // line.
-    let inner = match search_header(app, inner.width.into()) {
-        Some(header) if inner.height > 3 => {
-            let header_area = Rect { height: 1, ..inner };
-            frame.render_widget(Paragraph::new(header), header_area);
-            Rect {
-                y: inner.y + 1,
-                height: inner.height - 1,
-                ..inner
-            }
+    if let Some(header) = search_header(app, inner_width) {
+        view = view.header(header);
+    }
+    // A tree with rows always shows its first, so the placeholder's copy
+    // is worked out only when there are none.
+    if app.tree().rows.is_empty() {
+        view = view.empty(empty_left_panel_text(app));
+    }
+    view.render(area, frame.buffer_mut())
+}
+
+/// What the left pane's rows are laid out with, worked out once per
+/// frame: each group's counts, and the layout every row shares.
+pub(super) struct LeftRows<'a> {
+    summaries: std::collections::HashMap<RowId, GroupSummary>,
+    layout: RowLayout<'a>,
+}
+
+impl<'a> LeftRows<'a> {
+    /// The layout of `app`'s tree, whose rows have the `states` the App
+    /// worked out (`App::tree_row_states`).
+    pub(super) fn of(app: &'a App, states: &[RowState]) -> Self {
+        let summaries = compute_group_summaries(app.tree());
+        let align = GroupAlign::of_tree(app, &summaries, states);
+        Self {
+            summaries,
+            layout: RowLayout::of(app, align),
         }
-        _ => inner,
-    };
-
-    let visible = app.visible_rows();
-    if visible.is_empty() {
-        let placeholder: Vec<Line<'static>> =
-            text::wrap(&empty_left_panel_text(app), usize::from(inner.width))
-                .into_iter()
-                .map(Line::from)
-                .collect();
-        let widget =
-            Paragraph::new(placeholder).style(Style::default().add_modifier(app.theme().muted));
-        frame.render_widget(widget, inner);
-        return None;
     }
 
-    let now = current_unix_epoch_for_render();
-    let summaries = compute_group_summaries(app.tree());
-    let align = GroupAlign::of_tree(app, &summaries);
-
-    // Lay rows out against the width the paragraph really gets: the
-    // scrollbar gutter is carved out of the pane when the rows overflow it.
-    let gutter = ScrollGutter::layout(inner, visible.len());
-    let row_width = usize::from(gutter.content().width);
-
-    let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible.len());
-    let mut selected_line: Option<usize> = None;
-    for row in &visible {
-        let is_selected = app.selection() == Some(&row.id);
-        let summary = summaries.get(&row.id).copied();
-        let primary = render_left_row(row, app, is_selected, row_width, now, summary, align);
-        if is_selected && selected_line.is_none() {
-            selected_line = Some(lines.len());
-        }
-        lines.push(primary);
+    /// The producer the tree draws a row with: its cells at the width
+    /// the context gives. The tree applies the row's looks.
+    pub(super) fn line(&self, row: &Row, cx: &RowCtx<'_>) -> Line<'static> {
+        let layout = RowLayout {
+            summary: self.summaries.get(&row.id).copied(),
+            ..self.layout
+        };
+        row_line(row, cx, &layout)
     }
+}
 
-    // Each visible row is one line. The window starts where the last
-    // frame left it, is measured again for this pane, and follows the
-    // selection (its first row, when a row is listed twice).
-    let mut window = app.left_window();
-    window.resize(usize::from(inner.height), lines.len());
-    if let Some(line) = selected_line {
-        window.follow(line..line + 1);
-    }
-    let widget = Paragraph::new(lines).scroll(window.paragraph_scroll());
-    frame.render_widget(widget, gutter.content());
-    gutter.render(&window, frame.buffer_mut());
-    Some(window)
+/// Whether the Sessions view lists its sessions flat, without groups.
+fn flat_sessions(app: &App) -> bool {
+    matches!(
+        app.grouping(),
+        crate::tui::Grouping::Sessions(SessionsGrouping::None)
+    )
 }
 
 /// Render the left pane title as a lazydocker-style tab strip
@@ -478,15 +466,16 @@ pub(super) fn append_group_body_spans(
 /// Returns 0 for non-group rows so callers can fold every row through
 /// the same width-max.
 pub(super) fn group_row_body_width(
-    row: &crate::tui::rows::Row,
-    app: &App,
+    row: &Row,
+    prefix: RowPrefix,
+    theme: &Theme,
     align: &GroupAlign,
 ) -> usize {
     let RowKind::Group(group) = &row.kind else {
         return 0;
     };
-    let mut spans = row_prefix_spans(row, app, align);
-    append_group_body_spans(&mut spans, group, app.theme(), align.label_width, None);
+    let mut spans = row_prefix_spans(row, prefix, theme, align);
+    append_group_body_spans(&mut spans, group, theme, align.label_width, None);
     text::spans_width(&spans)
 }
 
@@ -571,16 +560,21 @@ pub(super) struct GroupAlign {
 }
 
 impl GroupAlign {
-    /// The anchors for `app`'s tree, given each group's `summaries`.
+    /// The anchors for `app`'s tree, given each group's `summaries` and
+    /// the `states` the App worked out for its rows, index for index.
     pub(super) fn of_tree(
         app: &App,
         summaries: &std::collections::HashMap<RowId, GroupSummary>,
+        states: &[RowState],
     ) -> Self {
         let tree = app.tree();
+        let theme = app.theme();
         let mut align = Self {
             pr: PrAlign::of_tree(tree),
-            mixed: MixedAlign::of_tree(tree, app.theme()),
-            native_marker: native_marker_reserved(app),
+            mixed: MixedAlign::of_tree(tree, theme),
+            // Only the native views mark rows (`App::tree_row_state`), so
+            // a mark anywhere reserves their marker cell.
+            native_marker: states.iter().any(|state| state.mark != RowMark::None),
             group_glyph: tree.rows.iter().any(
                 |row| matches!(&row.kind, RowKind::Group(group) if group.primary_node.is_some()),
             ),
@@ -594,39 +588,24 @@ impl GroupAlign {
             .unwrap_or(0);
         // Rows without a summary chip block don't take part, so an idle
         // workspace header doesn't push everyone else's counts right.
-        for row in &tree.rows {
+        for (index, row) in tree.rows.iter().enumerate() {
             let Some(summary) = summaries.get(&row.id).filter(|summary| summary.agents > 0) else {
                 continue;
             };
-            align.body_width = align.body_width.max(group_row_body_width(row, app, &align));
+            let prefix = RowPrefix {
+                expanded: app.is_expanded(&row.id),
+                mark: states.get(index).map_or(RowMark::None, |state| state.mark),
+                flat_sessions: flat_sessions(app),
+            };
+            align.body_width = align
+                .body_width
+                .max(group_row_body_width(row, prefix, theme, &align));
             align.count_width = align
                 .count_width
                 .max(format!("({})", summary.agents).chars().count());
         }
         align
     }
-}
-
-/// Whether the native views' pin marker cell is reserved: some row of
-/// the tree stands for a pinned entity.
-fn native_marker_reserved(app: &App) -> bool {
-    if !matches!(
-        app.active_view(),
-        crate::tui::View::Sessions
-            | crate::tui::View::Mux
-            | crate::tui::View::Prs
-            | crate::tui::View::Search
-    ) {
-        return false;
-    }
-    let Some(handle) = app.snapshot_handle() else {
-        return false;
-    };
-    let markers = handle.pinned_nodes();
-    !markers.is_empty()
-        && app.tree().rows.iter().any(|row| {
-            crate::tui::rows::row_node(&row.id).is_some_and(|node| markers.contains_key(node))
-        })
 }
 
 /// Widest branch name a PR row shows before truncating it, so one long
@@ -884,24 +863,30 @@ fn mixed_glyph_span(mixed: &crate::tui::rows::MixedRow, theme: &Theme) -> Span<'
     node_kind_glyph_span(mixed.node_kind, theme)
 }
 
+/// What a row's leading cells depend on beside the row: whether it is
+/// expanded, the pin marker the App put on it, and whether the Sessions
+/// view lists its sessions flat.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct RowPrefix {
+    expanded: bool,
+    mark: RowMark,
+    flat_sessions: bool,
+}
+
 /// The cells every row starts with: indent, disclosure, kind glyph, and
 /// pin marker. The group pre-pass measures headers with it, so it and
-/// [`render_left_row`] agree on where each header's body starts.
+/// [`row_line`] agree on where each header's body starts.
 fn row_prefix_spans(
-    row: &crate::tui::rows::Row,
-    app: &App,
+    row: &Row,
+    prefix: RowPrefix,
+    theme: &Theme,
     align: &GroupAlign,
 ) -> Vec<Span<'static>> {
-    let theme = app.theme();
     let mut spans: Vec<Span<'static>> = Vec::new();
-    let flat_sessions = matches!(
-        app.grouping(),
-        crate::tui::Grouping::Sessions(SessionsGrouping::None)
-    );
-    if !(flat_sessions && matches!(row.kind, RowKind::AgentSession(_))) {
+    if !(prefix.flat_sessions && matches!(row.kind, RowKind::AgentSession(_))) {
         spans.push(Span::raw(row_indent(row.depth)));
     }
-    spans.push(disclosure_span(row, app));
+    spans.push(disclosure_span(row, prefix.expanded, theme));
 
     // ADR 0073: per-row node-kind glyph between the disclosure and
     // the row body. A group header for no entity has none, and leaves
@@ -916,13 +901,8 @@ fn row_prefix_spans(
     // Native views mark a pinned entity where it sits, with the marker
     // the Pinned view uses. Once any row is pinned the cell is reserved
     // on every row, so columns hold still.
-    if align.native_marker
-        && let Some(handle) = app.snapshot_handle()
-    {
-        let marker = crate::tui::rows::row_node(&row.id)
-            .and_then(|node| handle.pinned_nodes().get(node).copied())
-            .unwrap_or(crate::tui::rows::PinMarker::None);
-        spans.push(pin_marker_span(marker, theme));
+    if align.native_marker {
+        spans.push(pin_marker_span(PinMarker::from(prefix.mark), theme));
     }
 
     if let RowKind::Mixed(mixed) = &row.kind
@@ -934,25 +914,60 @@ fn row_prefix_spans(
     spans
 }
 
-/// Build the rendered line for a single visible row.
-pub(super) fn render_left_row(
-    row: &crate::tui::rows::Row,
-    app: &App,
-    is_selected: bool,
-    width: usize,
-    now: i64,
-    group_summary: Option<GroupSummary>,
+/// What a row is laid out with beside the row and its context: the
+/// columns the tree's rows align to, the clock the ages read against,
+/// and the spinner frame a row awaiting the hand-off shows, worked out
+/// once per frame ([`LeftRows`]), and the row's own group counts.
+#[derive(Clone, Copy)]
+struct RowLayout<'a> {
+    theme: &'a Theme,
     align: GroupAlign,
-) -> Line<'static> {
-    let theme = app.theme();
+    /// The counts a group row shows, when the row is a group.
+    summary: Option<GroupSummary>,
+    now: i64,
+    /// The spinner frame a row awaiting the hand-off shows.
+    spinner: Option<&'static str>,
+    flat_sessions: bool,
+}
+
+impl<'a> RowLayout<'a> {
+    /// The layout `app`'s rows share, aligned to `align`, with no group
+    /// counts.
+    fn of(app: &'a App, align: GroupAlign) -> Self {
+        Self {
+            theme: app.theme(),
+            align,
+            summary: None,
+            now: current_unix_epoch_for_render(),
+            spinner: app
+                .handoff()
+                .map(|handoff| spinner_glyph(handoff.started_at)),
+            flat_sessions: flat_sessions(app),
+        }
+    }
+}
+
+/// One row's cells at the width `cx` gives, before the tree applies its
+/// looks.
+fn row_line(row: &Row, cx: &RowCtx<'_>, layout: &RowLayout<'_>) -> Line<'static> {
+    let RowLayout {
+        theme,
+        align,
+        summary: group_summary,
+        now,
+        ..
+    } = *layout;
+    let width = cx.width;
     // Rows the operator just left in tmux keep their old values,
     // dimmed, with a spinner where the attach glyph goes, until the
     // background refresh lands (ADR 0108).
-    let handoff_spinner = app
-        .handoff()
-        .filter(|_| app.row_is_frozen(row))
-        .map(|handoff| spinner_glyph(handoff.started_at));
-    let mut spans = row_prefix_spans(row, app, &align);
+    let handoff_spinner = layout.spinner.filter(|_| cx.pending);
+    let prefix = RowPrefix {
+        expanded: cx.expanded,
+        mark: cx.mark,
+        flat_sessions: layout.flat_sessions,
+    };
+    let mut spans = row_prefix_spans(row, prefix, theme, &align);
 
     match &row.kind {
         RowKind::Group(group) => {
@@ -1034,26 +1049,48 @@ pub(super) fn render_left_row(
         }
     }
 
-    if handoff_spinner.is_some() {
-        selection::pending(&mut spans, theme);
-    }
-    // A group (or any non-mixed row) standing for an entity that is
-    // gone or unknown wears the ghost style like the mixed rows do.
-    if !matches!(row.kind, RowKind::Mixed(_))
-        && let Some(handle) = app.snapshot_handle()
-        && let Some(node) = crate::tui::rows::row_node(&row.id)
-        && handle.snapshot().presence(node).is_some()
-    {
-        ghostify(&mut spans, theme);
-    }
-    // The selected row takes the selection pair, active or inactive by
-    // focus. A chip keeps the look it has on every other row, so it
-    // still reads as a chip. The tree's rows start with their disclosure
-    // and kind columns, so they draw the highlight without the cursor
-    // gutter.
-    let cursor = Cursor::of(is_selected, app.focus() == Focus::Left);
-    selection::highlight(&mut spans, cursor, theme);
+    // The tree applies the row's looks after this: the pending look for
+    // a row awaiting the hand-off, the ghost look for a non-mixed row
+    // standing for an entity that is gone or unknown (a mixed row dims
+    // its own cells by its tone), and the selection pair, active or
+    // inactive by focus, under which a chip keeps its look. The tree's
+    // rows start with their disclosure and kind columns, so they draw
+    // the highlight without the cursor gutter.
     Line::from(spans)
+}
+
+/// One row as the tree draws it, its looks applied, for a test that
+/// lays a single row out: the row's state is worked out from `app` as
+/// the frame would.
+#[cfg(test)]
+pub(super) fn render_left_row(
+    row: &Row,
+    app: &App,
+    is_selected: bool,
+    width: usize,
+    now: i64,
+    group_summary: Option<GroupSummary>,
+    align: GroupAlign,
+) -> Line<'static> {
+    let state = app.tree_row_state(row);
+    let cx = RowCtx {
+        selected: is_selected,
+        focused: app.focus() == Focus::Left,
+        expanded: app.is_expanded(&row.id),
+        ghost: state.ghost,
+        pending: state.pending,
+        mark: state.mark,
+        width,
+        theme: app.theme(),
+    };
+    let layout = RowLayout {
+        summary: group_summary,
+        now,
+        ..RowLayout::of(app, align)
+    };
+    let mut line = row_line(row, &cx, &layout);
+    cx.apply_looks(&mut line.spans);
+    line
 }
 
 /// `handoff_spinner` replaces the attach glyph while the row awaits
@@ -1596,16 +1633,16 @@ pub(super) fn mux_indicator_span(indicator: MuxIndicator, theme: &Theme) -> Span
     }
 }
 
-pub(super) fn disclosure_span(row: &crate::tui::rows::Row, app: &App) -> Span<'static> {
+pub(super) fn disclosure_span(row: &Row, expanded: bool, theme: &Theme) -> Span<'static> {
     if !row.expandable {
         return Span::raw("  ");
     }
-    let glyph = if app.is_expanded(&row.id) {
+    let glyph = if expanded {
         marks::EXPANDED
     } else {
         marks::COLLAPSED
     };
-    span!(Style::default().fg(app.theme().disclosure); "{glyph} ")
+    span!(Style::default().fg(theme.disclosure); "{glyph} ")
 }
 
 pub(super) fn row_indent(depth: u8) -> String {

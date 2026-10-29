@@ -301,3 +301,24 @@ fn listing_pinned_history_marks_those_records_with_the_hollow_pin() {
         .expect("unpinned row");
     assert!(!unpinned.chars().take(100).any(|c| c == '◎'), "{unpinned}");
 }
+
+/// The left pane lays each row out from the row and what the App worked
+/// out about it before the frame (`App::tree_row_states`): whether it is
+/// a ghost, whether it awaits the hand-off, and its pin marker. The
+/// renderer itself asks the snapshot and the hand-off nothing.
+#[test]
+fn the_left_pane_lays_rows_out_without_looking_anything_up() {
+    let renderer = include_str!("../ui/left_panel.rs");
+    for needle in [
+        "pinned_nodes(",
+        ".presence(",
+        "row_is_frozen(",
+        "row_awaits_handoff(",
+    ] {
+        assert!(
+            !renderer.contains(needle),
+            "src/tui/ui/left_panel.rs looks a row's state up (`{needle}`); \
+             work it out in `App::tree_row_state` and read it from the row's context"
+        );
+    }
+}
