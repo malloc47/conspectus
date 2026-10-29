@@ -113,9 +113,9 @@ fn esc_closes_the_form() {
 }
 
 #[test]
-fn ctrl_c_closes_the_form() {
+fn ctrl_c_dismisses_the_form() {
     let mut form = form("dev", "/tmp", Vec::new());
-    assert_eq!(key(&mut form, ctrl('c')), Outcome::Close);
+    assert_eq!(key(&mut form, ctrl('c')), Outcome::Dismiss);
 }
 
 #[test]

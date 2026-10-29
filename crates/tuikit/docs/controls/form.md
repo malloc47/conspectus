@@ -6,7 +6,7 @@
 | Layer | 1 (control) |
 | Type parameters | `M`, the host's message, which a submitted form becomes; the form implements `Overlay<M, Cx>` for every context `Cx` and reads none |
 | Cargo feature | none |
-| Outcomes | `Commit(M)` when `on_submit` takes the values; `Close` for `Esc`, `Ctrl-C`, or an `on_submit` that answers `Submit::Close`; `Consumed` for an edit, a move, a refused submit, or a key that changes nothing; never `Stay(M)` |
+| Outcomes | `Commit(M)` when `on_submit` takes the values; `Close` for `Esc` or an `on_submit` that answers `Submit::Close`; `Dismiss` for `Ctrl-C`; `Consumed` for an edit, a move, a refused submit, or a key that changes nothing; never `Stay(M)` |
 
 ## Purpose
 
@@ -358,7 +358,7 @@ field's editing keys, [path_field.md](path_field.md) for completion).
 
 | Key | Action | Notes |
 | --- | --- | --- |
-| `Ctrl-C` | Abort | closes the form, saying nothing; an alias, not in the footer |
+| `Ctrl-C` | Abort | dismisses the form (`Dismiss`), saying nothing; an alias, not in the footer |
 | `↑`, `Ctrl-P`, `S-Tab` | Up, Back | the previous stop, wrapping |
 | `↓`, `Ctrl-N` | Down | the next stop, wrapping |
 | `Tab` | Tab | completes the focused path field; the next stop when there is nothing to complete |
@@ -395,7 +395,7 @@ hints.
 | 1 | List cursor and highlight | the focused row draws the pointer in the 2-cell gutter and the `selection_active` highlight, as a list's cursor row does |
 | 2 | List ends | the ring wraps at both ends, as a short choice list does |
 | 4 | Close keys | `Esc` closes the form's one level, `Ctrl-C` dismisses it, and `q` is typed (a form is a typing level, option rows included) |
-| 5 | Close feedback | closing returns `Close` with no message |
+| 5 | Close feedback | closing returns `Close` or `Dismiss` with no message |
 | 6 | Forms | `Enter` submits from any field; `Tab`/`↓` and `S-Tab`/`↑` move over one ring, one stop per field |
 | 7 | Validation errors | a refused submit sets one error line in the footer slot and moves the focus to the field it is about; the next edit (a reset included) clears it; nothing is refused silently |
 | 8 | Footers and hints | the footer is generated from the form's key table, in the one grammar, and stays in view; a reset key is a row of the form's own table, so its footer names it and no other overlay inherits it |

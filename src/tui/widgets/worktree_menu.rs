@@ -430,6 +430,7 @@ impl WorktreeMenuState {
         match self.list.handle(key, &()) {
             Outcome::Commit(action) => self.activate(action),
             Outcome::Close => Outcome::Close,
+            Outcome::Dismiss => Outcome::Dismiss,
             Outcome::Consumed | Outcome::Stay(_) => Outcome::Consumed,
         }
     }

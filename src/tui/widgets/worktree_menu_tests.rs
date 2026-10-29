@@ -223,7 +223,10 @@ fn ctrl_c_and_q_dismiss_the_menu_from_every_screen() {
             Outcome::Consumed,
             "Esc steps back from screen {downs}"
         );
-        assert_eq!(state.handle_key(press(KeyCode::Char('q'))), Outcome::Close);
+        assert_eq!(
+            state.handle_key(press(KeyCode::Char('q'))),
+            Outcome::Dismiss
+        );
     }
 }
 

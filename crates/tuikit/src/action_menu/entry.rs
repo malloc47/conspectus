@@ -7,8 +7,9 @@ use crate::keys::KeyMatcher;
 /// House rule 3 has two confirmation idioms: an inline arm on a menu
 /// entry, when there is nothing more to say than "are you sure", and a
 /// dialog when a body helps. A menu entry can only ask for the first; a
-/// host that has more to say opens a dialog from the entry instead. A
-/// reversible action asks for neither.
+/// host that has more to say opens a dialog from the entry instead, as a
+/// step over the menu ([`Entry::opens_step`]). A reversible action asks
+/// for neither.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Confirm {
     /// The first `Enter` commits the entry.
@@ -37,6 +38,7 @@ pub enum Confirm {
 /// assert!(entry.enabled);
 /// assert_eq!(entry.outcome, "remove");
 /// assert!(!Entry::new("Rename", ()).disabled().enabled);
+/// assert!(Entry::new("Share", ()).opens_step().opens_step);
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry<M> {
@@ -59,7 +61,12 @@ pub struct Entry<M> {
     pub enabled: bool,
     /// Whether picking it needs a second `Enter`.
     pub confirm: Confirm,
-    /// What committing the entry reports: the host's message.
+    /// Whether picking it opens a step over the menu (a dialog, a
+    /// prompt) instead of finishing it: the menu reports `outcome` and
+    /// stays open (`Outcome::Stay`) for the host to open the step over
+    /// it.
+    pub opens_step: bool,
+    /// What picking the entry reports: the host's message.
     pub outcome: M,
 }
 
@@ -73,8 +80,21 @@ impl<M> Entry<M> {
             shortcut: None,
             enabled: true,
             confirm: Confirm::None,
+            opens_step: false,
             outcome,
         }
+    }
+
+    /// Marks the entry as one that leads to a further question: picking
+    /// it reports its message with `Outcome::Stay`, so the menu stays
+    /// open under the step the host opens
+    /// ([`ModalStack::push_step`](crate::overlay::ModalStack::push_step)).
+    /// `Esc` in the step comes back to the menu; a commit or a dismissal
+    /// there closes both.
+    #[must_use]
+    pub fn opens_step(mut self) -> Self {
+        self.opens_step = true;
+        self
     }
 
     /// Sets the secondary text under the label.

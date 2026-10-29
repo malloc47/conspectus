@@ -6,7 +6,7 @@
 | Layer | 1 (control) |
 | Type parameters | `M`, the host's message, which a confirmed text becomes; the prompt implements `Overlay<M, Cx>` for every context `Cx` and reads none |
 | Cargo feature | none |
-| Outcomes | `Commit(M)` when `on_confirm` takes the text; `Close` for `Esc` and `Ctrl-C`; `Consumed` for an edit, a swallowed `Tab`, a refusal, or a confirm that stays; never `Stay(M)` |
+| Outcomes | `Commit(M)` when `on_confirm` takes the text; `Close` for `Esc`; `Dismiss` for `Ctrl-C`; `Consumed` for an edit, a swallowed `Tab`, a refusal, or a confirm that stays; never `Stay(M)` |
 
 ## Purpose
 
@@ -107,15 +107,17 @@ let bottom: String = (rect.x..rect.right()).map(|x| buf[(x, rect.bottom() - 1)].
 assert!(bottom.starts_with("└ Enter confirm · Esc cancel ─"));
 ```
 
-A host whose overlay holds the prompt as one of its own levels (a settings
-panel's editor, a menu's follow-up question) keeps the prompt in its state,
-routes keys to it with `Overlay::handle`, and draws it with
-`TextPrompt::draw`. It checks `Ctrl-C` (the `Abort` row of
-`TEXT_INPUT_KEYS`) itself first, so `Ctrl-C` dismisses its whole overlay,
-and takes the prompt's `Close` as `Esc` stepping back to its own level. A
-prompt whose result is not yet the host's message (a parsed value the
-panel turns into a message with its live context) is a `TextPrompt` over
-that value, and the host maps the commit.
+A prompt that is a menu's follow-up question (the value a menu entry
+needs) opens as a step of the menu, with `ModalStack::push_step`: `Esc`
+gives the menu its keys back, and a commit or `Ctrl-C` closes the prompt
+and the menu together. A host whose overlay holds the prompt as one of its
+own levels instead (a settings panel's editor) keeps the prompt in its
+state, routes keys to it with `Overlay::handle`, draws it with
+`TextPrompt::draw`, takes the prompt's `Close` as `Esc` stepping back to
+its own level, and takes `Dismiss` as `Ctrl-C` dismissing its whole
+overlay. A prompt whose result is not yet the host's message (a parsed
+value the panel turns into a message with its live context) is a
+`TextPrompt` over that value, and the host maps the commit.
 
 ### Size
 
@@ -142,9 +144,9 @@ hints, so a refusal is never invisible.
 
 | Key | Action | Notes |
 | --- | --- | --- |
-| `Ctrl-C` | Abort | closes the prompt, saying nothing; an alias, not in the footer |
+| `Ctrl-C` | Abort | dismisses the prompt (`Dismiss`), and the flow it is a step of, saying nothing; an alias, not in the footer |
 | `Enter` | Confirm | `on_confirm` decides: commit, refuse with a reason, or stay |
-| `Esc` | Cancel | closes the prompt, saying nothing; on a stack that steps back to the overlay under it |
+| `Esc` | Cancel | closes the prompt (`Close`), saying nothing; as a step it gives the keys back to the overlay under it |
 | `Tab` | Tab | swallowed, so a tab never reaches the text or another control |
 | any other key | (line editor) | edits the line; `q` and every letter type themselves; a key that changes the text clears the error line |
 
@@ -166,8 +168,8 @@ The text the user types is unstyled.
 
 | # | Rule | How this control follows it |
 | --- | --- | --- |
-| 4 | Close keys | `Esc` closes the prompt's one level (on a stack, back to what is under it); `Ctrl-C` dismisses it; `q` is typed, since a prompt always has text in play |
-| 5 | Close feedback | closing returns `Close` and carries no message, so the host posts nothing |
+| 4 | Close keys | `Esc` closes the prompt's one level (as a step, back to what is under it); `Ctrl-C` dismisses it and its flow; `q` is typed, since a prompt always has text in play |
+| 5 | Close feedback | closing returns `Close` or `Dismiss` and carries no message, so the host posts nothing |
 | 7 | Validation errors | a refused confirm sets one error line in the footer slot under the field; the next edit clears it; no confirm is refused silently |
 | 8 | Footers and hints | the footer is generated from `TEXT_INPUT_KEYS`, in the one grammar; the prompt needs no hint on the host's status line |
 | 13 | Theme | the frame, caret, error line, and placeholder take theme tokens; no raw color or reversed cell |

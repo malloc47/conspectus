@@ -12,9 +12,10 @@
 //!   [`PromptResult`]: [`Commit`](PromptResult::Commit) closes the prompt
 //!   with the host's message, [`Reject`](PromptResult::Reject) keeps it
 //!   open with the reason on its error line, and
-//!   [`Stay`](PromptResult::Stay) keeps it open as it is. `Esc` and
-//!   `Ctrl-C` close it, saying nothing; `Tab` is swallowed; every other
-//!   key edits the line, `q` included.
+//!   [`Stay`](PromptResult::Stay) keeps it open as it is. `Esc` closes
+//!   it and `Ctrl-C` dismisses it (with any flow it is a step of),
+//!   saying nothing; `Tab` is swallowed; every other key edits the line,
+//!   `q` included.
 //! - **One error line.** A refused confirm shows its reason on one row
 //!   under the field, in the theme's `error`, until the next key that
 //!   changes the text clears it. On a screen too short for that row the
@@ -66,10 +67,14 @@
 //! The title, the initial text, and what a confirm means: the
 //! `on_confirm` closure parses or checks the text (with the host's own
 //! parsers) and builds the host's message, or gives the reason the text
-//! is refused. A host that opens the prompt as a level of an overlay of
-//! its own (a settings panel's editor, a menu's follow-up question)
-//! routes keys to it and takes `Close` as stepping back to its own level,
-//! after checking `Ctrl-C` itself so that dismisses the whole overlay.
+//! is refused. A prompt that is a menu's follow-up question opens as a
+//! step of the menu
+//! ([`ModalStack::push_step`](crate::overlay::ModalStack::push_step)):
+//! `Esc` returns to the menu, and a commit or `Ctrl-C` closes both. A
+//! host that holds the prompt as a level inside an overlay of its own (a
+//! settings panel's editor) routes keys to it, takes `Close` as stepping
+//! back to its own level, and takes `Dismiss` as dismissing the whole
+//! overlay.
 
 use std::fmt;
 use std::sync::Arc;
@@ -239,12 +244,13 @@ impl<M> fmt::Debug for TextPrompt<M> {
 }
 
 impl<M, Cx: ?Sized> Overlay<M, Cx> for TextPrompt<M> {
-    /// `Enter` asks `on_confirm`; `Esc` and `Ctrl-C` close the prompt;
-    /// `Tab` is swallowed; any other key goes to the line editor, and one
-    /// that changes the text clears the error line.
+    /// `Enter` asks `on_confirm`; `Esc` closes the prompt and `Ctrl-C`
+    /// dismisses it; `Tab` is swallowed; any other key goes to the line
+    /// editor, and one that changes the text clears the error line.
     fn handle(&mut self, key: KeyEvent, _cx: &Cx) -> Outcome<M> {
         match resolve(TEXT_INPUT_KEYS, key) {
-            Some(TextInputKey::Abort | TextInputKey::Cancel) => Outcome::Close,
+            Some(TextInputKey::Abort) => Outcome::Dismiss,
+            Some(TextInputKey::Cancel) => Outcome::Close,
             Some(TextInputKey::Tab) => Outcome::Consumed,
             Some(TextInputKey::Confirm) => match (self.on_confirm)(self.edit.value()) {
                 PromptResult::Commit(message) => Outcome::Commit(message),

@@ -10,8 +10,9 @@
 //! - **The contract.** [`Overlay<M, Cx>`](Overlay) has two calls.
 //!   [`handle`](Overlay::handle) takes one key press and the host's
 //!   context `&Cx` and returns an [`Outcome<M>`](Outcome): the key was
-//!   used, the overlay closes, or it hands the host a message `M`
-//!   (closing as it does, or staying open). [`render`](Overlay::render)
+//!   used, the overlay closes (stepping back, or dismissed as a whole),
+//!   or it hands the host a message `M` (closing as it does, or staying
+//!   open). [`render`](Overlay::render)
 //!   draws it over an area with the same context and the theme. The
 //!   overlay performs no effect: what a message does is the host's.
 //! - **The stack.** [`ModalStack<E>`](ModalStack) holds the open
@@ -19,12 +20,19 @@
 //!   own enum of overlays, or a boxed trait object. A key goes to the top
 //!   entry only ([`route`](ModalStack::route)); the host settles the
 //!   outcome ([`settle`](ModalStack::settle)), which closes the top entry
-//!   for [`Outcome::Close`] and [`Outcome::Commit`] and gives back the
-//!   message to handle. Every entry is drawn, bottom to top
+//!   for [`Outcome::Close`], [`Outcome::Dismiss`], and
+//!   [`Outcome::Commit`] and gives back the message to handle. Every
+//!   entry is drawn, bottom to top
 //!   ([`draw`](ModalStack::draw)): each one clears what it covers, so a
 //!   smaller overlay shows the one under it around its frame, and an
 //!   overlay that [fills the screen](Overlay::fills_screen) hides
 //!   everything below it.
+//! - **Steps.** An overlay that asks a further question (a menu whose
+//!   pick needs a confirmation or a value) opens it as a step of itself
+//!   ([`push_step`](ModalStack::push_step)) rather than as a mode inside
+//!   its own state. `Esc` in the step closes it and gives the keys back
+//!   to the entry under it; a commit, or `Ctrl-C` ([`Outcome::Dismiss`]),
+//!   closes the step and every entry it is a step of.
 //! - **The host owns the stack.** It keeps the stack beside (or lends it
 //!   out of) its own state and passes that state as `&Cx` while the stack
 //!   holds its entries mutably, so an overlay reads live host data on
@@ -84,7 +92,7 @@
 //! let outcome = stack.route(press(KeyCode::Enter), &files).expect("a menu is open");
 //! let settled = stack.settle(outcome);
 //! assert_eq!(settled.message, Some(Msg::Open("plan")));
-//! assert!(settled.closed.is_some() && stack.is_empty(), "a commit closes the menu");
+//! assert!(settled.closed.len() == 1 && stack.is_empty(), "a commit closes the menu");
 //!
 //! // Drawing walks the stack bottom to top; an empty stack draws nothing.
 //! let theme = Theme::default();
@@ -95,8 +103,9 @@
 //! # What a host keeps
 //!
 //! Its entry type and the one place that lists its overlays; what each
-//! message does; any bookkeeping when an overlay closes (the entry
-//! [`settle`](ModalStack::settle) closed is handed back for it); its base
+//! message does; which overlays open as steps of another; any
+//! bookkeeping when an overlay closes (the entries
+//! [`settle`](ModalStack::settle) closed are handed back for it); its base
 //! screen, which it draws before the stack unless an entry fills the
 //! screen; and its key tables, through which each overlay resolves its
 //! keys (see [`keys`](crate::keys)), with the close keys of house rule 4.

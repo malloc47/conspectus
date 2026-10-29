@@ -481,7 +481,8 @@ impl<M> Form<M> {
         self.settle_focus();
         let action = resolve(self.keys, key);
         match action {
-            Some(FormKey::Abort | FormKey::Cancel) => return Outcome::Close,
+            Some(FormKey::Abort) => return Outcome::Dismiss,
+            Some(FormKey::Cancel) => return Outcome::Close,
             Some(FormKey::Up | FormKey::Back) => self.step(-1),
             Some(FormKey::Down) => self.step(1),
             Some(FormKey::Tab) => {
@@ -555,7 +556,8 @@ impl<M> fmt::Debug for Form<M> {
 }
 
 impl<M, Cx: ?Sized> Overlay<M, Cx> for Form<M> {
-    /// `Enter` submits from any field; `Esc` and `Ctrl-C` close the form;
+    /// `Enter` submits from any field; `Esc` closes the form (`Close`) and
+    /// `Ctrl-C` dismisses it (`Dismiss`);
     /// `Tab`/`↓` and `S-Tab`/`↑` move along the ring (`Tab` completing a
     /// path first); the option keys act on an option row and edit a text
     /// field; any other key edits the focused field, and one that changes

@@ -130,9 +130,14 @@ fn stay_keeps_the_prompt_as_it_is() {
 
 #[test]
 fn esc_and_ctrl_c_close_and_q_types() {
-    for close in [press(KeyCode::Esc), ctrl('c')] {
+    // Esc steps back; Ctrl-C dismisses the prompt and any flow it is a
+    // step of.
+    for (close, outcome) in [
+        (press(KeyCode::Esc), Outcome::Close),
+        (ctrl('c'), Outcome::Dismiss),
+    ] {
         let mut prompt = naming("kept");
-        assert_eq!(key(&mut prompt, close), Outcome::Close, "{close:?}");
+        assert_eq!(key(&mut prompt, close), outcome, "{close:?}");
         assert_eq!(prompt.value(), "kept", "closing changes nothing");
     }
     let mut prompt = naming("");

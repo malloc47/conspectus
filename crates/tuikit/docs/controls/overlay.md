@@ -6,7 +6,7 @@
 | Layer | 2 (convention) |
 | Type parameters | `M`: the host's message, which a commit carries; `Cx`: the host's context, borrowed for every key and every draw; `E`: the stack's entry type, the host's own enum of overlays or a boxed trait object |
 | Cargo feature | none |
-| Outcomes | `Consumed`, `Close`, `Commit(M)` (close, then the host handles `M`), `Stay(M)` (stay open, and the host handles `M`) |
+| Outcomes | `Consumed`, `Close` (step back: close this entry), `Dismiss` (close this entry and every entry it is a step of), `Commit(M)` (close like `Dismiss`, then the host handles `M`), `Stay(M)` (stay open, and the host handles `M`) |
 
 ## Purpose
 
@@ -22,10 +22,19 @@ is the host's.
 passes its own state as `&Cx` while the stack holds its entries mutably, so
 an overlay reads live host data on every key and every frame rather than a
 copy taken when it opened. A key goes to the top entry only; settling the
-outcome closes the top entry for `Close` and `Commit` and hands the message
-back. Every entry is drawn, bottom to top; each clears what it covers, so a
-smaller overlay shows the one under it around its frame, and an overlay that
-fills the screen hides everything below it.
+outcome closes the top entry for `Close`, `Dismiss`, and `Commit` and hands
+the message back. Every entry is drawn, bottom to top; each clears what it
+covers, so a smaller overlay shows the one under it around its frame, and an
+overlay that fills the screen hides everything below it.
+
+An overlay that asks a further question (a menu whose pick needs a
+confirmation, a choice, or a value) opens the question as a *step* of
+itself (`push_step`) instead of switching modes inside its own state. The
+entry and its steps are one flow: `Esc` in a step is a `Close`, which
+closes the step and gives the keys back to the entry under it, and a
+`Commit` or a `Dismiss` (`Ctrl-C`, `q`) closes the whole flow, since the
+overlay is done or dismissed rather than one level of it. An entry opened
+with `push` is an overlay of its own, never part of the flow under it.
 
 The module replaces what a program grows one overlay at a time: a key
 forwarder and a handler per overlay that differ only in names, a draw call
@@ -36,9 +45,10 @@ overlay was routed at all. Adding an overlay becomes a state type, an
 `Overlay` impl, and one registration in the host's entry type.
 
 The host keeps its entry type and the one place that lists its overlays,
-what each message does, any bookkeeping as an overlay closes (settling
-hands the closed entry back for it), its base screen (drawn before the
-stack unless an entry fills the screen), and each overlay's key table.
+what each message does, which overlays open as steps of another, any
+bookkeeping as an overlay closes (settling hands the closed entries back
+for it), its base screen (drawn before the stack unless an entry fills the
+screen), and each overlay's key table.
 
 ## Usage example
 
@@ -72,7 +82,8 @@ struct Menu {
 impl Overlay<Msg, Model> for Menu {
     fn handle(&mut self, key: KeyEvent, model: &Model) -> Outcome<Msg> {
         match resolve(MENU_KEYS, key) {
-            Some(MenuKey::Abort | MenuKey::Close) => Outcome::Close,
+            Some(MenuKey::Abort) => Outcome::Dismiss,
+            Some(MenuKey::Close) => Outcome::Close,
             Some(MenuKey::Down) => {
                 self.cursor = (self.cursor + 1) % model.names.len();
                 Outcome::Consumed
@@ -140,7 +151,7 @@ let press = |code| KeyEvent::new(code, KeyModifiers::NONE);
 // The help page is on top: it takes the key and closes, silently.
 let outcome = stack.route(press(KeyCode::Esc), &model).expect("an overlay is open");
 let settled = stack.settle(outcome);
-assert!(settled.closed.is_some() && settled.message.is_none());
+assert!(settled.closed.len() == 1 && settled.message.is_none());
 
 // The menu takes the next keys; a pick closes it and hands back a message.
 stack.route(press(KeyCode::Down), &model);
@@ -158,6 +169,17 @@ if !stack.fills_screen() {
     // ... the host's own screen ...
 }
 stack.draw(area, &mut buf, &model, &theme);
+
+// A step: the help page opened as a step of the menu. Esc in it comes
+// back to the menu; a dismissal there closes both.
+stack.push_step(Modal::Help(Help));
+let outcome = stack.route(press(KeyCode::Esc), &model).expect("open");
+assert_eq!(stack.settle(outcome).closed.len(), 1);
+assert!(matches!(stack.top(), Some(Modal::Menu(_))));
+stack.push_step(Modal::Help(Help));
+let settled = stack.settle(Outcome::<Msg>::Dismiss);
+assert_eq!(settled.closed.len(), 2, "the step and the menu");
+assert!(stack.is_empty());
 ```
 
 ### The API
@@ -169,11 +191,11 @@ stack.draw(area, &mut buf, &model, &theme);
 | `Overlay::fills_screen(&self)` | whether the overlay covers the whole screen | `false` by default; nothing under it is drawn |
 | `Overlay::takes_text(&self)` | whether a text field in the overlay has the keys now | `false` by default; a host types a paste only into an overlay that says so |
 | `impl Overlay for Box<T>` | a boxed overlay is an overlay | so `ModalStack<Box<dyn Overlay<M, Cx>>>` works |
-| `Outcome::{Consumed, Close, Commit(M), Stay(M)}` | what the key asks the host to do | `map`, `closes`, `message` |
-| `ModalStack::new`, `push`, `pop`, `pop_if`, `close_all` | open and close entries | `pop_if` closes one kind of overlay only when it is on top; `close_all` returns the entries top first |
-| `top`, `top_mut`, `iter`, `iter_mut`, `len`, `is_empty` | look at the entries | `iter` runs bottom to top |
+| `Outcome::{Consumed, Close, Dismiss, Commit(M), Stay(M)}` | what the key asks the host to do | `map`, `closes`, `message` |
+| `ModalStack::new`, `push`, `push_step`, `pop`, `pop_if`, `close_flow`, `close_all` | open and close entries | `push_step` opens an entry as a step of the one on top (on an empty stack, as `push` does); `pop_if` closes one kind of overlay only when it is on top; `close_flow` closes the top entry and every entry it is a step of; `close_flow` and `close_all` return the entries top first |
+| `top`, `top_mut`, `top_is_step`, `iter`, `iter_mut`, `len`, `is_empty` | look at the entries | `iter` runs bottom to top; `top_is_step` says whether a `Close` from the top gives the keys back to the entry under it |
 | `route(key, &cx)` | gives the key to the top entry | `None` when the stack is empty: the key is the host's |
-| `settle(outcome)` | the stack's part of an outcome | closes the top for `Close` and `Commit`; returns a `Settled { closed, message }` |
+| `settle(outcome)` | the stack's part of an outcome | closes the top for `Close`, and the top's whole flow for `Commit` and `Dismiss`; returns a `Settled { closed, message }`, `closed` top first |
 | `draw(area, buf, &cx, &theme)` | draws every entry, bottom to top | starts at the topmost entry that fills the screen, on a cleared area |
 | `fills_screen()` | whether any open entry fills the screen | the host skips its own screen when it does |
 | `takes_text()` | whether the top entry takes a paste | `false` when the stack is empty |
@@ -195,13 +217,12 @@ follows (house rule 4), and the outcome each produces:
 
 | Key | Action | Notes |
 | --- | --- | --- |
-| `Esc` | Back one level | `Consumed` while the overlay has a level to return to (a sub-editor, a confirmation, a find prompt, a help page inside a viewer); `Close` at its first level |
-| `Ctrl-C` | Dismiss | `Close` from any level; first in every table (`keys::ctrl_c_first`) |
-| `q` | Dismiss | `Close` from any level where nothing is typed: a menu, a checklist, a confirmation, a choice, a settings list, a pager, a log, a reader; typed into a prompt, a form, a query, or a find prompt |
+| `Esc` | Back one level | `Consumed` while the overlay has a level of its own to return to (a sub-editor, a find prompt, a help page inside a viewer); `Close` at its first level, which for a step gives the keys back to the entry under it |
+| `Ctrl-C` | Dismiss | `Dismiss` from any level, closing every step of the flow; first in every table (`keys::ctrl_c_first`). An overlay that is never a step may answer it with `Close`, which closes it the same way |
+| `q` | Dismiss | as `Ctrl-C` wherever nothing is typed: a menu, a checklist, a dialog, a settings list, a pager, a log, a reader; typed into a prompt, a form, a query, or a find prompt |
 
 The standard tables in [`keys`](keys.md) bind them: `Ctrl-C` first in every
-table, `q` in the menu, confirmation, checklist, and pager tables, and a
-choice dialog's `q` to its `Abort`.
+table, and `q` in the menu, dialog, checklist, and pager tables.
 
 ## Theme tokens
 
@@ -213,12 +234,13 @@ choice dialog's `q` to its `Abort`.
 
 | # | Rule | How this module follows it |
 | --- | --- | --- |
-| 4 | Close keys | `Outcome` names the two ways out: `Consumed` for a step back inside the overlay, `Close` for leaving its first level and for a dismissal from any level; the stack closes only the top entry, so a dismissal never takes the overlay under it too |
-| 5 | Close feedback | `Close` carries no message, so a cancel reaches the host as a silent close; a host posts nothing for it |
+| 4 | Close keys | `Outcome` names the ways out: `Consumed` for a step back inside the overlay's own state, `Close` for leaving its first level (a step's `Close` returning to the entry under it), and `Dismiss` for leaving the whole overlay from any level; the stack closes a step's flow for `Dismiss` and `Commit` and never the overlays under the flow |
+| 5 | Close feedback | `Close` and `Dismiss` carry no message, so a cancel reaches the host as a silent close; a host posts nothing for it |
 | 8 | Footers and hints | the stack adds no keys an overlay's table does not have, so every footer generated from a table stays the whole truth |
 
 Not applicable: 1, 2, 10 (list looks and ends are `selection`'s), 3 (a
-confirmation is an overlay's own level), 6 (forms), 7 (an error line is the
+confirmation is a dialog, opened as a step of what asks), 6 (forms), 7 (an
+error line is the
 overlay's footer slot), 9 (the focus cue is the pane frame's), 11
 (feedback), 12 (paging is each scrolled overlay's), 13 (the stack draws no
 style), 14 (width is each overlay's), 15 and 16 (text entry and paths), 17
@@ -233,9 +255,15 @@ rule 4 through `Consumed`).
   `Outcome`, and `route` would hand it back.
 - **Dimming what is underneath.** Every entry draws as it is; a stack that
   dims the entries under the top one would pass each entry whether it is on
-  top.
+  top. A step's menu keeps its active cursor under the step for now.
+- **Acting and stepping back.** A step can step back (`Close`) or finish
+  the flow (`Commit`, `Dismiss`), but not hand the host a message and then
+  return to the entry under it; a step that applied something and went
+  back would take an outcome of its own (or `Stay` followed by the host
+  popping the step).
 - **Rendered areas.** An entry could report the rect it drew, for mouse hit
   testing and for a conformance check that each entry clears exactly its
   frame.
-- **A conformance suite.** The test kit's `assert_conventions` will walk a
-  host's registry of overlays and check the close keys above against each.
+- **A conformance suite.** The test kit's `assert_conventions` walks a
+  host's registry of overlays and checks the close keys above against
+  each; a step is checked as a case of its own opened over its flow.

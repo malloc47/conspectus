@@ -25,6 +25,12 @@
 //! - **Inline confirmation.** An entry that asks for a second `Enter`
 //!   arms on the first, and its row then says what the next `Enter` will
 //!   do. Moving the cursor disarms it; closing the menu says nothing.
+//! - **Further questions.** An entry that leads to a question of its own
+//!   (a dialog with a body, a prompt for a value) [opens a
+//!   step](Entry::opens_step): picking it reports its message and the
+//!   menu stays open under the step the host opens
+//!   ([`ModalStack::push_step`](crate::overlay::ModalStack::push_step)),
+//!   so `Esc` there comes back to the menu.
 //! - **Scrolling with a fixed footer.** The menu is the menu-sized modal
 //!   frame, as tall as its rows. On a screen too short for them the
 //!   footer keeps the bottom rows and the entries scroll in a window the
@@ -78,11 +84,12 @@
 //! Which entries a menu offers and in what order, their labels and
 //! details, which of them confirm, and what each commits: a host builds
 //! the entries from its own state each time it opens the menu, and the
-//! menu reports the chosen entry's message. A host whose overlay holds a
-//! menu as one of its levels (a list that leads to further questions)
-//! makes the menu's outcome a value of its own, routes keys to it with
-//! [`Overlay::handle`], takes a commit as the pick, and draws it with
-//! [`ActionMenu::draw`].
+//! menu reports the chosen entry's message. For an entry that opens a
+//! step, the host builds the step from the message (a dialog, a prompt)
+//! and opens it with
+//! [`ModalStack::push_step`](crate::overlay::ModalStack::push_step): a
+//! commit or a dismissal there closes the menu too, and `Esc` there gives
+//! the menu back its keys.
 
 mod body;
 mod entry;
@@ -312,8 +319,8 @@ impl<M> ActionMenu<M> {
 
 impl<M: Clone> ActionMenu<M> {
     /// Picks entry `index`: arms it when it asks for a second `Enter` and
-    /// is not armed yet, commits it otherwise, and does nothing when it
-    /// cannot run.
+    /// is not armed yet, reports it and stays open when it opens a step,
+    /// commits it otherwise, and does nothing when it cannot run.
     fn pick(&mut self, index: usize) -> Outcome<M> {
         let Some(entry) = self.entries.get(index).filter(|entry| entry.enabled) else {
             return Outcome::Consumed;
@@ -322,18 +329,24 @@ impl<M: Clone> ActionMenu<M> {
             self.armed = Some(index);
             return Outcome::Consumed;
         }
-        Outcome::Commit(entry.outcome.clone())
+        self.armed = None;
+        if entry.opens_step {
+            Outcome::Stay(entry.outcome.clone())
+        } else {
+            Outcome::Commit(entry.outcome.clone())
+        }
     }
 }
 
 impl<M: Clone, Cx: ?Sized> Overlay<M, Cx> for ActionMenu<M> {
     /// The arrows and their aliases move; `Enter` picks the cursor's
-    /// entry; `Esc`, `q`, and `Ctrl-C` close the menu, saying nothing; an
-    /// entry's shortcut moves the cursor to it and picks it. Every other
-    /// key is swallowed.
+    /// entry; `Esc` closes the menu (`Close`) and `q` and `Ctrl-C` dismiss
+    /// it (`Dismiss`), saying nothing; an entry's shortcut moves the
+    /// cursor to it and picks it. Every other key is swallowed.
     fn handle(&mut self, key: KeyEvent, _cx: &Cx) -> Outcome<M> {
         match resolve(MENU_KEYS, key) {
-            Some(MenuKey::Abort | MenuKey::Close) => Outcome::Close,
+            Some(MenuKey::Abort) => Outcome::Dismiss,
+            Some(MenuKey::Close) => Outcome::Close,
             Some(MenuKey::Up) => {
                 self.step(-1);
                 Outcome::Consumed

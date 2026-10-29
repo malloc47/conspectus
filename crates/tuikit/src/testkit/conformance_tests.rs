@@ -61,7 +61,7 @@ impl Rig for Host {
             return;
         };
         let settled = screen.stack.settle(outcome);
-        if settled.closed.is_some() {
+        if !settled.closed.is_empty() {
             screen.status = None;
         }
         if let Some(message) = settled.message {

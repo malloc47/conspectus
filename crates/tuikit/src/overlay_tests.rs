@@ -16,7 +16,8 @@ struct Shelf {
 
 /// A test overlay: a rect it clears and fills with its mark, and keys
 /// that say what it asks for. `Enter` commits the context's word, `s`
-/// stays with its own mark, `Esc` closes, anything else is used.
+/// stays with its own mark, `Esc` closes, `d` dismisses, anything else is
+/// used.
 #[derive(Debug, Clone, PartialEq)]
 struct Tile {
     mark: &'static str,
@@ -52,6 +53,7 @@ impl Overlay<String, Shelf> for Tile {
             KeyCode::Enter => Outcome::Commit(shelf.word.to_string()),
             KeyCode::Char('s') => Outcome::Stay(self.mark.to_string()),
             KeyCode::Esc => Outcome::Close,
+            KeyCode::Char('d') => Outcome::Dismiss,
             _ => Outcome::Consumed,
         }
     }
@@ -141,24 +143,124 @@ fn settling_closes_the_top_for_close_and_commit_only() {
 
     let consumed = stack.route(press(KeyCode::Char('j')), &shelf).unwrap();
     let settled = stack.settle(consumed);
-    assert_eq!((settled.closed, settled.message), (None, None));
+    assert_eq!((settled.closed, settled.message), (Vec::new(), None));
     assert_eq!(stack.len(), 2);
 
     let stay = stack.route(press(KeyCode::Char('s')), &shelf).unwrap();
     let settled = stack.settle(stay);
-    assert_eq!(settled.closed, None, "a stay leaves the entry open");
+    assert!(settled.closed.is_empty(), "a stay leaves the entry open");
     assert_eq!(settled.message.as_deref(), Some("b"));
 
     let close = stack.route(press(KeyCode::Esc), &shelf).unwrap();
     let settled = stack.settle(close);
-    assert_eq!(settled.closed.map(|tile| tile.mark), Some("b"));
+    assert_eq!(marks(&settled.closed), ["b"]);
     assert_eq!(settled.message, None, "closing is silent");
 
     let commit = stack.route(press(KeyCode::Enter), &shelf).unwrap();
     let settled = stack.settle(commit);
-    assert_eq!(settled.closed.map(|tile| tile.mark), Some("a"));
+    assert_eq!(marks(&settled.closed), ["a"]);
     assert_eq!(settled.message.as_deref(), Some("w"));
     assert!(stack.is_empty());
+}
+
+fn marks(tiles: &[Tile]) -> Vec<&'static str> {
+    tiles.iter().map(|tile| tile.mark).collect()
+}
+
+/// A stack with `a` on its own, then `b` with its step `c` over it.
+fn flow() -> ModalStack<Tile> {
+    let mut stack = ModalStack::new();
+    stack.push(Tile::new("a", Rect::default()));
+    stack.push(Tile::new("b", Rect::default()));
+    stack.push_step(Tile::new("c", Rect::default()));
+    stack
+}
+
+#[test]
+fn closing_a_step_gives_the_keys_back_to_the_entry_under_it() {
+    let shelf = Shelf { word: "w" };
+    let mut stack = flow();
+    assert!(stack.top_is_step());
+    let close = stack.route(press(KeyCode::Esc), &shelf).unwrap();
+    let settled = stack.settle(close);
+    assert_eq!(marks(&settled.closed), ["c"], "only the step closed");
+    assert_eq!(stack.top().map(|tile| tile.mark), Some("b"));
+    assert!(!stack.top_is_step(), "b opened on its own");
+    stack.route(press(KeyCode::Char('j')), &shelf);
+    assert_eq!(stack.top().map(|tile| tile.keys), Some(1), "b has the keys");
+}
+
+#[test]
+fn a_commit_or_a_dismissal_closes_the_whole_flow_and_nothing_under_it() {
+    let shelf = Shelf { word: "w" };
+    for (key, message) in [
+        (press(KeyCode::Enter), Some("w")),
+        (press(KeyCode::Char('d')), None),
+    ] {
+        let mut stack = flow();
+        let outcome = stack.route(key, &shelf).unwrap();
+        let settled = stack.settle(outcome);
+        assert_eq!(marks(&settled.closed), ["c", "b"], "{key:?}: top first");
+        assert_eq!(settled.message.as_deref(), message, "{key:?}");
+        assert_eq!(marks(stack.iter().as_slice()), ["a"], "{key:?}");
+    }
+}
+
+#[test]
+fn a_flow_runs_through_every_step_of_it() {
+    let shelf = Shelf { word: "w" };
+    let mut stack = flow();
+    stack.push_step(Tile::new("e", Rect::default()));
+    let dismiss = stack.route(press(KeyCode::Char('d')), &shelf).unwrap();
+    assert_eq!(marks(&stack.settle(dismiss).closed), ["e", "c", "b"]);
+    // An overlay opened on its own over a flow is not part of it.
+    let mut stack = flow();
+    stack.push(Tile::new("f", Rect::default()));
+    assert!(!stack.top_is_step());
+    let dismiss = stack.route(press(KeyCode::Char('d')), &shelf).unwrap();
+    assert_eq!(marks(&stack.settle(dismiss).closed), ["f"]);
+    assert_eq!(marks(&stack.close_flow()), ["c", "b"]);
+    assert_eq!(marks(&stack.close_flow()), ["a"]);
+    assert!(stack.close_flow().is_empty());
+}
+
+#[test]
+fn a_dismissal_closes_an_entry_that_is_no_step_as_a_close_does() {
+    let shelf = Shelf { word: "w" };
+    let mut stack = ModalStack::new();
+    stack.push(Tile::new("a", Rect::default()));
+    stack.push(Tile::new("b", Rect::default()));
+    let dismiss = stack.route(press(KeyCode::Char('d')), &shelf).unwrap();
+    assert_eq!(marks(&stack.settle(dismiss).closed), ["b"]);
+    assert_eq!(stack.len(), 1);
+}
+
+#[test]
+fn a_step_on_an_empty_stack_opens_as_an_overlay_of_its_own() {
+    let mut stack = ModalStack::new();
+    stack.push_step(Tile::new("a", Rect::default()));
+    assert!(!stack.top_is_step());
+    stack.push(Tile::new("b", Rect::default()));
+    stack.push_step(Tile::new("c", Rect::default()));
+    // Popping keeps every entry's place in its flow.
+    assert_eq!(stack.pop().map(|tile| tile.mark), Some("c"));
+    assert!(!stack.top_is_step());
+    stack.push_step(Tile::new("d", Rect::default()));
+    let popped = stack.pop_if(|tile| tile.mark == "d");
+    assert_eq!(popped.map(|tile| tile.mark), Some("d"));
+    assert_eq!(marks(&stack.close_all()), ["b", "a"]);
+    stack.push_step(Tile::new("e", Rect::default()));
+    assert!(!stack.top_is_step(), "close_all forgot the old steps");
+}
+
+#[test]
+fn outcomes_say_whether_they_close_and_what_they_carry() {
+    let dismiss: Outcome<&str> = Outcome::Dismiss;
+    assert!(dismiss.closes());
+    assert_eq!(dismiss.message(), None);
+    assert_eq!(dismiss.map(str::len), Outcome::Dismiss);
+    assert!(!Outcome::Stay("s").closes());
+    assert!(Outcome::<()>::Close.closes());
 }
 
 #[test]

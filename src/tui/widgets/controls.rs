@@ -495,8 +495,9 @@ impl ControlsOverlayState {
                 }
             },
             // A text editor's prompt checks what was typed; a refusal
-            // stays open with its reason. Closing it (Esc; Ctrl-C was
-            // taken above) steps back to the panel.
+            // stays open with its reason. Closing it (Esc) steps back to
+            // the panel; dismissing it (Ctrl-C, taken above already)
+            // dismisses the panel.
             SubEditor::Content(prompt) => match prompt.handle(event, &()) {
                 Outcome::Commit(text) => {
                     *slot = None;
@@ -512,6 +513,7 @@ impl ControlsOverlayState {
                     *slot = None;
                     ControlsOutcome::Continue
                 }
+                Outcome::Dismiss => ControlsOutcome::Close,
                 Outcome::Consumed | Outcome::Stay(_) => ControlsOutcome::Continue,
             },
             SubEditor::MaxAge(prompt) => match prompt.handle(event, &()) {
@@ -524,6 +526,7 @@ impl ControlsOverlayState {
                     *slot = None;
                     ControlsOutcome::Continue
                 }
+                Outcome::Dismiss => ControlsOutcome::Close,
                 Outcome::Consumed | Outcome::Stay(_) => ControlsOutcome::Continue,
             },
         }

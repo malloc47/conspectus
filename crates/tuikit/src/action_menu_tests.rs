@@ -121,10 +121,36 @@ fn the_cursor_wraps_at_both_ends() {
 
 #[test]
 fn the_close_keys_close_the_menu_saying_nothing() {
-    for close in [press(KeyCode::Esc), press(KeyCode::Char('q')), ctrl('c')] {
-        let mut menu = menu();
-        assert_eq!(key(&mut menu, close), Outcome::Close, "{close:?}");
+    // Esc leaves its one level; q and Ctrl-C dismiss it, and with it any
+    // flow it is a step of.
+    let mut open = menu();
+    assert_eq!(key(&mut open, press(KeyCode::Esc)), Outcome::Close);
+    for dismiss in [press(KeyCode::Char('q')), ctrl('c')] {
+        let mut open = menu();
+        assert_eq!(key(&mut open, dismiss), Outcome::Dismiss, "{dismiss:?}");
     }
+}
+
+#[test]
+fn an_entry_that_opens_a_step_reports_its_message_and_stays_open() {
+    let mut steps = ActionMenu::new(
+        "Steps",
+        vec![
+            Entry::new("Ask", Msg::Open).opens_step(),
+            Entry::new("Ask twice", Msg::Remove)
+                .opens_step()
+                .confirm(Confirm::Inline),
+            Entry::new("Done", Msg::Copy),
+        ],
+    );
+    let enter = press(KeyCode::Enter);
+    assert_eq!(key(&mut steps, enter), Outcome::Stay(Msg::Open));
+    down(&mut steps);
+    assert_eq!(key(&mut steps, enter), Outcome::Consumed, "armed");
+    assert_eq!(key(&mut steps, enter), Outcome::Stay(Msg::Remove));
+    assert_eq!(steps.armed(), None, "back from the step, nothing is armed");
+    down(&mut steps);
+    assert_eq!(key(&mut steps, enter), Outcome::Commit(Msg::Copy));
 }
 
 #[test]
@@ -196,7 +222,8 @@ fn the_close_keys_close_even_an_armed_menu() {
         let mut menu = menu();
         key(&mut menu, press(KeyCode::Up));
         key(&mut menu, press(KeyCode::Enter));
-        assert_eq!(key(&mut menu, close), Outcome::Close, "{close:?}");
+        assert!(key(&mut menu, close).closes(), "{close:?}");
+        assert_eq!(key(&mut menu, close).message(), None, "{close:?}");
     }
 }
 

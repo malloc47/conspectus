@@ -2654,7 +2654,7 @@ mod reducer_effects {
         );
         assert_eq!(app.status_message(), None, "the prompt draws its own keys");
         let settled = confirm_rename(&mut app, "  ");
-        assert!(settled.closed.is_none() && settled.message.is_none());
+        assert!(settled.closed.is_empty() && settled.message.is_none());
         assert_eq!(
             app.rename_overlay()
                 .and_then(tuikit::text_prompt::TextPrompt::error),
@@ -2668,7 +2668,7 @@ mod reducer_effects {
         let (mut app, _mux_id) = app_with_mux_selection("editor");
         crate::tui::runtime::open_rename_overlay(&mut app);
         let settled = confirm_rename(&mut app, "workshop");
-        assert!(settled.closed.is_some(), "a commit closes the prompt");
+        assert_eq!(settled.closed.len(), 1, "a commit closes the prompt");
         assert_eq!(
             settled.message,
             Some(Msg::CommitRename("workshop".to_string()))

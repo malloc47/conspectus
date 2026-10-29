@@ -4,14 +4,17 @@
 ///
 /// An overlay never acts on the world; it reports what the key meant.
 /// The host's stack does the stack's part ([`ModalStack::settle`]
-/// closes the top entry for `Close` and `Commit`), and the host handles
-/// the message `M` that `Commit` and `Stay` carry.
+/// closes the top entry for `Close`, and for `Commit` and `Dismiss` the
+/// top entry with every entry it is a step of), and the host handles the
+/// message `M` that `Commit` and `Stay` carry.
 ///
 /// How the close keys map (house rule 4): `Esc` steps back one level,
-/// which is `Consumed` while the overlay has a level to return to and
-/// `Close` at its first; `Ctrl-C`, and `q` where nothing is typed, are
-/// `Close` from any level. Closing is silent (house rule 5): a host
-/// posts no message for `Close`, because cancelling is not an event.
+/// which is `Consumed` while the overlay has a level of its own to return
+/// to and `Close` at its first (on a stack, a step's `Close` returns to
+/// the entry under it); `Ctrl-C`, and `q` where nothing is typed, are
+/// `Dismiss` from any level, which closes the whole overlay, every step
+/// of it included. Closing is silent (house rule 5): a host posts no
+/// message for `Close` or `Dismiss`, because cancelling is not an event.
 ///
 /// [`ModalStack::settle`]: super::ModalStack::settle
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -19,13 +22,19 @@ pub enum Outcome<M> {
     /// The overlay took the key and stays open; nothing else happens.
     Consumed,
     /// The overlay is done and closes with nothing to report: cancelled,
-    /// dismissed, or left.
+    /// or left one level back (a step returns to the entry under it).
     Close,
-    /// The overlay is done with a result: it closes, then the host
-    /// handles `M`.
+    /// The user dismissed the whole overlay (`Ctrl-C`, or `q` where
+    /// nothing is typed): it closes with nothing to report, and so does
+    /// every entry it is a step of. For an overlay that is no step, the
+    /// same as `Close`.
+    Dismiss,
+    /// The overlay is done with a result: it closes, and so does every
+    /// entry it is a step of, then the host handles `M`.
     Commit(M),
     /// The overlay stays open and the host handles `M`: a setting applied
-    /// as it changes, or a notice about input it refused.
+    /// as it changes, a notice about input it refused, or a request to
+    /// open the overlay's next step over it.
     Stay(M),
 }
 
@@ -37,14 +46,15 @@ impl<M> Outcome<M> {
         match self {
             Self::Consumed => Outcome::Consumed,
             Self::Close => Outcome::Close,
+            Self::Dismiss => Outcome::Dismiss,
             Self::Commit(message) => Outcome::Commit(f(message)),
             Self::Stay(message) => Outcome::Stay(f(message)),
         }
     }
 
-    /// Whether the overlay closes: `Close` or `Commit`.
+    /// Whether the overlay closes: `Close`, `Dismiss`, or `Commit`.
     pub fn closes(&self) -> bool {
-        matches!(self, Self::Close | Self::Commit(_))
+        matches!(self, Self::Close | Self::Dismiss | Self::Commit(_))
     }
 
     /// The message the host handles, if the outcome carries one (`Commit`
@@ -52,7 +62,7 @@ impl<M> Outcome<M> {
     pub fn message(self) -> Option<M> {
         match self {
             Self::Commit(message) | Self::Stay(message) => Some(message),
-            Self::Consumed | Self::Close => None,
+            Self::Consumed | Self::Close | Self::Dismiss => None,
         }
     }
 }

@@ -12,10 +12,11 @@
 use super::*;
 use tuikit::text_prompt::PromptResult;
 
-/// One key for the modal on top: route it, close the modal for a close
-/// or a commit (closing says nothing; see [`App::modal_closed`]), and
-/// send what it committed or sent while staying open. Does nothing when
-/// no modal is open.
+/// One key for the modal on top: route it, close the modal for a close,
+/// a dismissal, or a commit (a dismissal or a commit from a step closes
+/// the menu it was opened from too; closing says nothing, see
+/// [`App::modal_closed`]), and send what it committed or sent while
+/// staying open. Does nothing when no modal is open.
 pub(in crate::tui) fn modal_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
@@ -24,10 +25,10 @@ pub(in crate::tui) fn modal_key(
     let Some(settled) = app.press_modal_key(key) else {
         return;
     };
-    if let Some(closed) = settled.closed
-        && let Some(first) = app.modal_closed(closed, settled.message.as_ref())
-    {
-        send(app, first);
+    for closed in settled.closed {
+        if let Some(first) = app.modal_closed(closed, settled.message.as_ref()) {
+            send(app, first);
+        }
     }
     if let Some(msg) = settled.message {
         send(app, msg);

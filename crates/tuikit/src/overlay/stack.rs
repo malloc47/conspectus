@@ -19,6 +19,15 @@ use crate::theme::Theme;
 /// handles the message. Every entry is drawn, bottom to top
 /// ([`draw`](Self::draw)).
 ///
+/// An overlay can be several entries: a menu whose pick asks a further
+/// question opens the question as a *step* of the menu
+/// ([`push_step`](Self::push_step)). The steps and the entry they start
+/// from are one flow. `Esc` in a step is a plain [`Outcome::Close`],
+/// which closes the step and gives the keys back to the entry under it;
+/// an [`Outcome::Commit`] or an [`Outcome::Dismiss`] (`Ctrl-C`) closes
+/// the whole flow, because the overlay is done or dismissed, not one
+/// level of it.
+///
 /// ```
 /// use ratatui::buffer::Buffer;
 /// use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -42,25 +51,30 @@ use crate::theme::Theme;
 /// stack.push(Box::new(Notice));
 /// let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
 /// let outcome = stack.route(key, &()).expect("an overlay is open");
-/// assert!(stack.settle(outcome).closed.is_some());
+/// assert_eq!(stack.settle(outcome).closed.len(), 1);
 /// assert_eq!(stack.len(), 1, "only the top closed");
 /// ```
 #[derive(Clone, Debug)]
 pub struct ModalStack<E> {
     entries: Vec<E>,
+    /// Beside each entry: whether it was opened as a step of the entry
+    /// under it.
+    steps: Vec<bool>,
 }
 
-/// What settling an [`Outcome`] did: the entry it closed, if any, and the
-/// message the host handles next, if any.
+/// What settling an [`Outcome`] did: the entries it closed, if any, and
+/// the message the host handles next, if any.
 ///
-/// The closed entry is handed back so the host can do its own bookkeeping
-/// as an overlay goes (remember how it was left); dropping it is fine.
+/// The closed entries are handed back so the host can do its own
+/// bookkeeping as an overlay goes (remember how it was left); dropping
+/// them is fine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[must_use]
 pub struct Settled<E, M> {
-    /// The entry the outcome closed: the top one, for `Close` and
-    /// `Commit`.
-    pub closed: Option<E>,
+    /// The entries the outcome closed, top first: the top one for
+    /// `Close`, and for `Commit` and `Dismiss` the top one with every
+    /// entry it is a step of. Empty for `Consumed` and `Stay`.
+    pub closed: Vec<E>,
     /// The message the host handles: from `Commit` (after the entry
     /// closed) or `Stay`.
     pub message: Option<M>,
@@ -77,16 +91,32 @@ impl<E> ModalStack<E> {
     pub const fn new() -> Self {
         Self {
             entries: Vec::new(),
+            steps: Vec::new(),
         }
     }
 
-    /// Opens `entry` on top of the others; it takes the keys from now on.
+    /// Opens `entry` on top of the others as an overlay of its own; it
+    /// takes the keys from now on.
     pub fn push(&mut self, entry: E) {
         self.entries.push(entry);
+        self.steps.push(false);
+    }
+
+    /// Opens `entry` on top as the next step of the overlay on top: the
+    /// question a menu's pick asks, or a prompt for a value it needs. A
+    /// `Close` from the step gives the keys back to the entry under it; a
+    /// `Commit` or a `Dismiss` closes the step and the flow it belongs
+    /// to. On an empty stack the entry has nothing to be a step of and
+    /// opens as [`push`](Self::push) opens it.
+    pub fn push_step(&mut self, entry: E) {
+        let step = !self.entries.is_empty();
+        self.entries.push(entry);
+        self.steps.push(step);
     }
 
     /// Closes the top entry and returns it.
     pub fn pop(&mut self) -> Option<E> {
+        self.steps.pop();
         self.entries.pop()
     }
 
@@ -94,18 +124,40 @@ impl<E> ModalStack<E> {
     /// closes one kind of overlay without closing whatever is over it.
     pub fn pop_if(&mut self, pred: impl FnOnce(&E) -> bool) -> Option<E> {
         if self.entries.last().is_some_and(pred) {
-            self.entries.pop()
+            self.pop()
         } else {
             None
         }
     }
 
+    /// Closes the top entry and every entry it is a step of, and returns
+    /// them, top first: the whole flow the top entry belongs to. Empty
+    /// when the stack is.
+    pub fn close_flow(&mut self) -> Vec<E> {
+        let mut closed = Vec::new();
+        while let Some(entry) = self.entries.pop() {
+            let step = self.steps.pop().unwrap_or(false);
+            closed.push(entry);
+            if !step {
+                break;
+            }
+        }
+        closed
+    }
+
     /// Closes every entry and returns them, top first, the order they
     /// would have closed one at a time.
     pub fn close_all(&mut self) -> Vec<E> {
+        self.steps.clear();
         let mut closed = std::mem::take(&mut self.entries);
         closed.reverse();
         closed
+    }
+
+    /// Whether the top entry was opened as a step of the entry under it,
+    /// so a `Close` from it gives the keys back to that entry.
+    pub fn top_is_step(&self) -> bool {
+        self.steps.last().copied().unwrap_or(false)
     }
 
     /// The entry on top, which takes the keys.
@@ -150,13 +202,15 @@ impl<E> ModalStack<E> {
     }
 
     /// Does the stack's part of `outcome`: closes the top entry for
-    /// [`Outcome::Close`] and [`Outcome::Commit`]. Returns the entry it
-    /// closed and the message the host handles next.
+    /// [`Outcome::Close`], and the top entry's whole flow (it and every
+    /// entry it is a step of) for [`Outcome::Commit`] and
+    /// [`Outcome::Dismiss`]. Returns the entries it closed and the message
+    /// the host handles next.
     pub fn settle<M>(&mut self, outcome: Outcome<M>) -> Settled<E, M> {
-        let closed = if outcome.closes() {
-            self.entries.pop()
-        } else {
-            None
+        let closed = match outcome {
+            Outcome::Close => self.pop().into_iter().collect(),
+            Outcome::Commit(_) | Outcome::Dismiss => self.close_flow(),
+            Outcome::Consumed | Outcome::Stay(_) => Vec::new(),
         };
         Settled {
             closed,

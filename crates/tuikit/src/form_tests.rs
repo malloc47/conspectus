@@ -363,7 +363,7 @@ fn esc_and_ctrl_c_close_and_q_is_typed() {
     type_text(&mut form, "q");
     assert_eq!(form.values().text("name"), "q", "a form is a typing level");
     assert_eq!(key(&mut form, press(KeyCode::Esc)), Outcome::Close);
-    assert_eq!(key(&mut form, ctrl('c')), Outcome::Close);
+    assert_eq!(key(&mut form, ctrl('c')), Outcome::Dismiss);
     go(&mut form, "size");
     assert_eq!(
         key(&mut form, press(KeyCode::Char('q'))),
