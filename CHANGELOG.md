@@ -347,6 +347,15 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   (`j/k/PgDn/PgUp scroll · y copy · Esc/q/o close`), and on a narrow
   terminal it wraps onto a second line instead of losing `y copy` at the
   edge.
+- **Messages (`!`) scrolls like the other lists and readers.** A record
+  longer than its pane shows a scrollbar (and wraps a column narrower
+  beside it), a log longer than its list shows one too, and moving back
+  up inside the entries shown no longer scrolls the list. A summary too
+  long for its row ends in `…` instead of being cut off; on a narrow
+  terminal the keys line wraps onto a second line instead of losing
+  `y copy` and `Esc close` at the edge, and with no messages yet the keys
+  sit at the bottom of the dialog and the note wraps. The rows, colors,
+  and keys are unchanged.
 
 ### Fixed
 

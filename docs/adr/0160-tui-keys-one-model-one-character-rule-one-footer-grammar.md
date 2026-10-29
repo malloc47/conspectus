@@ -35,7 +35,10 @@ former, so the host's `PICKER_KEYS` is gone. Amended by
 `PAGER_KEYS` binds `q` to `Abort` and `Ctrl-D`/`Ctrl-U` as aliases, with
 its scroll rows in the `PAGER_SCROLL_KEYS` fragment; `READER_KEYS`,
 `PAGER_HELP_KEYS`, and `FIND_KEYS` are standard tables, and the host's
-`PANE_VIEWER_KEYS` is gone.
+`PANE_VIEWER_KEYS` is gone. Amended by
+[ADR 0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md):
+`LOG_LIST_KEYS` (`LogListKey`) is the standard log list table, `q`
+dismissing as `Ctrl-C` does, and the host's `MessagesKey` is gone.
 
 ## Context
 

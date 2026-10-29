@@ -1501,8 +1501,9 @@ Scrolling dialogs
 use `Space` to page down, as pagers do, and `Ctrl-D`/`Ctrl-U` to move half
 a page (help, the full-value viewer, and the viewers). A page is the rows the dialog shows,
 as it is for `PgDn`/`PgUp` in the tree, and scrolling stops at the last
-line. The help and the full-value viewer show a scrollbar when their text
-runs past the dialog and keep their keys on its last rows; on a terminal
+line. The help, the full-value viewer, and the Messages record show a
+scrollbar when their text runs past the dialog and keep their keys on its
+last rows; on a terminal
 too short for every line of keys, the line with the closing keys stays and
 the others scroll with the text. Help and the other long dialogs wrap
 their text to the dialog's width, and menus cut a label that cannot fit
@@ -1655,8 +1656,12 @@ is logged in memory for the life of the TUI process (ADR 0105). Press
 `!` to open the Messages overlay: newest entries first, with the
 selected entry's full record below, including argv, exit status,
 stderr and stdout for subprocesses, and the pane output when a
-harness died in its pane. `j`/`k` select, `J`/`K` or PgUp/PgDn scroll
-the record, `y` copies it, `Esc` closes.
+harness died in its pane. `j`/`k` select (stopping at the newest and
+the oldest entry), `g`/`G` jump to the newest and the oldest, `J`/`K`
+scroll the record a line and PgUp/PgDn (or `Space`) a page, `y` copies
+it, and `Esc`, `!`, `q`, or `Ctrl-C` close. A long log or a long record
+shows a scrollbar beside it, and a summary too long for its row ends in
+`…`; on a narrow terminal the keys line wraps onto a second line.
 
 A warning or error also:
 

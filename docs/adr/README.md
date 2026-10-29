@@ -157,7 +157,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted (amended by 0155, 0156) |
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted |
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161) |
-| [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163) |
+| [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179) |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155) |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
 | [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (see 0147) |
@@ -176,16 +176,16 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0151](0151-tui-framework-control-set-and-house-rules.md) | The Framework Control Set And Its House Rules | Accepted |
 | [0152](0152-tui-framework-dependency-ownership.md) | Who Owns The Framework's Third-Party Crates | Accepted |
 | [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted (amended by 0163) |
-| [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted (amended by 0168) |
+| [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted (amended by 0168, 0179) |
 | [0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md) | Text Is Measured, Cut, And Wrapped In Terminal Cells By One Module | Accepted |
 | [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161, 0177) |
 | [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted |
 | [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted (amended by 0166, 0174) |
 | [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted |
-| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176, 0177) |
+| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176, 0177, 0179) |
 | [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted (amended by 0172, 0176, 0177) |
 | [0162](0162-tui-help-pages-one-page-generated-from-key-tables.md) | Help Pages Are One Page, Generated From The Key Tables | Accepted (amended by 0177, 0178) |
-| [0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md) | Feedback Is One Type With Four Severities, And Toasts Are In-Tree | Accepted |
+| [0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md) | Feedback Is One Type With Four Severities, And Toasts Are In-Tree | Accepted (amended by 0179) |
 | [0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md) | The Test Kit Drives Frames, Keeps Colors In Goldens, And Holds Every Modal To The Conventions | Accepted (amended by 0176, 0177) |
 | [0165](0165-tui-text-entry-one-line-editor-and-one-text-field.md) | Text Entry Has One Line Editor And One Text Field | Accepted |
 | [0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md) | Text Prompts Are One Overlay That Explains Its Refusals | Accepted (amended by 0176) |
@@ -201,6 +201,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md) | Settings Panels Are One Control That Applies Each Change As It Is Made, And Their Editors Are Steps | Accepted |
 | [0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md) | Readers Are One Pager Over Content The Host Lays Out | Accepted (amended by 0178) |
 | [0178](0178-tui-help-pages-and-long-values-are-pager-contents.md) | Help Pages And Long Values Are Pager Contents, And A Framed Footer Scrolls What Does Not Fit | Accepted |
+| [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted |
 
 ## Transcript viewer
 

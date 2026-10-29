@@ -7,7 +7,12 @@ Accepted. Amended by
 an entry's level is one of four severities (info, success, warning,
 error), successful outcomes are logged as successes, and the bounded,
 repeat-collapsing log is the framework's `tuikit::feedback::Log` over
-Conspectus's payload (target, command record, detail).
+Conspectus's payload (target, command record, detail). Amended by
+[ADR 0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md):
+the overlay (decision 2) is the framework's `LogList` over that log; `q`
+and `Ctrl-C` dismiss it and `Esc` and `!` close it, its record pane is an
+embedded pager with the shared scrollbar, and its list keeps its window
+and shows a scrollbar too.
 
 ## Context
 

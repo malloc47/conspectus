@@ -9,7 +9,10 @@ Applies house rule 14 of ADR 0151 to glyph widths. Amended by
 [ADR 0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md):
 the marks gain the derived-line corner `└`, and the module names the
 three-cell option boxes built from vetted glyphs (`[x]`, `[ ]`, `(•)`,
-`( )`).
+`( )`). Amended by
+[ADR 0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md):
+the module names `TIMES`, the failure mark's character read as the
+multiplication sign in a repeat count (`(×3)`), not a mark of its own.
 
 ## Context
 

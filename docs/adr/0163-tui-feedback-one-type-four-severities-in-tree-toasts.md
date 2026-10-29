@@ -11,7 +11,11 @@ framework's `feedback` module. Amends [ADR 0056](0056-tui-clipboard-backend-osc5
 supplies), [ADR 0105](0105-tui-message-log.md) (the log's levels become
 the four severities, and its bounded, repeat-collapsing machinery is the
 framework's over a Conspectus payload), and [ADR 0153](0153-tui-theme-roles-aliases-and-named-styles.md)
-(a `toast_text` token joins the typed tokens).
+(a `toast_text` token joins the typed tokens). Amended by
+[ADR 0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md)
+(decision 6): an entry's summary with its repeat count is the framework's
+`Entry::summary_with_repeats`, and the Messages log is drawn by the
+framework's `LogList`.
 
 ## Context
 

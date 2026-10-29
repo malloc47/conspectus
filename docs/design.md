@@ -1296,8 +1296,14 @@ The value modal is a framed pager over the wrapped value, whose `y` is the
 copy hook, and every help page (the keymap's, the viewers', a pager's `?`
 level) is the framework's `HelpPage` read in a framed pager (ADR 0178); a
 framed footer too tall for its frame keeps its last rows and scrolls the
-rest with the body. The transcript viewer, the Messages detail, and the
-preview move onto the pager later.
+rest with the body. The Messages overlay is the framework's log list
+(ADR 0179): `LogList<R, M, Cx>` reads the host's `feedback::Log` from its
+context on every key and draw, lists its entries newest first (the
+severity's mark, the age, the summary with its repeat count) in a kept
+window, and shows the selected entry's record in an embedded pager;
+`conspectus` keeps the payload (target and command record), the record's
+text, the copy message, and the preview banner. The transcript viewer and
+the preview move onto the pager later.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
