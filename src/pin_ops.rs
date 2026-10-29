@@ -441,7 +441,9 @@ pub fn pin_record(
     Ok(slot)
 }
 
-/// Parse a `field=value` override: lists are shell-split.
+/// Parse a `field=value` override. A list is split like a shell command
+/// line (`crate::argv`), and one that ends inside a quote or on a lone
+/// backslash is refused rather than guessed at.
 pub fn parse_override(kind: PinKind, assignment: &str) -> Result<(String, FieldValue), PinError> {
     let (field, value) = assignment
         .split_once('=')
@@ -455,7 +457,10 @@ pub fn parse_override(kind: PinKind, assignment: &str) -> Result<(String, FieldV
         )));
     }
     let value = if PinKind::field_is_list(field) {
-        FieldValue::List(crate::argv::split_command_line(value))
+        FieldValue::List(
+            crate::argv::parse_command_line(value)
+                .map_err(|why| PinError::Invalid(format!("`{field}` has {why}")))?,
+        )
     } else {
         FieldValue::Text(value.to_string())
     };

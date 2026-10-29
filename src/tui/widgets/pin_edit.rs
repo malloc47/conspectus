@@ -21,6 +21,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
+use crate::argv::split_command_line;
 use crate::discovery::harness::{
     argv_without_fragment, launch_options_for, strip_known_launch_option_fragments,
 };
@@ -28,7 +29,6 @@ use crate::model::{FieldSource, FieldValue, PinKind, RecipeField, SlotFields};
 use crate::tui::Msg;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{self, Cols, display_argv, footer_lines, note_row, options_row};
-use crate::tui::widgets::launch_spec_form::parse_launch_argv;
 use tuikit::form::FormBody;
 use tuikit::overlay::Outcome;
 use tuikit::path_field::{Candidate, PathField};
@@ -384,8 +384,7 @@ impl PinEditFormState {
         let Some(idx) = self.row_index("argv") else {
             return Vec::new();
         };
-        let typed =
-            parse_launch_argv(self.rows[idx].control.value().trim(), "edit").unwrap_or_default();
+        let typed = split_command_line(self.rows[idx].control.value());
         if typed.is_empty() {
             self.default_argv(&self.harness_text())
         } else {
@@ -440,13 +439,10 @@ impl PinEditFormState {
         };
         let old = self.harness_text();
         let old_default = self.default_argv(&old);
-        let typed = parse_launch_argv(
+        let typed = split_command_line(
             self.row_index("argv")
-                .map_or("", |i| self.rows[i].control.value())
-                .trim(),
-            "edit",
-        )
-        .unwrap_or_default();
+                .map_or("", |i| self.rows[i].control.value()),
+        );
         let keys = &self.known_harness_keys;
         let next_idx = match keys.iter().position(|key| *key == old) {
             Some(pos) => tuikit::scroll::wrap_step(pos, keys.len(), delta),

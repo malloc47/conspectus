@@ -370,74 +370,13 @@ pub fn optional_string(value: &str) -> Option<String> {
     }
 }
 
-/// Shell-style tokenizer for the launch-argv override field. Same
-/// grammar both wrappers used before extraction: double / single
-/// quotes group, `\` escapes the next character, unquoted whitespace
-/// separates tokens. `error_prefix` is prepended to any diagnostic so
-/// each caller's error messages stay recognizable.
+/// The launch-argv field split into arguments by the one argv grammar
+/// (`crate::argv`), refusing an unclosed quote or a trailing escape.
+/// `error_prefix` starts the reason so each caller's messages stay
+/// recognizable.
 pub fn parse_launch_argv(raw: &str, error_prefix: &str) -> Result<Vec<String>, String> {
-    if raw.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut args = Vec::new();
-    let mut current = String::new();
-    let mut chars = raw.chars();
-    let mut quote: Option<char> = None;
-    let mut in_arg = false;
-    while let Some(ch) = chars.next() {
-        match (quote, ch) {
-            (Some(q), c) if c == q => {
-                quote = None;
-                in_arg = true;
-            }
-            (Some('"'), '\\') => match chars.next() {
-                Some(next @ ('"' | '\\' | '$' | '`')) => {
-                    current.push(next);
-                    in_arg = true;
-                }
-                Some(next) => {
-                    current.push('\\');
-                    current.push(next);
-                    in_arg = true;
-                }
-                None => return Err(format!("{error_prefix}: launch argv has a trailing escape")),
-            },
-            (Some(_), c) => {
-                current.push(c);
-                in_arg = true;
-            }
-            (None, '"' | '\'') => {
-                quote = Some(ch);
-                in_arg = true;
-            }
-            (None, '\\') => match chars.next() {
-                Some(next) => {
-                    current.push(next);
-                    in_arg = true;
-                }
-                None => return Err(format!("{error_prefix}: launch argv has a trailing escape")),
-            },
-            (None, c) if c.is_whitespace() => {
-                if in_arg {
-                    args.push(std::mem::take(&mut current));
-                    in_arg = false;
-                }
-            }
-            (None, c) => {
-                current.push(c);
-                in_arg = true;
-            }
-        }
-    }
-    if let Some(q) = quote {
-        return Err(format!(
-            "{error_prefix}: launch argv has an unclosed `{q}` quote"
-        ));
-    }
-    if in_arg {
-        args.push(current);
-    }
-    Ok(args)
+    crate::argv::parse_command_line(raw)
+        .map_err(|why| format!("{error_prefix}: launch argv has {why}"))
 }
 
 #[cfg(test)]

@@ -252,6 +252,23 @@ fn bad_overrides_are_refused_with_the_allowed_fields() {
 }
 
 #[test]
+fn an_unfinished_list_is_refused_and_a_text_field_is_taken_as_written() {
+    let err = parse_override(PinKind::Mux, "argv=claude --model 'opus").unwrap_err();
+    assert_eq!(err.to_string(), "`argv` has an unclosed `'` quote");
+    let err = parse_override(PinKind::Mux, r"argv=claude \").unwrap_err();
+    assert_eq!(err.to_string(), "`argv` has a trailing escape");
+
+    let (_, value) = parse_override(PinKind::Mux, r#"argv=claude -p "a\b""#).unwrap();
+    assert_eq!(
+        value,
+        FieldValue::List(vec!["claude".into(), "-p".into(), r"a\b".into()]),
+        "a backslash before an ordinary character stays inside double quotes"
+    );
+    let (_, value) = parse_override(PinKind::Mux, "label=it's 'odd").unwrap();
+    assert_eq!(value, FieldValue::Text("it's 'odd".into()));
+}
+
+#[test]
 fn edit_sets_and_clears_overrides_and_reports_no_ops() {
     let env = env();
     let snap = snapshot(vec![mux_node("work")]);
