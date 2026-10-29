@@ -4,6 +4,7 @@ title: Assess the milestone's impact on the existing backlog
 status: To Do
 assignee: []
 created_date: '2026-10-27 20:28'
+updated_date: '2026-10-29 21:26'
 labels:
   - tui-framework
   - tuifw-close
@@ -49,3 +50,9 @@ Blockers: Last in the milestone: it depends on the documentation and separation 
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+From CSP-748 (ADR 0180), for the assessment of CSP-342: the transcript viewer now runs on tuikit's Pager, and src/viewer keeps only the transcript (model, parsers, rendering, the pager content with its find unit, hidden-match count, toggles, and opening at a search result). src/viewer imports nothing from crate::tui and lists tuikit in docs/transcript-viewer-deps.md. Lifting src/viewer into a workspace member therefore carries tuikit as a dependency and no reader of its own; its clap binary would draw Pager<Transcript>. Re-scope CSP-342 to that.
+<!-- SECTION:NOTES:END -->
