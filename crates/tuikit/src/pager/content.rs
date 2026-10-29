@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 
 use super::Find;
 use crate::help::{HelpAction, HelpEntry};
-use crate::keys::{KeyAction, KeyRole, KeyRow};
+use crate::keys::{KeyAction, KeyRole, KeyRow, PagerKey};
 use crate::theme::Theme;
 
 /// What a [`Pager`](super::Pager) reads: rows laid out for a width, the
@@ -89,6 +89,14 @@ pub trait PagerContent {
     /// (how many matches what is hidden holds), or nothing.
     fn find_detail(&self, query: &str) -> Option<String> {
         let _ = query;
+        None
+    }
+
+    /// The content's own words for what one of the pager's keys does, on
+    /// the help page (`Jump to the oldest line`), or `None` to keep the
+    /// pager's. The key keeps its place and its section.
+    fn describe(key: PagerKey) -> Option<&'static str> {
+        let _ = key;
         None
     }
 

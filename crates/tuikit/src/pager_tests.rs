@@ -157,6 +157,10 @@ impl PagerContent for Doc {
         (self.hidden > 0).then(|| format!("{} hidden", self.hidden))
     }
 
+    fn describe(key: PagerKey) -> Option<&'static str> {
+        (key == PagerKey::Bottom).then_some("Jump to the newest row")
+    }
+
     fn empty(&self) -> std::borrow::Cow<'_, str> {
         "nothing here".into()
     }
@@ -655,6 +659,25 @@ fn the_help_page_lists_the_contents_keys_before_the_keys_that_leave() {
         .map(|section| section.title.to_string())
         .collect();
     assert_eq!(titles, ["Moving", "Finding", "Document", "Viewer"]);
+    // The content's own words for a pager key, in the key's place.
+    let rows: Vec<(String, String)> = pager.help_sections()[0]
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            crate::help::HelpRow::Keys {
+                keys, description, ..
+            } => Some((keys.clone(), description.to_string())),
+            crate::help::HelpRow::Legend { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        rows[6],
+        ("g / Home".to_string(), "Jump to the start".to_string())
+    );
+    assert_eq!(
+        rows[7],
+        ("G / End".to_string(), "Jump to the newest row".to_string())
+    );
     // Every key either table binds is described.
     assert!(crate::help::undescribed(READER_KEYS).is_empty());
     assert!(crate::help::undescribed(DOC_KEYS).is_empty());

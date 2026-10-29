@@ -127,7 +127,9 @@ pub use find::Find;
 
 use crate::feedback::Feedback;
 use crate::frame::ModalSize;
-use crate::help::{HelpAction, HelpEntry, HelpPage, HelpScroll, HelpSection, sections_for};
+use crate::help::{
+    HelpAction, HelpEntry, HelpPage, HelpRow, HelpScroll, HelpSection, sections_for,
+};
 use crate::keys::{
     FIND_KEYS, FindKey, Footer, KeyAction, KeyRole, KeyRow, PAGER_HELP_KEYS, PagerKey, READER_KEYS,
     key_label, resolve, rows,
@@ -593,10 +595,33 @@ impl<C: PagerContent> Pager<C> {
         ]
     }
 
-    /// The help page's sections: the pager's table's, with the content's
-    /// sections before the pager's last one (the keys that leave).
+    /// The help page's sections: the pager's table's, in the content's
+    /// words where it has its own ([`PagerContent::describe`]), with the
+    /// content's sections before the pager's last one (the keys that
+    /// leave).
     pub fn help_sections(&self) -> Vec<HelpSection> {
         let mut sections = sections_for(self.keys);
+        // The table's rows follow the listing, each in the next row of its
+        // section, so a key's row is found by counting.
+        let mut taken: Vec<usize> = vec![0; sections.len()];
+        for &action in PagerKey::LISTED {
+            let bound = rows(self.keys)
+                .any(|row| matches!(row, KeyRow::Bind { action: a, .. } if *a == action));
+            if !bound {
+                continue;
+            }
+            let title = action.help().section;
+            let Some(at) = sections.iter().position(|section| section.title == title) else {
+                continue;
+            };
+            let row = taken[at];
+            taken[at] += 1;
+            if let (Some(words), Some(HelpRow::Keys { description, .. })) =
+                (C::describe(action), sections[at].rows.get_mut(row))
+            {
+                *description = words.into();
+            }
+        }
         let leaving = PagerKey::Close.help().section;
         let at = sections
             .iter()
