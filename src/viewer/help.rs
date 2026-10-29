@@ -1,15 +1,17 @@
-//! What each viewer message does, as help text.
+//! What the viewer's keys do, as help text.
 //!
-//! The viewer's key table lives with the other overlay key tables in
-//! the TUI, so the help page is generated there from that table and the
-//! description each message gives here (`tuikit::help::sections_for`). A
-//! new [`ViewerMsg`] has to be described here (the match is exhaustive),
-//! so it cannot be left out of the help.
+//! The viewer's help page is the framework pager's, generated from the
+//! pager's key table and the transcript's own ([`TRANSCRIPT_KEYS`]). The
+//! toggles say what they do here, in a section of their own (a new
+//! [`TranscriptKey`] has to be described: the match is exhaustive), and
+//! [`describe`] gives the viewer's words for the pager keys whose
+//! meaning a transcript sharpens.
+//!
+//! [`TRANSCRIPT_KEYS`]: crate::viewer::keys::TRANSCRIPT_KEYS
 
 use tuikit::help::{HelpAction, HelpEntry};
 use tuikit::keys::PagerKey;
 
-use crate::viewer::input::ViewerMsg;
 use crate::viewer::keys::TranscriptKey;
 
 /// The section the toggles are listed in.
@@ -45,77 +47,6 @@ pub fn describe(key: PagerKey) -> Option<&'static str> {
             Some("Find in transcript; a match in hidden content turns that content on")
         }
         _ => None,
-    }
-}
-
-impl ViewerMsg {
-    /// Every message, in the order the help page lists them.
-    pub const ALL: [ViewerMsg; 18] = [
-        ViewerMsg::ScrollDown,
-        ViewerMsg::ScrollUp,
-        ViewerMsg::PageDown,
-        ViewerMsg::PageUp,
-        ViewerMsg::HalfPageDown,
-        ViewerMsg::HalfPageUp,
-        ViewerMsg::JumpToStart,
-        ViewerMsg::JumpToEnd,
-        ViewerMsg::CycleToolDetail,
-        ViewerMsg::ToggleThinking,
-        ViewerMsg::ToggleAborted,
-        ViewerMsg::ToggleHidden,
-        ViewerMsg::FindOpen,
-        ViewerMsg::FindNext,
-        ViewerMsg::FindPrev,
-        ViewerMsg::ToggleHelp,
-        ViewerMsg::Close,
-        ViewerMsg::Quit,
-    ];
-}
-
-impl HelpAction for ViewerMsg {
-    const LISTED: &'static [Self] = &Self::ALL;
-
-    /// Where this message is listed in the help, and what it does.
-    fn help(self) -> HelpEntry {
-        let (section, description) = match self {
-            ViewerMsg::ScrollDown => ("Moving", "Scroll one line down"),
-            ViewerMsg::ScrollUp => ("Moving", "Scroll one line up"),
-            ViewerMsg::PageDown => ("Moving", "Page down"),
-            ViewerMsg::PageUp => ("Moving", "Page up"),
-            ViewerMsg::HalfPageDown => ("Moving", "Half a page down"),
-            ViewerMsg::HalfPageUp => ("Moving", "Half a page up"),
-            ViewerMsg::JumpToStart => ("Moving", "Jump to the start of the transcript"),
-            ViewerMsg::JumpToEnd => ("Moving", "Jump to the end (where the viewer opens)"),
-            ViewerMsg::CycleToolDetail => (
-                "Showing more or less",
-                "Cycle tool detail: hidden, summary, truncated, full",
-            ),
-            ViewerMsg::ToggleThinking => ("Showing more or less", "Show or hide thinking turns"),
-            ViewerMsg::ToggleAborted => (
-                "Showing more or less",
-                "Show or hide aborted and interrupted turns",
-            ),
-            ViewerMsg::ToggleHidden => (
-                "Showing more or less",
-                "Show or hide records the harness's own UI never showed",
-            ),
-            ViewerMsg::FindOpen => (
-                "Finding",
-                "Find in transcript; a match in hidden content turns that content on",
-            ),
-            ViewerMsg::FindNext => ("Finding", "Next match, wrapping at the end"),
-            ViewerMsg::FindPrev => ("Finding", "Previous match, wrapping at the start"),
-            ViewerMsg::ToggleHelp => ("Viewer", "Show or hide this help"),
-            ViewerMsg::Close => (
-                "Viewer",
-                "Step back: close help, then the find, then the viewer",
-            ),
-            ViewerMsg::Quit => (
-                "Viewer",
-                "Leave the viewer at once, even with a find active",
-            ),
-        };
-        HelpEntry::new(section, description)
     }
 }
 

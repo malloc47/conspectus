@@ -76,7 +76,7 @@ pub enum ExecSpec {
     /// staying in the TUI.
     Resume(ResumeTarget),
     /// Open the transcript viewer for an agent session. The executor
-    /// picks native (parse transcript on disk into `ViewerState` +
+    /// picks native (parse transcript on disk into the viewer +
     /// `App::open_viewer_modal`) vs external fallback (spawn
     /// `claude-history` etc.); both paths read the filesystem so the
     /// reducer never touches them. With a `ViewerOpen` the viewer

@@ -339,8 +339,8 @@ fn run_effects_opening_viewers(
         {
             id.state_scope = to.join(rest).display().to_string();
         }
-        match crate::tui::viewer_bridge::build_viewer_state_at(&id, open.as_ref()) {
-            Some(state) => app.open_viewer_modal(state),
+        match crate::tui::viewer_bridge::build_viewer_at(&id, open.as_ref()) {
+            Some(viewer) => app.open_viewer_modal(viewer),
             None => notes.push("snapshot mode found no transcript to view".to_string()),
         }
     }

@@ -1943,7 +1943,6 @@ mod settle {
 mod viewer_find_prompt {
     use super::*;
     use crate::viewer::model::{TranscriptDocument, TranscriptTurn, TurnKind, TurnRole};
-    use crate::viewer::state::ViewerState;
 
     fn app_with_viewer() -> App {
         let mut document = TranscriptDocument::default();
@@ -1958,7 +1957,7 @@ mod viewer_find_prompt {
             });
         }
         let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(document));
+        app.open_viewer_modal(crate::tui::viewer_bridge::viewer(document, None));
         app
     }
 
@@ -1974,7 +1973,7 @@ mod viewer_find_prompt {
         modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('/')));
         // `n`, `q`, and Space are viewer keys, but the prompt owns them now.
         type_text(&mut app, "n q");
-        let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
+        let prompt = app.viewer_modal().and_then(|s| s.find().prompt());
         assert_eq!(prompt.map(tuikit::text_edit::LineEdit::value), Some("n q"));
         assert!(app.viewer_modal().is_some(), "q did not close the viewer");
     }
@@ -1986,12 +1985,12 @@ mod viewer_find_prompt {
         type_text(&mut app, "a");
         modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Enter));
         let state = app.viewer_modal().expect("viewer");
-        assert_eq!(state.find.matches, [0, 1, 2]);
-        assert!(state.find.prompt.is_none());
+        assert_eq!(state.find().matches(), [0, 1, 2]);
+        assert!(state.find().prompt().is_none());
         modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('n')));
-        assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(1));
+        assert_eq!(app.viewer_modal().and_then(|s| s.find().current()), Some(1));
         modal_key_pure(&mut app, chord(KeyModifiers::SHIFT, KeyCode::Char('N')));
-        assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(0));
+        assert_eq!(app.viewer_modal().and_then(|s| s.find().current()), Some(0));
     }
 
     #[test]
@@ -2000,7 +1999,10 @@ mod viewer_find_prompt {
         modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('/')));
         type_text(&mut app, "x");
         modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Esc));
-        assert!(app.viewer_modal().is_some_and(|s| s.find.prompt.is_none()));
+        assert!(
+            app.viewer_modal()
+                .is_some_and(|s| s.find().prompt().is_none())
+        );
         modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Esc));
         assert!(app.viewer_modal().is_none(), "a second Esc closes it");
     }
@@ -2010,7 +2012,7 @@ mod viewer_find_prompt {
         let mut app = app_with_viewer();
         modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('/')));
         modal_key_pure(&mut app, chord(KeyModifiers::CONTROL, KeyCode::Char('a')));
-        let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
+        let prompt = app.viewer_modal().and_then(|s| s.find().prompt());
         assert_eq!(prompt.map(tuikit::text_edit::LineEdit::value), Some(""));
     }
 }

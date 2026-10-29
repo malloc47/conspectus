@@ -8,6 +8,7 @@ use tuikit::keys::{
 };
 
 use super::*;
+use crate::viewer::keys::{TRANSCRIPT_KEYS, TranscriptKey};
 use tuikit::testkit::keys::chord;
 
 /// What a table gets wrong, by rule.
@@ -58,22 +59,23 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("MUX_LAUNCH_KEYS", problems(MUX_LAUNCH_KEYS)),
         ("PIN_EDIT_KEYS", problems(PIN_EDIT_KEYS)),
         ("PANE_KEYS", problems(PANE_KEYS)),
-        ("VIEWER_KEYS", problems(VIEWER_KEYS)),
-        ("VIEWER_FIND_KEYS", problems(VIEWER_FIND_KEYS)),
+        ("TRANSCRIPT_KEYS", problems(TRANSCRIPT_KEYS)),
     ]
 }
 
 /// Tables that are a part of another table or of a field, not a whole
 /// overlay's, so they need not start with `Ctrl-C`: the form's option
 /// rows are included after `FORM_KEYS`, the pager's scroll rows after
-/// `PAGER_KEYS` and `PAGER_HELP_KEYS` start with it, the pane viewer's own
-/// keys after the pager's `READER_KEYS`, the path field's one row is
+/// `PAGER_KEYS` and `PAGER_HELP_KEYS` start with it, the pane viewer's and
+/// the transcript viewer's own keys after the pager's `READER_KEYS`, the
+/// path field's one row is
 /// consulted by a form after the form's own table, and the line editor's
 /// keys are every text field's, consulted after its overlay's table.
 const FRAGMENTS: &[&str] = &[
     "FORM_OPTION_KEYS",
     "PAGER_SCROLL_KEYS",
     "PANE_KEYS",
+    "TRANSCRIPT_KEYS",
     "LINE_EDIT_KEYS",
     "PATH_FIELD_KEYS",
 ];
@@ -241,10 +243,7 @@ fn generated_footers_read_in_the_one_grammar() {
             "Esc cancel",
         ])
     );
-    assert_eq!(
-        footer(VIEWER_FIND_KEYS),
-        joined(&["Enter find", "Esc cancel"])
-    );
+    assert_eq!(footer(FIND_KEYS), joined(&["Enter find", "Esc cancel"]));
     // One grammar: a short imperative verb after the keys, never "to"
     // or "=".
     for text in [
@@ -325,47 +324,58 @@ fn every_list_moves_with_ctrl_n_and_ctrl_p() {
         Some(PaletteOptionKey::Down)
     );
     // The viewers are pagers with no cursor; Ctrl-N is not their `n`.
-    assert_eq!(resolve(VIEWER_KEYS, ctrl_n), None);
+    assert_eq!(resolve(TRANSCRIPT_KEYS, ctrl_n), None);
     assert_eq!(resolve(READER_KEYS, ctrl_n), None);
     assert_eq!(resolve(PANE_KEYS, ctrl_n), None);
 }
 
+/// What the transcript viewer does with a key: the pager's table
+/// first, then the transcript's toggles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Read {
+    Pager(PagerKey),
+    Toggle(TranscriptKey),
+}
+
 #[test]
-fn viewer_keys_resolve_as_the_old_match_did() {
-    use crate::viewer::input::ViewerMsg as V;
+fn the_transcript_viewer_resolves_the_readers_keys_then_its_toggles() {
+    use PagerKey as P;
+    use TranscriptKey as T;
     let none = KeyModifiers::NONE;
     let shift = KeyModifiers::SHIFT;
     let ctrl_mod = KeyModifiers::CONTROL;
     let alt_mod = KeyModifiers::ALT;
+    let pager = |key| Some(Read::Pager(key));
+    let toggle = |key| Some(Read::Toggle(key));
     let cases = [
-        (ctrl_mod, KeyCode::Char('c'), Some(V::Quit)),
-        (none, KeyCode::Esc, Some(V::Close)),
-        (none, KeyCode::Char('q'), Some(V::Quit)),
-        (none, KeyCode::Char('j'), Some(V::ScrollDown)),
-        (none, KeyCode::Down, Some(V::ScrollDown)),
-        (none, KeyCode::Char('k'), Some(V::ScrollUp)),
-        (none, KeyCode::Up, Some(V::ScrollUp)),
-        (none, KeyCode::PageDown, Some(V::PageDown)),
-        (none, KeyCode::Char(' '), Some(V::PageDown)),
-        (none, KeyCode::PageUp, Some(V::PageUp)),
-        (ctrl_mod, KeyCode::Char('d'), Some(V::HalfPageDown)),
-        (ctrl_mod, KeyCode::Char('u'), Some(V::HalfPageUp)),
+        (ctrl_mod, KeyCode::Char('c'), pager(P::Abort)),
+        (none, KeyCode::Esc, pager(P::Close)),
+        (none, KeyCode::Char('q'), pager(P::Abort)),
+        (none, KeyCode::Char('j'), pager(P::Down)),
+        (none, KeyCode::Down, pager(P::Down)),
+        (none, KeyCode::Char('k'), pager(P::Up)),
+        (none, KeyCode::Up, pager(P::Up)),
+        (none, KeyCode::PageDown, pager(P::PageDown)),
+        (none, KeyCode::Char(' '), pager(P::PageDown)),
+        (none, KeyCode::PageUp, pager(P::PageUp)),
+        (ctrl_mod, KeyCode::Char('d'), pager(P::HalfPageDown)),
+        (ctrl_mod, KeyCode::Char('u'), pager(P::HalfPageUp)),
         (none, KeyCode::Char('d'), None),
-        (none, KeyCode::Char('g'), Some(V::JumpToStart)),
-        (none, KeyCode::Home, Some(V::JumpToStart)),
-        (shift, KeyCode::Char('G'), Some(V::JumpToEnd)),
-        (none, KeyCode::Char('G'), Some(V::JumpToEnd)),
+        (none, KeyCode::Char('g'), pager(P::Top)),
+        (none, KeyCode::Home, pager(P::Top)),
+        (shift, KeyCode::Char('G'), pager(P::Bottom)),
+        (none, KeyCode::Char('G'), pager(P::Bottom)),
         (ctrl_mod, KeyCode::Char('G'), None),
-        (none, KeyCode::End, Some(V::JumpToEnd)),
-        (none, KeyCode::Char('t'), Some(V::CycleToolDetail)),
-        (shift, KeyCode::Char('T'), Some(V::ToggleThinking)),
-        (shift, KeyCode::Char('I'), Some(V::ToggleAborted)),
-        (shift, KeyCode::Char('H'), Some(V::ToggleHidden)),
-        (none, KeyCode::Char('?'), Some(V::ToggleHelp)),
-        (none, KeyCode::Char('/'), Some(V::FindOpen)),
-        (none, KeyCode::Char('n'), Some(V::FindNext)),
-        (shift, KeyCode::Char('N'), Some(V::FindPrev)),
-        (none, KeyCode::Char('N'), Some(V::FindPrev)),
+        (none, KeyCode::End, pager(P::Bottom)),
+        (none, KeyCode::Char('t'), toggle(T::Tools)),
+        (shift, KeyCode::Char('T'), toggle(T::Thinking)),
+        (shift, KeyCode::Char('I'), toggle(T::Aborted)),
+        (shift, KeyCode::Char('H'), toggle(T::Hidden)),
+        (none, KeyCode::Char('?'), pager(P::Help)),
+        (none, KeyCode::Char('/'), pager(P::Find)),
+        (none, KeyCode::Char('n'), pager(P::FindNext)),
+        (shift, KeyCode::Char('N'), pager(P::FindPrev)),
+        (none, KeyCode::Char('N'), pager(P::FindPrev)),
         (none, KeyCode::Char('x'), None),
         // The one rule for characters: no chord of a character fires it.
         (ctrl_mod, KeyCode::Char('g'), None),
@@ -376,17 +386,17 @@ fn viewer_keys_resolve_as_the_old_match_did() {
         (ctrl_mod, KeyCode::Char('n'), None),
     ];
     for (modifiers, code, expected) in cases {
-        assert_eq!(
-            resolve(VIEWER_KEYS, chord(modifiers, code)),
-            expected,
-            "{modifiers:?} {code:?}"
-        );
+        let key = chord(modifiers, code);
+        let read = resolve(READER_KEYS, key)
+            .map(Read::Pager)
+            .or_else(|| resolve(TRANSCRIPT_KEYS, key).map(Read::Toggle));
+        assert_eq!(read, expected, "{modifiers:?} {code:?}");
     }
 }
 
 #[test]
 fn find_prompt_keys_edit_confirm_and_leave() {
-    use crate::viewer::find::ViewerFindMsg as F;
+    use tuikit::keys::FindKey as F;
     use tuikit::text_edit::EditKey;
     let none = KeyModifiers::NONE;
     let ctrl_mod = KeyModifiers::CONTROL;
@@ -394,11 +404,11 @@ fn find_prompt_keys_edit_confirm_and_leave() {
     let cases = [
         (none, KeyCode::Enter, Some(F::Confirm)),
         (none, KeyCode::Esc, Some(F::Cancel)),
-        (ctrl_mod, KeyCode::Char('c'), Some(F::Quit)),
+        (ctrl_mod, KeyCode::Char('c'), Some(F::Abort)),
     ];
     for (modifiers, code, expected) in cases {
         assert_eq!(
-            resolve(VIEWER_FIND_KEYS, chord(modifiers, code)),
+            resolve(FIND_KEYS, chord(modifiers, code)),
             expected,
             "{modifiers:?} {code:?}"
         );
@@ -424,11 +434,7 @@ fn find_prompt_keys_edit_confirm_and_leave() {
     ];
     for (modifiers, code, expected) in edits {
         let key = chord(modifiers, code);
-        assert_eq!(
-            resolve(VIEWER_FIND_KEYS, key),
-            None,
-            "{modifiers:?} {code:?}"
-        );
+        assert_eq!(resolve(FIND_KEYS, key), None, "{modifiers:?} {code:?}");
         assert_eq!(EditKey::of(key), Some(expected), "{modifiers:?} {code:?}");
     }
 }

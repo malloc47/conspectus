@@ -13,17 +13,28 @@
 //! Harness dispatch goes through the adapter registry.
 //! `locator_for_session` iterates registered adapters and asks each
 //! for a `transcript_source`; the first non-`None` answer wins.
-//! `build_viewer_state` grabs the same adapter's `transcript_parser`
-//! and delegates the read. Aider (and every future harness that
-//! declines `transcript_source`) drops through both functions with
-//! `None` so the escape-hatch external viewer takes over.
+//! `build_viewer` grabs the same adapter's `transcript_parser` and
+//! delegates the read. Aider (and every future harness that declines
+//! `transcript_source`) drops through both functions with `None` so the
+//! escape-hatch external viewer takes over.
+//!
+//! The viewer itself is the framework's pager (`tuikit::pager`) over the
+//! viewer's transcript content: the pager owns scrolling, find, help,
+//! and the footer, so it is an overlay on the modal stack like any
+//! other, and the bridge only builds it.
+
+use tuikit::pager::Pager;
 
 use crate::discovery::harness::registered_adapters;
 use crate::model::AgentSessionId;
-use crate::tui::keybindings::overlay::VIEWER_FIND_KEYS;
+use crate::tui::Msg;
 use crate::viewer::model::{SessionLocator, TranscriptDocument};
 use crate::viewer::parser::ParseError;
-use crate::viewer::state::{ViewerOpen, ViewerState};
+use crate::viewer::state::{Transcript, ViewerOpen};
+
+/// The full-screen transcript viewer: the framework's pager over a
+/// transcript, an overlay on the TUI's modal stack.
+pub type TranscriptViewer = Pager<Transcript<Msg>>;
 
 /// Map a graph-flavored [`AgentSessionId`] to a viewer-flavored
 /// `SessionLocator`, or `None` when the harness key has no
@@ -34,34 +45,35 @@ pub fn locator_for_session(session: &AgentSessionId) -> Option<SessionLocator> {
         .and_then(|a| a.transcript_source(session))
 }
 
-/// Resolve a session into a `ViewerState` ready for the modal.
+/// Resolve a session into the viewer, opened at its newest turns.
 /// Parser failures degrade to a `TranscriptDocument::unavailable`
-/// document so the widget can always render a coherent banner
+/// document so the viewer can always render a coherent banner
 /// instead of bubbling the error up.
-pub fn build_viewer_state(session: &AgentSessionId) -> Option<ViewerState> {
-    build_viewer_state_at(session, None)
+pub fn build_viewer(session: &AgentSessionId) -> Option<TranscriptViewer> {
+    build_viewer_at(session, None)
 }
 
-/// [`build_viewer_state`], landed on a search result when `open` is
-/// given: the viewer highlights the query and shows the matched turn,
+/// [`build_viewer`], landed on a search result when `open` is given:
+/// the viewer highlights the query and shows the matched turn,
 /// switching on whatever hides it.
-pub fn build_viewer_state_at(
+pub fn build_viewer_at(
     session: &AgentSessionId,
     open: Option<&ViewerOpen>,
-) -> Option<ViewerState> {
+) -> Option<TranscriptViewer> {
     let adapter = registered_adapters().find(|a| a.harness_key() == session.harness_key)?;
     let locator = adapter.transcript_source(session)?;
     let document = adapter
         .transcript_parser()
         .and_then(|parser| parser.read(&locator).ok())
         .unwrap_or_else(|| TranscriptDocument::unavailable(&locator));
-    let mut state = ViewerState::new(document);
-    state.find_hint = tuikit::keys::footer(VIEWER_FIND_KEYS);
-    state.title_role = crate::tui::theme::harness_role(&session.harness_key);
-    if let Some(open) = open {
-        state.open_at(open);
-    }
-    Some(state)
+    Some(viewer(document, open))
+}
+
+/// The viewer over `document`, its title in the harness's color, at its
+/// newest turns or landed on `open`.
+pub fn viewer(document: TranscriptDocument, open: Option<&ViewerOpen>) -> TranscriptViewer {
+    let role = crate::tui::theme::harness_role(&document.meta.harness);
+    crate::viewer::find::viewer(Transcript::new(document).title_role(role), open)
 }
 
 /// Why a session's transcript has nothing to show.
@@ -75,7 +87,7 @@ pub enum TranscriptMissing {
 }
 
 /// Read a session's transcript for the inline preview (ADR 0112).
-/// Unlike [`build_viewer_state`], which degrades every failure to an
+/// Unlike [`build_viewer`], which degrades every failure to an
 /// empty document for the modal's banner, this keeps the reason so the
 /// preview can say why there is nothing to show.
 pub fn load_transcript(session: &AgentSessionId) -> Result<TranscriptDocument, TranscriptMissing> {

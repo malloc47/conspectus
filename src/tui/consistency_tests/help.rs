@@ -12,8 +12,7 @@ use tuikit::help::HelpPage;
 use tuikit::testkit::conformance::same_chrome;
 
 use crate::tui::Theme;
-use crate::tui::keybindings::overlay::VIEWER_KEYS;
-use crate::tui::widgets::{help, pane_viewer, viewer_help};
+use crate::tui::widgets::{help, pane_viewer};
 
 const SIZES: [(u16, u16); 4] = [(60, 20), (80, 24), (120, 40), (160, 50)];
 
@@ -33,17 +32,27 @@ fn page_at(page: &str, area: Rect, theme: &Theme, scroll: usize) -> Buffer {
             help.draw(area, &mut buf, theme);
         }
         "viewer" => {
-            let mut help = viewer_help::page(VIEWER_KEYS);
-            if at_end {
-                help.to_end();
-            }
-            help.draw(area, &mut buf, theme);
+            transcript_help(area, &mut buf, theme, at_end);
         }
         _ => {
             pane_help(area, &mut buf, theme, at_end);
         }
     }
     buf
+}
+
+/// The transcript viewer's help page drawn over it, at the top or, with
+/// `at_end`, scrolled to its end; returns how far the page scrolled.
+fn transcript_help(area: Rect, buf: &mut Buffer, theme: &Theme, at_end: bool) -> usize {
+    use tuikit::testkit::keys::typed;
+    let document = crate::viewer::model::TranscriptDocument::default();
+    let mut viewer = crate::tui::viewer_bridge::viewer(document, None);
+    viewer.handle_key(typed('?'));
+    if at_end {
+        viewer.handle_key(typed('G'));
+    }
+    viewer.draw(area, buf, theme);
+    viewer.help_page().map_or(0, |help| help.window().offset())
 }
 
 /// The pane viewer's help page drawn over it, at the top or, with
@@ -207,9 +216,7 @@ fn the_viewer_helps_scroll_where_the_keymap_help_does() {
         let max_scroll = |area: Rect| {
             let mut buf = Buffer::empty(area);
             if table == 0 {
-                let mut help = viewer_help::page(VIEWER_KEYS);
-                help.draw(area, &mut buf, &theme);
-                help.window().last_offset()
+                transcript_help(area, &mut buf, &theme, true)
             } else {
                 pane_help(area, &mut buf, &theme, true)
             }

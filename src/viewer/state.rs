@@ -1,22 +1,16 @@
-//! Pure viewer state.
+//! The viewer's state: a [`Transcript`] and which of its turns show.
 //!
-//! Per ADR 0024 the reducer is pure and synchronous; `widget.rs`
-//! consumes this state and writes back per-draw layout metrics
-//! (`viewport_height`, `total_lines`) so navigation messages
-//! (page-down etc.) know how far to move and the scroll offset
-//! can be clamped.
-//!
-//! The optional `rendered` cache holds the previously composed body
-//! lines so scrolling-only frames don't re-run `tui_markdown::from_str`
-//! over every Message turn. Invalidated whenever `content_width`,
-//! `show_tools`, or `show_thinking` change.
+//! Where the viewer is scrolled, its find, and its help page are the
+//! framework pager's (`tuikit::pager`); the transcript holds what is
+//! the transcript's own. The optional `rendered` cache holds the
+//! previously composed body lines so scrolling-only frames don't re-run
+//! `tui_markdown::from_str` over every Message turn. It is keyed by the
+//! content width and the four toggles.
 
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 
 use ratatui::text::Line;
 
-use crate::viewer::find::FindState;
 use crate::viewer::model::TranscriptDocument;
 
 /// How tool-use / tool-result turns are rendered.
@@ -159,91 +153,16 @@ impl<M> Transcript<M> {
         }
     }
 
+    /// Draws the header's title in the named style `role`.
+    #[must_use]
+    pub fn title_role(mut self, role: impl Into<String>) -> Self {
+        self.title_role = role.into();
+        self
+    }
+
     /// Drop the cached body-line composition.
     pub fn invalidate_render_cache(&mut self) {
         self.rendered = None;
-    }
-}
-
-/// Everything the viewer needs to render itself.
-#[derive(Clone, Debug)]
-pub struct ViewerState {
-    /// The transcript the viewer shows, and which of its turns. The
-    /// state reads as the transcript (`Deref`), so `state.document`
-    /// and the toggles are its fields.
-    pub transcript: Transcript,
-    /// Current scroll offset (line offset from the rendered body
-    /// top). Clamped on every draw against `total_lines` and
-    /// `viewport_height`.
-    pub scroll_offset: usize,
-    /// When `true`, the next draw pins the scroll offset to the
-    /// bottom of the document. `JumpToEnd` sets it; initial state
-    /// starts with it on so the modal opens on the last turn
-    /// (ADR 0052).
-    pub stick_to_end: bool,
-    /// When `true`, the modal renders a centered help-overlay panel
-    /// over the body listing every viewer keybinding. Toggled by
-    /// `?`; closed by `?` or `Esc`.
-    pub show_help: bool,
-    /// The help page in a pager of its own, scrolled while it is open.
-    /// Each draw brings it back inside the page and keeps the rows the
-    /// page showed, which its page keys move by (the transcript's own
-    /// viewport is taller). It starts empty: whoever draws the viewer
-    /// generates it from the viewer's key table. Boxed to keep the
-    /// viewer, which sits on the modal stack, small.
-    pub help: Box<tuikit::pager::Pager<tuikit::help::HelpPage>>,
-    /// Viewport height (in cells / lines) last seen during draw.
-    /// Used by the reducer to compute page/half-page deltas.
-    pub viewport_height: u16,
-    /// Total rendered line count produced by the last draw. Used
-    /// by the reducer to clamp scroll offsets.
-    pub total_lines: usize,
-    /// Find-in-transcript state: the prompt, the active query, and its
-    /// matches.
-    pub find: FindState,
-    /// Footer hint for the find prompt, generated from the prompt's key
-    /// table by whoever opens the viewer. Empty shows no hint.
-    pub find_hint: String,
-}
-
-impl Deref for ViewerState {
-    type Target = Transcript;
-
-    fn deref(&self) -> &Transcript {
-        &self.transcript
-    }
-}
-
-impl DerefMut for ViewerState {
-    fn deref_mut(&mut self) -> &mut Transcript {
-        &mut self.transcript
-    }
-}
-
-impl ViewerState {
-    /// Construct a fresh state for the given document. Opens on the
-    /// last turn (`stick_to_end = true`).
-    pub fn new(document: TranscriptDocument) -> Self {
-        Self {
-            transcript: Transcript::new(document),
-            scroll_offset: 0,
-            stick_to_end: true,
-            show_help: false,
-            help: Box::new(
-                tuikit::help::HelpPage::new(Vec::new()).pager(tuikit::keys::PAGER_HELP_KEYS),
-            ),
-            viewport_height: 0,
-            total_lines: 0,
-            find: FindState::default(),
-            find_hint: String::new(),
-        }
-    }
-
-    /// Maximum scroll offset given the latest layout. Saturating
-    /// arithmetic, so `total_lines < viewport_height` clamps to 0.
-    pub fn max_scroll(&self) -> usize {
-        self.total_lines
-            .saturating_sub(self.viewport_height as usize)
     }
 }
 
@@ -262,12 +181,16 @@ mod tests {
     }
 
     #[test]
-    fn fresh_state_opens_on_last_turn_with_clean_flags() {
-        let state = ViewerState::new(empty_doc());
-        assert_eq!(state.scroll_offset, 0);
-        assert!(state.stick_to_end);
-        assert_eq!(state.tool_detail, ToolDetail::Hidden);
-        assert!(!state.show_thinking);
+    fn a_fresh_transcript_shows_only_messages() {
+        let transcript: Transcript = Transcript::new(empty_doc());
+        assert_eq!(transcript.tool_detail, ToolDetail::Hidden);
+        assert!(!transcript.show_thinking);
+        assert!(!transcript.show_aborted && !transcript.show_hidden);
+        assert!(transcript.rendered.is_none());
+        assert_eq!(
+            transcript.title_role("harness.codex").title_role,
+            "harness.codex"
+        );
     }
 
     #[test]
@@ -281,21 +204,5 @@ mod tests {
         assert_eq!(d, ToolDetail::Full);
         d = d.cycle();
         assert_eq!(d, ToolDetail::Hidden);
-    }
-
-    #[test]
-    fn max_scroll_clamps_to_zero_when_doc_fits() {
-        let mut state = ViewerState::new(empty_doc());
-        state.total_lines = 10;
-        state.viewport_height = 24;
-        assert_eq!(state.max_scroll(), 0);
-    }
-
-    #[test]
-    fn max_scroll_subtracts_viewport_when_doc_exceeds() {
-        let mut state = ViewerState::new(empty_doc());
-        state.total_lines = 100;
-        state.viewport_height = 24;
-        assert_eq!(state.max_scroll(), 76);
     }
 }

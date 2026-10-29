@@ -14,7 +14,6 @@ use tuikit::pager::Find;
 use tuikit::text;
 use tuikit::theme::Theme;
 
-use crate::viewer::find::FindState;
 use crate::viewer::state::RenderCache;
 
 /// A query's matches marked on a transcript drawn outside a pager (the
@@ -58,23 +57,6 @@ impl Marks {
             theme,
         );
     }
-}
-
-/// Paint the matches of the active find on `lines`, which are the cache
-/// lines starting at `first_line`.
-pub fn highlight_matches(
-    lines: &mut [Line<'static>],
-    first_line: usize,
-    cache: &RenderCache,
-    find: &FindState,
-    theme: &Theme,
-) {
-    if !find.is_active() || find.matches.is_empty() {
-        return;
-    }
-    let holds = |turn: usize| find.matches.binary_search(&turn).is_ok();
-    let current = find.current_turn();
-    paint_turns(lines, first_line, cache, &find.query, holds, current, theme);
 }
 
 /// Paint every occurrence of `query` after the gutter on `lines`, the

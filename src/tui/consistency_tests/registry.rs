@@ -32,7 +32,7 @@ use tuikit::text_prompt::{PromptResult, TextPrompt};
 
 pub(super) fn open_viewer(app: &mut App) {
     let document = crate::viewer::model::TranscriptDocument::default();
-    app.open_viewer_modal(crate::viewer::state::ViewerState::new(document));
+    app.open_viewer_modal(crate::tui::viewer_bridge::viewer(document, None));
 }
 
 /// The pane the pane viewer cases read: `shell`'s first pane, running

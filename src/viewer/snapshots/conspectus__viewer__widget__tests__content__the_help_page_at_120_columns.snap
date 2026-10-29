@@ -1,0 +1,34 @@
+---
+source: src/viewer/widget_tests.rs
+expression: "help_page(120, 30, \"\")"
+---
+ claude-code:0b34e59c · /p/proj · 2 turns
+──────────┌ Help ────────────────────────────────────────────────────────────────────────────────────────────┐──────────
+ you  │ wh│Moving                                                                                            │
+          │  j / ↓         Scroll one line down                                                             ▲│
+  ai  │ no│  k / ↑         Scroll one line up                                                               █│
+          │  PgDn / Space  Page down                                                                        █│
+          │  PgUp          Page up                                                                          █│
+          │  Ctrl-D        Half a page down                                                                 █│
+          │  Ctrl-U        Half a page up                                                                   █│
+          │  g / Home      Jump to the start of the transcript                                              █│
+          │  G / End       Jump to the end, where the viewer opens, and stay there                          █│
+          │                                                                                                 █│
+          │Finding                                                                                          █│
+          │  /             Find in transcript; a match in hidden content turns that content on              █│
+          │  n             Next match, wrapping at the end                                                  █│
+          │  N             Previous match, wrapping at the start                                            █│
+          │                                                                                                 █│
+          │Showing more or less                                                                             █│
+          │  t             Cycle tool detail: hidden, summary, truncated, full                              █│
+          │  T             Show or hide thinking turns                                                      █│
+          │  I             Show or hide aborted and interrupted turns                                       █│
+          │  H             Show or hide records the harness's own UI never showed                           █│
+          │                                                                                                 █│
+          │Viewer                                                                                           █│
+          │  ?             Show or hide this help                                                           ║│
+          │  Esc           Step back: close this help, then the find, then the viewer                       ▼│
+          │  q / Ctrl-C    Leave the viewer at once, even with a find active                                 │
+          │j/k/PgDn/PgUp scroll · Esc/? back · q close                                                       │
+──────────└──────────────────────────────────────────────────────────────────────────────────────────────────┘──────────
+[ 1/4 ] · tools·off   (t) · think·off (T) · aborted·hide (I) · j/k/PgDn/PgUp scroll · / find · ? help · Esc/q close

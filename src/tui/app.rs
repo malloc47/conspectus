@@ -1472,37 +1472,6 @@ impl App {
                     }
                 }
             }
-            Msg::Viewer(vmsg) => {
-                use crate::viewer::input::{ViewerEffect, reduce};
-                if !matches!(self.modal_stack.top(), Some(crate::tui::Modal::Viewer(_))) {
-                    return effects;
-                }
-                let Some(crate::tui::Modal::Viewer(state)) = self.modal_stack.pop() else {
-                    unreachable!("checked above");
-                };
-                // Leaving is silent, as every overlay's close is: the
-                // status line drops the viewer's own line with it.
-                let (next, effect) = reduce(state, vmsg);
-                if effect == ViewerEffect::None {
-                    self.modal_stack.push(crate::tui::Modal::Viewer(next));
-                } else {
-                    self.status_message = None;
-                }
-            }
-            Msg::ViewerFind(fmsg) => {
-                if !matches!(self.modal_stack.top(), Some(crate::tui::Modal::Viewer(_))) {
-                    return effects;
-                }
-                let Some(crate::tui::Modal::Viewer(state)) = self.modal_stack.pop() else {
-                    unreachable!("checked above");
-                };
-                let (next, effect) = crate::viewer::find::reduce_find(state, fmsg);
-                if effect == crate::viewer::input::ViewerEffect::None {
-                    self.modal_stack.push(crate::tui::Modal::Viewer(next));
-                } else {
-                    self.status_message = None;
-                }
-            }
             Msg::AttachSelected => {
                 use crate::tui::effect::ExecSpec;
                 if self.selected_row_awaits_handoff() {

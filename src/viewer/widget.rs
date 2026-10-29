@@ -33,18 +33,14 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
-use tuikit::chip::{PositionChip, StatusChip, ToggleChip, Tone};
-use tuikit::glyphs::marks;
+use tuikit::chip::{ToggleChip, Tone};
 use tuikit::keys::{KeyRow, PagerKey};
 use tuikit::pager::{Find, PagerContent, PagerEffect};
 use tuikit::theme::Theme;
 
-use crate::viewer::highlight::{highlight_matches, paint_turns};
+use crate::viewer::highlight::paint_turns;
 use crate::viewer::keys::{TRANSCRIPT_KEYS, TranscriptKey};
 use crate::viewer::model::{TranscriptTurn, TurnKind};
 use crate::viewer::render::{
@@ -53,7 +49,7 @@ use crate::viewer::render::{
     tool_name_from_body,
 };
 use crate::viewer::search::{ContentKinds, ContentQuery, matching_turns};
-use crate::viewer::state::{RenderCache, ToolDetail, Transcript, TurnStart, ViewerState};
+use crate::viewer::state::{RenderCache, ToolDetail, Transcript, TurnStart};
 
 impl<M> PagerContent for Transcript<M> {
     type Message = M;
@@ -470,286 +466,17 @@ fn title_style(role: &str, theme: &Theme) -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-// ---------------------------------------------------------------------
-// The viewer's own chrome, until the TUI runs it on the pager.
-// ---------------------------------------------------------------------
-
-/// Draw the transcript viewer onto `area`. Mutates `state` to
-/// record the layout it observed (viewport height, total line
-/// count) so the reducer can use those numbers on the next key
-/// event.
-pub fn draw(state: &mut ViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
-    let chunks = Layout::vertical([
-        Constraint::Length(1), // header
-        Constraint::Length(1), // separator
-        Constraint::Min(1),    // body
-        Constraint::Length(1), // separator
-        Constraint::Length(1), // footer
-    ])
-    .split(area);
-
-    let header = state.transcript.header(usize::from(area.width), theme);
-    Widget::render(Paragraph::new(header), chunks[0], buf);
-    draw_separator(theme, buf, chunks[1]);
-    draw_body(state, theme, buf, chunks[2]);
-    draw_separator(theme, buf, chunks[3]);
-    draw_footer(state, theme, buf, chunks[4]);
-}
-
-fn draw_separator(theme: &Theme, buf: &mut Buffer, area: Rect) {
-    let rule: String = marks::RULE.repeat(area.width as usize);
-    Widget::render(
-        Paragraph::new(Line::from(Span::styled(rule, Tone::Inert.style(theme)))),
-        area,
-        buf,
-    );
-}
-
-fn draw_body(state: &mut ViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
-    // Empty-document banner short-circuits before we ever touch the
-    // turn list.
-    if state.document.is_empty() {
-        state.viewport_height = area.height;
-        state.total_lines = 0;
-        state.scroll_offset = 0;
-        let banner = Line::from(Span::styled(
-            "transcript unavailable",
-            Style::new().add_modifier(theme.muted),
-        ));
-        let rows = tuikit::text::wrap_line(&banner, usize::from(area.width), 0);
-        Widget::render(Paragraph::new(rows), area, buf);
-        return;
-    }
-
-    let total = state.transcript.lines(theme, area.width).len();
-    // A find that asked to scroll to a turn lands on its first line, one
-    // line down so the turn's neighbor above shows.
-    if let Some(turn) = state.find.pending_scroll.take()
-        && let Some(cache) = state.transcript.rendered.as_ref()
-        && let Some(start) = cache.turn_starts.iter().find(|s| s.turn_index == turn)
-    {
-        state.scroll_offset = start.line.saturating_sub(1);
-        state.stick_to_end = false;
-    }
-    let stick_to_end = state.stick_to_end;
-    let requested_offset = state.scroll_offset;
-    let viewport_height = area.height;
-    let max_offset = total.saturating_sub(viewport_height as usize);
-    let scroll_offset = if stick_to_end {
-        max_offset
-    } else {
-        requested_offset.min(max_offset)
-    };
-
-    // The cached lines are already wrapped to `content_width`, so the
-    // visible window is a plain slice. Slicing (rather than
-    // `Paragraph::scroll`, whose offset is a u16) keeps transcripts
-    // longer than 65,535 lines scrollable and clones only what is shown.
-    let visible_end = total.min(scroll_offset + viewport_height as usize);
-    let cache = state.transcript.rendered.as_ref().expect("composed above");
-    let mut visible = cache.lines[scroll_offset..visible_end].to_vec();
-    highlight_matches(&mut visible, scroll_offset, cache, &state.find, theme);
-    Widget::render(Paragraph::new(visible), area, buf);
-
-    state.viewport_height = viewport_height;
-    state.total_lines = total;
-    state.scroll_offset = scroll_offset;
-}
-
-fn draw_footer(state: &ViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
-    if let Some(prompt) = &state.find.prompt {
-        draw_find_prompt(prompt, &state.find_hint, theme, buf, area);
-        return;
-    }
-    let position = PositionChip::new(state.scroll_offset, state.total_lines);
-
-    let off_style = Tone::Inert.style(theme);
-    let pipe = Span::styled(" · ", off_style);
-
-    // Toggle chips inline the binding letter so the key + label
-    // travel together (`tools·sum (t)`). Keeps the operator's eyes
-    // on one column instead of cross-referencing a separate
-    // shortcut hint.
-    let tool_states = ToolDetail::ALL.map(ToolDetail::footer_label);
-    let tools = tool_chip(state.tool_detail, &tool_states);
-    let thinking = think_chip(state.show_thinking);
-    let aborted = abort_chip(state.show_aborted);
-    let hidden = hidden_chip(state.show_hidden);
-
-    // Long hint trails. `?` for help is its own chip so it stands
-    // out; `q close` is the last item per the operator-preferred
-    // ordering (close should sit where the muscle memory lands
-    // when ready to exit).
-    let help_chip = "(?) help";
-    let close_chip = "(q) close";
-    let scroll_hint = "j/k scroll · g/G top/end · PgUp/PgDn";
-
-    // The hidden chip only appears for transcripts whose parser marked
-    // turns hidden; for the rest it would toggle nothing.
-    let has_hidden = state.document.turns.iter().any(|turn| turn.hidden);
-
-    let find_tone = if state.find.is_active() && state.find.matches.is_empty() {
-        Tone::Warning
-    } else {
-        Tone::Success
-    };
-    let find = find_chip_text(state).map(|text| StatusChip::new(text, find_tone).bold());
-    let mut spans: Vec<Span<'_>> = vec![
-        position.span(),
-        pipe.clone(),
-        tools.span(theme),
-        pipe.clone(),
-        thinking.span(theme),
-        pipe.clone(),
-        aborted.span(theme),
-        pipe.clone(),
-    ];
-    if has_hidden {
-        spans.push(hidden.span(theme));
-        spans.push(pipe.clone());
-    }
-    if let Some(find) = &find {
-        spans.splice(2..2, [find.span(theme), pipe.clone()]);
-    }
-    spans.extend([
-        Span::styled("(/) find", off_style),
-        pipe.clone(),
-        Span::styled(help_chip, off_style),
-        pipe.clone(),
-        Span::styled(scroll_hint, off_style),
-        pipe,
-        Span::styled(close_chip, off_style),
-    ]);
-
-    // Width-aware truncate. Tiers, picked by what fits:
-    //   1. Full assembly above.
-    //   2. Drop scroll hint + help chip, keep position · tools · think
-    //      · aborted · hidden · close.
-    //   3. Keep one filter chip: hidden when the transcript has hidden
-    //      turns and no aborted ones, aborted otherwise.
-    //   4. Drop that chip too. Those filters are rarely flipped, and the
-    //      tools / think chips reflect ongoing state — those stay until
-    //      close itself is at risk.
-    let total = tuikit::text::spans_width(&spans);
-    let cap = area.width as usize;
-    let line = if total <= cap {
-        Line::from(spans)
-    } else {
-        // The tiers lead each chip with its separator, in the chip's
-        // own style.
-        let after_pipe = |text: String, style: Style| Span::styled(format!(" · {text}"), style);
-        let tools_span = after_pipe(tools.text(), tools.look(theme));
-        let think_span = after_pipe(thinking.text(), thinking.look(theme));
-        let aborted_span = after_pipe(aborted.text(), aborted.look(theme));
-        let hidden_span = after_pipe(hidden.text(), hidden.look(theme));
-        let close_span = Span::styled(format!(" · {close_chip}"), off_style);
-        let mut base = vec![position.span()];
-        if let Some(find) = &find {
-            base.push(after_pipe(find.text(), find.look(theme)));
-        }
-        base.extend([tools_span, think_span]);
-        let mut tiers: Vec<Vec<Span<'_>>> = Vec::new();
-        if has_hidden {
-            tiers.push(
-                base.iter()
-                    .cloned()
-                    .chain([
-                        aborted_span.clone(),
-                        hidden_span.clone(),
-                        close_span.clone(),
-                    ])
-                    .collect(),
-            );
-        }
-        // With room for one filter chip, keep the one that filters
-        // something in this transcript.
-        let has_aborted = state.document.turns.iter().any(|turn| turn.aborted);
-        let single = if has_hidden && !has_aborted {
-            hidden_span
-        } else {
-            aborted_span
-        };
-        tiers.push(
-            base.iter()
-                .cloned()
-                .chain([single, close_span.clone()])
-                .collect(),
-        );
-        let width = |spans: &[Span<'_>]| -> usize { tuikit::text::spans_width(spans) };
-        let chosen = tiers
-            .into_iter()
-            .find(|tier| width(tier) <= cap)
-            .unwrap_or_else(|| base.into_iter().chain([close_span]).collect());
-        Line::from(chosen)
-    };
-    Widget::render(Paragraph::new(line), area, buf);
-}
-
-/// The most cells the query takes in the footer chip, the ellipsis of a
-/// cut query included.
-const FIND_CHIP_QUERY_CELLS: usize = 17;
-
-/// The find chip: the query with its position among the matches, or
-/// `no match` (and how many matches the hidden turns hold), then the
-/// one-key note if there is one. With no active find, just the note.
-fn find_chip_text(state: &ViewerState) -> Option<String> {
-    let find = &state.find;
-    if !find.is_active() {
-        return find.note.clone();
-    }
-    let query = tuikit::text::truncate_end(&find.query, FIND_CHIP_QUERY_CELLS);
-    let mut text = match find.current {
-        Some(index) => format!("find \"{query}\" {}/{}", index + 1, find.matches.len()),
-        None => format!("find \"{query}\" no match"),
-    };
-    if find.matches.is_empty() && find.hidden_matches > 0 {
-        text.push_str(&format!(" · {} in hidden turns", find.hidden_matches));
-    }
-    if let Some(note) = &find.note {
-        text.push_str(" · ");
-        text.push_str(note);
-    }
-    Some(text)
-}
-
-/// Draw the find prompt over the footer: `/` and the query as a text
-/// field with its caret, then the key hint. A long query scrolls so the
-/// cursor stays in view.
-pub(crate) fn draw_find_prompt(
-    prompt: &tuikit::text_edit::LineEdit,
-    hint: &str,
-    theme: &Theme,
-    buf: &mut Buffer,
-    area: Rect,
-) {
-    let hint_text = if hint.is_empty() {
-        String::new()
-    } else {
-        format!("   {hint}")
-    };
-    let hint_cells = tuikit::text::width(&hint_text);
-    // Cells for the text and the cursor after the leading `/`; the field
-    // keeps a few even when the hint leaves none.
-    let room = usize::from(area.width)
-        .saturating_sub(1 + hint_cells)
-        .max(4);
-    let mut spans = tuikit::text_edit::TextField::new(prompt)
-        .prefix(Span::styled("/", Style::new().add_modifier(Modifier::BOLD)))
-        .spans(1 + room, theme);
-    spans.push(Span::styled(hint_text, Tone::Inert.style(theme)));
-    Widget::render(Paragraph::new(Line::from(spans)), area, buf);
-}
-
+/// Draw `viewer` `width` by `height`, as the TUI draws it.
 #[cfg(test)]
-pub fn render_to_buffer(
-    state: &mut ViewerState,
+pub fn render_to_buffer<M>(
+    viewer: &mut tuikit::pager::Pager<Transcript<M>>,
     theme: &Theme,
     width: u16,
     height: u16,
 ) -> ratatui::buffer::Buffer {
     tuikit::testkit::render::render(width, height, |frame| {
         let area = frame.area();
-        draw(state, theme, frame.buffer_mut(), area);
+        viewer.draw(area, frame.buffer_mut(), theme);
     })
 }
 

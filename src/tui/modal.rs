@@ -139,11 +139,10 @@ modals! {
     /// App's message log, whose `y` asks to copy with [`Msg::Copy`]. Boxed
     /// to keep [`Modal`] small.
     Messages(Box<crate::tui::widgets::messages::MessagesList>),
-    /// Full-screen transcript viewer (ADR 0052). A nested reducer: its
-    /// keys become [`Msg::Viewer`] and [`Msg::ViewerFind`], whose reducer
-    /// arms apply them to this entry, and close it when the viewer's own
-    /// reducer says so.
-    Viewer(crate::viewer::state::ViewerState),
+    /// Full-screen transcript viewer (ADR 0052): the framework's pager
+    /// over a transcript, whose `t`, `T`, `I`, and `H` show or hide kinds
+    /// of turn.
+    Viewer(crate::tui::viewer_bridge::TranscriptViewer),
     /// Full-screen viewer over a mux pane's scrollback, opened from a pane
     /// search result: the framework's pager over the scrollback, whose `a`
     /// asks to attach with [`Msg::AttachPane`]. Boxed to keep [`Modal`]

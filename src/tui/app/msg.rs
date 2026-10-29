@@ -187,16 +187,6 @@ pub enum Msg {
     /// The launch of `mux` ended without an attach. Drops its mark; an
     /// attach that did run sends [`Msg::HandoffReturned`] instead.
     LaunchAborted(MuxSessionId),
-    /// Nested-reducer entry point for the transcript viewer
-    /// (ADR 0085 contract 3). The reducer arm
-    /// pops the top viewer state, runs it through
-    /// `crate::viewer::input::reduce`, and pushes the new state
-    /// back on `ViewerEffect::None` or leaves the stack popped
-    /// on `ViewerEffect::Close`. No-op when the top of the modal
-    /// stack isn't the viewer.
-    Viewer(crate::viewer::input::ViewerMsg),
-    /// A key of the viewer's find prompt.
-    ViewerFind(crate::viewer::find::ViewerFindMsg),
     /// Attach to the currently selected row's mux session
     /// (ADR 0085 contract 2). The reducer resolves the target via
     /// `resolve_attach_target(&self)` and emits either

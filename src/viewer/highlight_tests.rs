@@ -2,10 +2,11 @@ use super::*;
 use crate::viewer::model::{
     TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
-use crate::viewer::state::ViewerState;
-use crate::viewer::widget::render_to_buffer;
+use crate::viewer::state::Transcript;
 use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
 use ratatui::style::Modifier;
+use ratatui::widgets::{Paragraph, Widget};
 
 fn document() -> TranscriptDocument {
     let turn = |role, body: &str| TranscriptTurn {
@@ -30,13 +31,30 @@ fn document() -> TranscriptDocument {
     }
 }
 
-fn paint_state(query: &str, current_turn: usize) -> (ViewerState, Buffer) {
-    let mut state = ViewerState::new(document());
-    state.find.query = query.to_string();
-    state.find.matches = vec![0, 2];
-    state.find.current = state.find.matches.iter().position(|&t| t == current_turn);
-    let buffer = render_to_buffer(&mut state, &Theme::default(), 80, 12);
-    (state, buffer)
+/// `document` composed `width` wide with `marks` painted on it, drawn
+/// from the top.
+fn painted(document: TranscriptDocument, marks: &Marks, width: u16) -> Buffer {
+    let theme = Theme::default();
+    let mut transcript: Transcript = Transcript::new(document);
+    let mut lines = transcript.lines(&theme, width).to_vec();
+    marks.paint(&mut lines, 0, transcript.rendered.as_ref().unwrap(), &theme);
+    let area = Rect::new(0, 0, width, 12);
+    let mut buffer = Buffer::empty(area);
+    Paragraph::new(lines).render(area, &mut buffer);
+    buffer
+}
+
+fn marks(query: &str, matches: Vec<usize>, current: Option<usize>) -> Marks {
+    Marks {
+        query: query.to_string(),
+        matches,
+        current,
+    }
+}
+
+fn paint_state(query: &str, current_turn: usize) -> Buffer {
+    let marks = marks(query, vec![0, 2], Some(current_turn));
+    painted(document(), &marks, 80)
 }
 
 /// The text of every body cell (right of the gutter's `│`) that
@@ -64,7 +82,7 @@ fn styled(buffer: &Buffer, modifier: Modifier) -> Vec<String> {
 
 #[test]
 fn the_current_match_is_reversed_and_the_others_underlined() {
-    let (_, buffer) = paint_state("needle", 0);
+    let buffer = paint_state("needle", 0);
     assert_eq!(
         styled(&buffer, Modifier::REVERSED),
         ["Needleneedle"],
@@ -75,7 +93,7 @@ fn the_current_match_is_reversed_and_the_others_underlined() {
 
 #[test]
 fn the_gutter_is_never_painted() {
-    let (_, buffer) = paint_state("you", 0);
+    let buffer = paint_state("you", 0);
     let reversed = styled(&buffer, Modifier::REVERSED);
     // The role chip says `you`; only the body's "you" in turn 2 and the
     // body of turn 0 ("you said") are matches, never the chip.
@@ -86,27 +104,24 @@ fn the_gutter_is_never_painted() {
 
 #[test]
 fn a_turn_that_is_not_a_match_is_left_alone() {
-    let (_, buffer) = paint_state("nothing", 0);
+    let buffer = paint_state("nothing", 0);
     assert!(styled(&buffer, Modifier::REVERSED).is_empty());
     assert!(styled(&buffer, Modifier::UNDERLINED).is_empty());
 }
 
 #[test]
-fn no_find_paints_nothing() {
-    let mut state = ViewerState::new(document());
-    let buffer = render_to_buffer(&mut state, &Theme::default(), 80, 12);
+fn no_marks_paint_nothing() {
+    let buffer = painted(document(), &Marks::default(), 80);
     assert!(styled(&buffer, Modifier::REVERSED).is_empty());
+    let unmatched = painted(document(), &marks("needle", Vec::new(), None), 80);
+    assert!(styled(&unmatched, Modifier::UNDERLINED).is_empty());
 }
 
 #[test]
 fn wide_and_combining_text_keeps_its_columns() {
     let mut doc = document();
     doc.turns[0].body = "東京 needle 東京".to_string();
-    let mut state = ViewerState::new(doc);
-    state.find.query = "needle".to_string();
-    state.find.matches = vec![0];
-    state.find.current = Some(0);
-    let buffer = render_to_buffer(&mut state, &Theme::default(), 80, 12);
+    let buffer = painted(doc, &marks("needle", vec![0], Some(0)), 80);
     assert_eq!(styled(&buffer, Modifier::REVERSED), ["needle"]);
 }
 
@@ -115,11 +130,7 @@ fn the_role_words_in_a_turn_header_are_not_matches() {
     // Turn 1's chip says `ai`; no body contains it.
     let mut doc = document();
     doc.turns[0].body = "you spoke".into();
-    let mut state = ViewerState::new(doc);
-    state.find.query = "ai".to_string();
-    state.find.matches = vec![1];
-    state.find.current = Some(0);
-    let buffer = render_to_buffer(&mut state, &Theme::default(), 80, 12);
+    let buffer = painted(doc, &marks("ai", vec![1], Some(1)), 80);
     let painted: Vec<_> = [Modifier::REVERSED, Modifier::UNDERLINED]
         .iter()
         .flat_map(|modifier| styled(&buffer, *modifier))
@@ -134,14 +145,9 @@ fn a_match_split_across_a_wrap_is_found_but_not_painted() {
     // navigation, but no cell is highlighted.
     let mut doc = document();
     doc.turns[0].body = "aaaaaaaaaaaaaaaaaaaaaaaa two words tail".into();
-    let mut state = ViewerState::new(doc);
-    state.find.query = "two words".to_string();
-    state.find.matches = vec![0];
-    state.find.current = Some(0);
-    let buffer = render_to_buffer(&mut state, &Theme::default(), 40, 12);
+    let buffer = painted(doc, &marks("two words", vec![0], Some(0)), 40);
     let mut screen = String::new();
-    // The status line quotes the query, so read the body rows only.
-    for y in 0..buffer.area.height.saturating_sub(2) {
+    for y in 0..buffer.area.height {
         for x in 0..buffer.area.width {
             screen.push_str(buffer[(x, y)].symbol());
         }

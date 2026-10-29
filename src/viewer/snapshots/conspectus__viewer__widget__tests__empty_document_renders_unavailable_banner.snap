@@ -1,6 +1,5 @@
 ---
-source: src/viewer/widget.rs
-assertion_line: 624
+source: src/viewer/widget_tests.rs
 expression: snapshot_string(&buf)
 ---
  claude-code:missing · (no cwd) · 0 turns
@@ -10,4 +9,4 @@ transcript unavailable
 
 
 ────────────────────────────────────────────────────────────
-[ 1/1 ] · tools·off   (t) · think·off (T) · (q) close
+[ 1/1 ] · tools·off   (t) · think·off (T) · Esc/q close

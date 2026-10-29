@@ -195,8 +195,9 @@ fn open_pin_cwd(app: &mut App) {
 }
 
 fn open_viewer_find(app: &mut App) {
-    app.open_viewer_modal(crate::viewer::state::ViewerState::new(
+    app.open_viewer_modal(crate::tui::viewer_bridge::viewer(
         crate::viewer::model::TranscriptDocument::default(),
+        None,
     ));
     send(app, press(KeyCode::Char('/')));
 }

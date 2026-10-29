@@ -23,7 +23,6 @@
 pub mod find;
 pub mod help;
 pub mod highlight;
-pub mod input;
 pub mod keys;
 pub mod model;
 pub mod parser;

@@ -2275,17 +2275,22 @@ mod modal_stack {
         assert!(app.modal_stack().is_empty());
     }
 
-    // viewer_modal migrates as a nested
-    // reducer entry. Msg::Viewer(ViewerMsg) is the App-level
-    // wrapper; the reducer arm pops, delegates to
-    // viewer::input::reduce, and pushes back or leaves
-    // popped based on the returned ViewerEffect.
+    // The transcript viewer is the framework's pager on the stack: its
+    // keys go to it through the stack like any overlay's, and its close
+    // settles like any overlay's.
+    fn viewer(document: crate::viewer::model::TranscriptDocument) -> App {
+        let mut app = App::new(RunConfig::defaults());
+        app.open_viewer_modal(crate::tui::viewer_bridge::viewer(document, None));
+        app
+    }
+
+    fn viewer_key(app: &mut App, code: ratatui::crossterm::event::KeyCode) {
+        crate::tui::runtime::modal_key_pure(app, tuikit::testkit::keys::press(code));
+    }
+
     #[test]
     fn open_viewer_pushes_modal_viewer_onto_stack() {
-        use crate::viewer::model::TranscriptDocument;
-        use crate::viewer::state::ViewerState;
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
+        let app = viewer(crate::viewer::model::TranscriptDocument::default());
         assert_eq!(app.modal_stack().len(), 1);
         assert!(matches!(
             app.modal_stack().iter().next(),
@@ -2295,29 +2300,22 @@ mod modal_stack {
     }
 
     #[test]
-    fn viewer_msg_close_pops_stack_silently() {
-        use crate::viewer::input::ViewerMsg;
-        use crate::viewer::model::TranscriptDocument;
-        use crate::viewer::state::ViewerState;
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
-        let effects = app.update(Msg::Viewer(ViewerMsg::Close));
-        assert!(effects.is_empty());
+    fn esc_closes_the_viewer_silently() {
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Esc);
         assert!(app.modal_stack().is_empty());
         assert_eq!(app.status_message(), None, "leaving the viewer is silent");
     }
 
     #[test]
     fn ctrl_c_in_the_viewer_find_prompt_leaves_the_viewer() {
-        use crate::viewer::find::ViewerFindMsg;
-        use crate::viewer::input::ViewerMsg;
-        use crate::viewer::model::TranscriptDocument;
-        use crate::viewer::state::ViewerState;
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
-        app.update(Msg::Viewer(ViewerMsg::FindOpen));
-        assert!(app.viewer_modal().is_some_and(|v| v.find.prompt.is_some()));
-        app.update(Msg::ViewerFind(ViewerFindMsg::Quit));
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char('/'));
+        assert!(
+            app.viewer_modal()
+                .is_some_and(|v| v.find().prompt().is_some())
+        );
+        crate::tui::runtime::modal_key_pure(&mut app, tuikit::testkit::keys::ctrl('c'));
         assert!(
             app.modal_stack().is_empty(),
             "dismissing reaches past the prompt"
@@ -2325,23 +2323,15 @@ mod modal_stack {
     }
 
     #[test]
-    fn viewer_msg_scroll_leaves_modal_on_top() {
-        use crate::viewer::input::ViewerMsg;
-        use crate::viewer::model::TranscriptDocument;
-        use crate::viewer::state::ViewerState;
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
-        let effects = app.update(Msg::Viewer(ViewerMsg::ScrollDown));
-        assert!(effects.is_empty());
+    fn scrolling_leaves_the_viewer_on_top() {
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char('j'));
         assert!(app.viewer_modal().is_some());
     }
 
     #[test]
-    fn viewer_find_msgs_edit_the_prompt_and_run_the_find() {
-        use crate::viewer::find::ViewerFindMsg;
-        use crate::viewer::input::ViewerMsg;
+    fn keys_edit_the_viewers_prompt_and_run_the_find() {
         use crate::viewer::model::{TranscriptDocument, TranscriptTurn, TurnKind, TurnRole};
-        use crate::viewer::state::ViewerState;
         let mut document = TranscriptDocument::default();
         document.turns.push(TranscriptTurn {
             role: TurnRole::User,
@@ -2351,66 +2341,41 @@ mod modal_stack {
             aborted: false,
             hidden: false,
         });
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(document));
-        app.update(Msg::Viewer(ViewerMsg::FindOpen));
+        let mut app = viewer(document);
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char('/'));
         for c in "needle".chars() {
-            assert!(
-                app.update(Msg::ViewerFind(ViewerFindMsg::Edit(
-                    tuikit::text_edit::EditKey::Insert(c)
-                )))
-                .is_empty()
-            );
+            viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char(c));
         }
-        let state = app.viewer_modal().expect("viewer");
+        let viewer = app.viewer_modal().expect("viewer");
         assert_eq!(
-            state
-                .find
-                .prompt
-                .as_ref()
+            viewer
+                .find()
+                .prompt()
                 .map(tuikit::text_edit::LineEdit::value),
             Some("needle")
         );
-        app.update(Msg::ViewerFind(ViewerFindMsg::Confirm));
-        let state = app.viewer_modal().expect("viewer stays open");
-        assert!(state.find.prompt.is_none());
-        assert_eq!(state.find.matches, [0]);
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Enter);
+        let viewer = app.viewer_modal().expect("viewer stays open");
+        assert!(viewer.find().prompt().is_none());
+        assert_eq!(viewer.find().matches(), [0]);
     }
 
     #[test]
-    fn viewer_find_msg_without_a_viewer_on_top_is_a_no_op() {
-        use crate::viewer::find::ViewerFindMsg;
-        let mut app = App::new(RunConfig::defaults());
-        assert!(
-            app.update(Msg::ViewerFind(ViewerFindMsg::Confirm))
-                .is_empty()
-        );
-        assert!(app.modal_stack().is_empty());
+    fn a_toggle_shows_its_turns_and_stays_in_the_viewer() {
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char('T'));
+        let viewer = app.viewer_modal().expect("the viewer stays open");
+        assert!(viewer.content().show_thinking);
     }
 
     #[test]
-    fn viewer_msg_without_open_viewer_is_a_no_op() {
-        use crate::viewer::input::ViewerMsg;
-        let mut app = App::new(RunConfig::defaults());
-        let effects = app.update(Msg::Viewer(ViewerMsg::Close));
-        assert!(effects.is_empty());
-        assert!(app.modal_stack().is_empty());
-    }
-
-    #[test]
-    fn viewer_msg_with_help_on_top_leaves_viewer_underneath_untouched() {
-        use crate::viewer::input::ViewerMsg;
-        use crate::viewer::model::TranscriptDocument;
-        use crate::viewer::state::ViewerState;
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
+    fn a_key_with_help_on_top_leaves_the_viewer_underneath_untouched() {
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
         app.open_help_overlay();
-        // Msg::Viewer must only fire when Viewer is on top.
-        // Help is on top now, so the reducer no-ops.
-        let effects = app.update(Msg::Viewer(ViewerMsg::Close));
-        assert!(effects.is_empty());
-        assert_eq!(app.modal_stack().len(), 2);
-        assert!(app.help_overlay().is_some());
+        // Keys go to the top entry only: Esc closes the help.
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Esc);
+        assert_eq!(app.modal_stack().len(), 1);
+        assert!(app.viewer_modal().is_some());
     }
 }
 

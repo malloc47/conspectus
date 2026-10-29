@@ -31,9 +31,9 @@ use super::registry::{open_pane_viewer, open_viewer};
 use super::*;
 use crate::tui::keybindings::overlay::{
     HELP_KEYS, MESSAGES_KEYS, MODAL_CONVENTION, MUX_LAUNCH_KEYS, NEW_MUX_KEYS, PANE_KEYS,
-    PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, VALUE_MODAL_KEYS, VIEWER_FIND_KEYS,
-    VIEWER_KEYS,
+    PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, VALUE_MODAL_KEYS,
 };
+use crate::viewer::keys::TRANSCRIPT_KEYS;
 
 /// The App drawn and driven as the fixture TUI does: the whole screen,
 /// keys through the modal stack, what a modal sends on the pure executor.
@@ -134,14 +134,17 @@ fn tables(modal: &str) -> Vec<KeyTable> {
         "Picker" => vec![table("PALETTE_KEYS", PALETTE_KEYS)],
         "ValueModal" => vec![table("VALUE_MODAL_KEYS", VALUE_MODAL_KEYS)],
         "Messages" => vec![table("MESSAGES_KEYS", MESSAGES_KEYS)],
-        "Viewer" => vec![table("VIEWER_KEYS", VIEWER_KEYS)],
+        // The framework's pager, then the transcript's toggles after it.
+        "Viewer" => vec![
+            table("READER_KEYS", READER_KEYS),
+            part("TRANSCRIPT_KEYS", TRANSCRIPT_KEYS),
+        ],
         // The framework's pager, then the pane's own keys after it.
         "PaneViewer" => vec![
             table("READER_KEYS", READER_KEYS),
             part("PANE_KEYS", PANE_KEYS),
         ],
         "PagerFind" => vec![table("FIND_KEYS", FIND_KEYS)],
-        "ViewerFind" => vec![table("VIEWER_FIND_KEYS", VIEWER_FIND_KEYS)],
         // The worktree menu's steps are modals of their own: a prompt and
         // dialogs.
         "WorktreeMenu" => vec![table("MENU_KEYS", MENU_KEYS)],
@@ -230,11 +233,16 @@ pub(super) fn registry() -> Registry<Host> {
         };
         registry.push(case(name, variant, view, open));
     }
+    let viewer_footer = {
+        let app = app_with(View::Pinned, open_viewer);
+        app.viewer_modal().expect("the viewer opens").footer()
+    };
     registry.push(
         Case::new("Viewer", || app_with(View::Pinned, open_viewer))
             .full_screen()
             .keys(convention("Viewer"), tables("Viewer"))
-            .keys(convention("ViewerFind"), tables("ViewerFind")),
+            .keys(convention("ViewerFind"), tables("PagerFind"))
+            .footer(viewer_footer),
     );
     let pane_footer = {
         let app = app_with(View::Pinned, open_pane_viewer);

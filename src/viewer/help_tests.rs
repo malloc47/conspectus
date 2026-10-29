@@ -1,64 +1,45 @@
 use super::*;
 
-/// A position for every message; the exhaustive match makes a new
-/// message fail to compile until it is placed in [`ViewerMsg::ALL`].
-fn position(msg: ViewerMsg) -> usize {
-    match msg {
-        ViewerMsg::ScrollDown => 0,
-        ViewerMsg::ScrollUp => 1,
-        ViewerMsg::PageDown => 2,
-        ViewerMsg::PageUp => 3,
-        ViewerMsg::HalfPageDown => 4,
-        ViewerMsg::HalfPageUp => 5,
-        ViewerMsg::JumpToStart => 6,
-        ViewerMsg::JumpToEnd => 7,
-        ViewerMsg::CycleToolDetail => 8,
-        ViewerMsg::ToggleThinking => 9,
-        ViewerMsg::ToggleAborted => 10,
-        ViewerMsg::ToggleHidden => 11,
-        ViewerMsg::FindOpen => 12,
-        ViewerMsg::FindNext => 13,
-        ViewerMsg::FindPrev => 14,
-        ViewerMsg::ToggleHelp => 15,
-        ViewerMsg::Close => 16,
-        ViewerMsg::Quit => 17,
+/// A position for every toggle; the exhaustive match makes a new key
+/// fail to compile until it is placed in the listing.
+fn position(key: TranscriptKey) -> usize {
+    match key {
+        TranscriptKey::Tools => 0,
+        TranscriptKey::Thinking => 1,
+        TranscriptKey::Aborted => 2,
+        TranscriptKey::Hidden => 3,
     }
 }
 
 #[test]
-fn every_message_is_listed_once_at_its_position() {
-    for msg in ViewerMsg::ALL {
-        assert_eq!(ViewerMsg::ALL[position(msg)], msg);
+fn every_toggle_is_listed_once_at_its_position() {
+    for &key in TranscriptKey::LISTED {
+        assert_eq!(TranscriptKey::LISTED[position(key)], key);
     }
-    let mut seen = ViewerMsg::ALL.to_vec();
+    let mut seen = TranscriptKey::LISTED.to_vec();
     seen.dedup();
-    assert_eq!(seen.len(), ViewerMsg::ALL.len());
+    assert_eq!(seen.len(), TranscriptKey::LISTED.len());
 }
 
 #[test]
-fn every_message_has_a_sentence_and_a_section() {
-    for msg in ViewerMsg::ALL {
-        let entry = msg.help();
-        assert!(!entry.section.is_empty(), "{msg:?}");
-        assert!(entry.description.len() > 6, "{msg:?}");
+fn every_toggle_has_a_sentence_in_the_one_section() {
+    for &key in TranscriptKey::LISTED {
+        let entry = key.help();
+        assert_eq!(entry.section, SHOWING, "{key:?}");
+        assert!(entry.description.len() > 6, "{key:?}");
         assert!(
             !entry.description.ends_with('.'),
-            "{msg:?} reads as a label"
+            "{key:?} reads as a label"
         );
     }
 }
 
 #[test]
-fn sections_are_contiguous_in_the_listing() {
-    let mut order: Vec<&str> = Vec::new();
-    for msg in ViewerMsg::ALL {
-        let section = msg.help().section;
-        match order.last() {
-            Some(last) if *last == section => {}
-            _ => {
-                assert!(!order.contains(&section), "`{section}` is split up");
-                order.push(section);
-            }
-        }
-    }
+fn the_viewer_rewords_only_the_ends_and_the_find() {
+    let reworded: Vec<PagerKey> = <PagerKey as HelpAction>::LISTED
+        .iter()
+        .copied()
+        .filter(|&key| describe(key).is_some())
+        .collect();
+    assert_eq!(reworded, [PagerKey::Top, PagerKey::Bottom, PagerKey::Find]);
 }

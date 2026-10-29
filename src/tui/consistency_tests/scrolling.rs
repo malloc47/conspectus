@@ -308,8 +308,9 @@ fn paging_the_transcript_viewers_help_moves_by_the_rows_it_shows() {
     for size in VIEWER_HELP_SIZES {
         let label = describe("viewer help", size);
         let mut app = app_in(View::Pinned);
-        app.open_viewer_modal(crate::viewer::state::ViewerState::new(
+        app.open_viewer_modal(crate::tui::viewer_bridge::viewer(
             crate::viewer::model::TranscriptDocument::default(),
+            None,
         ));
         press(&mut app, size, KeyCode::Char('?'));
         let rows = scrolling_rows(&mut app, size, KeyCode::Char('j'));

@@ -913,26 +913,25 @@ impl App {
     /// Read-only access to the active transcript viewer modal.
     /// Lives on the modal stack
     /// (ADR 0085 contract 3); this accessor peeks the top entry.
-    pub fn viewer_modal(&self) -> Option<&crate::viewer::state::ViewerState> {
+    pub fn viewer_modal(&self) -> Option<&crate::tui::viewer_bridge::TranscriptViewer> {
         match self.modal_stack.top()? {
-            crate::tui::Modal::Viewer(state) => Some(state),
+            crate::tui::Modal::Viewer(viewer) => Some(viewer),
             _ => None,
         }
     }
 
     /// Mutable access to the viewer on top.
-    pub fn viewer_modal_mut(&mut self) -> Option<&mut crate::viewer::state::ViewerState> {
+    pub fn viewer_modal_mut(&mut self) -> Option<&mut crate::tui::viewer_bridge::TranscriptViewer> {
         match self.modal_stack.top_mut()? {
-            crate::tui::Modal::Viewer(state) => Some(state),
+            crate::tui::Modal::Viewer(viewer) => Some(viewer),
             _ => None,
         }
     }
 
-    /// Push a viewer modal onto the stack. Callers construct the
-    /// initial state via `viewer_bridge::build_viewer_state` and
-    /// pass ownership here.
-    pub fn open_viewer_modal(&mut self, state: crate::viewer::state::ViewerState) {
-        self.modal_stack.push(crate::tui::Modal::Viewer(state));
+    /// Push a viewer modal onto the stack. Callers build the viewer with
+    /// `viewer_bridge::build_viewer` and pass ownership here.
+    pub fn open_viewer_modal(&mut self, viewer: crate::tui::viewer_bridge::TranscriptViewer) {
+        self.modal_stack.push(crate::tui::Modal::Viewer(viewer));
     }
 
     /// The pane scrollback viewer, when it is on top.

@@ -61,21 +61,68 @@ fn unknown_harness_has_no_locator() {
 }
 
 #[test]
-fn build_viewer_state_returns_none_for_unsupported_harness() {
+fn build_viewer_returns_none_for_unsupported_harness() {
     let id = session("aider", "/u", "k");
-    assert!(build_viewer_state(&id).is_none());
+    assert!(build_viewer(&id).is_none());
 }
 
 #[test]
-fn build_viewer_state_yields_unavailable_doc_when_file_absent() {
+fn build_viewer_yields_unavailable_doc_when_file_absent() {
     // Claude harness key + a state root that doesn't exist on
     // disk → parser errors with NotFound → bridge falls back
     // to TranscriptDocument::unavailable rather than None.
     let id = session("claude-code", "/nonexistent/.claude", "abc");
-    let state = build_viewer_state(&id).expect("supported harness yields a state");
-    assert!(state.document.is_empty(), "fallback doc has no turns");
-    assert_eq!(state.document.meta.harness, "claude-code");
-    assert_eq!(state.document.meta.session_key, "abc");
+    let viewer = build_viewer(&id).expect("supported harness yields a viewer");
+    let document = &viewer.content().document;
+    assert!(document.is_empty(), "fallback doc has no turns");
+    assert_eq!(document.meta.harness, "claude-code");
+    assert_eq!(document.meta.session_key, "abc");
+}
+
+#[test]
+fn the_viewer_opens_at_the_end_with_its_title_in_the_harness_color() {
+    use crate::viewer::model::{TranscriptMeta, TranscriptTurn, TurnKind, TurnRole};
+    let turns = (0..40)
+        .map(|n| TranscriptTurn {
+            role: TurnRole::User,
+            kind: TurnKind::Message,
+            body: format!("turn {n}"),
+            timestamp: None,
+            aborted: false,
+            hidden: false,
+        })
+        .collect();
+    let document = TranscriptDocument {
+        meta: TranscriptMeta {
+            harness: "codex".to_string(),
+            session_key: "abc".to_string(),
+            cwd: None,
+        },
+        turns,
+    };
+    let mut viewer = viewer(document, None);
+    assert!(viewer.follows_end(), "opens on the newest turns");
+    assert_eq!(viewer.content().title_role, "harness.codex");
+    let theme = crate::tui::Theme::default();
+    let area = ratatui::layout::Rect::new(0, 0, 60, 12);
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    viewer.draw(area, &mut buf, &theme);
+    let title = tuikit::testkit::buffer::style_at(&buf, "codex:abc").expect("the title");
+    assert_eq!(title.fg, Some(theme.harness_color("codex")));
+    assert!(tuikit::testkit::buffer::text(&buf).contains("turn 39"));
+}
+
+#[test]
+fn the_title_of_an_unknown_harness_takes_its_color() {
+    let document = TranscriptDocument::unavailable(&SessionLocator {
+        harness_key: "mystery".to_string(),
+        session_key: "k".to_string(),
+        state_root: std::path::PathBuf::from("/x"),
+    });
+    assert_eq!(
+        viewer(document, None).content().title_role,
+        "harness_unknown"
+    );
 }
 
 #[test]

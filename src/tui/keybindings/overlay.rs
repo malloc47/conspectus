@@ -8,10 +8,10 @@
 //! options pane takes the standard palette option keys). This module holds
 //! the tables of the overlays that are the TUI's own: search, the help
 //! page, the value modal, Messages (the standard log list table with its
-//! copy key), the three forms (built on the standard form rows), the
-//! transcript viewer and its find prompt, and the pane viewer's own keys
-//! (the framework's pager takes the rest); and the modal key convention
-//! every modal is checked against.
+//! copy key), the three forms (built on the standard form rows), and the
+//! pane viewer's own keys (the framework's pager takes the rest; the
+//! transcript viewer's toggles are the viewer's own table); and the modal
+//! key convention every modal is checked against.
 //!
 //! Every overlay resolves its keys through one of these tables or a
 //! standard one and renders its footer from the same table, so the
@@ -29,8 +29,6 @@ use tuikit::keys::{
 };
 
 use crate::tui::widgets::pane_viewer::PaneKey;
-use crate::viewer::find::ViewerFindMsg;
-use crate::viewer::input::ViewerMsg;
 
 // ---------------------------------------------------------------------
 // Search: quick select and content search, two palettes; their options
@@ -197,7 +195,9 @@ pub const PIN_EDIT_KEYS: &[KeyRow<FormKey>] = &[
 // ---------------------------------------------------------------------
 // The pane viewer is the framework's pager (`tuikit::keys::READER_KEYS`);
 // these are its content's own keys, which the pager resolves after its
-// table. `a` is shown; the wrap chip in the footer names `w`.
+// table. `a` is shown; the wrap chip in the footer names `w`. The
+// transcript viewer is the same pager; its content's keys (the toggles)
+// are the viewer's own (`crate::viewer::keys::TRANSCRIPT_KEYS`).
 // ---------------------------------------------------------------------
 
 impl KeyAction for PaneKey {
@@ -211,81 +211,6 @@ impl KeyAction for PaneKey {
 pub const PANE_KEYS: &[KeyRow<PaneKey>] = &[
     shown(ch('a'), PaneKey::Attach, "a", "attach"),
     alias(ch('w'), PaneKey::Wrap),
-];
-
-// ---------------------------------------------------------------------
-// The transcript viewer. It draws its own footer from its toggle state,
-// behind the ADR 0052 extraction boundary, so these rows are all aliases;
-// the keys still resolve here.
-// ---------------------------------------------------------------------
-
-impl KeyAction for ViewerMsg {
-    fn role(self) -> KeyRole {
-        match self {
-            Self::ScrollUp | Self::ScrollDown | Self::JumpToStart | Self::JumpToEnd => {
-                KeyRole::Move
-            }
-            Self::PageUp | Self::PageDown | Self::HalfPageUp | Self::HalfPageDown => KeyRole::Page,
-            Self::CycleToolDetail
-            | Self::ToggleThinking
-            | Self::ToggleAborted
-            | Self::ToggleHidden
-            | Self::FindOpen
-            | Self::FindNext
-            | Self::FindPrev
-            | Self::ToggleHelp => KeyRole::Other,
-            Self::Close => KeyRole::Leave,
-            Self::Quit => KeyRole::Abort,
-        }
-    }
-}
-
-pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
-    alias(ctrl('c'), ViewerMsg::Quit),
-    alias(ctrl('d'), ViewerMsg::HalfPageDown),
-    alias(ctrl('u'), ViewerMsg::HalfPageUp),
-    alias(key(KeyCode::Esc), ViewerMsg::Close),
-    alias(ch('q'), ViewerMsg::Quit),
-    alias(ch('j'), ViewerMsg::ScrollDown),
-    alias(key(KeyCode::Down), ViewerMsg::ScrollDown),
-    alias(ch('k'), ViewerMsg::ScrollUp),
-    alias(key(KeyCode::Up), ViewerMsg::ScrollUp),
-    alias(key(KeyCode::PageDown), ViewerMsg::PageDown),
-    alias(ch(' '), ViewerMsg::PageDown),
-    alias(key(KeyCode::PageUp), ViewerMsg::PageUp),
-    alias(ch('g'), ViewerMsg::JumpToStart),
-    alias(key(KeyCode::Home), ViewerMsg::JumpToStart),
-    alias(ch('G'), ViewerMsg::JumpToEnd),
-    alias(key(KeyCode::End), ViewerMsg::JumpToEnd),
-    alias(ch('t'), ViewerMsg::CycleToolDetail),
-    alias(ch('T'), ViewerMsg::ToggleThinking),
-    alias(ch('I'), ViewerMsg::ToggleAborted),
-    alias(ch('H'), ViewerMsg::ToggleHidden),
-    alias(ch('/'), ViewerMsg::FindOpen),
-    alias(ch('n'), ViewerMsg::FindNext),
-    alias(ch('N'), ViewerMsg::FindPrev),
-    alias(ch('?'), ViewerMsg::ToggleHelp),
-];
-
-impl KeyAction for ViewerFindMsg {
-    fn role(self) -> KeyRole {
-        match self {
-            Self::Quit => KeyRole::Abort,
-            Self::Cancel => KeyRole::Leave,
-            Self::Confirm => KeyRole::Apply,
-            Self::Edit(edit) => edit.role(),
-        }
-    }
-}
-
-/// The find prompt inside the transcript viewer. Keys no row binds go to the line
-/// editor (`tuikit::text_edit::EditKey::of`), so `q` types and the
-/// editing keys are every text field's; `Ctrl-C` leaves the viewer, as
-/// it does from anywhere in it.
-pub const VIEWER_FIND_KEYS: &[KeyRow<ViewerFindMsg>] = &[
-    alias(ctrl('c'), ViewerFindMsg::Quit),
-    shown(key(KeyCode::Enter), ViewerFindMsg::Confirm, "Enter", "find"),
-    shown(key(KeyCode::Esc), ViewerFindMsg::Cancel, "Esc", "cancel"),
 ];
 
 // ---------------------------------------------------------------------

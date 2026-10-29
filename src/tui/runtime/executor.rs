@@ -416,9 +416,9 @@ pub(super) fn execute_view_session(
     session_id: crate::model::AgentSessionId,
     open: Option<&crate::viewer::state::ViewerOpen>,
 ) {
-    if let Some(state) = crate::tui::viewer_bridge::build_viewer_state_at(&session_id, open) {
+    if let Some(viewer) = crate::tui::viewer_bridge::build_viewer_at(&session_id, open) {
         let label = format!("{}:{}", session_id.harness_key, session_id.session_key);
-        app.open_viewer_modal(state);
+        app.open_viewer_modal(viewer);
         let _ = app.update(Msg::SetStatus(Some(Feedback::info(format!(
             "viewing {label}"
         )))));

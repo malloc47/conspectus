@@ -8,16 +8,15 @@
 //! which clears what it covers, or fills the screen. The rename and step
 //! prompts, the new mux form, the row, mux, and worktree menus, the
 //! dialogs, Clean up, the Controls panel and its editors, the picker, the
-//! keymap help, the value modal, the pane viewer, and Messages have no impl
-//! here: they are the framework's text prompt, form, action menu, dialog,
-//! checklist, settings panel, palette, pager, and log list, which implement
-//! the trait for their context.
+//! keymap help, the value modal, the transcript and pane viewers, and
+//! Messages have no impl here: they are the framework's text prompt, form,
+//! action menu, dialog, checklist, settings panel, palette, pager, and log
+//! list, which implement the trait for their context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
-use tuikit::keys::resolve;
 use tuikit::overlay::{Outcome, Overlay};
 use tuikit::theme::Theme as KitTheme;
 
@@ -90,45 +89,6 @@ impl Overlay<Msg, App> for SearchOverlayState {
 
     fn takes_text(&self) -> bool {
         self.options_cursor().is_none()
-    }
-}
-
-impl Overlay<Msg, App> for crate::viewer::state::ViewerState {
-    /// A nested reducer: the key becomes a viewer message, which the App's
-    /// reducer applies to this entry (closing it when the viewer says to
-    /// leave). While the find prompt is open it owns the keys: its own
-    /// keys confirm or leave it, and the editing keys edit the query.
-    fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
-        use crate::tui::keybindings::overlay::{VIEWER_FIND_KEYS, VIEWER_KEYS};
-        use crate::viewer::find::ViewerFindMsg;
-        use tuikit::text_edit::EditKey;
-        if self.find.prompt.is_some() {
-            return resolve(VIEWER_FIND_KEYS, key)
-                .or_else(|| EditKey::of(key).map(ViewerFindMsg::Edit))
-                .map_or(Outcome::Consumed, |msg| Outcome::Stay(Msg::ViewerFind(msg)));
-        }
-        resolve(VIEWER_KEYS, key).map_or(Outcome::Consumed, |msg| Outcome::Stay(Msg::Viewer(msg)))
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        crate::viewer::widget::draw(self, app.theme(), buf, area);
-        if self.show_help {
-            crate::tui::widgets::viewer_help::draw(
-                crate::tui::keybindings::overlay::VIEWER_KEYS,
-                &mut self.help,
-                app.theme(),
-                buf,
-                area,
-            );
-        }
-    }
-
-    fn fills_screen(&self) -> bool {
-        true
-    }
-
-    fn takes_text(&self) -> bool {
-        self.find.prompt.is_some()
     }
 }
 
