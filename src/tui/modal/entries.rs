@@ -26,7 +26,7 @@ use crate::tui::widgets::{
     mux_menu::{MuxMenuState, MuxMenuWidget},
     pane_viewer::{PaneViewerOutcome, PaneViewerState},
     picker::{PickerState, PickerWidget},
-    pin_edit::{PinEditFormState, PinEditFormWidget},
+    pin_edit::PinEditForm,
     row_menu::{RowMenuState, RowMenuWidget},
     search::SearchOverlayState,
     value_modal::{ValueModalOutcome, ValueModalState, ValueModalWidget},
@@ -272,17 +272,17 @@ impl Overlay<Msg, App> for MuxLaunchForm {
     }
 }
 
-impl Overlay<Msg, App> for PinEditFormState {
+impl Overlay<Msg, App> for PinEditForm {
     fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
         self.handle_key(key)
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        PinEditFormWidget::new(self, app.theme()).render(area, buf);
+    fn render(&mut self, area: Rect, buf: &mut Buffer, _app: &App, theme: &KitTheme) {
+        self.draw(area, buf, theme);
     }
 
     fn takes_text(&self) -> bool {
-        self.focused_label().is_some()
+        PinEditForm::takes_text(self)
     }
 }
 

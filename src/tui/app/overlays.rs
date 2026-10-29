@@ -632,23 +632,21 @@ impl App {
     }
 
     /// Active pin edit form, if on top of stack.
-    pub fn pin_edit_form(&self) -> Option<&crate::tui::widgets::pin_edit::PinEditFormState> {
+    pub fn pin_edit_form(&self) -> Option<&crate::tui::widgets::pin_edit::PinEditForm> {
         match self.modal_stack.top()? {
             crate::tui::Modal::PinEdit(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
-    pub fn pin_edit_form_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::pin_edit::PinEditFormState> {
+    pub fn pin_edit_form_mut(&mut self) -> Option<&mut crate::tui::widgets::pin_edit::PinEditForm> {
         match self.modal_stack.top_mut()? {
             crate::tui::Modal::PinEdit(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_pin_edit_form(&mut self, state: crate::tui::widgets::pin_edit::PinEditFormState) {
+    pub fn open_pin_edit_form(&mut self, state: crate::tui::widgets::pin_edit::PinEditForm) {
         self.modal_stack
             .push(crate::tui::Modal::PinEdit(Box::new(state)));
     }

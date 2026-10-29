@@ -160,6 +160,8 @@ fn the_harness_row_lists_its_options_and_the_permission_toggle() {
     );
 }
 
+/// Each field shows under its label in the forms' shared vocabulary (the
+/// worktree branch reads `branch`, as in the launch form).
 #[test]
 fn editing_a_pin_lists_every_field_the_pin_can_change() {
     let mut app = app_in(View::Pinned);
@@ -169,8 +171,8 @@ fn editing_a_pin_lists_every_field_the_pin_can_change() {
     let missing: Vec<&str> = PinKind::Mux
         .overridable_fields()
         .iter()
-        .copied()
-        .filter(|field| !frame.contains(field))
+        .map(|field| crate::tui::widgets::pin_edit::label_for(field))
+        .filter(|label| !frame.contains(&format!(" {label} ")))
         .collect();
     assert!(
         missing.is_empty(),

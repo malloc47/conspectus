@@ -1,10 +1,20 @@
-use ratatui::style::{Color, Modifier, Style};
+//! The framework's form rows as Conspectus draws them: with its theme
+//! (the default look, and every form token a `[tui.theme]` override
+//! reaches), its directory fields, its harnesses' launch options, and its
+//! form key tables.
 
-use super::*;
-use crate::tui::theme::OverrideValue::Text as OverrideText;
-use tuikit::form::{Tone, choice_row, one_of_row, path_row, read_only_row, text_row};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use tuikit::form::{
+    Cols, Tone, check_row, chips, choice_row, footer_lines, one_of_row, path_cells, path_row,
+    read_only_row, text_cells, text_row,
+};
 use tuikit::glyphs::marks;
 use tuikit::text_edit::LineEdit;
+
+use crate::tui::Theme;
+use crate::tui::theme::OverrideValue::Text as OverrideText;
+use crate::tui::widgets::launch_argv;
 
 fn text(line: &Line<'_>) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
@@ -40,7 +50,7 @@ const ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz";
 
 #[test]
 fn a_long_value_scrolls_around_the_cursor_with_edge_marks() {
-    let spans = value_cells(&edit(ALPHABET, 20), 12, true, &theme());
+    let spans = text_cells(&edit(ALPHABET, 20), 12, true, &theme());
     let cells: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
         cells.starts_with("< "),
@@ -48,7 +58,7 @@ fn a_long_value_scrolls_around_the_cursor_with_edge_marks() {
     );
     assert!(cells.ends_with(" >"), "the end is out of view: {cells:?}");
     assert_eq!(style_of(&spans, "u"), theme().field_cursor.into_style());
-    let spans = value_cells(&edit(ALPHABET, 0), 12, true, &theme());
+    let spans = text_cells(&edit(ALPHABET, 0), 12, true, &theme());
     let cells: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert_eq!(cells, "  abcdefgh >");
 }
@@ -57,11 +67,11 @@ fn a_long_value_scrolls_around_the_cursor_with_edge_marks() {
 fn wide_characters_fill_the_field_by_their_cells() {
     // Twelve cells of field: the marks take four, so four two-cell
     // characters and the caret do not fit, and the window scrolls.
-    let spans = value_cells(&edit("東京タワーと富士山", 9), 12, true, &theme());
+    let spans = text_cells(&edit("東京タワーと富士山", 9), 12, true, &theme());
     assert_eq!(tuikit::text::spans_width(&spans), 12);
     let cells: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert_eq!(cells, "< 富士山    ", "the cursor rides the right edge");
-    let spans = value_cells(&edit("東京タワーと富士山", 0), 12, true, &theme());
+    let spans = text_cells(&edit("東京タワーと富士山", 0), 12, true, &theme());
     let cells: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert_eq!(cells, "  東京タワ >");
 }
@@ -143,29 +153,29 @@ fn the_harness_row_marks_the_selected_chip_and_flags_a_custom_value() {
     assert!(text(&custom).contains("[custom]"));
 }
 
+/// A harness's launch options as the forms draw them: checkboxes,
+/// checked when `argv` carries their flags.
+fn options_row(harness: &str, argv: &[String]) -> Line<'static> {
+    let options = crate::discovery::harness::launch_options_for(harness);
+    let items: Vec<(String, bool)> = options
+        .iter()
+        .zip(launch_argv::options_on(options, argv))
+        .map(|(option, on)| (option.label.to_string(), on))
+        .collect();
+    check_row("options", &items, None, false, Cols::new(60), &theme())
+}
+
 #[test]
 fn launch_options_show_checked_when_the_argv_carries_the_flags() {
-    let options = crate::discovery::harness::launch_options_for("claude-code");
-    let off = options_row(
-        "options",
-        options,
-        &["claude".into()],
-        false,
-        Cols::new(60),
-        &theme(),
-    );
+    let off = options_row("claude-code", &["claude".into()]);
     assert!(
         text(&off).contains("[ ] skip permissions"),
         "{}",
         text(&off)
     );
     let on = options_row(
-        "options",
-        options,
+        "claude-code",
         &["claude".into(), "--dangerously-skip-permissions".into()],
-        false,
-        Cols::new(60),
-        &theme(),
     );
     assert!(text(&on).contains("[x] skip permissions"), "{}", text(&on));
 }
@@ -210,7 +220,7 @@ fn style_of(spans: &[Span<'_>], needle: &str) -> Style {
 
 #[test]
 fn the_default_theme_draws_the_form_as_it_always_has() {
-    let spans = value_cells(&edit(ALPHABET, 20), 12, true, &theme());
+    let spans = text_cells(&edit(ALPHABET, 20), 12, true, &theme());
     // The scroll marks, the fill, and the cursor cell keep the fixed
     // look the forms had before they took the theme.
     assert_eq!(
@@ -228,14 +238,14 @@ fn the_default_theme_draws_the_form_as_it_always_has() {
         style_of(&spans, "u"),
         Style::default().fg(Color::Black).bg(Color::White)
     );
-    let idle = value_cells(&edit("abc", 0), 12, false, &theme());
+    let idle = text_cells(&edit("abc", 0), 12, false, &theme());
     assert_eq!(style_of(&idle, "bc"), Style::default().fg(Color::Gray));
 }
 
 #[test]
 fn a_custom_theme_restyles_the_field_its_marks_and_its_cursor() {
     let theme = custom();
-    let spans = value_cells(&edit(ALPHABET, 20), 12, true, &theme);
+    let spans = text_cells(&edit(ALPHABET, 20), 12, true, &theme);
     assert_eq!(
         style_of(&spans, "<"),
         Style::default()
@@ -251,7 +261,7 @@ fn a_custom_theme_restyles_the_field_its_marks_and_its_cursor() {
         style_of(&spans, "u"),
         Style::default().fg(Color::White).bg(Color::Red)
     );
-    let idle = value_cells(&edit("abc", 0), 12, false, &theme);
+    let idle = text_cells(&edit("abc", 0), 12, false, &theme);
     assert_eq!(style_of(&idle, "bc"), Style::default().fg(Color::Green));
 }
 
@@ -259,7 +269,7 @@ fn a_custom_theme_restyles_the_field_its_marks_and_its_cursor() {
 fn chips_notes_footers_and_warnings_follow_the_theme() {
     let theme = custom();
     let known: Vec<String> = ["claude-code", "codex"].map(String::from).to_vec();
-    let chips = harness_chips("codex", &known, 40, &theme);
+    let chips = chips("codex", &known, 40, &theme);
     assert_eq!(
         style_of(&chips, "[codex]"),
         Style::default()
@@ -271,7 +281,7 @@ fn chips_notes_footers_and_warnings_follow_the_theme() {
         Style::default().add_modifier(Modifier::ITALIC)
     );
 
-    let note = note_row("pin", "a note", Cols::new(40), &theme);
+    let note = read_only_row("pin", "a note", Tone::Note, Cols::new(40), &theme);
     assert_eq!(
         style_of(&note.spans, "a note"),
         Style::default().add_modifier(Modifier::ITALIC)

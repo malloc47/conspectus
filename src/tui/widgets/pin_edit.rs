@@ -1,37 +1,71 @@
 //! The pin edit form: every field a pin can change, listed with its
 //! current value and where that value comes from.
 //!
-//! The first row renames the pin (a live mux pin renames its tmux
-//! session with it). Below it are the label and the fields the pin's
-//! kind can override. A row shows the value in effect; editing it makes
-//! an override, and Ctrl-R drops the override so the field follows the
-//! entity again. Paths complete with Tab, the harness is chosen among
-//! the known harnesses, and a harness's launch options (skipping
-//! permissions) toggle on the argv row.
+//! The form is the framework's `Form`, so it moves, submits, refuses, and
+//! shows its keys the way every form does: one ring of fields (`Tab`/`↓`
+//! next, `S-Tab`/`↑` previous), `Enter` saves from any of them, a field
+//! that stops the save says why on the error line and takes the focus,
+//! and the footer stays in view.
 //!
-//! Up and Down move between rows. Tab completes a path and moves on
-//! elsewhere. Left, Right, and Space act on the harness and options
-//! rows and edit the text on the others.
+//! The first field renames the pin (a live mux pin renames its tmux
+//! session with it). Below it are the label and the fields the pin's kind
+//! can override, each an override row: it shows the value in effect and
+//! where that value comes from, editing it makes an override, and
+//! `Ctrl-R` drops the override so the field follows the entity again.
+//! Paths complete with `Tab`, the harness is chosen among the known
+//! harnesses, and a harness's launch options (skipping permissions) are
+//! checkboxes that add or remove their flags in the argv.
+//!
+//! This module keeps what only Conspectus knows: which fields each kind
+//! of pin has and what they are labelled; the words for where a value
+//! comes from (`running`, `last seen`, `saved`, `default`) and what the
+//! focused row says about following; the rename's checks; and the save
+//! ([`PinEditRequest`], which the runtime writes to the pin store). The
+//! launch options and the argv a harness change carries are kept in step
+//! after each key with the launch form's helpers (`launch_argv`). The
+//! default argv is decided when the form opens and again only when the
+//! harness or the cwd changes, so drawing the form reads no files.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::macros::line;
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::Widget;
+use tuikit::form::{
+    CheckGroup, Choice, Field, FieldKind, Form, OverrideRow, OverrideView, ReadOnly, Standing,
+    Submit, Tone, Values,
+};
+use tuikit::keys::{FormKey, resolve};
+use tuikit::overlay::{Outcome, Overlay};
+use tuikit::path_field::{Candidate, PathField};
+use tuikit::text_edit::LineEdit;
 
 use crate::argv::split_command_line;
 use crate::discovery::harness::launch_options_for;
+use crate::launch_default::LaunchDefaults;
 use crate::model::{FieldSource, FieldValue, PinKind, RecipeField, SlotFields};
 use crate::tui::Msg;
-use crate::tui::theme::Theme;
-use crate::tui::widgets::form::{self, Cols, footer_lines, note_row, options_row};
+use crate::tui::keybindings::overlay::PIN_EDIT_KEYS;
 use crate::tui::widgets::launch_argv::{self, DefaultArgv};
-use tuikit::form::{Choice, FormBody};
-use tuikit::overlay::Outcome;
-use tuikit::path_field::{Candidate, PathField};
-use tuikit::text_edit::LineEdit;
+
+/// The form's title.
+const TITLE: &str = "Edit pin";
+
+/// The read-only line naming the pin, its kind, and its status.
+pub const SUMMARY: &str = "summary";
+/// The pin's own name: the first field, which renames the pin.
+pub const PIN: &str = "pin";
+/// The note under the pin name of a live mux pin.
+pub const RENAMES: &str = "renames";
+/// The harness's launch options, under the harness of a mux pin.
+pub const OPTIONS: &str = "options";
+/// The mux harness, among the known harnesses.
+const HARNESS: &str = "harness";
+/// The mux cwd, which the default argv depends on.
+const CWD: &str = "cwd";
+/// The mux argv.
+const ARGV: &str = "argv";
+
+/// Lines under the rows that explain the focused field.
+const DETAIL_LINES: usize = 2;
 
 /// What the form saves: a rename, overrides to set, overrides to drop.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +74,13 @@ pub struct PinEditRequest {
     pub rename: Option<String>,
     pub set: Vec<(String, FieldValue)>,
     pub unset: Vec<String>,
+}
+
+impl PinEditRequest {
+    /// Whether saving it would change nothing.
+    fn is_empty(&self) -> bool {
+        self.rename.is_none() && self.set.is_empty() && self.unset.is_empty()
+    }
 }
 
 /// What opening the form needs to know about the pin.
@@ -60,138 +101,366 @@ pub struct PinEditInit {
     pub known_pin_names: Vec<String>,
     pub known_harness_keys: Vec<String>,
     pub cwd_candidates: Vec<Candidate>,
-    pub defaults: Option<crate::launch_default::LaunchDefaults>,
+    pub defaults: Option<LaunchDefaults>,
 }
 
+/// The pin's recipe fields the form edits, in order: the label, then the
+/// fields its kind can override.
+fn recipe_fields(kind: PinKind) -> impl Iterator<Item = &'static str> {
+    std::iter::once("label").chain(kind.overridable_fields().iter().copied())
+}
+
+/// The label a recipe field's row shows: the field's name in the short
+/// vocabulary the other forms use.
+pub fn label_for(field: &str) -> &str {
+    match field {
+        "worktree_branch" => "branch",
+        "resume_into" => "resume in",
+        other => other,
+    }
+}
+
+/// Whether `field` of a `kind` pin holds a directory.
+fn is_path(kind: PinKind, field: &str) -> bool {
+    matches!(
+        (kind, field),
+        (PinKind::Mux, "cwd") | (PinKind::Checkout, "location") | (PinKind::Repo, "path")
+    )
+}
+
+/// The pin edit form: the framework form and what keeps the launch
+/// options and the argv in step.
 #[derive(Debug, Clone)]
-enum Control {
-    Text(LineEdit),
-    Path(PathField),
-    Harness(LineEdit),
+pub struct PinEditForm {
+    form: Form<Msg>,
+    pin: String,
+    kind: PinKind,
+    known_pin_names: Vec<String>,
+    /// Where an empty argv comes from.
+    defaults: Option<LaunchDefaults>,
+    /// The argv an empty argv means for the harness and cwd as they are
+    /// now, decided when either changes so drawing reads it from here.
+    default: DefaultArgv,
 }
 
-impl Control {
-    fn value(&self) -> &str {
-        match self {
-            Self::Text(input) | Self::Harness(input) => input.value(),
-            Self::Path(path) => path.value(),
-        }
-    }
-
-    /// The value saving commits: trimmed, and with `~` expanded in a
-    /// path, which the commands that read the pin take as given.
-    fn committed(&self) -> String {
-        match self {
-            Self::Text(input) | Self::Harness(input) => input.value().trim().to_string(),
-            Self::Path(path) => path.expanded_value(),
-        }
-    }
-
-    fn replace(&mut self, value: String) {
-        match self {
-            Self::Text(input) | Self::Harness(input) => *input = LineEdit::new(value),
-            Self::Path(path) => {
-                path.set_value(value);
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Which {
-    /// The pin's own name.
-    PinName,
-    /// A field of the pin's recipe (the label is one).
-    Field(&'static str),
-}
-
-#[derive(Debug, Clone)]
-struct Row {
-    which: Which,
-    label: String,
-    control: Control,
-    /// The text when the form opened.
-    initial: String,
-    /// The pin had an override for this field when the form opened.
-    overridden: bool,
-    /// The value and layer the field has without an override.
-    inherited: (String, Option<FieldSource>),
-    /// The layer in effect when the form opened.
-    source: Option<FieldSource>,
-    /// Ctrl-R was pressed: the override goes away on save.
-    cleared: bool,
-}
-
-impl Row {
-    fn edited(&self) -> bool {
-        self.control.value() != self.initial
-    }
-
-    /// The word at the end of the row: where the value comes from, and
-    /// what saving will do. At most [`TAG_WIDTH`] cells.
-    fn tag(&self) -> &'static str {
-        match self.which {
-            Which::PinName => "",
-            Which::Field(_) => {
-                if self.cleared {
-                    "will follow"
-                } else if self.edited() {
-                    "will keep"
-                } else if self.overridden {
-                    "kept"
-                } else {
-                    layer_word(self.source)
-                }
-            }
-        }
-    }
-
-    /// What the focused row says about itself, in two lines: its state,
-    /// and what following would give.
-    fn hint(&self, kind: PinKind) -> (String, String) {
-        let Which::Field(_) = self.which else {
-            return (
-                "the name this pin is listed under".to_string(),
-                String::new(),
+impl PinEditForm {
+    /// The form for the pin `init` describes, the focus on its name.
+    pub fn new(init: PinEditInit) -> Self {
+        let PinEditInit {
+            pin,
+            kind,
+            status,
+            live_mux,
+            effective,
+            overrides,
+            inherited,
+            known_pin_names,
+            known_harness_keys,
+            cwd_candidates,
+            defaults,
+        } = init;
+        let submit = {
+            let pin = pin.clone();
+            move |values: &Values<'_>| save(&pin, kind, values)
+        };
+        let mut form = Form::new(TITLE, PIN_EDIT_KEYS, submit)
+            .intro(intro(kind))
+            .details(DETAIL_LINES)
+            .field(Field::read_only(
+                SUMMARY,
+                "pin",
+                ReadOnly::new(format!("{pin} · {} · {status}", kind.as_str()), Tone::Note),
+            ))
+            .field(
+                Field::text(PIN, "pin name", pin.clone())
+                    .validate(name_check(pin.clone(), known_pin_names.clone()))
+                    .hint("the name this pin is listed under"),
             );
-        };
-        let value = self.control.value().trim();
-        let (inherited_value, inherited_layer) = &self.inherited;
-        let follows = |value: &str, layer: Option<FieldSource>| match layer {
-            Some(FieldSource::Live) => format!("following the running {}: {value}", kind.as_str()),
-            Some(FieldSource::History) => format!("following the last seen value: {value}"),
-            Some(FieldSource::Snapshot) => {
-                format!("following the value saved with the pin: {value}")
-            }
-            Some(FieldSource::Default) => format!("following the default: {value}"),
-            _ => "nothing to follow yet; type a value to keep with this pin".to_string(),
-        };
-        let back = || {
-            let again = follows(inherited_value, *inherited_layer);
-            format!(
-                "Ctrl-R goes back to {}",
-                again.replacen("following", "following —", 1)
-            )
-        };
-        if self.cleared {
-            return (
-                "will follow again when saved".to_string(),
-                follows(inherited_value, *inherited_layer),
-            );
+        if live_mux {
+            form = form.field(Field::read_only(
+                RENAMES,
+                "",
+                ReadOnly::new("renames the tmux session too", Tone::Note),
+            ));
         }
-        if self.edited() {
-            let second = if inherited_layer.is_some() {
-                back()
+        for field in recipe_fields(kind) {
+            let (value, source) = lookup(&effective, field);
+            let overridden = overrides.contains_key(field);
+            // A field with an override would follow its value without the
+            // pin's overrides; one without follows what it has now, which
+            // can come from another field's override (the default argv of
+            // an overridden harness).
+            let (follows, layer) = if overridden {
+                lookup(&inherited, field)
             } else {
-                String::new()
+                (value.clone(), source)
             };
-            return (format!("will be kept with this pin: {value}"), second);
+            let row = OverrideRow::new(follows, layer_word(layer))
+                .overridden(overridden)
+                .hint(hint(kind, layer));
+            let label = label_for(field);
+            let entry = if is_path(kind, field) {
+                Field::path(
+                    field,
+                    label,
+                    crate::tui::paths::directory_field(value, cwd_candidates.clone()),
+                )
+                .with_override(row)
+                .hint("Tab completes the path")
+            } else if (kind, field) == (PinKind::Mux, HARNESS) {
+                Field::choice(
+                    field,
+                    label,
+                    Choice::new(value, known_harness_keys.clone()).custom(true),
+                )
+                .with_override(row)
+                .hint("←/→ choose a harness")
+            } else if field == ARGV {
+                Field::text(field, label, value)
+                    .with_override(row)
+                    .validate(move |text| override_check(kind, ARGV, text))
+            } else {
+                Field::text(field, label, value).with_override(row)
+            };
+            form = form.field(entry);
+            if (kind, field) == (PinKind::Mux, HARNESS) {
+                form = form.field(
+                    Field::check_group(
+                        OPTIONS,
+                        OPTIONS,
+                        CheckGroup::new(Vec::<(String, bool)>::new()),
+                    )
+                    .visible_if(|values| {
+                        !launch_options_for(values.text(HARNESS).trim()).is_empty()
+                    })
+                    .hint("launch options for this harness")
+                    .hint("Space or ←/→ turns an option on or off"),
+                );
+            }
         }
-        if self.overridden {
-            return (format!("kept with this pin: {value}"), back());
-        }
-        (follows(value, self.source), String::new())
+        let mut edit = Self {
+            form,
+            pin,
+            kind,
+            known_pin_names,
+            defaults,
+            default: DefaultArgv::default(),
+        };
+        edit.default = edit.decide_default();
+        edit.follow();
+        edit
     }
+
+    /// The pin the form edits, by its name when the form opened.
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+
+    /// The framework form: its fields, values, focus, and error line.
+    pub fn form(&self) -> &Form<Msg> {
+        &self.form
+    }
+
+    /// The reason the last save was refused, until the next edit.
+    pub fn error(&self) -> Option<&str> {
+        self.form.error()
+    }
+
+    /// The text of the row for recipe field `field` (`None` for a field
+    /// the pin's kind does not have).
+    pub fn field_text(&self, field: &str) -> Option<&str> {
+        self.form
+            .get(field)
+            .filter(|_| field != PIN)
+            .and_then(Field::text_value)
+    }
+
+    /// The pin name row's text.
+    pub fn name_text(&self) -> &str {
+        self.form.values().text(PIN)
+    }
+
+    /// The labels of the pin name and recipe field rows, in order.
+    pub fn row_labels(&self) -> Vec<&str> {
+        self.form
+            .fields()
+            .iter()
+            .filter(|field| field.id() == PIN || field.override_row().is_some())
+            .map(Field::label)
+            .collect()
+    }
+
+    /// The id of the field that has the focus.
+    pub fn focus(&self) -> Option<&'static str> {
+        self.form.focus()
+    }
+
+    /// The label of the row that has the focus.
+    pub fn focused_label(&self) -> Option<&str> {
+        let id = self.form.focus()?;
+        self.form.get(id).map(Field::label)
+    }
+
+    /// Whether typing edits the focused field, so a paste belongs to it.
+    pub fn takes_text(&self) -> bool {
+        self.form.takes_text()
+    }
+
+    /// Draws the form over `area`.
+    pub fn draw(&self, area: Rect, buf: &mut Buffer, theme: &tuikit::theme::Theme) {
+        self.form.draw(area, buf, theme);
+    }
+
+    /// The request the form would save, or why it can't.
+    pub fn request(&self) -> Result<PinEditRequest, String> {
+        let values = self.form.values();
+        check_name(&self.pin, &self.known_pin_names, values.text(PIN))?;
+        build_request(&self.pin, self.kind, &values)
+    }
+
+    /// One key: the form edits, moves, resets, or saves; then the fields
+    /// that follow others catch up. Stepping the harness carries a typed
+    /// argv across, and flipping a launch option writes its flags into
+    /// the argv.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
+        let steps_harness = self.focus() == Some(HARNESS)
+            && matches!(
+                resolve(PIN_EDIT_KEYS, key),
+                Some(FormKey::OptionPrev | FormKey::OptionNext | FormKey::Toggle)
+            );
+        let old_default = self.default.argv().to_vec();
+        let outcome = Overlay::<Msg, ()>::handle(&mut self.form, key, &());
+        match self.form.edited() {
+            Some(HARNESS) if steps_harness => self.carry_argv(&old_default),
+            Some(OPTIONS) => self.apply_options(),
+            _ => {}
+        }
+        self.follow();
+        outcome
+    }
+
+    /// The text of field `id`, as typed.
+    fn text(&self, id: &str) -> &str {
+        self.form.values().text(id)
+    }
+
+    /// The cwd the default argv is decided for, `~` expanded.
+    fn cwd(&self) -> String {
+        self.form
+            .values()
+            .path(CWD)
+            .map(PathField::expanded_value)
+            .unwrap_or_default()
+    }
+
+    /// The argv a mux pin with this harness and cwd starts from when it
+    /// has none of its own: a profile, `atelier exec`, or the harness
+    /// default. Nothing for the other kinds, which have no argv.
+    fn decide_default(&self) -> DefaultArgv {
+        if self.kind != PinKind::Mux {
+            return DefaultArgv::default();
+        }
+        DefaultArgv::resolve(
+            self.defaults.as_ref(),
+            self.text(HARNESS).trim(),
+            &self.cwd(),
+        )
+    }
+
+    /// The argv the pin launches: the argv row read as far as it goes,
+    /// or the default when it is empty.
+    fn argv_now(&self) -> Vec<String> {
+        if self.form.get(ARGV).is_none() {
+            return Vec::new();
+        }
+        launch_argv::effective(split_command_line(self.text(ARGV)), self.default.argv())
+    }
+
+    fn set_argv(&mut self, argv: &[String]) {
+        if let Some(FieldKind::Text(edit)) = self.form.get_mut(ARGV).map(Field::kind_mut) {
+            *edit = LineEdit::new(launch_argv::display(argv));
+        }
+    }
+
+    /// After a step of the harness: a typed argv loses the old harness's
+    /// flags, and one that was only the old default follows the new one.
+    fn carry_argv(&mut self, old_default: &[String]) {
+        let typed = split_command_line(self.text(ARGV));
+        if typed.is_empty() {
+            return;
+        }
+        let (harness, cwd) = (self.text(HARNESS).trim().to_string(), self.cwd());
+        self.default.refresh(self.defaults.as_ref(), &harness, &cwd);
+        let next = launch_argv::carried(typed, old_default, self.default.argv());
+        self.set_argv(&next);
+    }
+
+    /// After a launch option flipped: the argv takes the options as the
+    /// checkboxes now say.
+    fn apply_options(&mut self) {
+        let options = launch_options_for(self.text(HARNESS).trim());
+        let Some(checked) = self
+            .form
+            .values()
+            .check_group(OPTIONS)
+            .map(CheckGroup::checked)
+        else {
+            return;
+        };
+        let mut argv = self.argv_now();
+        for (option, on) in options.iter().zip(checked) {
+            argv = launch_argv::with_option(argv, *option, on);
+        }
+        self.set_argv(&argv);
+    }
+
+    /// Brings the fields that follow others up to date: the default argv
+    /// (decided again only when the harness or the cwd changed) and the
+    /// launch options' checkboxes.
+    fn follow(&mut self) {
+        if self.kind != PinKind::Mux {
+            return;
+        }
+        let (harness, cwd) = (self.text(HARNESS).trim().to_string(), self.cwd());
+        self.default.refresh(self.defaults.as_ref(), &harness, &cwd);
+        let argv = self.argv_now();
+        let options = launch_options_for(&harness);
+        let items: Vec<(String, bool)> = options
+            .iter()
+            .zip(launch_argv::options_on(options, &argv))
+            .map(|(option, on)| (option.label.to_string(), on))
+            .collect();
+        if let Some(FieldKind::CheckGroup(group)) = self.form.get_mut(OPTIONS).map(Field::kind_mut)
+        {
+            group.set_items(items);
+        }
+    }
+}
+
+/// What the paragraph above the rows says about following.
+fn intro(kind: PinKind) -> String {
+    format!(
+        "A blank field follows the running {}, then its last seen value, then what was saved \
+         with the pin. Type to keep a value of your own with this pin; Ctrl-R goes back to \
+         following.",
+        kind.as_str()
+    )
+}
+
+fn text_of(value: &FieldValue) -> String {
+    match value {
+        FieldValue::Text(text) => text.clone(),
+        FieldValue::List(list) => launch_argv::display(list),
+    }
+}
+
+/// `field`'s value in `fields`, as the form shows it, and its layer.
+fn lookup(fields: &[RecipeField], name: &str) -> (String, Option<FieldSource>) {
+    fields
+        .iter()
+        .find(|field| field.name == name)
+        .map(|field| (text_of(&field.value), Some(field.source)))
+        .unwrap_or_default()
 }
 
 /// The word for where a value comes from.
@@ -206,617 +475,146 @@ fn layer_word(layer: Option<FieldSource>) -> &'static str {
     }
 }
 
-/// Cells of the right-hand column that names where a value comes from.
-const TAG_WIDTH: usize = 11;
+/// What following `layer` gives a `kind` pin's field: `value`, from
+/// where.
+fn following(kind: PinKind, layer: Option<FieldSource>, value: &str) -> String {
+    match layer {
+        Some(FieldSource::Live) => format!("following the running {}: {value}", kind.as_str()),
+        Some(FieldSource::History) => format!("following the last seen value: {value}"),
+        Some(FieldSource::Snapshot) => format!("following the value saved with the pin: {value}"),
+        Some(FieldSource::Default) => format!("following the default: {value}"),
+        Some(FieldSource::Override) | None => {
+            "nothing to follow yet; type a value to keep with this pin".to_string()
+        }
+    }
+}
 
-/// Form state: one row per editable field, and the cursor.
-#[derive(Debug, Clone)]
-pub struct PinEditFormState {
-    pin: String,
+/// What the focused override row says about itself: where its value
+/// stands, and what `Ctrl-R` would go back to. `layer` is where the
+/// value it follows without an override comes from.
+fn hint(
     kind: PinKind,
-    status: String,
-    live_mux: bool,
-    rows: Vec<Row>,
-    focus: usize,
-    known_pin_names: Vec<String>,
-    known_harness_keys: Vec<String>,
-    defaults: Option<crate::launch_default::LaunchDefaults>,
-    /// The argv an empty argv row means, decided when the harness or the
-    /// cwd changes, so drawing the options row reads it from here.
-    default: DefaultArgv,
-    error: Option<String>,
-}
-
-/// What a cursor position is on: a row, or the harness options row that
-/// sits under the harness.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Stop {
-    Row(usize),
-    Options,
-}
-
-fn text_of(value: &FieldValue) -> String {
-    match value {
-        FieldValue::Text(text) => text.clone(),
-        FieldValue::List(list) => launch_argv::display(list),
-    }
-}
-
-fn lookup(fields: &[RecipeField], name: &str) -> (String, Option<FieldSource>) {
-    fields
-        .iter()
-        .find(|field| field.name == name)
-        .map(|field| (text_of(&field.value), Some(field.source)))
-        .unwrap_or_default()
-}
-
-impl PinEditFormState {
-    pub fn new(init: PinEditInit) -> Self {
-        let mut rows = vec![Row {
-            which: Which::PinName,
-            label: "pin name".to_string(),
-            control: Control::Text(LineEdit::new(init.pin.clone())),
-            initial: init.pin.clone(),
-            overridden: false,
-            inherited: (init.pin.clone(), None),
-            source: None,
-            cleared: false,
-        }];
-        let fields: Vec<&'static str> = std::iter::once("label")
-            .chain(init.kind.overridable_fields().iter().copied())
-            .collect();
-        for field in fields {
-            let (effective, source) = lookup(&init.effective, field);
-            let inherited = lookup(&init.inherited, field);
-            let overridden = init.overrides.contains_key(field);
-            let control = match (init.kind, field) {
-                (PinKind::Mux, "cwd")
-                | (PinKind::Checkout, "location")
-                | (PinKind::Repo, "path") => Control::Path(crate::tui::paths::directory_field(
-                    effective.clone(),
-                    init.cwd_candidates.clone(),
-                )),
-                (PinKind::Mux, "harness") => Control::Harness(LineEdit::new(effective.clone())),
-                _ => Control::Text(LineEdit::new(effective.clone())),
-            };
-            rows.push(Row {
-                which: Which::Field(field),
-                label: field.to_string(),
-                control,
-                initial: effective,
-                overridden,
-                inherited,
-                source,
-                cleared: false,
-            });
-        }
-        let mut state = Self {
-            pin: init.pin,
-            kind: init.kind,
-            status: init.status,
-            live_mux: init.live_mux,
-            rows,
-            focus: 0,
-            known_pin_names: init.known_pin_names,
-            known_harness_keys: init.known_harness_keys,
-            defaults: init.defaults,
-            default: DefaultArgv::default(),
-            error: None,
+    layer: Option<FieldSource>,
+) -> impl Fn(&OverrideView<'_>) -> Vec<String> + Send + Sync + 'static {
+    move |view| {
+        let value = view.value.trim();
+        let back = || match layer {
+            Some(_) => format!(
+                "Ctrl-R goes back to {}",
+                following(kind, layer, view.inherited).replacen("following", "following —", 1)
+            ),
+            None => "Ctrl-R drops it; there is nothing to follow yet".to_string(),
         };
-        state.default = state.default_for(&state.harness_text());
-        state
-    }
-
-    pub fn pin(&self) -> &str {
-        &self.pin
-    }
-
-    pub fn error(&self) -> Option<&str> {
-        self.error.as_deref()
-    }
-
-    /// The text of the row for `field` (`None` for an unknown field).
-    pub fn field_text(&self, field: &str) -> Option<&str> {
-        self.rows
-            .iter()
-            .find(|row| matches!(row.which, Which::Field(name) if name == field))
-            .map(|row| row.control.value())
-    }
-
-    /// The pin name row's text.
-    pub fn name_text(&self) -> &str {
-        self.rows[0].control.value()
-    }
-
-    /// The labels of the rows, in order.
-    pub fn row_labels(&self) -> Vec<&str> {
-        self.rows.iter().map(|row| row.label.as_str()).collect()
-    }
-
-    /// Which row the cursor is on, by label (`None` on the options row).
-    pub fn focused_label(&self) -> Option<&str> {
-        match self.stops().get(self.focus) {
-            Some(Stop::Row(idx)) => Some(self.rows[*idx].label.as_str()),
-            _ => None,
-        }
-    }
-
-    fn harness_text(&self) -> String {
-        self.rows
-            .iter()
-            .find(|row| row.which == Which::Field("harness"))
-            .map(|row| row.control.value().trim().to_string())
-            .unwrap_or_default()
-    }
-
-    fn has_options(&self) -> bool {
-        self.kind == PinKind::Mux && !launch_options_for(&self.harness_text()).is_empty()
-    }
-
-    fn stops(&self) -> Vec<Stop> {
-        let mut stops = Vec::new();
-        for (idx, row) in self.rows.iter().enumerate() {
-            stops.push(Stop::Row(idx));
-            if row.which == Which::Field("harness") && self.has_options() {
-                stops.push(Stop::Options);
-            }
-        }
-        stops
-    }
-
-    fn move_focus(&mut self, delta: i32) {
-        let count = self.stops().len();
-        self.focus = tuikit::selection::Ends::Wrap.step(self.focus.min(count - 1), count, delta);
-    }
-
-    fn row_index(&self, field: &'static str) -> Option<usize> {
-        self.rows
-            .iter()
-            .position(|row| row.which == Which::Field(field))
-    }
-
-    /// The cwd row's text, which the default argv depends on.
-    fn cwd_text(&self) -> String {
-        self.row_index("cwd")
-            .map(|idx| self.rows[idx].control.value().trim().to_string())
-            .unwrap_or_default()
-    }
-
-    /// The argv a pin with `harness` starts from when it has none of its
-    /// own: a profile, `atelier exec`, or the harness default.
-    fn default_for(&self, harness: &str) -> DefaultArgv {
-        DefaultArgv::resolve(self.defaults.as_ref(), harness, &self.cwd_text())
-    }
-
-    /// Decides the default argv again if the harness or the cwd changed.
-    fn refresh_default(&mut self) {
-        let (harness, cwd) = (self.harness_text(), self.cwd_text());
-        self.default.refresh(self.defaults.as_ref(), &harness, &cwd);
-    }
-
-    /// The argv row's text read as an argv, as far as it goes.
-    fn typed_argv(&self) -> Vec<String> {
-        self.row_index("argv")
-            .map(|idx| split_command_line(self.rows[idx].control.value()))
-            .unwrap_or_default()
-    }
-
-    fn argv_now(&self) -> Vec<String> {
-        if self.row_index("argv").is_none() {
-            return Vec::new();
-        }
-        launch_argv::effective(self.typed_argv(), self.default.argv())
-    }
-
-    fn set_argv(&mut self, argv: &[String]) {
-        if let Some(idx) = self.row_index("argv") {
-            self.rows[idx].control.replace(launch_argv::display(argv));
-            self.rows[idx].cleared = false;
-        }
-    }
-
-    /// Flips a launch option on the options row: with one option, that
-    /// one; with several, `delta` steps from the only one that is on.
-    fn toggle_option(&mut self, delta: i32) {
-        let options = launch_options_for(&self.harness_text());
-        if options.is_empty() {
-            return;
-        }
-        let argv = self.argv_now();
-        let on = launch_argv::options_on(options, &argv);
-        let selected: Vec<usize> = (0..options.len()).filter(|idx| on[*idx]).collect();
-        let idx = match (selected.as_slice(), delta) {
-            ([only], -1 | 1) if options.len() > 1 => {
-                tuikit::scroll::wrap_step(*only, options.len(), delta)
-            }
-            ([first, ..], _) => *first,
-            ([], _) => 0,
-        };
-        let next = launch_argv::with_option(argv, options[idx], !on[idx]);
-        self.set_argv(&next);
-    }
-
-    /// Steps the harness through the known ones, as a form's choice
-    /// does, and carries a typed argv across (`launch_argv::carried`).
-    fn cycle_harness(&mut self, delta: i32) {
-        let Some(idx) = self.row_index("harness") else {
-            return;
-        };
-        let mut choice = Choice::new(self.harness_text(), self.known_harness_keys.clone());
-        if !choice.step(delta) {
-            return;
-        }
-        let old_default = self.default.argv().to_vec();
-        let typed = self.typed_argv();
-        self.rows[idx].control.replace(choice.value().to_string());
-        self.rows[idx].cleared = false;
-        self.refresh_default();
-        if !typed.is_empty() {
-            let next = launch_argv::carried(typed, &old_default, self.default.argv());
-            self.set_argv(&next);
-        }
-    }
-
-    fn inherit(&mut self) {
-        let Some(Stop::Row(idx)) = self.stops().get(self.focus).copied() else {
-            return;
-        };
-        let row = &mut self.rows[idx];
-        if row.which == Which::PinName {
-            let initial = row.initial.clone();
-            row.control.replace(initial);
-            return;
-        }
-        let value = row.inherited.0.clone();
-        row.control.replace(value);
-        row.cleared = true;
-    }
-
-    /// The request the form would save, or why it can't.
-    pub fn request(&self) -> Result<PinEditRequest, String> {
-        let name = self.rows[0].control.value().trim().to_string();
-        let rename = if name == self.pin {
-            None
-        } else {
-            crate::pin_slots::validate_id(&name).map_err(|err| err.to_string())?;
-            if self.known_pin_names.contains(&name) {
-                return Err(format!("a pin named `{name}` already exists"));
-            }
-            Some(name)
-        };
-        let mut set = Vec::new();
-        let mut unset = Vec::new();
-        for row in &self.rows[1..] {
-            let Which::Field(field) = row.which else {
-                continue;
-            };
-            let text = row.control.committed();
-            if row.cleared {
-                if row.overridden {
-                    unset.push(field.to_string());
+        match view.standing {
+            Standing::Follows => vec![following(kind, layer, value)],
+            Standing::Kept => vec![format!("kept with this pin: {value}"), back()],
+            Standing::Changed => {
+                let mut lines = vec![format!("will be kept with this pin: {value}")];
+                if layer.is_some() {
+                    lines.push(back());
                 }
-                continue;
+                lines
             }
-            if !row.edited() {
-                continue;
-            }
-            if text.is_empty() {
-                if row.overridden {
-                    unset.push(field.to_string());
-                }
-                continue;
-            }
-            let (name, value) =
-                crate::pin_ops::parse_override(self.kind, &format!("{field}={text}"))
-                    .map_err(|err| err.to_string())?;
-            set.push((name, value));
-        }
-        Ok(PinEditRequest {
-            pin: self.pin.clone(),
-            rename,
-            set,
-            unset,
-        })
-    }
-
-    fn try_commit(&mut self) -> Outcome<Msg> {
-        match self.request() {
-            Ok(request) => {
-                if request.rename.is_none() && request.set.is_empty() && request.unset.is_empty() {
-                    return Outcome::Close;
-                }
-                Outcome::Commit(Msg::CommitPinEdit(request))
-            }
-            Err(message) => {
-                self.error = Some(message);
-                Outcome::Consumed
-            }
-        }
-    }
-
-    /// A key on a text row: an edit that changes the value takes back
-    /// a pending follow and clears the error.
-    fn typed(&mut self, idx: usize, key: KeyEvent) -> Outcome<Msg> {
-        let changed = match &mut self.rows[idx].control {
-            Control::Text(input) | Control::Harness(input) => input.handle(key).changed,
-            Control::Path(path) => path.handle(key).changed,
-        };
-        if changed {
-            self.rows[idx].cleared = false;
-            self.error = None;
-        }
-        Outcome::Consumed
-    }
-}
-
-impl PinEditFormState {
-    /// One key: edit, move between the rows, change an option, save, or
-    /// close. A key that changed the harness or the cwd decides the
-    /// default argv again, so drawing never has to.
-    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        let outcome = self.key(key);
-        self.refresh_default();
-        outcome
-    }
-
-    fn key(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        use crate::tui::keybindings::overlay::PIN_EDIT_KEYS;
-        use tuikit::keys::{FormKey, resolve};
-        let stop = self
-            .stops()
-            .get(self.focus)
-            .copied()
-            .unwrap_or(Stop::Row(0));
-        let option_delta = match resolve(PIN_EDIT_KEYS, key) {
-            Some(FormKey::Abort | FormKey::Cancel) => return Outcome::Close,
-            Some(FormKey::Up | FormKey::Back) => {
-                self.move_focus(-1);
-                return Outcome::Consumed;
-            }
-            Some(FormKey::Down) => {
-                self.move_focus(1);
-                return Outcome::Consumed;
-            }
-            Some(FormKey::Tab) => {
-                if let Stop::Row(idx) = stop
-                    && let Control::Path(path) = &mut self.rows[idx].control
-                    && path.complete()
-                {
-                    self.rows[idx].cleared = false;
-                    return Outcome::Consumed;
-                }
-                self.move_focus(1);
-                return Outcome::Consumed;
-            }
-            Some(FormKey::Inherit) => {
-                self.inherit();
-                return Outcome::Consumed;
-            }
-            Some(FormKey::Submit) => return self.try_commit(),
-            Some(FormKey::OptionPrev) => Some(-1),
-            Some(FormKey::OptionNext | FormKey::Toggle) => Some(1),
-            None => None,
-        };
-        match stop {
-            Stop::Options => {
-                if let Some(delta) = option_delta {
-                    self.toggle_option(delta);
-                }
-                Outcome::Consumed
-            }
-            Stop::Row(idx) => {
-                if let (Control::Harness(_), Some(delta)) = (&self.rows[idx].control, option_delta)
-                {
-                    self.cycle_harness(delta);
-                    return Outcome::Consumed;
-                }
-                self.typed(idx, key)
-            }
+            Standing::Reset => vec![
+                "will follow again when saved".to_string(),
+                following(kind, layer, view.inherited),
+            ],
         }
     }
 }
 
-/// Popup renderer for the form.
-pub struct PinEditFormWidget<'a> {
-    state: &'a PinEditFormState,
-    theme: &'a Theme,
-}
-
-impl<'a> PinEditFormWidget<'a> {
-    pub fn new(state: &'a PinEditFormState, theme: &'a Theme) -> Self {
-        Self { state, theme }
+/// Refuses a new pin name that is not a valid pin id or that another pin
+/// has. The name the pin has now is always fine.
+fn check_name(pin: &str, known: &[String], text: &str) -> Result<(), String> {
+    let name = text.trim();
+    if name == pin {
+        return Ok(());
     }
+    crate::pin_slots::validate_id(name).map_err(|err| err.to_string())?;
+    if known.iter().any(|known| known == name) {
+        return Err(format!("a pin named `{name}` already exists"));
+    }
+    Ok(())
 }
 
-impl Widget for PinEditFormWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let state = self.state;
-        let frame = form::modal_frame(self.theme, "Edit pin");
-        let inner_width = usize::from(frame.inner_width(area));
-        let label_width = state
-            .rows
-            .iter()
-            .map(|row| tuikit::text::width(&row.label))
-            .max()
-            .unwrap_or(11)
-            .clamp(11, 16);
-        let cols = Cols::new(inner_width).with_label(label_width);
-        let grid = Grid::new(inner_width, label_width);
-        let stops = state.stops();
-        let focus = stops.get(state.focus).copied().unwrap_or(Stop::Row(0));
-        let dim = Style::default().add_modifier(self.theme.muted);
+/// The pin name field's check.
+fn name_check(
+    pin: String,
+    known: Vec<String>,
+) -> impl Fn(&str) -> Result<(), String> + Send + Sync {
+    move |text: &str| check_name(&pin, &known, text)
+}
 
-        let mut top: Vec<Line<'static>> = vec![note_row(
-            "pin",
-            &format!("{} · {} · {}", state.pin, state.kind.as_str(), state.status),
-            cols,
-            self.theme,
-        )];
-        let help = format!(
-            "A blank field follows the running {}, then its last seen value, then what was \
-             saved with the pin. Type to keep a value of your own with this pin; Ctrl-R goes \
-             back to following.",
-            state.kind.as_str()
-        );
-        top.extend(
-            tuikit::text::wrap(&help, inner_width.saturating_sub(2))
-                .into_iter()
-                .map(|text| Line::styled(format!("  {}", text.trim_end()), dim)),
-        );
-        top.push(line![""]);
+/// Refuses a value `field` cannot hold, as `pin edit --set` would (an
+/// argv that ends inside a quote).
+fn override_check(kind: PinKind, field: &str, text: &str) -> Result<(), String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(());
+    }
+    crate::pin_ops::parse_override(kind, &format!("{field}={text}"))
+        .map(drop)
+        .map_err(|err| err.to_string())
+}
 
-        let mut rows: Vec<Line<'static>> = Vec::new();
-        let mut cursor_row = 0;
-        let mut detail = (String::new(), String::new());
-        for (idx, row) in state.rows.iter().enumerate() {
-            let active = focus == Stop::Row(idx);
-            if active {
-                cursor_row = rows.len();
-                detail = row.hint(state.kind);
-                if detail.1.is_empty() {
-                    detail.1 = row_help(row);
-                }
-            }
-            rows.push(render_row(state, row, active, grid, cols, self.theme));
-            if row.which == Which::PinName && state.live_mux {
-                rows.push(note_row(
-                    "",
-                    "renames the tmux session too",
-                    cols,
-                    self.theme,
-                ));
-            }
-            if row.which == Which::Field("harness") && state.has_options() {
-                let active = focus == Stop::Options;
-                if active {
-                    cursor_row = rows.len();
-                    detail = (
-                        "launch options for this harness".to_string(),
-                        "Space or ←/→ turns an option on or off".to_string(),
+/// The value saving commits for `field`: trimmed, and with `~` expanded
+/// in a path, which the commands that read the pin take as given.
+fn committed(values: &Values<'_>, field: &str) -> String {
+    values.path(field).map_or_else(
+        || values.text(field).trim().to_string(),
+        PathField::expanded_value,
+    )
+}
+
+/// The save the values ask for: a rename when the name changed; each
+/// changed field kept as an override (an emptied override dropped); each
+/// reset field's override dropped.
+fn build_request(pin: &str, kind: PinKind, values: &Values<'_>) -> Result<PinEditRequest, String> {
+    let name = values.text(PIN).trim();
+    let rename = (name != pin).then(|| name.to_string());
+    let mut set = Vec::new();
+    let mut unset = Vec::new();
+    for field in recipe_fields(kind) {
+        let overridden = values
+            .field(field)
+            .and_then(Field::override_row)
+            .is_some_and(OverrideRow::is_overridden);
+        match values.standing(field) {
+            Some(Standing::Reset) => unset.push(field.to_string()),
+            Some(Standing::Changed) => {
+                let text = committed(values, field);
+                if text.is_empty() {
+                    if overridden {
+                        unset.push(field.to_string());
+                    }
+                } else {
+                    let assignment = format!("{field}={text}");
+                    set.push(
+                        crate::pin_ops::parse_override(kind, &assignment)
+                            .map_err(|err| err.to_string())?,
                     );
                 }
-                let harness = state.harness_text();
-                rows.push(options_row(
-                    "options",
-                    launch_options_for(&harness),
-                    &state.argv_now(),
-                    active,
-                    cols,
-                    self.theme,
-                ));
             }
-        }
-
-        // The focused row's explanation always takes the same two lines,
-        // so the form never changes height as the cursor moves.
-        let detail_width = inner_width.saturating_sub(2);
-        let mut bottom: Vec<Line<'static>> = vec![
-            line![""],
-            Line::styled(
-                format!("  {}", tuikit::text::fit(&detail.0, detail_width)),
-                dim,
-            ),
-            Line::styled(
-                format!("  {}", tuikit::text::fit(&detail.1, detail_width)),
-                dim,
-            ),
-        ];
-        if let Some(err) = state.error() {
-            bottom.push(Line::styled(
-                format!("  {}", tuikit::text::fit(err, detail_width)),
-                Style::default().fg(self.theme.error),
-            ));
-        }
-        bottom.push(line![""]);
-        bottom.extend(footer_lines(
-            crate::tui::keybindings::overlay::PIN_EDIT_KEYS,
-            inner_width,
-            self.theme,
-        ));
-
-        // The rows scroll; the summary above them and the explanation,
-        // error, and keys below stay in view.
-        let body = FormBody::new(rows, cursor_row).top(top).notes(bottom);
-        frame.render(area, buf, body);
-    }
-}
-
-/// The second explanation line of a focused row: what its keys do.
-fn row_help(row: &Row) -> String {
-    match &row.control {
-        Control::Path(_) => "Tab completes the path".to_string(),
-        Control::Harness(_) => "←/→ choose a harness".to_string(),
-        Control::Text(_) => String::new(),
-    }
-}
-
-/// The columns of a row, in cells: the two-cell selection gutter, the
-/// label, a gap, the value, a gap, and the right-aligned tag. Every row
-/// uses the same widths, focused or not.
-#[derive(Clone, Copy)]
-struct Grid {
-    label: usize,
-    value: usize,
-}
-
-impl Grid {
-    fn new(inner: usize, label: usize) -> Self {
-        let fixed = 2 + label + 2 + 1 + TAG_WIDTH;
-        Self {
-            label,
-            value: inner.saturating_sub(fixed).max(4),
+            Some(Standing::Follows | Standing::Kept) | None => {}
         }
     }
+    Ok(PinEditRequest {
+        pin: pin.to_string(),
+        rename,
+        set,
+        unset,
+    })
 }
 
-fn render_row(
-    state: &PinEditFormState,
-    row: &Row,
-    active: bool,
-    grid: Grid,
-    cols: Cols,
-    theme: &Theme,
-) -> Line<'static> {
-    let mut spans = vec![Span::raw(form::prefix(&row.label, grid.label))];
-    match &row.control {
-        Control::Harness(input) => {
-            let value = input.value().trim();
-            let custom = !value.is_empty() && !state.known_harness_keys.iter().any(|k| k == value);
-            if custom {
-                let mark = " [custom]";
-                let width = grid.value.saturating_sub(tuikit::text::width(mark));
-                spans.extend(form::value_cells(input, width, active, theme));
-                spans.push(Span::styled(mark, Style::default().fg(theme.warning)));
-            } else {
-                let slot = 18.min(grid.value);
-                spans.extend(form::value_cells(input, slot, active, theme));
-                let chips =
-                    form::harness_chips(value, &state.known_harness_keys, grid.value - slot, theme);
-                let used = tuikit::text::spans_width(&chips);
-                spans.extend(chips);
-                spans.push(Span::raw(" ".repeat(grid.value - slot - used)));
-            }
-        }
-        Control::Path(path) => {
-            spans.extend(form::path_cells(path, grid.value, active, theme));
-        }
-        Control::Text(input) => {
-            spans.extend(form::value_cells(input, grid.value, active, theme));
-        }
+/// What `Enter` does: save the changes, close when there are none, or
+/// say why the values cannot be saved. The fields' checks (the name, the
+/// argv) have passed.
+fn save(pin: &str, kind: PinKind, values: &Values<'_>) -> Submit<Msg> {
+    match build_request(pin, kind, values) {
+        Ok(request) if request.is_empty() => Submit::Close,
+        Ok(request) => Submit::Commit(Msg::CommitPinEdit(request)),
+        Err(reason) => Submit::Reject(reason),
     }
-    spans.push(Span::raw(" "));
-    let pending = row.cleared || row.edited();
-    let tag_style = if pending {
-        Style::default().fg(theme.warning)
-    } else {
-        Style::default().add_modifier(theme.muted)
-    };
-    spans.push(Span::styled(
-        format!("{:>width$}", row.tag(), width = TAG_WIDTH),
-        tag_style,
-    ));
-    let _ = cols;
-    form::row(spans, active, theme)
 }
 
 #[cfg(test)]

@@ -1778,8 +1778,9 @@ impl App {
                 }));
             }
             Msg::OpenSlotEdit(slot) => match self.pin_edit_init(&slot) {
-                Some(init) => self
-                    .open_pin_edit_form(crate::tui::widgets::pin_edit::PinEditFormState::new(init)),
+                Some(init) => {
+                    self.open_pin_edit_form(crate::tui::widgets::pin_edit::PinEditForm::new(init));
+                }
                 None => effects.push(Effect::Toast(Feedback::warning(format!(
                     "no pin named `{slot}`"
                 )))),

@@ -6459,7 +6459,8 @@ fn opening_edit_builds_the_form_from_the_pin_and_saving_emits_one_store_write() 
     let labels = form.row_labels();
     assert_eq!(&labels[..2], ["pin name", "label"]);
     for field in crate::model::PinKind::Mux.overridable_fields() {
-        assert!(labels.contains(field), "{field} missing from {labels:?}");
+        let label = crate::tui::widgets::pin_edit::label_for(field);
+        assert!(labels.contains(&label), "{label} missing from {labels:?}");
     }
     assert_eq!(form.name_text(), "conspectus-main");
 
@@ -6853,11 +6854,11 @@ fn a_badge_with_a_wide_command_keeps_the_badge_width() {
 
 #[test]
 fn form_rows_with_wide_values_fit_the_form() {
-    use crate::tui::widgets::form::{Cols, note_row};
+    use tuikit::form::{Cols, Tone, read_only_row};
     let theme = Theme::default();
     let value = "東京/設計/レビュー/ノート/最終版/ドラフト/コメント付き ⚠\u{fe0f} 確認待ち";
     for inner in [30, 44, 60] {
-        let line = note_row("cwd", value, Cols::new(inner), &theme);
+        let line = read_only_row("cwd", value, Tone::Note, Cols::new(inner), &theme);
         let width = line.width();
         assert!(width <= inner, "{inner}: {width} cells: {line:?}");
         assert!(line.to_string().ends_with('…'), "{inner}: {line:?}");

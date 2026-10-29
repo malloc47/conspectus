@@ -3,7 +3,6 @@
 pub mod badge;
 pub mod clean_up;
 pub mod controls;
-pub mod form;
 pub mod help;
 pub mod launch_argv;
 pub mod messages;
@@ -19,3 +18,7 @@ pub mod search;
 pub mod value_modal;
 pub mod viewer_help;
 pub mod worktree_menu;
+
+#[cfg(test)]
+#[path = "form_tests.rs"]
+mod form_tests;
