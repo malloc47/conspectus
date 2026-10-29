@@ -341,6 +341,12 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `Esc/q/? close`, though `q` leaves the viewer there; it now reads
   `j/k/PgDn/PgUp scroll · Esc/? back · q close`. `Ctrl-D`/`Ctrl-U` page
   by half in the `?` help and the full-value viewer too.
+- **The full-value viewer (`o`, and a rebuild plan) reads like the help.**
+  A value longer than the dialog shows a scrollbar, the keys line is
+  dimmed like the help's and lists `y copy` before the keys that close it
+  (`j/k/PgDn/PgUp scroll · y copy · Esc/q/o close`), and on a narrow
+  terminal it wraps onto a second line instead of losing `y copy` at the
+  edge.
 
 ### Fixed
 

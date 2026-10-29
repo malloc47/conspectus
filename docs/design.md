@@ -1291,9 +1291,13 @@ modes, one window clamped at every draw with viewport paging, half pages,
 and a sticky end, a find on the one line editor that always scrolls to its
 match, `Esc` stepping back and `q` leaving, a help page generated from the
 pager's and the content's tables, and a generated footer. The pane
-scrollback viewer is a pager over numbered lines that wrap (`w` cuts them);
-the transcript viewer, the value modal, the help page's body, the Messages
-detail, and the preview move onto it later.
+scrollback viewer is a pager over numbered lines that wrap (`w` cuts them).
+The value modal is a framed pager over the wrapped value, whose `y` is the
+copy hook, and every help page (the keymap's, the viewers', a pager's `?`
+level) is the framework's `HelpPage` read in a framed pager (ADR 0178); a
+framed footer too tall for its frame keeps its last rows and scrolls the
+rest with the body. The transcript viewer, the Messages detail, and the
+preview move onto the pager later.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

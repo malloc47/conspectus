@@ -25,7 +25,13 @@ holds each page to its own level's footer. Carries out what
 left for this extraction for the pane viewer: its offset is a window with
 a sticky end. Amends [ADR 0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md):
 the conformance suite takes a level's tables consulted after its first
-with `conformance::part`.
+with `conformance::part`. Amended by
+[ADR 0178](0178-tui-help-pages-and-long-values-are-pager-contents.md)
+(decisions 3 and 7): a framed pager whose footer is taller than its frame
+keeps the footer's last rows and scrolls its first rows with the body, and
+`PAGER_HELP_KEYS` binds `?` as another `Close`, the help level being a
+pager over that table; the value modal and the help page's body are
+pager contents.
 
 ## Context
 
