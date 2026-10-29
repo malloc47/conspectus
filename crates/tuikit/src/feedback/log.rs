@@ -3,6 +3,7 @@
 use std::collections::VecDeque;
 
 use super::{Feedback, Severity};
+use crate::glyphs::marks;
 
 /// One thing that happened: when, how much it matters, a one-line
 /// summary, and the host's payload of type `T` (what it was about, what
@@ -38,6 +39,16 @@ impl<T> Entry<T> {
     /// would show it.
     pub fn feedback(&self) -> Feedback {
         Feedback::new(self.severity, self.summary.clone())
+    }
+
+    /// The summary as a list of entries shows it: with the count of
+    /// repeats after it once the entry repeated (`save failed (×3)`).
+    pub fn summary_with_repeats(&self) -> String {
+        if self.repeats > 1 {
+            format!("{} ({}{})", self.summary, marks::TIMES, self.repeats)
+        } else {
+            self.summary.clone()
+        }
     }
 }
 

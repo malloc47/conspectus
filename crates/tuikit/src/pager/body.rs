@@ -81,14 +81,17 @@ pub(super) fn modal<C: PagerContent>(
     );
 }
 
-/// Draws an embedded pager: the body and its scrollbar.
+/// Draws an embedded pager: the body and its scrollbar, with `tail`
+/// scrolling after the content's last row (the rows of a host's footer
+/// that do not fit under the pager; none for most).
 pub(super) fn embedded<C: PagerContent>(
     pager: &mut Pager<C>,
     area: Rect,
     buf: &mut Buffer,
     theme: &Theme,
+    tail: &[Line<'static>],
 ) {
-    draw_body(pager, area, buf, theme, true, &[]);
+    draw_body(pager, area, buf, theme, true, tail);
 }
 
 /// A framed pager inside its frame.

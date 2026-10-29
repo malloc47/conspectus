@@ -33,6 +33,10 @@ pub const COLLAPSED: &str = "▶";
 pub const OK: &str = "√";
 /// A check that failed, or a value that did not.
 pub const FAIL: &str = "×";
+/// The multiplication sign in a count of repeats (`(×3)`): the character
+/// of [`FAIL`], read as "times" there, so it is not a mark of its own in
+/// [`ALL`].
+pub const TIMES: &str = FAIL;
 /// Something that needs attention but is not an error.
 pub const WARNING: &str = "▲";
 /// An unchecked item in a list of choices, and, between parentheses, the

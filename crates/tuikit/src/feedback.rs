@@ -17,7 +17,8 @@
 //!   entries into one with a repeat count and counts the warnings and
 //!   errors the user has not looked at yet. An entry carries a payload of
 //!   the host's type (what it was about, what ran), so the log's
-//!   machinery is the framework's and its meaning the host's.
+//!   machinery is the framework's and its meaning the host's. The
+//!   [`LogList`](crate::log_list::LogList) control reads it.
 //!
 //! One [`Feedback`] (a severity, a text, and a lifetime) is what the
 //! status line and a toast show and what a log entry is summarized by.

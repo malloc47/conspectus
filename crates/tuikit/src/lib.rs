@@ -26,6 +26,7 @@ pub mod frame;
 pub mod glyphs;
 pub mod help;
 pub mod keys;
+pub mod log_list;
 pub mod overlay;
 pub mod pager;
 pub mod palette;

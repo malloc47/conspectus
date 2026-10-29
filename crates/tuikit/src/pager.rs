@@ -645,11 +645,25 @@ impl<C: PagerContent> Pager<C> {
         match self.mode {
             PagerMode::Screen => body::screen(self, area, buf, theme),
             PagerMode::Modal(size) => body::modal(self, size, area, buf, theme),
-            PagerMode::Embedded => body::embedded(self, area, buf, theme),
+            PagerMode::Embedded => body::embedded(self, area, buf, theme, &[]),
         }
         if let Some(help) = &mut self.help {
             help.draw(area, buf, theme);
         }
+    }
+
+    /// Draws the pager embedded in `area` with `tail` after the content's
+    /// last row, scrolling with it: the first rows of a control's footer
+    /// that do not fit under the pager, which keep to the rule a framed
+    /// pager's footer does (its last rows stay, the rest scroll).
+    pub(crate) fn draw_embedded(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        theme: &Theme,
+        tail: &[ratatui::text::Line<'static>],
+    ) {
+        body::embedded(self, area, buf, theme, tail);
     }
 }
 

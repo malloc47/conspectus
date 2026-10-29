@@ -70,6 +70,21 @@ fn back_to_back_duplicates_collapse_into_a_repeat_count() {
 }
 
 #[test]
+fn a_repeated_entry_reads_with_its_count() {
+    let mut log = Log::default();
+    log.push(entry(10, Severity::Error, "refresh failed"));
+    let once = log.newest_first().next().expect("an entry");
+    assert_eq!(once.summary_with_repeats(), "refresh failed");
+    log.push(entry(20, Severity::Error, "refresh failed"));
+    log.push(entry(30, Severity::Error, "refresh failed"));
+    let thrice = log.newest_first().next().expect("an entry");
+    assert_eq!(
+        thrice.summary_with_repeats(),
+        format!("refresh failed ({}3)", crate::glyphs::marks::TIMES)
+    );
+}
+
+#[test]
 fn entries_that_differ_in_severity_or_payload_do_not_collapse() {
     let mut log = Log::default();
     log.push(entry(0, Severity::Warning, "launch"));

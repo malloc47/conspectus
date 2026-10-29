@@ -1,6 +1,6 @@
 //! The standard key tables and the action enums they bind: one table per
-//! standard control, so every menu, dialog, pager, prompt, checklist,
-//! palette, settings panel, and form takes the same keys.
+//! standard control, so every menu, dialog, pager, prompt, checklist, log
+//! list, palette, settings panel, and form takes the same keys.
 //!
 //! Each table starts with `Ctrl-C`, bound to its `Abort` action, and a
 //! table where nothing is typed binds `q` to it as well (house rule 4);
@@ -489,6 +489,80 @@ impl KeyAction for ChecklistKey {
             Self::Toggle | Self::SelectAll | Self::SelectNone => KeyRole::Change,
             Self::Confirm => KeyRole::Apply,
             Self::Cancel => KeyRole::Leave,
+        }
+    }
+}
+
+/// What a log list's keys do: the list of entries and the selected
+/// entry's detail under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LogListKey {
+    /// Dismiss the log list (`Ctrl-C`, `q`).
+    Abort,
+    /// Close the log list (`Esc`).
+    Close,
+    /// Select the next entry down the list, an older one.
+    Down,
+    /// Select the next entry up the list, a newer one.
+    Up,
+    /// Select the newest entry, at the top of the list.
+    Newest,
+    /// Select the oldest entry, at the bottom of the list.
+    Oldest,
+    /// Scroll the detail down a row.
+    DetailDown,
+    /// Scroll the detail up a row.
+    DetailUp,
+    /// Scroll the detail down a page: the rows it shows.
+    DetailPageDown,
+    /// Scroll the detail up a page.
+    DetailPageUp,
+    /// Copy the selected entry (a log list whose table binds it).
+    Copy,
+}
+
+/// A log list: `j/k select · J/K scroll detail · Esc close`. `j` and `k`
+/// (with the arrows and `Ctrl-N`/`Ctrl-P`) select an entry and stop at the
+/// ends; `g`/`Home` and `G`/`End` select the newest and the oldest; `J`
+/// and `K` scroll the detail a row, `PgDn`/`Space` and `PgUp` a page
+/// (aliases). `q` dismisses it, as `Ctrl-C` does. No row binds
+/// [`Copy`](LogListKey::Copy): a host whose entries copy binds it in its
+/// own table, as a host adds the key that opened the list as another
+/// close.
+pub const LOG_LIST_KEYS: &[KeyRow<LogListKey>] = &[
+    alias(ctrl('c'), LogListKey::Abort),
+    alias(ch('q'), LogListKey::Abort),
+    shown(ch('j'), LogListKey::Down, "j", "select"),
+    alias(key(KeyCode::Down), LogListKey::Down),
+    alias(ctrl('n'), LogListKey::Down),
+    shown(ch('k'), LogListKey::Up, "k", "select"),
+    alias(key(KeyCode::Up), LogListKey::Up),
+    alias(ctrl('p'), LogListKey::Up),
+    alias(ch('g'), LogListKey::Newest),
+    alias(key(KeyCode::Home), LogListKey::Newest),
+    alias(ch('G'), LogListKey::Oldest),
+    alias(key(KeyCode::End), LogListKey::Oldest),
+    shown(ch('J'), LogListKey::DetailDown, "J", "scroll detail"),
+    shown(ch('K'), LogListKey::DetailUp, "K", "scroll detail"),
+    alias(key(KeyCode::PageDown), LogListKey::DetailPageDown),
+    alias(ch(' '), LogListKey::DetailPageDown),
+    alias(key(KeyCode::PageUp), LogListKey::DetailPageUp),
+    shown(key(KeyCode::Esc), LogListKey::Close, "Esc", "close"),
+];
+
+impl KeyAction for LogListKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Abort => KeyRole::Abort,
+            Self::Close => KeyRole::Leave,
+            Self::Down
+            | Self::Up
+            | Self::Newest
+            | Self::Oldest
+            | Self::DetailDown
+            | Self::DetailUp => KeyRole::Move,
+            Self::DetailPageDown | Self::DetailPageUp => KeyRole::Page,
+            Self::Copy => KeyRole::Other,
         }
     }
 }
