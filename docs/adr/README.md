@@ -134,7 +134,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | ADR | Decision | Status |
 | --- | --- | --- |
 | [0024](0024-tui-runtime-and-architecture.md) | TUI Runtime, App Architecture, And Dependency Policy | Accepted |
-| [0025](0025-tui-preview-ansi-rendering-dependency.md) | TUI Preview ANSI Rendering Dependency | Accepted |
+| [0025](0025-tui-preview-ansi-rendering-dependency.md) | TUI Preview ANSI Rendering Dependency | Accepted (amended by 0181) |
 | [0030](0030-tui-text-input-primitive.md) | TUI Text-Input Primitive | Accepted (narrowed by 0165, 0166) |
 | [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149, 0173, 0176) |
 | [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted (amended by 0153, 0159) |
@@ -158,7 +158,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted |
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161) |
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179) |
-| [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155) |
+| [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181) |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
 | [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (see 0147) |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
@@ -176,7 +176,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0151](0151-tui-framework-control-set-and-house-rules.md) | The Framework Control Set And Its House Rules | Accepted |
 | [0152](0152-tui-framework-dependency-ownership.md) | Who Owns The Framework's Third-Party Crates | Accepted |
 | [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted (amended by 0163, 0180) |
-| [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted (amended by 0168, 0179) |
+| [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted (amended by 0168, 0179, 0181) |
 | [0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md) | Text Is Measured, Cut, And Wrapped In Terminal Cells By One Module | Accepted |
 | [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161, 0177) |
 | [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted |
@@ -199,10 +199,11 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md) | Palettes Are One Control, A Query Over Results The Host Ranks | Accepted (amended by 0175) |
 | [0175](0175-tui-search-is-two-palettes-and-a-hit-is-one-column-plan.md) | Search Is Two Palettes, And A Hit's Cells Are One Column Plan | Accepted |
 | [0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md) | Settings Panels Are One Control That Applies Each Change As It Is Made, And Their Editors Are Steps | Accepted |
-| [0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md) | Readers Are One Pager Over Content The Host Lays Out | Accepted (amended by 0178) |
+| [0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md) | Readers Are One Pager Over Content The Host Lays Out | Accepted (amended by 0178, 0181) |
 | [0178](0178-tui-help-pages-and-long-values-are-pager-contents.md) | Help Pages And Long Values Are Pager Contents, And A Framed Footer Scrolls What Does Not Fit | Accepted (amended by 0180) |
 | [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted |
 | [0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) | The Transcript Viewer Is A Pager Content, And The Viewer Boundary Keeps Only The Transcript | Accepted |
+| [0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md) | Rich Text Is A Framework Feature, And The Preview Scrolls In A Region Counted From An Anchor | Accepted |
 
 ## Transcript viewer
 
@@ -211,11 +212,11 @@ Opening and rendering harness transcripts.
 | ADR | Decision | Status |
 | --- | --- | --- |
 | [0019](0019-session-transcript-viewer.md) | Session Transcript Viewer Integration | Accepted (amended) |
-| [0051](0051-tui-transcript-preview-markdown-dependency.md) | TUI Transcript Preview Markdown Rendering Dependency | Accepted (amended) |
+| [0051](0051-tui-transcript-preview-markdown-dependency.md) | TUI Transcript Preview Markdown Rendering Dependency | Accepted (amended, and by 0181) |
 | [0052](0052-native-session-viewer.md) | Native In-Tree Multi-Harness Session Transcript Viewer | Accepted (boundary narrowed by 0180) |
 | [0053](0053-viewer-abort-filter-default-harness-ux.md) | Aborted-Message Filtering In The Native Viewer | Accepted |
 | [0122](0122-viewer-harness-hidden-records-toggle.md) | Harness-Hidden Records Behind A Viewer Toggle | Accepted |
-| [0054](0054-viewer-table-rendering-comfy-table.md) | Markdown Table Rendering Via comfy-table | Accepted |
+| [0054](0054-viewer-table-rendering-comfy-table.md) | Markdown Table Rendering Via comfy-table | Accepted (amended by 0181) |
 
 ## Process, tooling, and distribution
 

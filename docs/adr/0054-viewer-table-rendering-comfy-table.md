@@ -4,7 +4,11 @@
 
 Accepted. Extends ADR 0052 (native viewer) and ADR 0051 (markdown
 rendering dep). Adds `comfy-table` to the viewer's allowed-dep
-surface.
+surface. Amended by [ADR 0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md): `comfy-table` is an optional
+dependency of the framework crate behind its `richtext` feature, the
+segmenter and the table layout are the framework's
+(`richtext::segment_body` and `render_table`), and the viewer reaches
+them through `richtext::markdown`.
 
 ## Context
 

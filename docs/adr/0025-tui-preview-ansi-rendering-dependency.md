@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md): `ansi-to-tui` is an optional
+dependency of the framework crate behind its `richtext` feature, which
+`conspectus` turns on, and the shim this ADR describes is the framework's
+`richtext::ansi_text`, its color-off path and malformed-input fallback
+kept.
 
 ## Context
 

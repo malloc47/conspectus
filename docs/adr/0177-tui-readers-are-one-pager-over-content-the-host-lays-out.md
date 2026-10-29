@@ -34,6 +34,9 @@ pager over that table; the value modal and the help page's body are
 pager contents. Amended by
 [ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md): the
 transcript viewer is a pager content too, with its own `TRANSCRIPT_KEYS`.
+Amended by [ADR 0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md): the preview region is not a pager
+content but a `scroll::ScrollRegion`, since it counts from its end or a
+match and draws from a shared borrow of its host.
 
 ## Context
 
