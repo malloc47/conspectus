@@ -40,9 +40,10 @@ use crate::filter::{
     RowFilter,
 };
 use crate::tui::Theme;
-use crate::tui::widgets::input::{InputOutcome, TextPromptState};
 use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState};
 use crate::tui::{Grouping, Sort, View};
+use tuikit::overlay::{Outcome, Overlay};
+use tuikit::text_prompt::{PromptResult, TextPrompt};
 
 /// Registered harness keys surfaced in the harness sub-editor.
 /// Derives from the adapter registry
@@ -165,9 +166,11 @@ pub enum ControlsCursor {
 #[derive(Debug, Clone)]
 pub enum SubEditor {
     Harness(MultiSelectState),
-    MaxAge(TextPromptState),
-    /// The content query text.
-    Content(TextPromptState),
+    /// The max-age filter's text, parsed by its prompt: no age, or the
+    /// age to keep.
+    MaxAge(TextPrompt<Option<std::time::Duration>>),
+    /// The content query text: none clears the search.
+    Content(TextPrompt<Option<String>>),
     MuxState(MultiSelectState),
     PrState(MultiSelectState),
 }
@@ -348,10 +351,7 @@ impl ControlsOverlayState {
             }
             ControlsCursor::FilterContent => {
                 let initial = ctx.content.map(|(text, ..)| text).unwrap_or_default();
-                self.sub_editor = Some(SubEditor::Content(TextPromptState::new(
-                    " contains ",
-                    initial.to_string(),
-                )));
+                self.sub_editor = Some(SubEditor::Content(build_content_editor(initial)));
                 ControlsOutcome::Continue
             }
             ControlsCursor::ContentGroup => {
@@ -494,55 +494,37 @@ impl ControlsOverlayState {
                     ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
                 }
             },
-            SubEditor::Content(state) => match state.handle_key(event) {
-                InputOutcome::Continue => ControlsOutcome::Continue,
-                InputOutcome::Abort => ControlsOutcome::Close,
-                InputOutcome::Cancel => {
+            // A text editor's prompt checks what was typed; a refusal
+            // stays open with its reason. Closing it (Esc; Ctrl-C was
+            // taken above) steps back to the panel.
+            SubEditor::Content(prompt) => match prompt.handle(event, &()) {
+                Outcome::Commit(text) => {
                     *slot = None;
-                    ControlsOutcome::Continue
-                }
-                InputOutcome::Confirm(value) => {
-                    *slot = None;
-                    let text = value.trim().to_string();
-                    if text.is_empty() {
-                        ControlsOutcome::ApplyAndStay(crate::tui::Msg::ClearContentSearch)
-                    } else {
-                        ControlsOutcome::ApplyAndStay(crate::tui::Msg::StartContentSearch {
+                    ControlsOutcome::ApplyAndStay(match text {
+                        None => crate::tui::Msg::ClearContentSearch,
+                        Some(text) => crate::tui::Msg::StartContentSearch {
                             text,
                             kinds: ctx.search_kinds,
-                        })
-                    }
+                        },
+                    })
                 }
-            },
-            SubEditor::MaxAge(state) => match state.handle_key(event) {
-                InputOutcome::Continue => ControlsOutcome::Continue,
-                InputOutcome::Abort => ControlsOutcome::Close,
-                InputOutcome::Cancel => {
+                Outcome::Close => {
                     *slot = None;
                     ControlsOutcome::Continue
                 }
-                InputOutcome::Confirm(value) => {
-                    let trimmed = value.trim();
-                    let parsed = if trimmed.is_empty() {
-                        Ok(None)
-                    } else {
-                        parse_max_age(trimmed).map(Some)
-                    };
-                    match parsed {
-                        Ok(max_age) => {
-                            *slot = None;
-                            let new_filter = with_max_age(ctx.filter.clone(), max_age);
-                            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-                        }
-                        Err(why) => {
-                            // Keep the editor open so the operator can
-                            // fix the value, and say what is wrong.
-                            ControlsOutcome::ApplyAndStay(crate::tui::Msg::Toast(
-                                tuikit::feedback::Feedback::warning(format!("max age: {why}")),
-                            ))
-                        }
-                    }
+                Outcome::Consumed | Outcome::Stay(_) => ControlsOutcome::Continue,
+            },
+            SubEditor::MaxAge(prompt) => match prompt.handle(event, &()) {
+                Outcome::Commit(max_age) => {
+                    *slot = None;
+                    let new_filter = with_max_age(ctx.filter.clone(), max_age);
+                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
                 }
+                Outcome::Close => {
+                    *slot = None;
+                    ControlsOutcome::Continue
+                }
+                Outcome::Consumed | Outcome::Stay(_) => ControlsOutcome::Continue,
             },
         }
     }
@@ -600,12 +582,33 @@ fn with_pr_state(mut filter: RowFilter, values: Vec<PrStateKey>) -> RowFilter {
     filter
 }
 
-fn build_max_age_editor(filter: &RowFilter) -> TextPromptState {
+/// The max-age editor, seeded with the filter's age. Blank text clears
+/// the filter; text [`parse_max_age`] refuses keeps the editor open with
+/// the reason.
+fn build_max_age_editor(filter: &RowFilter) -> TextPrompt<Option<std::time::Duration>> {
     let initial = filter
         .max_age
         .map(format_duration_for_input)
         .unwrap_or_default();
-    TextPromptState::new(" max age ", initial)
+    TextPrompt::new("max age", initial, |text: &str| {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return PromptResult::Commit(None);
+        }
+        match parse_max_age(trimmed) {
+            Ok(max_age) => PromptResult::Commit(Some(max_age)),
+            Err(why) => PromptResult::Reject(format!("max age: {why}")),
+        }
+    })
+}
+
+/// The contents editor, seeded with the current query. Blank text
+/// clears the content search.
+fn build_content_editor(initial: &str) -> TextPrompt<Option<String>> {
+    TextPrompt::new("contains", initial, |text: &str| {
+        let text = text.trim();
+        PromptResult::Commit((!text.is_empty()).then(|| text.to_string()))
+    })
 }
 
 fn indices_to_harness_values(indices: &[usize]) -> Vec<String> {
@@ -842,10 +845,8 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &T
             let labels: Vec<&'static str> = PR_STATE_OPTIONS.iter().map(|k| k.as_str()).collect();
             MultiSelectWidget::new(state, &labels, theme).render(area, buf);
         }
-        SubEditor::MaxAge(state) | SubEditor::Content(state) => {
-            use crate::tui::widgets::input::TextPromptWidget;
-            TextPromptWidget::new(state, theme).render(area, buf);
-        }
+        SubEditor::MaxAge(prompt) => prompt.draw(area, buf, theme),
+        SubEditor::Content(prompt) => prompt.draw(area, buf, theme),
     }
 }
 

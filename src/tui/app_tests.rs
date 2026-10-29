@@ -2166,11 +2166,17 @@ mod modal_stack {
     // (its Continue/Close outcomes map cleanly to
     // Consumed/Close); rename and search stay with their
     // specialized dispatchers.
+    /// A rename prompt whose confirm does nothing, for stack tests.
+    fn staying_prompt() -> tuikit::text_prompt::TextPrompt<Msg> {
+        tuikit::text_prompt::TextPrompt::new("rename", "", |_: &str| {
+            tuikit::text_prompt::PromptResult::Stay
+        })
+    }
+
     #[test]
     fn open_rename_pushes_modal_rename_onto_stack() {
-        use crate::tui::widgets::input::TextPromptState;
         let mut app = App::new(RunConfig::defaults());
-        app.open_rename_overlay(TextPromptState::new("rename", ""));
+        app.open_rename_overlay(staying_prompt());
         assert_eq!(app.modal_stack().len(), 1);
         assert!(matches!(
             app.modal_stack().iter().next(),
@@ -2181,9 +2187,8 @@ mod modal_stack {
 
     #[test]
     fn close_rename_pops_when_top_is_rename() {
-        use crate::tui::widgets::input::TextPromptState;
         let mut app = App::new(RunConfig::defaults());
-        app.open_rename_overlay(TextPromptState::new("rename", ""));
+        app.open_rename_overlay(staying_prompt());
         app.close_rename_overlay();
         assert!(app.modal_stack().is_empty());
         assert!(app.rename_overlay().is_none());
@@ -2238,11 +2243,10 @@ mod modal_stack {
         // (ValueModal covered separately since it exercises
         // the Overlay trait path.) Peek accessors report the
         // exact top variant only; pop reveals each in turn.
-        use crate::tui::widgets::input::TextPromptState;
         let mut app = App::new(RunConfig::defaults());
         app.open_controls_overlay();
         app.open_search_overlay();
-        app.open_rename_overlay(TextPromptState::new("rename", ""));
+        app.open_rename_overlay(staying_prompt());
         app.open_help_overlay();
         assert_eq!(app.modal_stack().len(), 4);
         assert!(app.help_overlay().is_some());
@@ -2622,6 +2626,75 @@ mod reducer_effects {
             }
             other => panic!("expected CommitMuxRename, got {other:?}"),
         }
+    }
+
+    /// Replace the open prompt's text and press Enter, through the stack.
+    fn confirm_rename(
+        app: &mut App,
+        text: &str,
+    ) -> tuikit::overlay::Settled<crate::tui::Modal, Msg> {
+        use ratatui::crossterm::event::KeyCode;
+        use tuikit::testkit::keys::{ctrl, press};
+        let _ = app.press_modal_key(ctrl('u'));
+        for c in text.chars() {
+            let _ = app.press_modal_key(press(KeyCode::Char(c)));
+        }
+        app.press_modal_key(press(KeyCode::Enter))
+            .expect("the rename prompt is open")
+    }
+
+    #[test]
+    fn the_mux_rename_prompt_refuses_a_blank_name_and_says_why() {
+        let (mut app, _mux_id) = app_with_mux_selection("editor");
+        crate::tui::runtime::open_rename_overlay(&mut app);
+        assert_eq!(
+            app.rename_overlay()
+                .map(tuikit::text_prompt::TextPrompt::value),
+            Some("editor")
+        );
+        assert_eq!(app.status_message(), None, "the prompt draws its own keys");
+        let settled = confirm_rename(&mut app, "  ");
+        assert!(settled.closed.is_none() && settled.message.is_none());
+        assert_eq!(
+            app.rename_overlay()
+                .and_then(tuikit::text_prompt::TextPrompt::error),
+            Some("mux rename: name cannot be empty")
+        );
+        assert!(app.toasts().is_empty(), "the prompt says why, not a toast");
+    }
+
+    #[test]
+    fn the_mux_rename_prompt_commits_the_typed_name() {
+        let (mut app, _mux_id) = app_with_mux_selection("editor");
+        crate::tui::runtime::open_rename_overlay(&mut app);
+        let settled = confirm_rename(&mut app, "workshop");
+        assert!(settled.closed.is_some(), "a commit closes the prompt");
+        assert_eq!(
+            settled.message,
+            Some(Msg::CommitRename("workshop".to_string()))
+        );
+    }
+
+    #[test]
+    fn the_session_rename_prompt_takes_blank_text_as_clearing_the_alias() {
+        let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
+        select_session(&mut app, "Session One");
+        crate::tui::runtime::open_rename_overlay(&mut app);
+        let settled = confirm_rename(&mut app, "");
+        assert_eq!(settled.message, Some(Msg::CommitRename(String::new())));
+    }
+
+    #[test]
+    fn cancelling_a_rename_says_nothing() {
+        use ratatui::crossterm::event::KeyCode;
+        use tuikit::testkit::keys::press;
+        let (mut app, _mux_id) = app_with_mux_selection("editor");
+        crate::tui::runtime::open_rename_overlay(&mut app);
+        crate::tui::runtime::modal_key_pure(&mut app, press(KeyCode::Char('x')));
+        crate::tui::runtime::modal_key_pure(&mut app, press(KeyCode::Esc));
+        assert!(app.rename_overlay().is_none(), "Esc closes the prompt");
+        assert_eq!(app.status_message(), None);
+        assert!(app.toasts().is_empty());
     }
 
     #[test]

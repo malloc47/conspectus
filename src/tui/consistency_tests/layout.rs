@@ -222,7 +222,11 @@ fn the_quick_select_title_shows_both_reaches_and_does_not_shift_when_toggled() {
 /// the prompt the modal under it draws exactly as it does alone.
 #[test]
 fn a_modal_over_another_draws_over_it_and_leaves_the_rest_alone() {
-    let prompt = || crate::tui::widgets::input::TextPromptState::new("Above", "typed");
+    let prompt = || {
+        tuikit::text_prompt::TextPrompt::new("Above", "typed", |_: &str| {
+            tuikit::text_prompt::PromptResult::Stay
+        })
+    };
     for (name, view, open) in builders() {
         for (width, height) in [(80_u16, 24_u16), (120, 40)] {
             let label = describe_size(name, width, height);

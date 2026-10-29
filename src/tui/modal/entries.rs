@@ -5,7 +5,9 @@
 //! for drawing; the impl here hands each the App data it reads. A scrolled
 //! entry keeps the window it drew, so its next page key moves by the rows
 //! that were on screen. Every entry draws through the shared modal frame,
-//! which clears what it covers, or fills the screen.
+//! which clears what it covers, or fills the screen. The rename prompt has
+//! no impl here: it is the framework's text prompt, which implements the
+//! trait for any context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
@@ -15,12 +17,10 @@ use tuikit::keys::resolve;
 use tuikit::overlay::{Outcome, Overlay};
 use tuikit::theme::Theme as KitTheme;
 
-use super::RenameOverlayState;
 use crate::tui::widgets::{
     clean_up::{CleanUpState, CleanUpWidget},
     controls::{ControlsOutcome, ControlsOverlayState, ControlsOverlayWidget},
     help::{HelpOutcome, HelpOverlayState, HelpOverlayWidget},
-    input::TextPromptWidget,
     messages::{MessagesOverlayState, MessagesWidget},
     mux_launch::{MuxLaunchFormState, MuxLaunchFormWidget},
     mux_menu::{MuxMenuState, MuxMenuWidget},
@@ -65,20 +65,6 @@ impl Overlay<Msg, App> for ControlsOverlayState {
 
     fn takes_text(&self) -> bool {
         self.editor_takes_text()
-    }
-}
-
-impl Overlay<Msg, App> for RenameOverlayState {
-    fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
-        self.handle_key(key)
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        TextPromptWidget::new(self.inner(), app.theme()).render(area, buf);
-    }
-
-    fn takes_text(&self) -> bool {
-        true
     }
 }
 

@@ -33,7 +33,6 @@ use conspectus::tui::rows::RowId;
 use conspectus::tui::search::SearchItem;
 use conspectus::tui::theme::{KeyOrigin, TokenValue};
 use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
-use conspectus::tui::widgets::input::{TextPromptState, TextPromptWidget};
 use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
 use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
 use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
@@ -45,7 +44,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_pantry::Ingredient;
+use tuikit::overlay::Overlay;
 use tuikit::testkit::keys::press;
+use tuikit::text_prompt::{PromptResult, TextPrompt};
 
 /// Configuration for one multi-select preview variant. The state is
 /// rebuilt per `render` so the ingredient struct stays `Send`-clean
@@ -360,6 +361,8 @@ struct TextInputVariant {
     title: &'static str,
     initial: &'static str,
     cursor_left: usize,
+    /// Press Enter so the prompt refuses the text and shows why.
+    refused: bool,
     variant_name: &'static str,
     description_text: &'static str,
 }
@@ -374,7 +377,7 @@ impl Ingredient for TextInputVariant {
     }
 
     fn source(&self) -> &str {
-        "conspectus::tui::widgets::input"
+        "tuikit::text_prompt"
     }
 
     fn description(&self) -> &str {
@@ -383,15 +386,24 @@ impl Ingredient for TextInputVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let mut state = TextPromptState::new(self.title, self.initial);
-        // `TextPromptState::new` lands the cursor at the end so typing
+        // The preview's prompt refuses blank text, as the pin rename does.
+        let mut prompt = TextPrompt::new(self.title, self.initial, |text: &str| {
+            if text.trim().is_empty() {
+                PromptResult::Reject("pin: nothing entered".into())
+            } else {
+                PromptResult::<()>::Stay
+            }
+        });
+        // `TextPrompt::new` lands the cursor at the end so typing
         // appends naturally; the preview moves it left when a variant
         // wants to show the cursor mid-string.
         for _ in 0..self.cursor_left {
-            let event = press(KeyCode::Left);
-            let _ = state.handle_key(event);
+            let _ = prompt.handle(press(KeyCode::Left), &());
         }
-        TextPromptWidget::new(&state, &theme).render(area, buf);
+        if self.refused {
+            let _ = prompt.handle(press(KeyCode::Enter), &());
+        }
+        prompt.draw(area, buf, &theme);
     }
 }
 
@@ -657,29 +669,41 @@ fn main() -> std::io::Result<()> {
                 "Same backend, different query — cursor advanced two rows to exercise the non-cursor + cursor row styling side by side.",
         }),
         Box::new(TextInputVariant {
-            title: " rename ",
+            title: "rename",
             initial: "",
             cursor_left: 0,
+            refused: false,
             variant_name: "Empty value",
             description_text:
                 "Modal just opened — empty input, cursor at the start, awaiting first keystroke.",
         }),
         Box::new(TextInputVariant {
-            title: " rename ",
+            title: "rename",
             initial: "ingest-refactor",
             cursor_left: 8,
+            refused: false,
             variant_name: "Mid-edit (cursor mid-string)",
             description_text:
-                "Pre-populated alias with the cursor moved 8 chars left — exercises the reversed-cell cursor cue mid-string.",
+                "Pre-populated alias with the cursor moved 8 chars left — exercises the caret mid-string.",
         }),
         Box::new(TextInputVariant {
-            title: " max age ",
+            title: "max age",
             initial:
                 "30d-or-some-other-very-long-text-value-the-operator-might-have-typed-here-to-test-the-window",
             cursor_left: 0,
+            refused: false,
             variant_name: "Long value (cursor at end)",
             description_text:
                 "Value longer than the modal's inner width — exercises the field's window around the cursor.",
+        }),
+        Box::new(TextInputVariant {
+            title: "Rename pin",
+            initial: "",
+            cursor_left: 0,
+            refused: true,
+            variant_name: "Refused (error line)",
+            description_text:
+                "Enter on blank text: the prompt stays open and grows one row for the reason, until the next edit.",
         }),
         Box::new(ThemeHarnessIngredient),
     ];

@@ -103,6 +103,45 @@ fn create_flow_commits_worktree_create() {
 }
 
 #[test]
+fn a_blank_branch_is_refused_in_the_prompt_until_a_name_is_typed() {
+    let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
+    state.handle_key(press(KeyCode::Enter));
+    for c in "  ".chars() {
+        state.handle_key(press(KeyCode::Char(c)));
+    }
+    // Refused without a message to the host: the prompt says why itself.
+    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
+    assert!(state.editing_branch(), "the prompt stays open");
+    let theme = crate::tui::theme::Theme::default();
+    let drawn = tuikit::testkit::buffer::text(&tuikit::testkit::render::render_widget(
+        WorktreeMenuWidget::new(&state, &theme),
+        80,
+        24,
+    ));
+    assert!(
+        drawn.contains("worktree: branch name is required"),
+        "the error line says why:\n{drawn}"
+    );
+    for c in "wip".chars() {
+        state.handle_key(press(KeyCode::Char(c)));
+    }
+    let drawn = tuikit::testkit::buffer::text(&tuikit::testkit::render::render_widget(
+        WorktreeMenuWidget::new(&state, &theme),
+        80,
+        24,
+    ));
+    assert!(!drawn.contains("required"), "typing clears it:\n{drawn}");
+    assert_eq!(
+        state.handle_key(press(KeyCode::Enter)),
+        Outcome::Commit(Msg::CommitWorktreeCreate {
+            repo_root: "/wt/feature".to_string(),
+            branch: "wip".to_string(),
+        }),
+        "the name is trimmed"
+    );
+}
+
+#[test]
 fn remove_flow_forces_when_guarded() {
     let mut state =
         WorktreeMenuState::new(worktree_ctx(vec!["codex (agent)".to_string()], true)).expect("ok");

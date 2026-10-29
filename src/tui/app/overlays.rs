@@ -96,35 +96,24 @@ impl App {
         self.modal_stack.takes_text()
     }
 
-    /// Active rename-overlay state, if any. Lives on the modal
-    /// stack (ADR 0085 contract 3); this accessor peeks the top
-    /// entry.
-    pub fn rename_overlay(&self) -> Option<&crate::tui::widgets::input::TextPromptState> {
+    /// The rename prompt, if it is on top of the stack.
+    pub fn rename_overlay(&self) -> Option<&tuikit::text_prompt::TextPrompt<crate::tui::Msg>> {
         match self.modal_stack.top()? {
-            crate::tui::Modal::Rename(state) => Some(state.inner()),
+            crate::tui::Modal::Rename(prompt) => Some(prompt),
             _ => None,
         }
     }
 
-    /// Mutable access for the runtime's per-key forwarding.
-    pub fn rename_overlay_mut(&mut self) -> Option<&mut crate::tui::RenameOverlayState> {
-        match self.modal_stack.top_mut()? {
-            crate::tui::Modal::Rename(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    /// Push a rename overlay onto the modal stack. Caller
-    /// pre-populates the input with the current alias, harness
-    /// title, or empty string per ADR 0030. The raw text-input
-    /// state is wrapped in a `RenameOverlayState` so the
-    /// overlay's Confirm(String) maps to Msg::CommitRename via
-    /// the uniform Overlay trait.
-    pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextPromptState) {
-        self.slot_prompt = None;
-        self.modal_stack.push(crate::tui::Modal::Rename(
-            crate::tui::RenameOverlayState::new(state),
-        ));
+    /// Push a rename prompt onto the modal stack. The opener seeds it
+    /// with the current name (an alias, a harness title, a mux's or a
+    /// pin's name, or nothing, per ADR 0030) and gives it the closure
+    /// that turns a confirmed name into the rename it means, so the
+    /// prompt commits that message itself.
+    pub fn open_rename_overlay(
+        &mut self,
+        prompt: tuikit::text_prompt::TextPrompt<crate::tui::Msg>,
+    ) {
+        self.modal_stack.push(crate::tui::Modal::Rename(prompt));
     }
 
     /// Fix the entity the open rename prompt renames.
@@ -132,17 +121,23 @@ impl App {
         self.rename_node = Some(node);
     }
 
-    /// Open the text prompt that edits a pin slot.
-    pub(crate) fn open_slot_prompt(
-        &mut self,
-        prompt: super::SlotPrompt,
-        title: &str,
-        initial: &str,
-    ) {
-        self.open_rename_overlay(crate::tui::widgets::input::TextPromptState::new(
-            title, initial,
+    /// Open the prompt that renames the pin `slot`: blank input is
+    /// refused in the prompt, and a name commits the slot's rename.
+    pub(crate) fn open_pin_rename(&mut self, slot: String) {
+        use crate::tui::Msg;
+        use tuikit::text_prompt::{PromptResult, TextPrompt};
+        let initial = slot.clone();
+        self.open_rename_overlay(TextPrompt::new(
+            "Rename pin",
+            initial,
+            move |text: &str| match text.trim() {
+                "" => PromptResult::Reject("pin: nothing entered".into()),
+                name => PromptResult::Commit(Msg::CommitSlotRename {
+                    slot: slot.clone(),
+                    new_name: name.to_string(),
+                }),
+            },
         ));
-        self.slot_prompt = Some(prompt);
     }
 
     /// Open a menu that unpins whichever of `slots` is chosen.

@@ -110,12 +110,6 @@ impl ProviderStatus {
     }
 }
 
-/// The slot a text prompt is editing, and how.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum SlotPrompt {
-    Rename(String),
-}
-
 /// Top-level state. Owns the resolved run configuration plus the
 /// per-frame UI state.
 #[derive(Debug)]
@@ -261,9 +255,6 @@ pub struct App {
     /// go to the top entry, every entry is drawn bottom to top, and a
     /// close or a commit closes the top. See [`crate::tui::modal`].
     modal_stack: crate::tui::modal::ModalStack,
-    /// What the text prompt on top of the stack edits, when it edits a
-    /// pin slot rather than the selected row's name.
-    slot_prompt: Option<SlotPrompt>,
     /// The entity the open rename prompt renames, fixed when it opened
     /// so a later focus change can't redirect the commit.
     rename_node: Option<NodeId>,
@@ -588,7 +579,6 @@ impl App {
             explorer_window: ScrollWindow::default(),
             last_visible_index: None,
             modal_stack: crate::tui::modal::ModalStack::new(),
-            slot_prompt: None,
             rename_node: None,
             toasts: Toasts::new(),
             sort,
@@ -1671,11 +1661,13 @@ impl App {
                 effects.push(Effect::Persist);
             }
             Msg::CommitRename(value) => {
-                let effect = match self.slot_prompt.take() {
-                    Some(prompt) => slot_prompt_effect(prompt, &value),
-                    None => self.rename_commit_effect(&value),
-                };
+                let effect = self.rename_commit_effect(&value);
                 effects.push(effect);
+            }
+            Msg::CommitSlotRename { slot, new_name } => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::RenameSlot { slot, new_name },
+                ));
             }
             Msg::CommitWorktreeCreate { repo_root, branch } => {
                 effects.push(Effect::WriteStore(
@@ -1798,10 +1790,7 @@ impl App {
                     request,
                 }));
             }
-            Msg::OpenSlotRename(slot) => {
-                let initial = slot.clone();
-                self.open_slot_prompt(SlotPrompt::Rename(slot), "Rename pin", &initial);
-            }
+            Msg::OpenSlotRename(slot) => self.open_pin_rename(slot),
             Msg::OpenSlotRetarget(pin) => {
                 let candidates = self
                     .snapshot_handle()
@@ -2027,19 +2016,3 @@ pub(in crate::tui) fn sessions_linked_to_mux(
 #[cfg(test)]
 #[path = "app_tests.rs"]
 mod tests;
-
-/// The store write that commits a slot prompt's text.
-fn slot_prompt_effect(prompt: SlotPrompt, value: &str) -> super::Effect {
-    use super::Effect;
-    use crate::tui::effect::StoreOp;
-    let value = value.trim().to_string();
-    if value.is_empty() {
-        return Effect::Toast(Feedback::warning("pin: nothing entered"));
-    }
-    Effect::WriteStore(match prompt {
-        SlotPrompt::Rename(slot) => StoreOp::RenameSlot {
-            slot,
-            new_name: value,
-        },
-    })
-}

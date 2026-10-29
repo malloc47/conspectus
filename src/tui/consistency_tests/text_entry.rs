@@ -1,6 +1,7 @@
 //! Every text field edits the same way: Alt-B and Alt-F move by word, a
 //! pasted value cannot submit the field it lands in, a path typed with
-//! `~` reaches the command expanded, and input a field refuses says why.
+//! `~` reaches the command expanded, and input a field refuses says why
+//! (in a prompt, on its error line).
 //!
 //! Each field is opened the way the operator opens it and driven by the
 //! keys the live loop routes to it (`action_for_event`), and the checks
@@ -392,11 +393,25 @@ fn an_invalid_max_age_says_why_and_keeps_the_editor_open() {
         "the editor stays open for a fix"
     );
     assert_eq!(app.filter().max_age, None, "no filter is applied");
-    let frame = screen(&mut app);
+    says_in_the_prompt(&mut app, "max age: missing unit (expected ms/s/m/h/d)");
+    // The next edit clears the reason.
+    type_text(&mut app, "m");
+    assert!(!screen(&mut app).contains("missing unit"));
+}
+
+/// The prompt on top explains a refusal on its own error line: the
+/// reason is drawn inside the prompt's frame and no toast is posted.
+fn says_in_the_prompt(app: &mut App, reason: &str) {
+    let frame = screen(app);
+    let row = frame
+        .lines()
+        .find(|row| row.contains(reason))
+        .unwrap_or_else(|| panic!("the prompt says {reason:?}:\n{frame}"));
     assert!(
-        frame.contains("max age: missing unit (expected ms/s/m/h/d)"),
-        "a toast says what is wrong:\n{frame}"
+        row.contains(&format!("│{reason}")),
+        "the reason starts inside the prompt's border:\n{frame}"
     );
+    assert!(app.toasts().is_empty(), "no toast: {:?}", app.toasts());
 }
 
 #[test]
@@ -405,11 +420,7 @@ fn an_empty_branch_name_says_why_and_keeps_the_prompt_open() {
     let effects = send(&mut app, press(KeyCode::Enter));
     assert!(!acts(&effects), "nothing is created: {effects:?}");
     assert!(app.worktree_menu().is_some(), "the prompt stays open");
-    let frame = screen(&mut app);
-    assert!(
-        frame.contains("worktree: branch name is required"),
-        "a toast says what is missing:\n{frame}"
-    );
+    says_in_the_prompt(&mut app, "worktree: branch name is required");
 }
 
 #[test]
@@ -441,11 +452,8 @@ fn an_empty_pin_rename_says_nothing_was_entered() {
     clear(&mut app);
     let effects = send(&mut app, press(KeyCode::Enter));
     assert!(!acts(&effects), "nothing is renamed: {effects:?}");
-    let frame = screen(&mut app);
-    assert!(
-        frame.contains("pin: nothing entered"),
-        "a toast says why:\n{frame}"
-    );
+    assert!(app.rename_overlay().is_some(), "the prompt stays open");
+    says_in_the_prompt(&mut app, "pin: nothing entered");
 }
 
 // ---- paste -----------------------------------------------------------------

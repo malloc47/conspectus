@@ -221,11 +221,13 @@ pub enum Msg {
     /// (and the accompanying filesystem read) happens in the
     /// executor, not here.
     ViewSelected,
-    /// Confirm the rename overlay's typed value (ADR 0029).
-    /// Reducer resolves the selected row and emits either a mux
-    /// rename, an agent-session alias rename, or a "lost selection"
-    /// toast. The alias-rename branch also chains an optional
-    /// native mux rename inside the executor per lockstep.
+    /// Confirm the session or mux rename prompt's typed value (ADR
+    /// 0029). Reducer resolves the entity the prompt opened for (or the
+    /// selected row) and emits either a mux rename, an agent-session
+    /// alias rename, or a "lost selection" toast. The alias-rename
+    /// branch also chains an optional native mux rename inside the
+    /// executor per lockstep. A pin's rename prompt commits
+    /// [`Msg::CommitSlotRename`] instead.
     CommitRename(String),
     /// Commit the worktree menu's "New worktree" branch input.
     /// Reducer emits
@@ -301,6 +303,12 @@ pub enum Msg {
     CommitPinEdit(crate::tui::widgets::pin_edit::PinEditRequest),
     /// Slot menu → open the rename prompt.
     OpenSlotRename(String),
+    /// The pin rename prompt confirmed a name: rename the slot (and a
+    /// live mux with it). The prompt refuses a blank name itself.
+    CommitSlotRename {
+        slot: String,
+        new_name: String,
+    },
     /// Slot menu → open the retarget prompt.
     OpenSlotRetarget(String),
     /// Retarget picker → point the pin at the chosen entity (a node id

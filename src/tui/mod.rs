@@ -43,7 +43,7 @@ pub mod worktree_actions;
 
 pub use app::{App, ContentSearch, ContentStatus, Msg};
 pub use effect::Effect;
-pub use modal::{Modal, RenameOverlayState};
+pub use modal::Modal;
 #[cfg(feature = "snapshot")]
 pub use runtime::run_from_fixture;
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]

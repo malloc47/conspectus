@@ -10,6 +10,7 @@
 //! closes the same way in every mode.
 
 use super::*;
+use tuikit::text_prompt::PromptResult;
 
 /// One key for the modal on top: route it, close the modal for a close
 /// or a commit (closing says nothing; see [`App::modal_closed`]), and
@@ -42,10 +43,13 @@ pub(in crate::tui) fn modal_key_pure(app: &mut App, key: ratatui::crossterm::eve
 }
 
 /// Resolve the current selection to a renameable row and seed the
-/// rename overlay. Agent sessions use alias > harness title > empty;
-/// pin rows use the pin display name.
+/// rename prompt. Agent sessions use alias > harness title > empty;
+/// pin rows use the pin display name. Each prompt gets the closure that
+/// says what its confirm means, so a mux refuses a blank name in the
+/// prompt while a session takes one as clearing its alias.
 pub(in crate::tui) fn open_rename_overlay(app: &mut App) {
     use crate::model::NodeId;
+    use tuikit::text_prompt::TextPrompt;
     let subject = crate::tui::actions::action_subject(app);
     if let Some(pin) = subject.pin {
         // A pin has its own prompt, which renames a live mux with it.
@@ -62,14 +66,18 @@ pub(in crate::tui) fn open_rename_overlay(app: &mut App) {
         return;
     };
     let snapshot = handle.snapshot();
-    let (title, initial) = match &node {
+    let (title, initial, confirm) = match &node {
         NodeId::AgentSession(id) => {
             let alias = snapshot.aliases.get(&node).map(str::to_string);
             let title = snapshot.nodes.iter().find_map(|n| match n {
                 crate::model::GraphNode::AgentSession(s) if &s.id == id => s.title.clone(),
                 _ => None,
             });
-            (" rename session ", alias.or(title).unwrap_or_default())
+            (
+                "rename session",
+                alias.or(title).unwrap_or_default(),
+                rename_session as fn(&str) -> PromptResult<Msg>,
+            )
         }
         NodeId::MuxSession(mux) if snapshot.is_live(&node) => {
             // Seed with the bare tmux name (post-`<socket>:` prefix
@@ -79,7 +87,11 @@ pub(in crate::tui) fn open_rename_overlay(app: &mut App) {
                 .native_id
                 .rsplit_once(':')
                 .map_or(mux.native_id.as_str(), |(_, name)| name);
-            (" rename mux ", bare.to_string())
+            (
+                "rename mux",
+                bare.to_string(),
+                rename_mux as fn(&str) -> PromptResult<Msg>,
+            )
         }
         NodeId::MuxSession(_) => {
             app.update(Msg::SetStatus(Some(Feedback::warning(
@@ -94,11 +106,20 @@ pub(in crate::tui) fn open_rename_overlay(app: &mut App) {
             return;
         }
     };
-    let state = crate::tui::widgets::input::TextPromptState::new(title, initial);
-    app.open_rename_overlay(state);
+    app.open_rename_overlay(TextPrompt::new(title, initial, confirm));
     app.set_rename_node(node);
-    app.update(Msg::SetStatus(Some(Feedback::info(format!(
-        "rename: {}",
-        tuikit::keys::footer(tuikit::keys::TEXT_INPUT_KEYS)
-    )))));
+}
+
+/// A session's rename: any text, blank included, which clears the alias.
+fn rename_session(text: &str) -> PromptResult<Msg> {
+    PromptResult::Commit(Msg::CommitRename(text.to_string()))
+}
+
+/// A live mux's rename: a mux needs a name, so blank text is refused.
+fn rename_mux(text: &str) -> PromptResult<Msg> {
+    if text.trim().is_empty() {
+        PromptResult::Reject("mux rename: name cannot be empty".into())
+    } else {
+        PromptResult::Commit(Msg::CommitRename(text.to_string()))
+    }
 }

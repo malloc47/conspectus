@@ -6081,6 +6081,24 @@ fn the_slot_menu_offers_every_gesture() {
     insta::assert_snapshot!("slot_row_menu", trimmed(pinned_frame(&mut app, 100)));
 }
 
+/// Replace the text of the prompt on top, press Enter, and return what
+/// the reducer makes of what the prompt commits: nothing when it refuses.
+fn confirm_prompt(app: &mut App, text: &str) -> Vec<crate::tui::Effect> {
+    use ratatui::crossterm::event::KeyCode;
+    use tuikit::testkit::keys::{ctrl, press};
+    let _ = app.press_modal_key(ctrl('u'));
+    for c in text.chars() {
+        let _ = app.press_modal_key(press(KeyCode::Char(c)));
+    }
+    let settled = app
+        .press_modal_key(press(KeyCode::Enter))
+        .expect("a prompt is open");
+    settled
+        .message
+        .map(|msg| app.update(msg))
+        .unwrap_or_default()
+}
+
 #[test]
 fn slot_prompts_commit_to_their_own_store_write() {
     use crate::tui::Effect;
@@ -6093,11 +6111,11 @@ fn slot_prompts_commit_to_their_own_store_write() {
     app.update(Msg::OpenSlotRename("conspectus-main".into()));
     assert_eq!(
         app.rename_overlay()
-            .map(crate::tui::widgets::input::TextPromptState::value),
+            .map(tuikit::text_prompt::TextPrompt::value),
         Some("conspectus-main")
     );
     assert_eq!(
-        app.update(Msg::CommitRename("renamed".into())),
+        confirm_prompt(&mut app, "renamed"),
         vec![Effect::WriteStore(StoreOp::RenameSlot {
             slot: "conspectus-main".into(),
             new_name: "renamed".into(),
@@ -6121,29 +6139,34 @@ fn slot_prompts_commit_to_their_own_store_write() {
             target: "other".into(),
         })]
     );
+    // A blank name is refused in the prompt, which stays open and says
+    // why; nothing is written and no toast is posted.
     app.update(Msg::OpenSlotRename("conspectus-main".into()));
-    assert!(matches!(
-        app.update(Msg::CommitRename("   ".into())).as_slice(),
-        [Effect::Toast(_)]
-    ));
+    assert_eq!(confirm_prompt(&mut app, "   "), Vec::new());
+    assert_eq!(
+        app.rename_overlay()
+            .and_then(tuikit::text_prompt::TextPrompt::error),
+        Some("pin: nothing entered")
+    );
 }
 
 #[test]
 fn a_cancelled_slot_prompt_does_not_capture_the_next_rename() {
     use crate::tui::Effect;
     use crate::tui::effect::StoreOp;
+    use tuikit::text_prompt::{PromptResult, TextPrompt};
     let mut app = native_app(View::Mux, RowFilter::default());
     app.update(Msg::OpenSlotRename("conspectus-main".into()));
     app.close_rename_overlay();
 
-    // A later rename of the selected mux opens its own overlay, which
-    // forgets the abandoned slot prompt.
+    // A later rename of the selected mux opens its own prompt, whose
+    // confirm says what it renames; the abandoned pin prompt left
+    // nothing behind to redirect it.
     app.set_selection(mux_row("scratch"));
-    app.open_rename_overlay(crate::tui::widgets::input::TextPromptState::new(
-        "Rename mux",
-        "scratch",
-    ));
-    let effects = app.update(Msg::CommitRename("renamed".into()));
+    app.open_rename_overlay(TextPrompt::new("rename mux", "scratch", |text: &str| {
+        PromptResult::Commit(Msg::CommitRename(text.to_string()))
+    }));
+    let effects = confirm_prompt(&mut app, "renamed");
     assert!(
         matches!(
             effects.as_slice(),

@@ -302,15 +302,47 @@ fn max_age_invalid_value_keeps_editor_open() {
     for c in "nope".chars() {
         state.handle_key(&ctx, press(KeyCode::Char(c)));
     }
-    // The editor stays open and a toast says what is wrong.
+    // The editor stays open, applies nothing, and its error line says
+    // what is wrong until the next edit.
     let outcome = state.handle_key(&ctx, press(KeyCode::Enter));
+    assert_eq!(outcome, ControlsOutcome::Continue);
+    let error = |state: &ControlsOverlayState| match state.sub_editor() {
+        Some(SubEditor::MaxAge(prompt)) => prompt.error().map(str::to_string),
+        other => panic!("the max-age editor closed: {other:?}"),
+    };
     assert_eq!(
-        outcome,
-        ControlsOutcome::ApplyAndStay(crate::tui::Msg::Toast(tuikit::feedback::Feedback::warning(
-            "max age: not a non-negative integer: ``"
-        )))
+        error(&state).as_deref(),
+        Some("max age: not a non-negative integer: ``")
     );
-    assert!(matches!(state.sub_editor(), Some(SubEditor::MaxAge(_))));
+    state.handle_key(&ctx, press(KeyCode::Backspace));
+    assert_eq!(error(&state), None, "an edit clears the reason");
+}
+
+#[test]
+fn esc_in_a_text_editor_steps_back_and_ctrl_c_closes_the_panel() {
+    let filter = RowFilter::default();
+    let ctx = ctx_with(
+        View::Sessions,
+        Grouping::default_for(View::Sessions),
+        &filter,
+        Sort::Hierarchy,
+    );
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    state.handle_key(&ctx, press(KeyCode::Down));
+    state.handle_key(&ctx, press(KeyCode::Enter));
+    state.handle_key(&ctx, press(KeyCode::Char('q')));
+    assert!(state.editor_takes_text(), "q is typed, not a way out");
+    assert_eq!(
+        state.handle_key(&ctx, press(KeyCode::Esc)),
+        ControlsOutcome::Continue
+    );
+    assert!(state.sub_editor().is_none(), "Esc steps back to the panel");
+
+    state.handle_key(&ctx, press(KeyCode::Enter));
+    assert_eq!(
+        state.handle_key(&ctx, tuikit::testkit::keys::ctrl('c')),
+        ControlsOutcome::Close
+    );
 }
 
 #[test]

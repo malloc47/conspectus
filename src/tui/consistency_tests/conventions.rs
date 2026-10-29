@@ -169,8 +169,10 @@ fn case(name: &'static str, variant: &'static str, view: View, open: Open) -> Ca
         ("MuxMenu" | "RowMenu", _) => case.footer(MENU_KEYS),
         ("MuxLaunch", _) => case.footer(MUX_LAUNCH_KEYS),
         ("PinEdit", _) => case.footer(PIN_EDIT_KEYS),
-        // The prompt's keys are on the status line; the worktree menu's
-        // list, Clean up, and the picker draw no footer of their own.
+        // The prompt draws its keys on its bottom border.
+        ("Rename", _) => case.footer(TEXT_INPUT_KEYS),
+        // The worktree menu's list, Clean up, and the picker draw no
+        // footer of their own.
         _ => case,
     }
 }

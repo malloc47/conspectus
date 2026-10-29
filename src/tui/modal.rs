@@ -110,9 +110,10 @@ modals! {
     /// search settings, applied as they change. Reads the App's settings
     /// on every key and every frame.
     Controls(crate::tui::widgets::controls::ControlsOverlayState),
-    /// Rename prompt (ADR 0029, ADR 0030): the text-input widget with its
-    /// confirm mapped to [`Msg::CommitRename`].
-    Rename(RenameOverlayState),
+    /// Rename prompt (ADR 0029): the framework's text prompt, whose
+    /// confirm the opener's closure turns into the rename it means (a
+    /// session's alias, a live mux's name, or a pin's name).
+    Rename(tuikit::text_prompt::TextPrompt<Msg>),
     /// `/` quick select and `s` content search. Ranks the App's rows and
     /// content results on every key.
     Search(crate::tui::widgets::search::SearchOverlayState),
@@ -150,41 +151,4 @@ modals! {
     /// A pick-one list with type-to-filter: where a pin points next, or a
     /// remembered search.
     Picker(Box<crate::tui::widgets::picker::PickerState>),
-}
-
-/// The rename prompt: the generic text-input widget, whose confirm maps
-/// to [`Msg::CommitRename`]. The text-input state is shared with other
-/// prompts, so its own outcome stays generic and the rename mapping lives
-/// here.
-#[derive(Debug, Clone)]
-pub struct RenameOverlayState {
-    inner: crate::tui::widgets::input::TextPromptState,
-}
-
-impl RenameOverlayState {
-    /// Wrap a fresh text-input state seeded for a rename.
-    pub fn new(inner: crate::tui::widgets::input::TextPromptState) -> Self {
-        Self { inner }
-    }
-
-    /// The wrapped text-input state.
-    pub fn inner(&self) -> &crate::tui::widgets::input::TextPromptState {
-        &self.inner
-    }
-
-    /// The wrapped text-input state, mutably, for seeding the buffer.
-    pub fn inner_mut(&mut self) -> &mut crate::tui::widgets::input::TextPromptState {
-        &mut self.inner
-    }
-
-    /// One key into the prompt: a confirm commits the rename; a cancel
-    /// or a dismissal closes it.
-    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        use crate::tui::widgets::input::InputOutcome;
-        match self.inner.handle_key(key) {
-            InputOutcome::Continue => Outcome::Consumed,
-            InputOutcome::Cancel | InputOutcome::Abort => Outcome::Close,
-            InputOutcome::Confirm(value) => Outcome::Commit(Msg::CommitRename(value)),
-        }
-    }
 }

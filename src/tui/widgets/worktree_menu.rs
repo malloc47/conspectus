@@ -3,10 +3,11 @@
 //! The `w` menu: a self-contained (`Ctx = ()`) modal that captures the
 //! selected node's worktree facts at open time and drives a small
 //! state machine — a list of [`WorktreeAction`]s, then either a
-//! branch-name text input (create) or a confirm (remove). It reuses
-//! the shared [`TextPromptState`] for the branch prompt and emits a
-//! single committed [`Msg`] that the runtime turns into a mutation
-//! effect.
+//! branch-name text input (create) or a confirm (remove). The branch
+//! prompt is the framework's [`TextPrompt`], held as a level of the menu:
+//! `Esc` there steps back to the list, `Ctrl-C` closes the menu, and a
+//! blank name is refused in the prompt. The menu emits a single committed
+//! [`Msg`] that the runtime turns into a mutation effect.
 //!
 //! The wired subset (create / merge / remove / close-down) is offered
 //! today; the rest of the [`worktree_actions`] policy (reveal, and the
@@ -33,9 +34,9 @@ use crate::model::{
 use crate::tui::Msg;
 use crate::tui::rows::RowId;
 use crate::tui::theme::Theme;
-use crate::tui::widgets::input::{InputOutcome, TextPromptState, TextPromptWidget};
 use crate::tui::worktree_actions::{WorktreeAction, WorktreeContext, worktree_actions};
-use tuikit::overlay::Outcome;
+use tuikit::overlay::{Outcome, Overlay};
+use tuikit::text_prompt::{PromptResult, TextPrompt};
 
 /// Actions the runtime knows how to dispatch today. `worktree_actions`
 /// may return more (reveal, future stories); the menu offers only
@@ -275,10 +276,26 @@ fn is_reveal(action: WorktreeAction) -> bool {
     )
 }
 
+/// The prompt that asks for a new worktree's branch in `repo_root`: a
+/// blank name is refused with the reason, and a name commits the create.
+fn branch_prompt(repo_root: String) -> TextPrompt<Msg> {
+    TextPrompt::new(
+        "New worktree — branch",
+        "",
+        move |text: &str| match text.trim() {
+            "" => PromptResult::Reject("worktree: branch name is required".into()),
+            branch => PromptResult::Commit(Msg::CommitWorktreeCreate {
+                repo_root: repo_root.clone(),
+                branch: branch.to_string(),
+            }),
+        },
+    )
+}
+
 #[derive(Debug, Clone)]
 enum Mode {
     List,
-    BranchInput(TextPromptState),
+    BranchInput(TextPrompt<Msg>),
     ConfirmRemove,
     ConfirmMerge,
     /// Close-down: pick merge (land) vs discard, then commit.
@@ -354,7 +371,10 @@ impl WorktreeMenuState {
     fn activate(&mut self) -> Outcome<Msg> {
         match self.selected() {
             WorktreeAction::NewWorktree => {
-                self.mode = Mode::BranchInput(TextPromptState::new("New worktree — branch", ""));
+                let Some(repo_root) = self.ctx.repo_root.clone() else {
+                    return Outcome::Close;
+                };
+                self.mode = Mode::BranchInput(branch_prompt(repo_root));
                 Outcome::Consumed
             }
             WorktreeAction::MergeWorktree => {
@@ -399,30 +419,23 @@ impl WorktreeMenuState {
         }
     }
 
+    /// One key for the branch prompt, a level of the menu: `Ctrl-C`
+    /// dismisses the whole menu, `Esc` (the prompt closing) steps back to
+    /// the list, and a confirmed name commits the create.
     fn handle_branch_input(&mut self, key: KeyEvent) -> Outcome<Msg> {
+        use tuikit::keys::{TEXT_INPUT_KEYS, TextInputKey, resolve};
         let Mode::BranchInput(input) = &mut self.mode else {
             return Outcome::Consumed;
         };
-        match input.handle_key(key) {
-            InputOutcome::Continue => Outcome::Consumed,
-            InputOutcome::Abort => Outcome::Close,
-            InputOutcome::Cancel => {
+        if resolve(TEXT_INPUT_KEYS, key) == Some(TextInputKey::Abort) {
+            return Outcome::Close;
+        }
+        match input.handle(key, &()) {
+            Outcome::Close => {
                 self.mode = Mode::List;
                 Outcome::Consumed
             }
-            InputOutcome::Confirm(branch) => {
-                let branch = branch.trim().to_string();
-                if branch.is_empty() {
-                    // Keep the input open for a real value, and say so.
-                    return Outcome::Stay(Msg::Toast(tuikit::feedback::Feedback::warning(
-                        "worktree: branch name is required",
-                    )));
-                }
-                let Some(repo_root) = self.ctx.repo_root.clone() else {
-                    return Outcome::Close;
-                };
-                Outcome::Commit(Msg::CommitWorktreeCreate { repo_root, branch })
-            }
+            outcome => outcome,
         }
     }
 
@@ -549,9 +562,9 @@ impl<'a> WorktreeMenuWidget<'a> {
 
 impl Widget for WorktreeMenuWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Branch input renders through the shared text-input widget.
+        // The branch prompt draws itself, in place of the list.
         if let Mode::BranchInput(input) = &self.state.mode {
-            TextPromptWidget::new(input, self.theme).render(area, buf);
+            input.draw(area, buf, self.theme);
             return;
         }
 
