@@ -4,16 +4,21 @@ use std::sync::Arc;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
+use ratatui::widgets::{Paragraph, Widget};
 
 use crate::form::{
     Choice, Field, Form, KEPT, OverrideRow, SOURCE_GAP, Standing, Submit, Toggle, Values,
     WILL_FOLLOW, WILL_KEEP,
 };
 use crate::glyphs::marks;
-use crate::keys::{FORM_KEYS, FORM_OPTION_KEYS, FormKey, KeyRow, ctrl, include, key, shown};
-use crate::overlay::{Outcome, Overlay};
+use crate::keys::{
+    Convention, EnterMeans, FORM_KEYS, FORM_OPTION_KEYS, FormKey, KeyRow, SpaceMeans, ctrl,
+    include, key, shown,
+};
+use crate::overlay::{ModalStack, Outcome, Overlay};
 use crate::path_field::{PathField, PathKind};
 use crate::testkit::buffer::{find, rows, style_at};
+use crate::testkit::conformance::{self, Case, Registry, Rig};
 use crate::testkit::golden::assert_golden;
 use crate::testkit::keys::{ctrl as ctrl_press, press};
 use crate::testkit::paths::MemoryPaths;
@@ -438,4 +443,61 @@ fn an_override_form_looks_as_its_golden_says() {
     assert_golden(&golden_path("override.golden"), &buf, |path, text| {
         std::fs::write(path, text)
     });
+}
+
+// ---- the conventions ---------------------------------------------------------
+
+/// A host of one stack of settings forms over a screen of text.
+struct Host(Theme);
+
+impl Rig for Host {
+    type State = ModalStack<Form<Change>>;
+
+    fn render(&self, stack: &mut Self::State, area: Rect) -> Buffer {
+        let mut buf = Buffer::empty(area);
+        Paragraph::new("the screen under the form").render(area, &mut buf);
+        stack.draw::<Change, ()>(area, &mut buf, &(), &self.0);
+        buf
+    }
+
+    fn close_top(&self, stack: &mut Self::State) {
+        stack.pop();
+    }
+
+    fn press(&self, stack: &mut Self::State, key: KeyEvent) {
+        if let Some(outcome) = stack.route::<Change, ()>(key, &()) {
+            let _ = stack.settle(outcome);
+        }
+    }
+
+    fn depth(&self, stack: &Self::State) -> usize {
+        stack.len()
+    }
+
+    fn theme(&self) -> &Theme {
+        &self.0
+    }
+}
+
+/// The detail lines follow the focus without moving the rows' text, and
+/// the reset key is a row of the form's own table: the conventions every
+/// modal keeps hold for a form with override rows.
+#[test]
+fn an_override_form_keeps_the_conventions_every_modal_keeps() {
+    let open = || {
+        let mut stack = ModalStack::new();
+        stack.push(settings());
+        stack
+    };
+    let registry = Registry::new(Host(Theme::default())).case(
+        Case::new("Settings", open)
+            .typed()
+            .moves()
+            .keys(
+                Convention::new("Settings", EnterMeans::Submits, SpaceMeans::Toggles, ""),
+                [conformance::table("KEYS", KEYS)],
+            )
+            .footer(KEYS),
+    );
+    conformance::assert_conventions(&registry);
 }

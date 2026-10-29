@@ -185,8 +185,10 @@ verb (`Enter save`), and `Esc cancel`. `Space` is its own action,
 with `←`/`→` and flip one with `Space`; on every other option row it steps
 the option on as `→` does (see [form.md](form.md)). `FormKey::Inherit`
 drops a field's own value and takes the inherited one again, for forms
-with override rows. `PagerKey::Copy` is bound by a pager whose content can
-be copied.
+with override rows; no standard table binds it, so a form binds its own
+reset key (a chord such as `Ctrl-R`) in its own table and the chord stays
+free to mean something else in another overlay. `PagerKey::Copy` is bound
+by a pager whose content can be copied.
 
 ## Theme tokens
 

@@ -512,14 +512,15 @@ pub fn source_cells(word: &str, width: usize, pending: bool, theme: &Theme) -> V
 
 /// A line that explains the form or its focused field, receding
 /// (`muted`): indented by the cursor gutter, so it starts under the
-/// labels, and cut with the ellipsis mark to `width` cells.
+/// labels, and made exactly `width` cells (cut with the ellipsis mark, or
+/// padded), so the line keeps its look whatever it says.
 pub fn detail_line(detail: &str, width: usize, theme: &Theme) -> Line<'static> {
     let room = width.saturating_sub(selection::GUTTER_WIDTH);
     Line::styled(
         format!(
             "{}{}",
             " ".repeat(selection::GUTTER_WIDTH),
-            text::truncate_end(detail, room)
+            text::fit(detail, room)
         ),
         Style::default().add_modifier(theme.muted),
     )

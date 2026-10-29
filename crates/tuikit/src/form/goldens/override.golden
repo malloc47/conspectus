@@ -10,7 +10,7 @@ style |                                                                |
 text  |  ┌ Settings ────────────────────────────────────────────────┐  |
 style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
 text  |  │  A field follows its default until you change it.        │  |
-style |  abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb        a  |
+style |  abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba  |
 text  |  │                                                          │  |
 style |  a                                                          a  |
 text  |  │  title          draft                                    │  |
@@ -28,9 +28,9 @@ style |  a                 cccccccccc                               a  |
 text  |  │                                                          │  |
 style |  a                                                          a  |
 text  |  │  the theme's size is medium                              │  |
-style |  abbbbbbbbbbbbbbbbbbbbbbbbbbbb                              a  |
+style |  abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba  |
 text  |  │                                                          │  |
-style |  a                                                          a  |
+style |  abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbba  |
 text  |  │                                                          │  |
 style |  a                                                          a  |
 text  |  │↑/↓ move · Tab complete/next · S-Tab back                 │  |

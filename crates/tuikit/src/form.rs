@@ -367,11 +367,13 @@ impl<M> Form<M> {
         let mut notes = vec![Line::default()];
         if self.details > 0 {
             let hints = focus.map_or_else(Vec::new, |index| self.fields[index].hints());
-            notes.extend((0..self.details).map(|line| {
-                hints
-                    .get(line)
-                    .map_or_else(Line::default, |hint| detail_line(hint, width, theme))
-            }));
+            // Every line of the band is drawn, a blank one too, so the band
+            // keeps its look as the focus moves and only its words change.
+            notes.extend(
+                (0..self.details).map(|line| {
+                    detail_line(hints.get(line).map_or("", String::as_str), width, theme)
+                }),
+            );
             notes.push(Line::default());
         }
         FormBody::new(rows, cursor)
