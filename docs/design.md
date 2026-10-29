@@ -755,7 +755,7 @@ three creation paths plus rename, attach, and teardown:
   No argv is injected (ADR 0028).
 - **Mux launch** (ADR 0096) — a harness in a fresh mux. `conspectus mux
   launch <harness> --name <mux-name> [--cwd <path>]` on the CLI; the `m`
-  Mux menu in the TUI opens a launch-spec form (ADR 0097), and `N` opens
+  Mux menu in the TUI opens the launch form (ADR 0169), and `N` opens
   it too (worktree toggle off by default). The default argv comes from launch
   profiles (ADR 0142).
 - **Rebuild** (ADR 0142) — a gone mux, a planned slot, or a mux whose
@@ -1203,8 +1203,18 @@ that commits a message or refuses with a reason), a refusal shows on one
 error line directly above the footer until the next edit, and the footer,
 generated from the form's key table, stays in view while only the rows
 scroll. Labels take the short forms (`name`, `socket`, `argv`, `branch`).
-The new mux form is a `Form`; the launch and pin edit forms draw their rows
-through the same row kit and body until they move onto it.
+The new mux and launch forms are `Form`s (ADR 0169): the launch form keeps
+the fields that follow others in step around it (the harness's launch
+options over the argv, the derived command row, and the default argv,
+decided when the harness or the cwd changes rather than while drawing). The
+pin edit form draws its rows through the same row kit and body until it
+moves onto it.
+
+Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
+`src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
+argv someone types (the forms, `pin edit --set`) is refused when it ends
+inside a quote or on a lone backslash; text read back from tmux or the
+records is read as far as it goes.
 
 ### Graph-to-View Slicing
 

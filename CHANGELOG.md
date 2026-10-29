@@ -217,6 +217,23 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   Typing a name that only appears inside a known directory (`src` for
   `~/work/src/app`) no longer completes to it; type the start of the
   path.
+- **The launch form moves on one ring.** Its socket checkbox, which sat
+  at the end of the name row and only `Tab` reached, is a `server` row
+  of its own under the name (`[ ] own socket`), so `↓` and `Tab` visit
+  the same fields and the name gets the whole row; the `socket` field
+  still appears under it while it is on. A launch the form refuses moves
+  the cursor to the field it is about, as the new tmux session form
+  does.
+- **One way to split an argv.** The launch form's `argv`, the pin edit
+  form's `argv` (its checkboxes and its save), `pin edit --set argv=…`,
+  and the previews of a tmux pane's start command split text the same
+  way, as `docs/operations.md` describes. A backslash inside double
+  quotes before an ordinary character now stays (`"a\b"` is `a\b`; the
+  previews and `pin edit` read `ab`), a last lone backslash stands for
+  itself, and the pin edit form and `pin edit --set` refuse an argv that
+  ends inside a quote or on a lone backslash (they closed the quote or
+  dropped the backslash). The forms write an argv back quoted as the
+  previews quote it, so `@`, `%`, and `,` stay bare.
 
 ### Fixed
 
@@ -226,7 +243,9 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   offer only directories and mark a file `▲`.
 - **Drawing a form reads no files.** A path field listed a directory and
   checked its path on every frame drawn; it now looks only when its text
-  changes.
+  changes. The launch and pin edit forms looked for an Atelier workspace
+  on every frame to show the default command; they now decide it when
+  the form opens and when the harness or the cwd changes.
 
 - **Text fields keep their cursor in view.** The quick select, content
   search, and picker queries show a cursor and scroll to keep it on

@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted. Narrowed by
+Superseded by
+[ADR 0169](0169-tui-launch-form-is-a-form-and-one-grammar-splits-every-argv.md):
+`LaunchSpecFormState` is gone, its one remaining consumer, the mux launch
+form, is the framework's `Form`, and the argv helpers it shared live in
+`tui::widgets::launch_argv`. Earlier narrowed by
 [ADR 0167](0167-tui-path-fields-complete-behind-a-source-and-expand-tilde-on-commit.md):
 the cwd field is the framework's `path_field::PathField`, a directory field
 over Conspectus's read-only file-system source, in place of

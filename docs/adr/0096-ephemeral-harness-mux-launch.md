@@ -5,7 +5,10 @@
 Accepted. Amended by [ADR 0142](0142-rebuild-plans-and-executors.md): the
 launched mux is recorded in history with its argv, `--pin` and `--pin
 --no-launch` replace `pin adopt` and `pin create`, and the default argv
-comes from launch profiles.
+comes from launch profiles. Narrowed by
+[ADR 0169](0169-tui-launch-form-is-a-form-and-one-grammar-splits-every-argv.md):
+the TUI form is the framework's `Form`, not the launch-spec primitive
+described under **Form** below.
 
 ## Context
 

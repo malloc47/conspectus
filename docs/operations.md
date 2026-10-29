@@ -1026,7 +1026,8 @@ conspectus pin show <name>
 `pr`, `branch`, `workspace`, or `fork`. `pin rename` on a live mux pin also
 renames the tmux session and pins the `name` override; `--no-mux` renames
 the pin alone. `FIELD=VALUE` lists (such as `argv`) are split like a shell command
-line. Pinning a live mux, worktree, or repo first records it in
+line, as the launch form's `argv` is (see the launch form below), and one that
+ends inside a quote is refused. Pinning a live mux, worktree, or repo first records it in
 history so the pin has a stable record to point at. `rm` removes the
 pin and nothing else. `pin add`, `edit`, `rename`, `retarget`,
 `refresh`, `move`, `rm`, and `migrate` are the only commands that write
@@ -1202,7 +1203,8 @@ on the `argv` row. `↑`/`↓` move between rows, `Enter` saves, and `Esc`
 cancels.
 
 The launch and new mux forms work the same way: `↑`/`↓` move between fields,
-`Tab` completes a directory in a path field and moves on elsewhere,
+`Tab` and `S-Tab` visit the same fields, `Tab` completes a directory in a
+path field first and moves on when there is nothing to complete,
 `←`/`→`/`Space` choose among the harnesses, options, and toggles, and a line
 shows the command the form will run. `Enter` launches or creates from
 whichever field has the cursor. A choice of one among several, such as the
@@ -1224,17 +1226,41 @@ the form saves or runs the expanded path.
 
 `N`, or `m` then **Launch harness in new mux…**, opens the mux launch form
 with the worktree toggle off (switch it on to create or reuse a worktree). The
-mux's **name** is the first field. A **socket** checkbox to the right of the
-name reveals a **socket** field beneath it, for a tmux server other than the
-default; `Tab` reaches the checkbox right after the name and `Space` (or `←`/`→`)
-toggles it. With it off the launch uses the default server, and the socket text
-you typed is kept if you switch it back on. The `command` row shows what will
-run; it is derived output, drawn dim and italic and indented under a `└`, and
-never takes focus. An empty `argv`
+mux's **name** is the first field. Under it, the **server** checkbox (`[ ] own
+socket`) reveals a **socket** field beneath it, for a tmux server other than
+the default; it is a field like the others, and `Space` (or `←`/`→`) toggles
+it. With it off the launch uses the default server, and the socket text you
+typed is kept if you switch it back on. The harness's launch options, such as
+skipping permissions, are checkboxes that add or remove their flags in the
+`argv`. The `command` row shows what will run; it is derived output, drawn dim
+and italic and indented under a `└`, and never takes focus. An empty `argv`
 resolves to the harness's default (a project or user `[launch.*]`
 profile, `atelier exec`, or the harness default) and the form shows the
-command and where it came from. The last field, **pin**, can also pin the new
-mux or, with *pin, don't launch*, write a planned pin and start nothing.
+command and where it came from; the form decides that default when it opens
+and again when you change the harness or the cwd. The last field, **pin**, can
+also pin the new mux or, with *pin, don't launch*, write a planned pin and
+start nothing.
+
+An argv you type (the launch form's and the pin edit form's `argv`, and
+`conspectus pin edit --set argv=…`) is split like a shell command line, with
+nothing expanded:
+
+- Spaces separate arguments.
+- Single quotes keep everything between them as written: `'opus 4'` is one
+  argument, and `'a\b'` keeps its backslash.
+- Double quotes keep everything between them too, except that a backslash
+  before `"`, `\`, `$`, or a backtick stands for that character: `"say
+  \"hi\""` is `say "hi"`, while `"a\b"` is `a\b`.
+- Outside quotes a backslash makes the next character plain: `x\ y` is one
+  argument, `x y`.
+- Pieces with nothing between them are one argument (`--name="two words"`),
+  and `''` is an empty argument.
+- `$HOME`, `~`, `*`, `;`, `|`, and backticks are passed as they are.
+
+An argv that ends inside a quote or on a lone backslash is refused with the
+reason (``mux launch: launch argv has an unclosed `'` quote``, `` `argv` has a
+trailing escape ``) until you finish it. Toggling a launch option or changing
+the harness works on what you have typed so far and writes it back finished.
 
 ### The Search view
 
@@ -1507,9 +1533,12 @@ ms/s/m/h/d)`), an empty branch name for a new worktree (`worktree:
 branch name is required`), and renaming a pin or a tmux session to
 nothing (`pin: nothing entered`, `mux rename: name cannot be empty`).
 The new tmux session and launch forms say why on an error line just above
-their keys, until your next edit: an empty name or cwd in the new tmux
-session form (`mux: name is required`, `mux: cwd is required`) also moves
-the cursor to the field to fill in.
+their keys, until your next edit, and move the cursor to the field to fix:
+an empty name or cwd in the new tmux session form (`mux: name is
+required`, `mux: cwd is required`), and in the launch form an empty or
+live name, an empty harness or cwd, an argv that ends inside a quote, or
+a worktree without its branch or repo (`mux launch: mux name is
+required`, ``mux launch: launch argv has an unclosed `'` quote``).
 
 A prompt shows its keys on its bottom border (`Enter confirm · Esc
 cancel`). `Esc` leaves it without saying anything; from the worktree

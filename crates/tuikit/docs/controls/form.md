@@ -183,6 +183,42 @@ footer fit (`src/form/goldens/narrow.golden`):
 └──────────────────────────────────────┘
 ```
 
+### Keeping fields in step
+
+A field whose value follows others (a line derived from them, the items of
+a check group that depend on a choice) is the host's to update. The host
+keeps the form inside a type of its own, hands it each key, reads
+`Form::edited` to see which field the key changed, and updates the
+follower through `Form::get_mut`; a change made that way does not clear the
+error line. Work that costs something, such as reading a file to decide
+what a derived line says, happens there, when an input changes, and its
+answer is kept, so drawing the form reads only its fields.
+
+```rust
+use ratatui::crossterm::event::KeyEvent;
+use tuikit::form::{Field, FieldKind, Form, Tone};
+use tuikit::overlay::{Outcome, Overlay};
+
+/// A form whose `total` line follows its `count` field.
+struct Order<M> {
+    form: Form<M>,
+}
+
+impl<M> Order<M> {
+    fn handle_key(&mut self, key: KeyEvent) -> Outcome<M> {
+        let outcome = Overlay::<M, ()>::handle(&mut self.form, key, &());
+        if self.form.edited() == Some("count") {
+            let count: u32 = self.form.values().text("count").trim().parse().unwrap_or(0);
+            let total = format!("{} cents", count * 250);
+            if let Some(FieldKind::ReadOnly(line)) = self.form.get_mut("total").map(Field::kind_mut) {
+                line.set(total, Tone::Derived);
+            }
+        }
+        outcome
+    }
+}
+```
+
 ### Size
 
 The form is drawn in the form modal frame (`FORM_SIZE`, which is
