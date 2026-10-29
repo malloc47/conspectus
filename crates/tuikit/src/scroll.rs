@@ -25,6 +25,12 @@
 //!   [`text::wrap_line`](crate::text::wrap_line) and remembers the rows
 //!   each line took, so a scroll range, a scrollbar's length, and a
 //!   wrapped cursor's span are counted from the rows that are drawn.
+//! - **Region**: [`ScrollRegion`] is a window with no cursor whose offset
+//!   counts from an [`Anchor`]: the top, the bottom (a body that shows the
+//!   newest rows keeps its distance from the end as rows arrive), or a row
+//!   the content marks (a match it opened on). It steps, clamps, draws
+//!   lines or rows the host cut, keeps a banner above them, and draws the
+//!   scrollbar; [`rows_under`] is the room a banner leaves.
 //!
 //! ```
 //! use ratatui::buffer::Buffer;
@@ -71,11 +77,13 @@
 //! the rows the frame really showed.
 
 mod gutter;
+mod region;
 mod rows;
 mod step;
 mod window;
 
 pub use gutter::ScrollGutter;
+pub use region::{Anchor, ScrollRegion, rows_under};
 pub use rows::WrappedRows;
 pub use step::{clamp_step, wrap_step};
 pub use window::{ScrollWindow, follow_offset};

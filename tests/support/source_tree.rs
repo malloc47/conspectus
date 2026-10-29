@@ -52,7 +52,7 @@
 //! * When a story moves files from `src` into `crates/tuikit/src`, raise
 //!   `FRAMEWORK_SRC` in the same change and lower `HOST_SRC` if the move
 //!   took the host under its minimum. The sum of the two should not shrink.
-//! * `FRAMEWORK_SRC` asks for 70 of the 94 files the crate holds today:
+//! * `FRAMEWORK_SRC` asks for 121 of the 162 files the crate holds today:
 //!   `lib.rs`, the foundation and convention modules, and the test kit,
 //!   with their sibling test files.
 //!   `FRAMEWORK_EXAMPLES` is 0 until the first example exists; raise it to 1
@@ -97,14 +97,14 @@ impl Tree {
     }
 }
 
-/// The host's `src` (395 files today).
+/// The host's `src` (389 files today).
 pub const HOST_SRC: Tree = Tree::new("src", 300);
 /// The host's integration tests (38 files today).
 pub const HOST_TESTS: Tree = Tree::new("tests", 30);
 /// The host's examples (1 file today).
 pub const HOST_EXAMPLES: Tree = Tree::new("examples", 1);
-/// The framework's `src` (141 files today). Raise this as code moves in.
-pub const FRAMEWORK_SRC: Tree = Tree::new("crates/tuikit/src", 106);
+/// The framework's `src` (162 files today). Raise this as code moves in.
+pub const FRAMEWORK_SRC: Tree = Tree::new("crates/tuikit/src", 121);
 /// The framework's integration tests (6 files today, one of them shared
 /// scan plumbing under `support/`). The independence guard alone keeps the
 /// minimum of 1.
