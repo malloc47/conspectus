@@ -1,30 +1,33 @@
 //! Dev-only one-shot TUI snapshot mode (ADR 0067).
 //!
-//! Renders one frame of the TUI into a ratatui `TestBackend`, emits
-//! the cell grid as ANSI-styled text to stdout, and exits. Used by
-//! agents iterating on renderer changes so they can "see" the TUI
-//! without an interactive screenshot loop.
+//! Renders one frame of the TUI off screen, emits the cell grid as
+//! ANSI-styled text to stdout, and exits. Used by agents iterating on
+//! renderer changes so they can "see" the TUI without an interactive
+//! screenshot loop.
 //!
 //! Pipeline:
 //!
 //! 1. Build an `App` exactly like the production `tui` runtime does
-//!    (`App::new(config)`), then call [`crate::tui::runtime::refresh`]
+//!    (`App::new(config)`), then call `runtime::refresh`
 //!    to populate the row tree via live discovery.
-//! 2. Parse the optional `--snapshot-keys` script into a sequence of
-//!    `KeyEvent`s and dispatch each one through the same `translate`
-//!    function the interactive event loop uses, so key behavior
-//!    matches the live UI.
-//! 3. Render one frame via `TestBackend` and walk the resulting
-//!    `Buffer`, emitting minimal ANSI escape sequences as styles
-//!    change cell-to-cell.
+//! 2. Parse the optional `--snapshot-keys` script with the framework's
+//!    key-script notation (`tuikit::testkit::keys`) and dispatch each key
+//!    through the same `translate` function the interactive event loop
+//!    uses, so key behavior matches the live UI. A key an open modal owns
+//!    goes through the modal stack, and whatever the modal sends goes
+//!    through the reducer, so every overlay key does what it does live.
+//! 3. Render one frame with the framework's one-frame driver
+//!    (`tuikit::testkit::render`) and write it as ANSI text
+//!    (`tuikit::testkit::ansi`), styles kept.
 //! 4. Optionally slice the buffer to a single pane
 //!    ([`SnapshotPane`]) using the same layout split the renderer
 //!    uses, so agents can target the left tree, the detail pane,
 //!    the header bar, or the status bar without grepping.
 //!
-//! The dispatcher handles a deliberate subset of actions — anything
-//! that would take over the terminal, spawn a process, or write to
-//! disk is skipped with a one-line stderr warning. The agent's
+//! The dispatcher handles a deliberate subset of actions, and the
+//! effects the reducer emits run on a snapshot-safe executor: anything
+//! that would take over the terminal, spawn a process, or write to disk
+//! is skipped with a one-line stderr note naming it. The agent's
 //! keystroke is recorded as a no-op rather than silently dropped.
 
 use std::fs;
@@ -32,13 +35,11 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{Event, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
 use tuikit::feedback::{Feedback, Severity};
+use tuikit::testkit::render::FrameDriver;
+use tuikit::testkit::{ansi, keys};
 
 use crate::model::GraphSnapshot;
 use crate::tui::Msg;
@@ -103,8 +104,8 @@ pub enum SnapshotPane {
 
 /// Render one snapshot frame and write the ANSI-encoded result to
 /// stdout. Mirrors the discovery + reducer pipeline of the
-/// interactive `tui` runtime; the only difference is the
-/// `TestBackend` and the optional key prelude.
+/// interactive `tui` runtime; the only difference is the off-screen
+/// terminal and the optional key prelude.
 pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     if snap.width == 0 || snap.height == 0 {
         return Err(anyhow!(
@@ -140,11 +141,12 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
 
     seed_messages(&mut app, &snap.messages, snap.now);
 
-    let keys = parse_key_script(&snap.keys)?;
+    let keys = keys::parse(&snap.keys).map_err(|error| anyhow!(error))?;
     let rebase = snap
         .fixture_root
         .as_deref()
         .map(|root| (std::path::Path::new(FIXTURE_PATH_ROOT), root));
+    let mut notes = Notes::new();
     // A `--contains` query scans before the first key.
     runtime::run_pending_content_scans(&mut app, rebase);
     drive_keys(
@@ -153,27 +155,26 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
         keys,
         Rect::new(0, 0, snap.width, snap.height),
         rebase,
-    )?;
+        &mut notes,
+    );
+    for note in &notes {
+        eprintln!("conspectus: {note}");
+    }
     show_feedback(&mut app, &snap);
     // One frame, no event loop: read the selection's preview now
     // rather than showing it loading.
-    let fixture_root = snap
-        .fixture_root
-        .as_deref()
-        .map(|root| (std::path::Path::new(FIXTURE_PATH_ROOT), root));
-    runtime::load_offline_preview_now(&mut app, &config, fixture_root);
+    runtime::load_offline_preview_now(&mut app, &config, rebase);
 
-    let backend = TestBackend::new(snap.width, snap.height);
-    let mut terminal = Terminal::new(backend)?;
+    // A fresh driver, so the frame holds only the cells this draw sent.
+    let mut driver = FrameDriver::new(snap.width, snap.height);
     // Mirror the interactive runtime's pre-draw step, which retires a
     // toast whose time is up.
     app.prepare_toast_for_render();
-    terminal.draw(|frame| runtime::draw_screen(&mut app, frame))?;
-    let buffer = terminal.backend().buffer();
+    let buffer = driver.draw(|frame| runtime::draw_screen(&mut app, frame));
 
     let area = Rect::new(0, 0, snap.width, snap.height);
     let region = pane_rect(area, snap.pane, app.config().narrow_layout_threshold);
-    let out = buffer_to_ansi(buffer, region);
+    let out = ansi::to_ansi(buffer, region);
 
     let mut stdout = std::io::stdout().lock();
     stdout.write_all(out.as_bytes())?;
@@ -254,6 +255,10 @@ fn write_fixture(path: &std::path::Path, snapshot: &GraphSnapshot) -> Result<()>
     Ok(())
 }
 
+/// What the snapshot driver skipped or could not do, one line each, for
+/// stderr.
+pub(in crate::tui) type Notes = Vec<String>;
+
 /// Dispatch the key prelude one key at a time, resolving each through
 /// the same overlay / keymap / focus pipeline as the interactive loop.
 /// Like that loop, a frame of `area` is drawn before each key, so a key
@@ -265,51 +270,62 @@ fn drive_keys(
     keys: Vec<KeyEvent>,
     area: Rect,
     rebase: Option<(&std::path::Path, &std::path::Path)>,
-) -> Result<()> {
-    let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))?;
-    for key in keys {
-        app.prepare_toast_for_render();
-        terminal.draw(|frame| runtime::draw_screen(app, frame))?;
-        if let Some(action) = runtime::action_for_event(app, Event::Key(key)) {
-            apply_action(app, config, action, rebase);
-            // Overlay keys can start a search; finish it before the
-            // next key so the frame is deterministic.
-            app.search_overlay_tick(std::time::Instant::now(), true);
-            runtime::run_pending_content_scans(app, rebase);
-        }
-    }
-    Ok(())
+    notes: &mut Notes,
+) {
+    let mut driver = FrameDriver::new(area.width, area.height);
+    driver.drive(
+        app,
+        keys,
+        |app, frame| {
+            app.prepare_toast_for_render();
+            runtime::draw_screen(app, frame);
+        },
+        |app, key| {
+            if let Some(action) = runtime::action_for_event(app, Event::Key(key)) {
+                apply_action(app, config, action, rebase, notes);
+                // Overlay keys can start a search; finish it before the
+                // next key so the frame is deterministic.
+                app.search_overlay_tick(std::time::Instant::now(), true);
+                runtime::run_pending_content_scans(app, rebase);
+            }
+        },
+    );
 }
 
 /// Open the transcript viewer for the selected session, reading the
 /// transcript from the scenario world when a fixture root rebases the
-/// paths. A session with nothing to show leaves a note on stderr.
-fn open_viewer(app: &mut App, rebase: Option<(&std::path::Path, &std::path::Path)>) {
+/// paths. A session with nothing to show leaves a note.
+fn open_viewer(
+    app: &mut App,
+    rebase: Option<(&std::path::Path, &std::path::Path)>,
+    notes: &mut Notes,
+) {
     let effects = app.update(Msg::ViewSelected);
-    run_effects_opening_viewers(app, effects, rebase);
+    run_effects_opening_viewers(app, effects, rebase, notes);
 }
 
 /// Run effects the snapshot-safe way: a request to view a session opens
 /// the viewer from the scenario world, and a request to read a pane's
-/// scrollback opens the pane viewer on the capture the world recorded;
-/// everything else goes through the pure executor.
+/// scrollback opens the pane viewer on the capture the world recorded.
+/// What would reach outside the snapshot ([`reaches_outside`]) is skipped
+/// with a note naming it; everything else goes through the pure executor.
 fn run_effects_opening_viewers(
     app: &mut App,
     effects: Vec<crate::tui::effect::Effect>,
     rebase: Option<(&std::path::Path, &std::path::Path)>,
+    notes: &mut Notes,
 ) {
     use crate::tui::effect::{Effect, ExecSpec};
     for effect in effects {
-        // OSC 52 would land in the frame output.
-        if matches!(effect, Effect::Copy { .. }) {
-            eprintln!("conspectus: snapshot mode skipped a copy");
+        if let Some(what) = reaches_outside(&effect) {
+            notes.push(format!("snapshot mode skipped {what}"));
             continue;
         }
         if let Effect::Exec(ExecSpec::PaneScrollback { pane, line, text }) = &effect {
             match rebase {
                 Some((_, root)) => runtime::open_recorded_pane(app, root, pane, *line, text),
-                None => eprintln!(
-                    "conspectus: snapshot mode reads pane scrollback only from a fixture root"
+                None => notes.push(
+                    "snapshot mode reads pane scrollback only from a fixture root".to_string(),
                 ),
             }
             continue;
@@ -325,24 +341,50 @@ fn run_effects_opening_viewers(
         }
         match crate::tui::viewer_bridge::build_viewer_state_at(&id, open.as_ref()) {
             Some(state) => app.open_viewer_modal(state),
-            None => eprintln!("conspectus: snapshot mode found no transcript to view"),
+            None => notes.push("snapshot mode found no transcript to view".to_string()),
         }
+    }
+}
+
+/// What `effect` would do outside the snapshot, if it would: a copy (its
+/// OSC 52 escape would land in the frame), a hand-off to another program,
+/// a mux command, or a store write. `None` for the effects the snapshot
+/// runs itself (a viewer, a pane's recorded scrollback) or on the pure
+/// executor (a toast, a refresh, the TUI's own state).
+fn reaches_outside(effect: &crate::tui::effect::Effect) -> Option<&'static str> {
+    use crate::tui::effect::{Effect, ExecSpec};
+    match effect {
+        Effect::Copy { .. } => Some("a copy"),
+        Effect::Exec(ExecSpec::AttachMux(_)) => Some("an attach"),
+        Effect::Exec(ExecSpec::Resume(_)) => Some("a resume"),
+        Effect::Exec(ExecSpec::MuxNew { .. } | ExecSpec::MuxLaunch { .. }) => Some("a launch"),
+        Effect::Exec(ExecSpec::Rebuild { .. } | ExecSpec::ShowRebuildPlan { .. }) => {
+            Some("a rebuild")
+        }
+        Effect::RunMux(_) => Some("a mux command"),
+        Effect::WriteStore(_) => Some("a store write"),
+        Effect::Exec(ExecSpec::ViewSession(..) | ExecSpec::PaneScrollback { .. })
+        | Effect::SpawnRefresh { .. }
+        | Effect::Toast(_)
+        | Effect::Persist
+        | Effect::Quit => None,
     }
 }
 
 /// Apply an action against the snapshot-safe action subset. Actions
 /// that would spawn a process, take over the terminal, or otherwise
-/// reach outside the snapshot are skipped with a stderr note so the
-/// agent knows the key was a no-op rather than silently dropped.
+/// reach outside the snapshot are skipped with a note so the agent
+/// knows the key was a no-op rather than silently dropped.
 fn apply_action(
     app: &mut App,
     config: &RunConfig,
     action: Action,
     rebase: Option<(&std::path::Path, &std::path::Path)>,
+    notes: &mut Notes,
 ) {
     match action {
         Action::Msg(msg) => dispatch(app, *msg),
-        Action::ModalKey(key) => modal_key(app, key, rebase),
+        Action::ModalKey(key) => modal_key(app, key, rebase, notes),
         Action::SwitchView(view) => dispatch(app, Msg::SwitchView(view)),
         Action::CycleView(delta) => {
             let next = cycle_view(app.active_view(), delta);
@@ -375,7 +417,7 @@ fn apply_action(
         // The forms and the rename prompt open as in the live loop.
         Action::OpenNewMuxForm => runtime::open_new_mux_form_action(app),
         Action::OpenRename => runtime::open_rename_overlay(app),
-        Action::View => open_viewer(app, rebase),
+        Action::View => open_viewer(app, rebase, notes),
         Action::Refresh => runtime::refresh(app, config),
         Action::HardRefresh => {
             app.update(crate::tui::Msg::ForgeRefreshRequested);
@@ -385,68 +427,28 @@ fn apply_action(
         // The clipboard write is skipped: OSC 52 would land in the
         // frame output. The toast still renders.
         Action::ExplorerEnter => runtime::explorer_enter(app, |_| Ok(())),
-        other => {
-            eprintln!(
-                "conspectus: snapshot mode skipped unsupported action: {}",
-                action_label(&other)
-            );
-        }
+        other => notes.push(format!(
+            "snapshot mode skipped unsupported action: {}",
+            action_label(&other)
+        )),
     }
 }
 
 /// A key for the modal on top, routed as in the live loop: every modal
-/// moves, scrolls, edits, and closes the same way. What it sends goes
-/// through [`snapshot_send`], which keeps the snapshot from reaching
-/// outside itself.
-fn modal_key(app: &mut App, key: KeyEvent, rebase: Option<(&std::path::Path, &std::path::Path)>) {
-    let from = app.top_modal_name();
-    runtime::modal_key(app, key, &mut |app, msg| {
-        snapshot_send(app, from, msg, rebase);
-    });
-}
-
-/// What the snapshot driver does with a message the modal `from` sent.
-///
-/// Help, Controls, Messages, the search overlay, and the transcript
-/// viewer only move the TUI (a setting, a row, a search, a scroll), so
-/// what they send runs, a request to view a session opening the viewer
-/// from the scenario world and a copy skipped. Everything else (the
-/// menus, prompts, forms, checklists, the picker, the value modal, the
-/// pane viewer) acts when it picks or submits, so only what reaches
-/// nothing outside the snapshot runs: a notice it shows while it stays
-/// open, a copy (skipped), and a pick that only opens another modal. The
-/// rest is skipped with a note.
-fn snapshot_send(
+/// moves, scrolls, edits, picks, submits, and closes the same way. What
+/// it sends goes through the reducer, as in every loop, and the effects
+/// that follow through [`run_effects_opening_viewers`], which keeps the
+/// snapshot from reaching outside itself.
+fn modal_key(
     app: &mut App,
-    from: Option<&str>,
-    msg: Msg,
+    key: KeyEvent,
     rebase: Option<(&std::path::Path, &std::path::Path)>,
+    notes: &mut Notes,
 ) {
-    let moves_only = matches!(
-        from,
-        Some("Help" | "Controls" | "Messages" | "Search" | "Viewer")
-    );
-    let harmless = matches!(msg, Msg::Toast(_) | Msg::Copy { .. }) || only_opens_a_modal(&msg);
-    if moves_only || harmless {
+    runtime::modal_key(app, key, &mut |app, msg| {
         let effects = app.update(msg);
-        run_effects_opening_viewers(app, effects, rebase);
-    } else {
-        eprintln!("conspectus: snapshot mode skipped a pick or submit");
-    }
-}
-
-/// Whether `msg` does nothing but open a modal: one of the forms, the
-/// rename prompt, the picker, or the Clean up checklist.
-fn only_opens_a_modal(msg: &Msg) -> bool {
-    matches!(
-        msg,
-        Msg::OpenNewMuxForm
-            | Msg::OpenMuxLaunchForm
-            | Msg::OpenSlotEdit(_)
-            | Msg::OpenSlotRename(_)
-            | Msg::OpenSlotRetarget(_)
-            | Msg::OpenCleanUp
-    )
+        run_effects_opening_viewers(app, effects, rebase, notes);
+    });
 }
 
 fn action_label(action: &Action) -> &'static str {
@@ -461,8 +463,8 @@ fn action_label(action: &Action) -> &'static str {
 
 /// Compute the rect for a snapshot pane using the same layout the
 /// renderer applies in `ui::draw`. Kept in sync with the constraints
-/// in `ui::draw` and `ui::draw_body`; the renderer's constants are
-/// pulled in via `pub(super)` so the two never drift.
+/// in `ui::draw` and `ui::draw_body` by hand; the `pane_rect` tests
+/// pin the split.
 fn pane_rect(area: Rect, pane: SnapshotPane, narrow_layout_threshold: u16) -> Rect {
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -496,197 +498,6 @@ fn pane_rect(area: Rect, pane: SnapshotPane, narrow_layout_threshold: u16) -> Re
             }
         }
     }
-}
-
-/// Walk the buffer cells row by row and emit minimal ANSI escape
-/// sequences as styles change. A reset is emitted at the end of
-/// each row so background fills don't bleed into the next line in
-/// the operator's terminal.
-fn buffer_to_ansi(buffer: &Buffer, region: Rect) -> String {
-    let mut out = String::new();
-    let area = buffer.area();
-    for y in region.y..region.y.saturating_add(region.height) {
-        if y >= area.y.saturating_add(area.height) {
-            break;
-        }
-        let mut current_style: Option<Style> = None;
-        for x in region.x..region.x.saturating_add(region.width) {
-            if x >= area.x.saturating_add(area.width) {
-                break;
-            }
-            let cell = &buffer[(x, y)];
-            let style = cell.style();
-            if current_style.as_ref() != Some(&style) {
-                out.push_str(&ansi_style_seq(style));
-                current_style = Some(style);
-            }
-            out.push_str(cell.symbol());
-        }
-        out.push_str("\x1b[0m");
-        if y + 1 < region.y.saturating_add(region.height) {
-            out.push('\n');
-        }
-    }
-    out
-}
-
-fn ansi_style_seq(style: Style) -> String {
-    let mut out = String::from("\x1b[0m");
-    if let Some(fg) = style.fg
-        && let Some(seq) = color_to_seq(fg, false)
-    {
-        out.push_str(&seq);
-    }
-    if let Some(bg) = style.bg
-        && let Some(seq) = color_to_seq(bg, true)
-    {
-        out.push_str(&seq);
-    }
-    let mods = style.add_modifier;
-    if mods.contains(Modifier::BOLD) {
-        out.push_str("\x1b[1m");
-    }
-    if mods.contains(Modifier::DIM) {
-        out.push_str("\x1b[2m");
-    }
-    if mods.contains(Modifier::ITALIC) {
-        out.push_str("\x1b[3m");
-    }
-    if mods.contains(Modifier::UNDERLINED) {
-        out.push_str("\x1b[4m");
-    }
-    if mods.contains(Modifier::REVERSED) {
-        out.push_str("\x1b[7m");
-    }
-    out
-}
-
-fn color_to_seq(color: Color, bg: bool) -> Option<String> {
-    let base = if bg { 48 } else { 38 };
-    Some(match color {
-        Color::Reset => return None,
-        Color::Black => format!("\x1b[{}m", if bg { 40 } else { 30 }),
-        Color::Red => format!("\x1b[{}m", if bg { 41 } else { 31 }),
-        Color::Green => format!("\x1b[{}m", if bg { 42 } else { 32 }),
-        Color::Yellow => format!("\x1b[{}m", if bg { 43 } else { 33 }),
-        Color::Blue => format!("\x1b[{}m", if bg { 44 } else { 34 }),
-        Color::Magenta => format!("\x1b[{}m", if bg { 45 } else { 35 }),
-        Color::Cyan => format!("\x1b[{}m", if bg { 46 } else { 36 }),
-        Color::Gray => format!("\x1b[{}m", if bg { 47 } else { 37 }),
-        Color::DarkGray => format!("\x1b[{}m", if bg { 100 } else { 90 }),
-        Color::LightRed => format!("\x1b[{}m", if bg { 101 } else { 91 }),
-        Color::LightGreen => format!("\x1b[{}m", if bg { 102 } else { 92 }),
-        Color::LightYellow => format!("\x1b[{}m", if bg { 103 } else { 93 }),
-        Color::LightBlue => format!("\x1b[{}m", if bg { 104 } else { 94 }),
-        Color::LightMagenta => format!("\x1b[{}m", if bg { 105 } else { 95 }),
-        Color::LightCyan => format!("\x1b[{}m", if bg { 106 } else { 96 }),
-        Color::White => format!("\x1b[{}m", if bg { 107 } else { 97 }),
-        Color::Rgb(r, g, b) => format!("\x1b[{base};2;{r};{g};{b}m"),
-        Color::Indexed(i) => format!("\x1b[{base};5;{i}m"),
-    })
-}
-
-/// Parse a `--snapshot-keys` script into a list of `KeyEvent`s.
-///
-/// Literal characters pass through as-is (`v` → `KeyCode::Char('v')`).
-/// Uppercase literals carry an implicit `SHIFT` modifier so the
-/// translate layer sees them the same way a real keyboard does.
-/// `<Name>` bracketed sequences map non-printables and modifier
-/// combinations; supported names:
-///
-/// - Arrows: `<Up> <Down> <Left> <Right>`
-/// - Enter / Esc / Tab / BackTab / Space / Backspace / Delete /
-///   Insert / Home / End / PageUp / PageDown
-/// - Function keys: `<F1>` .. `<F12>`
-/// - Single literal in brackets (e.g. `<v>`)
-/// - Modifier prefixes: `<C-x>` (Control), `<A-x>` (Alt), `<S-Tab>`
-///   (Shift); modifiers nest, so `<C-A-Del>` is legal.
-fn parse_key_script(raw: &str) -> Result<Vec<KeyEvent>> {
-    let mut out = Vec::new();
-    let mut chars = raw.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '<' {
-            let mut name = String::new();
-            let mut closed = false;
-            for nc in chars.by_ref() {
-                if nc == '>' {
-                    closed = true;
-                    break;
-                }
-                name.push(nc);
-            }
-            if !closed {
-                return Err(anyhow!("unterminated `<...>` in key script: missing `>`"));
-            }
-            out.push(parse_named_key(&name)?);
-        } else {
-            out.push(literal_to_key(ch));
-        }
-    }
-    Ok(out)
-}
-
-fn literal_to_key(ch: char) -> KeyEvent {
-    let mods = if ch.is_ascii_uppercase() {
-        KeyModifiers::SHIFT
-    } else {
-        KeyModifiers::NONE
-    };
-    KeyEvent::new(KeyCode::Char(ch), mods)
-}
-
-fn parse_named_key(name: &str) -> Result<KeyEvent> {
-    if let Some(rest) = name.strip_prefix("C-") {
-        let inner = parse_named_key(rest)?;
-        return Ok(KeyEvent::new(
-            inner.code,
-            inner.modifiers | KeyModifiers::CONTROL,
-        ));
-    }
-    if let Some(rest) = name.strip_prefix("A-") {
-        let inner = parse_named_key(rest)?;
-        return Ok(KeyEvent::new(
-            inner.code,
-            inner.modifiers | KeyModifiers::ALT,
-        ));
-    }
-    if let Some(rest) = name.strip_prefix("S-") {
-        let inner = parse_named_key(rest)?;
-        return Ok(KeyEvent::new(
-            inner.code,
-            inner.modifiers | KeyModifiers::SHIFT,
-        ));
-    }
-    let code = match name {
-        "Up" => KeyCode::Up,
-        "Down" => KeyCode::Down,
-        "Left" => KeyCode::Left,
-        "Right" => KeyCode::Right,
-        "Enter" => KeyCode::Enter,
-        "Esc" => KeyCode::Esc,
-        "Tab" => KeyCode::Tab,
-        "BackTab" => KeyCode::BackTab,
-        "Space" => KeyCode::Char(' '),
-        "Backspace" => KeyCode::Backspace,
-        "Delete" => KeyCode::Delete,
-        "Insert" => KeyCode::Insert,
-        "Home" => KeyCode::Home,
-        "End" => KeyCode::End,
-        "PageUp" => KeyCode::PageUp,
-        "PageDown" => KeyCode::PageDown,
-        s if s.starts_with('F') && s.len() > 1 => {
-            let n: u8 = s[1..]
-                .parse()
-                .map_err(|_| anyhow!("unknown function key `<{name}>`"))?;
-            KeyCode::F(n)
-        }
-        s if s.chars().count() == 1 => {
-            let ch = s.chars().next().unwrap();
-            return Ok(literal_to_key(ch));
-        }
-        _ => return Err(anyhow!("unknown key name `<{name}>`")),
-    };
-    Ok(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
 #[cfg(test)]

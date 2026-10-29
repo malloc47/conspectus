@@ -16,8 +16,8 @@ use tuikit::glyphs::marks;
 use super::glyphs::sources;
 use super::layout::{Open, app_with, builders, modal_rect, press};
 use super::source_tree::{self, Tree};
-use super::text::string_literals;
 use super::*;
+use tuikit::testkit::source::{Literal, production_code, string_literals};
 
 /// Modals that list rows a cursor moves over.
 const LISTS: &[&str] = &[
@@ -211,10 +211,6 @@ struct Reversed {
 
 const REVERSED_ELSEWHERE: &[Reversed] = &[
     Reversed {
-        path: "src/tui/snapshot.rs",
-        reason: "writes the reversed modifier as its escape code in a snapshot frame",
-    },
-    Reversed {
         path: "src/tui/widgets/input.rs",
         reason: "the text cursor cell of the one-line prompt",
     },
@@ -237,7 +233,11 @@ fn hand_written_cursors(root: &Path, trees: &[Tree]) -> Vec<String> {
     let mut used = vec![false; REVERSED_ELSEWHERE.len()];
     let mut out = Vec::new();
     for (path, text) in sources(root, trees) {
-        for (line, literal) in string_literals(&text) {
+        for Literal {
+            line,
+            text: literal,
+        } in string_literals(&text)
+        {
             if literal.starts_with("> ") {
                 out.push(format!(
                     "{path}:{line}: \"{literal}\" draws a cursor of its own; draw the row \
@@ -245,9 +245,7 @@ fn hand_written_cursors(root: &Path, trees: &[Tree]) -> Vec<String> {
                 ));
             }
         }
-        let code = text.split("#[cfg(test)]").next().unwrap_or("");
-        for (index, line) in code.lines().enumerate() {
-            let line = line.split("//").next().unwrap_or("");
+        for (index, line) in production_code(&text).lines().enumerate() {
             if !line.contains("Modifier::REVERSED") {
                 continue;
             }
