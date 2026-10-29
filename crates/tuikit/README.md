@@ -60,7 +60,10 @@ or sends, with scope strips, a status row, an options pane, a debounce
 for a slow provider, and a footer that stays in view), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
 scrollbar gutter, wrapped-row counts, and the scroll region whose offset
-counts from the top, the bottom, or a marked row), the `richtext` module
+counts from the top, the bottom, or a marked row), the `tree` module
+(the tree: a state kept apart from its host's rows, with the selection
+kept by identity across rebuilds, folds, and paging by the rows shown, and
+the pane that draws the rows from lines its host lays out), the `richtext` module
 behind its feature (ANSI text, captured terminal output fitted in a wrap
 mode, and Markdown with its tables and highlighted code), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age
