@@ -383,26 +383,6 @@ pub const PIN_EDIT_KEYS: &[KeyRow<FormKey>] = &[
 ];
 
 // ---------------------------------------------------------------------
-// Path omnibox field, a part of the forms rather than an overlay of its
-// own. Unbound keys edit the path.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OmniboxKey {
-    Complete,
-}
-
-impl KeyAction for OmniboxKey {
-    fn role(self) -> KeyRole {
-        match self {
-            Self::Complete => KeyRole::Other,
-        }
-    }
-}
-
-pub const OMNIBOX_KEYS: &[KeyRow<OmniboxKey>] = &[alias(key(KeyCode::Tab), OmniboxKey::Complete)];
-
-// ---------------------------------------------------------------------
 // Transcript and pane viewers. Each draws its own footer from its toggle
 // state, behind the ADR 0052 extraction boundary, so these rows are all
 // aliases; the keys still resolve here.

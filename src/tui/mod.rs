@@ -23,6 +23,7 @@ pub mod keybindings;
 pub mod keymap;
 pub mod messages;
 pub mod modal;
+pub mod paths;
 pub mod preview;
 pub mod preview_wrap;
 pub mod relation_path;

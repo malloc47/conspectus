@@ -1705,18 +1705,10 @@ fn parse_config_duration(raw: &str) -> Result<u64, String> {
 /// forms pass through unchanged. When `home` is `None`, the raw
 /// path is returned even if it starts with `~` — the loader has no
 /// home to splice in and the operator-visible result is at least
-/// stable rather than half-resolved.
+/// stable rather than half-resolved. This is the one `~` rule, which
+/// the pin store and the TUI's path fields share.
 fn expand_home(raw: &str, home: Option<&Path>) -> PathBuf {
-    let Some(home) = home else {
-        return PathBuf::from(raw);
-    };
-    if raw == "~" {
-        return home.to_path_buf();
-    }
-    if let Some(rest) = raw.strip_prefix("~/") {
-        return home.join(rest);
-    }
-    PathBuf::from(raw)
+    tuikit::path_field::expand_home(raw, home)
 }
 
 fn merge_table(config: &mut TableConfig, file: TableFile) {

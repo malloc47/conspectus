@@ -25,8 +25,8 @@ use tuikit::frame::Lines;
 use crate::tui::Msg;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{self, footer_lines, input_row, path_row};
-use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
 use tuikit::overlay::Outcome;
+use tuikit::path_field::{Candidate, PathField};
 use tuikit::text_edit::LineEdit;
 
 /// Which field currently holds the cursor.
@@ -51,7 +51,7 @@ impl NewMuxField {
 #[derive(Debug, Clone)]
 pub struct NewMuxFormState {
     name: LineEdit,
-    cwd: PathOmniboxState,
+    cwd: PathField,
     focus: NewMuxField,
 }
 
@@ -63,15 +63,15 @@ impl NewMuxFormState {
     pub fn new(name: impl Into<String>, cwd: impl Into<String>) -> Self {
         Self {
             name: LineEdit::new(name),
-            cwd: PathOmniboxState::new(cwd),
+            cwd: crate::tui::paths::directory_field(cwd, Vec::new()),
             focus: NewMuxField::Name,
         }
     }
 
     /// Offer these directories when completing the cwd field.
     #[must_use]
-    pub fn with_cwd_candidates(mut self, candidates: Vec<PathCandidate>) -> Self {
-        self.cwd.set_known_candidates(candidates);
+    pub fn with_cwd_candidates(mut self, candidates: Vec<Candidate>) -> Self {
+        self.cwd.set_candidates(candidates);
         self
     }
 
@@ -135,15 +135,9 @@ impl NewMuxFormState {
                 return Outcome::Consumed;
             }
             Some(FormKey::Tab) => {
-                if self.focus == NewMuxField::Cwd
-                    && matches!(
-                        self.cwd.handle_key(key),
-                        PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed
-                    )
-                {
-                    return Outcome::Consumed;
+                if !(self.focus == NewMuxField::Cwd && self.cwd.complete()) {
+                    self.focus = self.focus.toggle();
                 }
-                self.focus = self.focus.toggle();
                 return Outcome::Consumed;
             }
             Some(FormKey::Submit) => return self.try_commit(),
@@ -151,7 +145,7 @@ impl NewMuxFormState {
         }
         match self.focus {
             NewMuxField::Cwd => {
-                self.cwd.handle_key(key);
+                self.cwd.handle(key);
             }
             NewMuxField::Name => {
                 self.name.handle(key);

@@ -41,9 +41,8 @@ use crate::tui::widgets::form::{
 use crate::tui::widgets::launch_spec_form::{
     LaunchSpecFormState, LaunchSpecInit, SpecTextField, optional_string, parse_launch_argv,
 };
-use crate::tui::widgets::path_omnibox::PathOmniboxOutcome;
 use tuikit::overlay::Outcome;
-use tuikit::text_edit::LineEdit;
+use tuikit::path_field::{Candidate, PathField};
 
 const HARNESS_LABEL: &str = "harness";
 const CWD_LABEL: &str = "cwd";
@@ -127,12 +126,12 @@ pub struct MuxLaunchRequest {
 }
 
 /// Ephemeral harness launch form state. Owns the shared launch-spec
-/// primitive plus the mux-launch-only `worktree_repo` field and the
-/// cursor.
+/// primitive plus the mux-launch-only `worktree_repo` field (a directory,
+/// completed like the cwd) and the cursor.
 #[derive(Debug, Clone)]
 pub struct MuxLaunchFormState {
     spec: LaunchSpecFormState,
-    worktree_repo: LineEdit,
+    worktree_repo: PathField,
     focus: MuxLaunchField,
     pin: PinChoice,
     /// Whether the mux socket field is shown and used. Off means the
@@ -163,7 +162,7 @@ impl MuxLaunchFormState {
         });
         Self {
             spec,
-            worktree_repo: LineEdit::default(),
+            worktree_repo: crate::tui::paths::directory_field("", Vec::new()),
             focus: MuxLaunchField::MuxName,
             pin: PinChoice::Off,
             socket_enabled: false,
@@ -182,7 +181,7 @@ impl MuxLaunchFormState {
     /// switching it on later starts from the launch directory.
     #[must_use]
     pub fn with_worktree_repo(mut self, repo: impl Into<String>) -> Self {
-        self.worktree_repo = LineEdit::new(repo);
+        self.worktree_repo.set_value(repo);
         self
     }
 
@@ -190,7 +189,7 @@ impl MuxLaunchFormState {
     #[must_use]
     pub fn with_worktree(mut self, repo: impl Into<String>) -> Self {
         self.spec.set_worktree_enabled(true);
-        self.worktree_repo = LineEdit::new(repo);
+        self.worktree_repo.set_value(repo);
         self
     }
 
@@ -213,12 +212,11 @@ impl MuxLaunchFormState {
         Some(format!("{} — from {}", command.join(" "), source.label()))
     }
 
-    /// Offer these directories when completing the cwd field.
+    /// Offer these directories when completing the cwd field and the
+    /// worktree repo.
     #[must_use]
-    pub fn with_cwd_candidates(
-        mut self,
-        candidates: Vec<crate::tui::widgets::path_omnibox::PathCandidate>,
-    ) -> Self {
+    pub fn with_cwd_candidates(mut self, candidates: Vec<Candidate>) -> Self {
+        self.worktree_repo.set_candidates(candidates.clone());
         self.spec.set_cwd_candidates(candidates);
         self
     }
@@ -339,9 +337,7 @@ impl MuxLaunchFormState {
             if branch.is_empty() {
                 return Err("mux launch: worktree branch is required".to_string());
             }
-            let repo = crate::tui::widgets::path_omnibox::expand_home_prefix(
-                self.worktree_repo.value().trim(),
-            );
+            let repo = self.worktree_repo.expanded_value();
             if repo.is_empty() {
                 return Err("mux launch: worktree repo is required".to_string());
             }
@@ -382,18 +378,18 @@ impl MuxLaunchFormState {
                 return Outcome::Consumed;
             }
             Some(FormKey::Tab) => {
-                // Tab completes a path in the cwd field, and moves on
-                // when there is nothing to complete.
-                if self.focus == MuxLaunchField::Cwd {
-                    match self.spec.cwd_handle_key(key) {
-                        PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed => {
-                            self.spec.clear_error();
-                            return Outcome::Consumed;
-                        }
-                        PathOmniboxOutcome::NoCompletion | PathOmniboxOutcome::Continue => {}
-                    }
+                // Tab completes a path in the cwd and repo fields, and
+                // moves on when there is nothing to complete.
+                let completed = match self.focus {
+                    MuxLaunchField::Cwd => self.spec.cwd_handle_key(key).changed,
+                    MuxLaunchField::WorktreeRepo => self.worktree_repo.complete(),
+                    _ => false,
+                };
+                if completed {
+                    self.spec.clear_error();
+                } else {
+                    self.advance_stop(1);
                 }
-                self.advance_stop(1);
                 return Outcome::Consumed;
             }
             Some(FormKey::Submit) => return self.try_commit(),
@@ -445,11 +441,7 @@ impl MuxLaunchFormState {
                 return Outcome::Consumed;
             }
             MuxLaunchField::Cwd => {
-                let outcome = self.spec.cwd_handle_key(key);
-                if matches!(
-                    outcome,
-                    PathOmniboxOutcome::Changed | PathOmniboxOutcome::Completed
-                ) {
+                if self.spec.cwd_handle_key(key).changed {
                     self.spec.clear_error();
                 }
                 return Outcome::Consumed;
@@ -620,7 +612,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
             row(
                 &mut lines,
                 MuxLaunchField::WorktreeRepo,
-                input_row(
+                path_row(
                     WORKTREE_REPO_LABEL,
                     &state.worktree_repo,
                     focus == MuxLaunchField::WorktreeRepo,

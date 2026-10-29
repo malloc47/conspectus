@@ -2,6 +2,7 @@ use ratatui::style::Color;
 
 use super::*;
 use crate::tui::theme::OverrideValue::Text as OverrideText;
+use tuikit::glyphs::marks;
 use tuikit::text_edit::LineEdit;
 
 fn text(line: &Line<'_>) -> String {
@@ -87,17 +88,21 @@ fn the_label_column_widens_for_long_labels() {
 }
 
 #[test]
-fn completion_remainder_names_what_tab_would_add() {
+fn a_path_row_shows_the_tab_hint_only_while_focused_with_a_completion() {
+    let theme = theme();
+    let here = tempfile::tempdir().expect("temp dir");
+    std::fs::create_dir(here.path().join("alpha")).expect("mkdir");
+    let typed = here.path().join("al").display().to_string();
+    let field = crate::tui::paths::directory_field(typed, Vec::new());
+    let cols = Cols::new(80);
+    let focused = text(&path_row("cwd", &field, true, cols, &theme));
+    assert!(focused.contains(" Tab: pha"), "{focused:?}");
+    let idle = text(&path_row("cwd", &field, false, cols, &theme));
+    assert!(!idle.contains("Tab:"), "{idle:?}");
     assert_eq!(
-        completion_remainder("/tmp/al", "/tmp/alpha"),
-        Some("pha".into())
-    );
-    assert_eq!(completion_remainder("", "/tmp"), Some("/tmp".into()));
-    assert_eq!(completion_remainder("/tmp/alpha", "/tmp/alpha"), None);
-    assert_eq!(
-        completion_remainder("~/sr", "/home/me/src"),
-        Some("c".into()),
-        "falls back to the basename"
+        tuikit::text::width(&focused),
+        tuikit::text::width(&idle),
+        "the row keeps its width with or without the hint"
     );
 }
 
@@ -293,20 +298,23 @@ fn chips_notes_footers_and_warnings_follow_the_theme() {
 #[test]
 fn path_marks_follow_the_theme() {
     let theme = custom();
-    let empty = PathOmniboxState::new("");
+    let mark_style = |value: String| {
+        let field = crate::tui::paths::directory_field(value, Vec::new());
+        let mark = field.validity().mark();
+        path_cells(&field, 30, false, &theme)
+            .into_iter()
+            .find(|span| span.content == mark)
+            .expect("the mark is drawn")
+            .style
+    };
+    assert_eq!(mark_style(String::new()), Style::default().fg(Color::Blue));
     assert_eq!(
-        path_mark(&empty, &theme)[1].style,
-        Style::default().fg(Color::Blue)
-    );
-    let missing = PathOmniboxState::new("/no/such/place/for/this/test");
-    assert_eq!(
-        path_mark(&missing, &theme)[1].style,
+        mark_style("/no/such/place/for/this/test".to_string()),
         Style::default().fg(Color::LightRed)
     );
     let here = tempfile::tempdir().expect("temp dir");
-    let exists = PathOmniboxState::new(here.path().display().to_string());
     assert_eq!(
-        path_mark(&exists, &theme)[1].style,
+        mark_style(here.path().display().to_string()),
         Style::default().fg(Color::LightCyan)
     );
 }

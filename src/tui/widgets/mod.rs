@@ -12,7 +12,6 @@ pub mod mux_launch;
 pub mod mux_menu;
 pub mod new_mux;
 pub mod pane_viewer;
-pub mod path_omnibox;
 pub mod picker;
 pub mod pin_edit;
 pub mod row_menu;

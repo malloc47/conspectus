@@ -2,15 +2,17 @@
 //! the new mux form, and the pin edit form.
 //!
 //! Every form draws the same kinds of rows: a text value with a cursor
-//! and scroll indicators, a path field with a validity mark and a Tab
-//! completion hint, the harness choices as a row of chips, a row of
+//! and scroll indicators, a path field (the framework's `PathField`, with
+//! its validity mark and its Tab completion hint), the harness choices as
+//! a row of chips, a row of
 //! launch option checkboxes, and one-of-N choice rows. Sharing them keeps
 //! the forms looking and behaving alike.
 //!
 //! Every row takes the theme: a field's value is drawn in the `field`
 //! token, a focused field's in `field_active` with the cursor cell in
 //! `field_cursor`, scroll markers and hints in `accent`, notes and
-//! footers `muted`, and path marks in `success`, `warning`, and `inert`.
+//! footers `muted`, and path marks in `success`, `warning`, and `inert`
+//! (the framework's path look).
 //! Every row starts with the cursor gutter, and the focused field's row
 //! takes the list cursor's marker and highlight ([`row`]); the fills of
 //! its value keep their look inside the highlight.
@@ -21,15 +23,15 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
-use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
 use tuikit::selection::{self, Cursor};
 use tuikit::text;
 use tuikit::text_edit::{LineEdit, TextField};
 
+use tuikit::path_field::PathField;
+
 use crate::discovery::harness::{HarnessLaunchOption, argv_contains_fragment};
 use crate::tui::Theme;
-use crate::tui::widgets::path_omnibox::{PathOmniboxState, PathValidation};
 
 pub const LABEL_WIDTH: usize = 11;
 
@@ -60,7 +62,6 @@ impl Cols {
 }
 const VALUE_GAP: &str = "  ";
 const TEXT_GUTTER: &str = "  ";
-const PATH_SUFFIX_WIDTH: usize = 32;
 /// What an empty field shows.
 const EMPTY_VALUE: &str = "-";
 
@@ -164,97 +165,39 @@ pub fn input_row(
     value_row(label, edit, active, cols, None, theme)
 }
 
-/// A path field: the value, a mark for whether it exists, and the
-/// remainder Tab would complete.
+/// A path field's row: the label, then the field drawn by the framework's
+/// one path look ([`path_cells`]).
 pub fn path_row(
     label: &str,
-    omnibox: &PathOmniboxState,
+    field: &PathField,
     active: bool,
     cols: Cols,
     theme: &Theme,
 ) -> Line<'static> {
-    value_row(
-        label,
-        omnibox.edit(),
-        active,
-        cols,
-        Some(path_suffix(omnibox, active, theme)),
-        theme,
-    )
+    let prefix = prefix(label, cols.label);
+    let width = cols.inner.saturating_sub(lead_width(&prefix)).max(1);
+    let mut spans = vec![Span::raw(prefix)];
+    spans.extend(path_cells(field, width, active, theme));
+    row(spans, active, theme)
 }
 
-/// The validity mark of a path value: `√` when it exists, `!` when it is
-/// missing, `?` when it is empty.
-fn path_symbol(omnibox: &PathOmniboxState, theme: &Theme) -> (&'static str, Style) {
-    match omnibox.validation() {
-        PathValidation::Empty => ("?", Style::default().fg(theme.inert)),
-        PathValidation::Exists => (marks::OK, Style::default().fg(theme.success)),
-        PathValidation::Missing => ("!", Style::default().fg(theme.warning)),
-    }
-}
-
-fn path_suffix(omnibox: &PathOmniboxState, focused: bool, theme: &Theme) -> Suffix {
-    let (symbol, style) = path_symbol(omnibox, theme);
-    let mut spans = vec![Span::raw(" "), Span::styled(symbol, style)];
-    let used = 1 + text::width(symbol);
-    let remaining = PATH_SUFFIX_WIDTH.saturating_sub(used);
-    if remaining > 1 {
-        if let Some(hint) = completion_hint(omnibox, focused) {
-            let hint = text::truncate_end(&hint, remaining.saturating_sub(1));
-            let used = used + 1 + text::width(&hint);
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(hint, Style::default().fg(theme.accent)));
-            spans.push(Span::raw(
-                " ".repeat(PATH_SUFFIX_WIDTH.saturating_sub(used)),
-            ));
-        } else {
-            spans.push(Span::raw(" ".repeat(remaining)));
-        }
-    }
-    Suffix {
-        width: PATH_SUFFIX_WIDTH,
-        spans,
-    }
-}
-
-/// The validity mark after a path value: two cells, a space and `√`
-/// (exists), `!` (missing) or `?` (empty).
-pub fn path_mark(omnibox: &PathOmniboxState, theme: &Theme) -> Vec<Span<'static>> {
-    let (symbol, style) = path_symbol(omnibox, theme);
-    vec![Span::raw(" "), Span::styled(symbol, style)]
-}
-
-pub fn completion_hint(omnibox: &PathOmniboxState, focused: bool) -> Option<String> {
-    if !focused {
-        return None;
-    }
-    let value = omnibox.value().trim();
-    omnibox
-        .suggestions()
-        .into_iter()
-        .find(|suggestion| suggestion.path.as_str() != value)
-        .and_then(|suggestion| completion_remainder(value, &suggestion.path))
-        .map(|remainder| format!("Tab: {remainder}"))
-}
-
-/// What typing `suggestion` would add to `typed`.
-pub fn completion_remainder(typed: &str, suggestion: &str) -> Option<String> {
-    let typed = typed.trim();
-    if typed.is_empty() {
-        return Some(suggestion.to_string());
-    }
-    suggestion
-        .strip_prefix(typed)
-        .filter(|remainder| !remainder.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            let typed_basename = typed.rsplit('/').next().unwrap_or(typed);
-            let suggestion_basename = suggestion.rsplit('/').next().unwrap_or(suggestion);
-            suggestion_basename
-                .strip_prefix(typed_basename)
-                .filter(|remainder| !remainder.is_empty())
-                .map(str::to_string)
-        })
+/// A path field in exactly `width` cells, in a form's field look: the
+/// value as [`value_cells`] draws it, the validity mark, and while the
+/// field is focused and has a completion, the `Tab:` hint. Every form
+/// draws its path fields with this, so each shows the hint by one rule.
+pub fn path_cells(
+    field: &PathField,
+    width: usize,
+    active: bool,
+    theme: &Theme,
+) -> Vec<Span<'static>> {
+    field
+        .view()
+        .focused(active)
+        .marks(true)
+        .placeholder(EMPTY_VALUE)
+        .style(entry_style(active, theme))
+        .spans(width, theme)
 }
 
 /// The harness field: its value with a chip for every known harness,

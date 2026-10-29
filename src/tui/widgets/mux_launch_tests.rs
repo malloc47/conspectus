@@ -356,9 +356,8 @@ fn candidates_complete_directories_the_filesystem_does_not_list() {
         vec!["claude-code".to_string()],
         Vec::new(),
     )
-    .with_cwd_candidates(vec![crate::tui::widgets::path_omnibox::PathCandidate::new(
+    .with_cwd_candidates(vec![tuikit::path_field::Candidate::new(
         "/srv/work/known-repo",
-        "repo",
         300,
     )]);
     state.handle_key(press(KeyCode::Down));
@@ -419,7 +418,7 @@ fn a_missing_cwd_is_flagged_in_the_form() {
         vec!["claude-code".to_string()],
         Vec::new(),
     );
-    assert!(rendered(&state).contains('!'));
+    assert!(rendered(&state).contains(tuikit::glyphs::marks::WARNING));
 }
 
 fn name_row(frame: &str) -> String {

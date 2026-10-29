@@ -124,7 +124,7 @@ fn tab_completes_a_directory_in_the_cwd_field() {
 #[test]
 fn candidates_offer_known_directories() {
     let mut state = NewMuxFormState::new("dev", "/srv/wor").with_cwd_candidates(vec![
-        crate::tui::widgets::path_omnibox::PathCandidate::new("/srv/work/known", "repo", 300),
+        tuikit::path_field::Candidate::new("/srv/work/known", 300),
     ]);
     state.handle_key(press(KeyCode::Down));
     state.handle_key(press(KeyCode::Tab));

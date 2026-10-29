@@ -51,7 +51,6 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("NEW_MUX_KEYS", problems(NEW_MUX_KEYS)),
         ("MUX_LAUNCH_KEYS", problems(MUX_LAUNCH_KEYS)),
         ("PIN_EDIT_KEYS", problems(PIN_EDIT_KEYS)),
-        ("OMNIBOX_KEYS", problems(OMNIBOX_KEYS)),
         ("PANE_VIEWER_KEYS", problems(PANE_VIEWER_KEYS)),
         ("VIEWER_KEYS", problems(VIEWER_KEYS)),
         ("VIEWER_FIND_KEYS", problems(VIEWER_FIND_KEYS)),
@@ -63,12 +62,7 @@ fn registry() -> Vec<(&'static str, Problems)> {
 /// rows are included after `FORM_KEYS`, the path field's one row is
 /// consulted by a form after the form's own table, and the line editor's
 /// keys are every text field's, consulted after its overlay's table.
-const FRAGMENTS: &[&str] = &[
-    "FORM_OPTION_KEYS",
-    "LINE_EDIT_KEYS",
-    "OMNIBOX_KEYS",
-    "PATH_FIELD_KEYS",
-];
+const FRAGMENTS: &[&str] = &["FORM_OPTION_KEYS", "LINE_EDIT_KEYS", "PATH_FIELD_KEYS"];
 
 #[test]
 fn every_advertised_key_resolves_to_what_its_footer_says() {

@@ -22,7 +22,7 @@ use crate::discovery::harness::{
     launch_options_for, strip_known_launch_option_fragments,
 };
 use crate::tui::widgets::form::display_argv;
-use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
+use tuikit::path_field::{Candidate, PathField};
 use tuikit::text_edit::{Edit, LineEdit};
 
 /// Owned state for the launch-spec form's shared fields.
@@ -31,7 +31,7 @@ use tuikit::text_edit::{Edit, LineEdit};
 #[derive(Debug, Clone)]
 pub struct LaunchSpecFormState {
     harness: LineEdit,
-    cwd: PathOmniboxState,
+    cwd: PathField,
     mux_name: LineEdit,
     mux_socket: LineEdit,
     launch_argv: LineEdit,
@@ -63,7 +63,7 @@ impl LaunchSpecFormState {
     pub fn new(init: LaunchSpecInit) -> Self {
         Self {
             harness: LineEdit::new(init.harness_value),
-            cwd: PathOmniboxState::new(init.cwd_value),
+            cwd: crate::tui::paths::directory_field(init.cwd_value, Vec::new()),
             mux_name: LineEdit::new(init.mux_name_value),
             mux_socket: LineEdit::default(),
             launch_argv: LineEdit::default(),
@@ -80,7 +80,7 @@ impl LaunchSpecFormState {
     pub fn harness(&self) -> &LineEdit {
         &self.harness
     }
-    pub fn cwd(&self) -> &PathOmniboxState {
+    pub fn cwd(&self) -> &PathField {
         &self.cwd
     }
     pub fn mux_name(&self) -> &LineEdit {
@@ -113,7 +113,7 @@ impl LaunchSpecFormState {
     pub fn harness_mut(&mut self) -> &mut LineEdit {
         &mut self.harness
     }
-    pub fn cwd_mut(&mut self) -> &mut PathOmniboxState {
+    pub fn cwd_mut(&mut self) -> &mut PathField {
         &mut self.cwd
     }
     pub fn mux_name_mut(&mut self) -> &mut LineEdit {
@@ -160,8 +160,8 @@ impl LaunchSpecFormState {
         self.worktree_enabled = enabled;
     }
 
-    pub fn set_cwd_candidates(&mut self, candidates: Vec<PathCandidate>) {
-        self.cwd.set_known_candidates(candidates);
+    pub fn set_cwd_candidates(&mut self, candidates: Vec<Candidate>) {
+        self.cwd.set_candidates(candidates);
     }
 
     pub fn set_known_harness_keys(&mut self, keys: Vec<String>) {
@@ -322,11 +322,11 @@ impl LaunchSpecFormState {
             .map(String::as_str)
     }
 
-    /// Route a key event into the cwd omnibox and return the
-    /// omnibox's outcome. Wrappers use this from their per-field
+    /// Route a key event into the cwd field and say what it did (`Tab`
+    /// completes the path). Wrappers use this from their per-field
     /// dispatch when the cursor is on the cwd row.
-    pub fn cwd_handle_key(&mut self, event: KeyEvent) -> PathOmniboxOutcome {
-        self.cwd.handle_key(event)
+    pub fn cwd_handle_key(&mut self, event: KeyEvent) -> Edit {
+        self.cwd.handle(event)
     }
 
     /// Route a key event into whichever text field the caller names,

@@ -7,7 +7,7 @@ expression: "frame_at(&state, 100, 20)"
           │  mux socket     -                                                            │
           │  harness        claude-code      [claude-code] [codex] [opencode]            │
           │  options        [ ] skip permissions                                         │
-          │  cwd            /tmp                          √                              │
+          │  cwd            /tmp                                                        √│
           │  launch argv    -                                                            │
           │  └ command      claude                                                       │
           │  worktree       [ ] no worktree                                              │

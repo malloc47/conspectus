@@ -1541,58 +1541,59 @@ pub(crate) fn derive_mux_form_cwd(app: &App) -> Option<String> {
     derive_new_mux_cwd(app)
 }
 
-/// Directories the cwd fields offer to complete: the selected row's,
-/// then those of live agent sessions, muxes, processes, checkouts, repos,
-/// and workspaces in the graph, and the cwds of pins.
+/// Directories the cwd fields offer to complete, highest priority first:
+/// the selected row's, the cwds of pins, then those of live agent
+/// sessions, muxes (the session's, then its active pane's), processes,
+/// checkouts, repos, and workspaces in the graph.
 pub(crate) fn known_cwd_candidates(
     app: &App,
     selected: Option<&str>,
-) -> Vec<crate::tui::widgets::path_omnibox::PathCandidate> {
+) -> Vec<tuikit::path_field::Candidate> {
     use crate::model::GraphNode;
-    use crate::tui::widgets::path_omnibox::PathCandidate;
+    use tuikit::path_field::Candidate;
     let mut candidates = Vec::new();
-    let mut push = |path: &str, source: &str, rank: i32| {
+    let mut push = |path: &str, priority: i32| {
         let path = path.trim();
         if !path.is_empty() {
-            candidates.push(PathCandidate::new(path, source, rank));
+            candidates.push(Candidate::new(path, priority));
         }
     };
     if let Some(selected) = selected {
-        push(selected, "selected", 1_000);
+        push(selected, 1_000);
     }
     if let Some(handle) = app.snapshot_handle() {
         for node in handle.snapshot().live_nodes() {
             match node {
                 GraphNode::AgentSession(node) => {
                     if let Some(cwd) = node.cwd.as_deref() {
-                        push(cwd, "agent", 450);
+                        push(cwd, 450);
                     }
                 }
                 GraphNode::MuxSession(node) => {
                     if let Some(cwd) = node.cwd.as_deref() {
-                        push(cwd, "mux", 440);
+                        push(cwd, 440);
                     }
                     if let Some(cwd) = node.active_pane_current_path.as_deref() {
-                        push(cwd, "mux", 430);
+                        push(cwd, 430);
                     }
                 }
                 GraphNode::RuntimeProcess(node) => {
                     if let Some(cwd) = node.cwd.as_deref() {
-                        push(cwd, "process", 400);
+                        push(cwd, 400);
                     }
                 }
-                GraphNode::Checkout(node) => push(&node.root, "checkout", 350),
+                GraphNode::Checkout(node) => push(&node.root, 350),
                 GraphNode::Repo(node) => {
                     let root = node
                         .common_dir
                         .strip_suffix("/.git")
                         .unwrap_or(&node.common_dir);
-                    push(root, "repo", 320);
+                    push(root, 320);
                 }
-                GraphNode::Workspace(node) => push(&node.root, "workspace", 300),
+                GraphNode::Workspace(node) => push(&node.root, 300),
                 GraphNode::Pin(node) => {
                     if let Some(cwd) = node.text("cwd") {
-                        push(cwd, "pin", 500);
+                        push(cwd, 500);
                     }
                 }
                 GraphNode::Branch(_) | GraphNode::Fork(_) | GraphNode::ForgePr(_) => {}

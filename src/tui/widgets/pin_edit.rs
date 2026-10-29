@@ -31,8 +31,8 @@ use crate::tui::widgets::form::{
     self, Cols, SplitBody, display_argv, footer_lines, note_row, options_row,
 };
 use crate::tui::widgets::launch_spec_form::parse_launch_argv;
-use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
 use tuikit::overlay::Outcome;
+use tuikit::path_field::{Candidate, PathField};
 use tuikit::text_edit::LineEdit;
 
 /// What the form saves: a rename, overrides to set, overrides to drop.
@@ -61,14 +61,14 @@ pub struct PinEditInit {
     pub inherited: Vec<RecipeField>,
     pub known_pin_names: Vec<String>,
     pub known_harness_keys: Vec<String>,
-    pub cwd_candidates: Vec<PathCandidate>,
+    pub cwd_candidates: Vec<Candidate>,
     pub defaults: Option<crate::launch_default::LaunchDefaults>,
 }
 
 #[derive(Debug, Clone)]
 enum Control {
     Text(LineEdit),
-    Path(PathOmniboxState),
+    Path(PathField),
     Harness(LineEdit),
 }
 
@@ -92,7 +92,9 @@ impl Control {
     fn replace(&mut self, value: String) {
         match self {
             Self::Text(input) | Self::Harness(input) => *input = LineEdit::new(value),
-            Self::Path(path) => path.set_value(value),
+            Self::Path(path) => {
+                path.set_value(value);
+            }
         }
     }
 }
@@ -269,11 +271,10 @@ impl PinEditFormState {
             let control = match (init.kind, field) {
                 (PinKind::Mux, "cwd")
                 | (PinKind::Checkout, "location")
-                | (PinKind::Repo, "path") => {
-                    let mut path = PathOmniboxState::new(effective.clone());
-                    path.set_known_candidates(init.cwd_candidates.clone());
-                    Control::Path(path)
-                }
+                | (PinKind::Repo, "path") => Control::Path(crate::tui::paths::directory_field(
+                    effective.clone(),
+                    init.cwd_candidates.clone(),
+                )),
                 (PinKind::Mux, "harness") => Control::Harness(LineEdit::new(effective.clone())),
                 _ => Control::Text(LineEdit::new(effective.clone())),
             };
@@ -549,7 +550,7 @@ impl PinEditFormState {
     fn typed(&mut self, idx: usize, key: KeyEvent) -> Outcome<Msg> {
         let changed = match &mut self.rows[idx].control {
             Control::Text(input) | Control::Harness(input) => input.handle(key).changed,
-            Control::Path(path) => path.handle_key(key) == PathOmniboxOutcome::Changed,
+            Control::Path(path) => path.handle(key).changed,
         };
         if changed {
             self.rows[idx].cleared = false;
@@ -582,10 +583,7 @@ impl PinEditFormState {
             Some(FormKey::Tab) => {
                 if let Stop::Row(idx) = stop
                     && let Control::Path(path) = &mut self.rows[idx].control
-                    && matches!(
-                        path.handle_key(key),
-                        PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed
-                    )
+                    && path.complete()
                 {
                     self.rows[idx].cleared = false;
                     return Outcome::Consumed;
@@ -806,9 +804,7 @@ fn render_row(
             }
         }
         Control::Path(path) => {
-            let width = grid.value.saturating_sub(2);
-            spans.extend(form::value_cells(path.edit(), width, active, theme));
-            spans.extend(form::path_mark(path, theme));
+            spans.extend(form::path_cells(path, grid.value, active, theme));
         }
         Control::Text(input) => {
             spans.extend(form::value_cells(input, grid.value, active, theme));
