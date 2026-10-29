@@ -39,12 +39,13 @@ the style-spec grammar), the `glyphs` module (shared marks, the vetted-glyph
 table, and the source scanner), the `text` module (measuring, cutting,
 wrapping, snippets, and match painting in terminal cells), the
 `text_edit` module (the line editor every text field edits with and the
-text field that draws it), the `scroll`
+text field that draws it), the `text_prompt` module (the one-line prompt
+that commits, refuses with a reason, or stays), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
 scrollbar gutter, and wrapped-row counts), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age
 text, recency tint, and the age cell), the `frame` module (the modal
-frame and its named sizes), the `selection` module (the list cursor's
+frame, its footer on the bottom border, and its named sizes), the `selection` module (the list cursor's
 marker and highlight, the ghost and pending looks, and the wrap-or-clamp
 rule), the `keys` module (key tables, footers, key labels, roles, and the
 standard tables for menus, dialogs, pagers, prompts, checklists, and

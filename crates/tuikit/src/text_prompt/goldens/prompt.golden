@@ -1,0 +1,28 @@
+frame 34x11
+text  |                                  |
+style |                                  |
+text  |  ┌ Name ──────────────────────┐  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |  │draft                       │  |
+style |  a     b                      a  |
+text  |  └ Enter confirm · Esc cancel ┘  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |                                  |
+style |                                  |
+text  |                                  |
+style |                                  |
+text  |  ┌ Name ──────────────────────┐  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |  │name                        │  |
+style |  abccc                        a  |
+text  |  │a name is required          │  |
+style |  adddddddddddddddddd          a  |
+text  |  └ Enter confirm · Esc cancel ┘  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |                                  |
+style |                                  |
+legend
+  a  fg Cyan
+  b  fg Black, bg White
+  c  fg DarkGray
+  d  fg Red

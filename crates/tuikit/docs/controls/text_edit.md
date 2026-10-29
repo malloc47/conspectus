@@ -151,7 +151,8 @@ types itself (`EditKey::Insert`).
 chord are not consumed: `handle` returns `Edit::IGNORED` and the host acts
 on them. The prompt contract (`Enter` confirm, `Esc` cancel, `Ctrl-C`
 abort, `Tab` swallowed) is the standard `TEXT_INPUT_KEYS` table (see
-[keys.md](keys.md)).
+[keys.md](keys.md)), which `TextPrompt` resolves before the editor's (see
+[text_prompt.md](text_prompt.md)).
 
 ## Theme tokens
 
@@ -200,4 +201,5 @@ focus cue is the pane frame's; a field shows focus with its caret), 11
   option of this one.
 - **Completion and validity.** A path field's completion, candidate list,
   and validity mark build on `LineEdit` and `TextField` as `PathField`; a
-  prompt's title, footer, and error line as `TextPrompt`.
+  prompt's title, footer, and error line are `TextPrompt`'s (see
+  [text_prompt.md](text_prompt.md)).
