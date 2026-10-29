@@ -426,6 +426,12 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   that shrinks no longer leaves blank rows below it, the `.` row menu
   scrolls to its cursor and keeps its key hints, and the row, mux, and
   worktree menus no longer crash a very short terminal.
+- **The cursor stays on a row listed twice.** A tree can list one entity
+  under two parents (a session under two PR checkouts). On the second
+  copy, a refresh or a change of filter or sort moved the
+  cursor up to the first copy, and the tree scrolled to show the first
+  copy instead of the one the cursor was on. Both now stay with the
+  cursor's copy.
 - **The right pane stays on its content too.** Scrolling the Preview
   (`J`/`K`) past its end shows its last lines instead of blank rows, and
   the first key back moves it at once; the explorer fills its zone after

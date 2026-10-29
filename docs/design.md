@@ -1322,6 +1322,21 @@ offset counts from the top, a transcript's newest turns, or the search
 match it opened on, rather than in an embedded pager, since it draws from
 the App every frame and counts from its end or a match.
 
+The tree is a framework control (ADR 0182), first with lines `conspectus`
+lays out. `tuikit::tree::TreeState` keeps the left pane's selection by row
+id (with the position it showed at, so the cursor stays on the copy it was
+on when a row is listed twice), the expanded rows, and the window the last
+frame drew; each view's slot saves it whole, page keys move by its window,
+and one rebuild routine keeps the selection when the rows are rebuilt (the
+same id, else the same position, else the launch context's row on the
+first load, else the first row). `TreeView` draws the pane (the tab strip
+title, the Search header, the Pinned banner, the placeholder, the
+scrollbar) and each row's pending, ghost, and selection looks over the
+cells `conspectus` lays out; the App works out each row's ghost, pending,
+and pin-marker state before the frame, so laying a row out looks nothing
+up. `RowKind`, `RowId`, the row builders, and the columns stay in
+`conspectus` until the column schema.
+
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
 argv someone types (the forms, `pin edit --set`) is refused when it ends
