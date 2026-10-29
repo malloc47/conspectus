@@ -18,6 +18,7 @@
 pub mod age;
 pub mod chip;
 pub mod feedback;
+pub mod form;
 pub mod frame;
 pub mod glyphs;
 pub mod help;

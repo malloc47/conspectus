@@ -40,7 +40,10 @@ table, and the source scanner), the `text` module (measuring, cutting,
 wrapping, snippets, and match painting in terminal cells), the
 `text_edit` module (the line editor every text field edits with and the
 text field that draws it), the `text_prompt` module (the one-line prompt
-that commits, refuses with a reason, or stays), the `scroll`
+that commits, refuses with a reason, or stays), the `path_field` module
+(the path field that completes through a source its host supplies), the
+`form` module (the multi-field form that submits from any field and keeps
+its keys in view), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
 scrollbar gutter, and wrapped-row counts), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age

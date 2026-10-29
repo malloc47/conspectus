@@ -1,0 +1,28 @@
+frame 40x10
+text  |                                        |
+style |                                        |
+text  |┌ Make a thing ────────────────────────┐|
+style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+text  |│► name           -                    │|
+style |abbbbbbbbbbbbbbbbbcddddddddddddddddddbba|
+text  |│                                      │|
+style |a                                      a|
+text  |│a name is required                    │|
+style |aeeeeeeeeeeeeeeeeee                    a|
+text  |│↑/↓ move · Tab complete/next          │|
+style |affffffffffffffffffffffffffff          a|
+text  |│S-Tab back · ←/→/Space change         │|
+style |afffffffffffffffffffffffffffff         a|
+text  |│Ctrl-R reset · Enter make · Esc cancel│|
+style |affffffffffffffffffffffffffffffffffffffa|
+text  |└──────────────────────────────────────┘|
+style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+text  |                                        |
+style |                                        |
+legend
+  a  fg Cyan
+  b  bold, reversed
+  c  fg Black, bg White
+  d  fg White, bg DarkGray
+  e  fg Red
+  f  dim
