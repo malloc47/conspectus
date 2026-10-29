@@ -19,6 +19,7 @@ const ALLOWED_EXTERNAL_DEPS: &[&str] = &[
     "syntect",
     "thiserror",
     "tui-markdown",
+    "tuikit",
     "unicode-width",
 ];
 
