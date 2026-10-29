@@ -1548,7 +1548,20 @@ dialog too. A dialog or prompt a menu entry opens sits over the menu:
 typed) closes both. On a short terminal a dialog keeps its keys at the
 bottom and its text scrolls with the arrow keys.
 
-Inside the transcript viewer and the pane viewer, `?` opens a help page
+The transcript viewer and the pane viewer are one reader: they scroll,
+page (`PgDn`/`Space`, `PgUp`, `Ctrl-D`/`Ctrl-U`), jump to the ends
+(`g`/`Home`, `G`/`End`; `G` keeps the view at the end as it changes), find,
+step back with `Esc`, leave with `q`, and show their position as `[ n/m ]`
+alike. Their footer is generated from their keys, after the position, the
+find, a one-key note, and the viewer's toggle chips (`tools·off (t) ·
+think·off (T) · aborted·hide (I)`, and `hidden·hide (H)` for a transcript
+with hidden records): `j/k/PgDn/PgUp scroll · / find · ? help · Esc/q
+close`. A narrow footer drops the scroll keys first, then the find and
+help keys, then the chips from the last, and always keeps `Esc/q close`.
+A toggle shows or hides turns in place: at the end the view stays at the
+end, elsewhere it keeps its row.
+
+Inside either viewer, `?` opens a help page
 drawn like the main help: the same frame and size, section headings, an
 accent-colored key column, descriptions that wrap, a scrollbar, and a
 footer naming the keys that work there (`j/k/PgDn/PgUp scroll · Esc/?
@@ -1628,7 +1641,8 @@ the prompt edits like every text field (see Editing text in fields;
 `Ctrl-U` clears the whole query). `n` and `N` step to the next and previous
 match and wrap at either end, saying so in the footer. The footer shows
 `find "query" i/N` (or `no match`; the header's `find:"query"` chip uses the
-same wording), and each match is highlighted: the current one reversed, the
+same wording), and each match is highlighted: the current one in the
+selection look (`selection_active`, reversed and bold by default), the
 others in the shared match style (bold, underlined). `Esc` clears the find before
 it closes the viewer, one step back at a time; `q` (and `Ctrl-C`) leave the
 viewer at once, from the help page or with a find active, and `Ctrl-C`
@@ -1639,8 +1653,9 @@ showing: messages always, and tool output, thinking, aborted, and hidden
 turns only while their toggles (`t`, `T`, `I`, `H`) show them. When a
 query matches only in turns the toggles hide, the footer says how many
 (`no match · 2 in hidden turns`); turning the toggle on brings them into
-the match count. A match the line wrapping splits across two lines still
-counts but is not highlighted.
+the match count. Hiding the turn the find is on leaves it on no match
+(`find "query" 3 matches`) until `n` or `N` goes to one. A match the line
+wrapping splits across two lines still counts but is not highlighted.
 
 A search result opens the viewer on its matching turn with the query
 active. If that turn is hidden, the viewer shows it (full tool output,

@@ -339,22 +339,29 @@ are sketches.
   `header` names the source and counts the lines; `chips` shows the wrap
   toggle; one content key asks the host to attach (`Request`). The opener
   calls `land(query, line)` and, with no match, `set_note` and `at_row`.
-- **A rich document of entries** (rendered from Markdown, with tables, and
-  kinds of entry a toggle shows or hides). `layout` composes and caches
-  the rows for the width and the toggles (the cache key is the width and
-  the toggle states); `rows` slices the cache; `find` matches entries
-  among the kinds the toggles show, and `find_detail` counts the matches
-  in the hidden ones (`3 in hidden entries`); `match_rows` reads the start
-  of each entry in the cache; `paint` paints after the entry's gutter,
-  every row of the current entry in the current-match look; `chips` are
-  the toggles' `ToggleChip`s, most important first; each toggle key
-  returns `Relayout`, so the find stays on its entry. It opens `at_end`.
-  Opening at a match found elsewhere: the host switches on the toggles
-  that show the entry, calls `land(query, entry)`, and notes what it
-  switched on. Host roles in its header (a source's color) are named
-  styles read from the theme it is given, and `describe` keeps its own
-  words for the ends and the find (`a match in hidden content turns that
-  content on`).
+- **A rich document of entries** (built; rendered from Markdown, with
+  tables, and kinds of entry a toggle shows or hides). `layout` composes
+  and caches the rows for the width and the toggles (the cache key is the
+  width and the toggle states); `rows` slices the cache; `find` matches
+  entries among the kinds the toggles show, and `find_detail` counts the
+  matches in the hidden ones (`3 in hidden entries`); `match_rows` is an
+  entry's rows up to the next entry's (a run of entries folded into one
+  summary row shares it); `paint` paints every row of a matching entry
+  after its gutter through `text::paint_matches`, the current entry's in
+  the current-match look, and never a folded summary row; `chips` are the
+  toggles' `ToggleChip`s, most important first, each naming its key, so
+  the toggles' rows are aliases; each toggle key returns `Relayout`, so
+  the find stays on its entry while it is shown, and a window kept to the
+  end stays there. It opens `at_end`. Opening at a match found elsewhere:
+  the host switches on the toggles that show the entry, calls
+  `refresh` and `land(query, entry)`, and notes what it switched on in
+  the info tone, or that the query is gone in the warning tone. Host
+  roles in its header (a source's color) are named styles read from the
+  theme it is given; `describe` keeps its own words for the ends and the
+  find (`a match in hidden content turns that content on`); `empty` tells
+  a document with no entries from one whose entries the toggles all hide.
+  The content sends nothing, so it is generic over the pager's message,
+  as the help page is.
 - **A long value** (built; a framed reader opened by `o`).
   `Modal(ModalSize::WIDE)` with a table of `PAGER_KEYS`, `o` as another
   close, and `y` bound to `PagerKey::Copy`; `layout` wraps each line of the

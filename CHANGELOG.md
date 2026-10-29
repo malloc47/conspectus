@@ -356,6 +356,22 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `y copy` and `Esc close` at the edge, and with no messages yet the keys
   sit at the bottom of the dialog and the note wraps. The rows, colors,
   and keys are unchanged.
+- **The transcript viewer reads like the pane viewer.** Its keys line
+  names the keys that work in it (`/ find · ? help · Esc/q close` after
+  the toggle chips, with `j/k/PgDn/PgUp scroll` when it fits) and, when
+  narrow, drops the scroll, find, and help keys and then the chips but
+  always keeps `Esc/q close` (at 40 columns it used to lose the close hint
+  at the edge). A toggle (`t`, `T`, `I`, `H`) pressed at the end keeps the
+  view at the end. Hiding the turn a find is on leaves the find on no
+  match until `n` or `N`. The help page lists the find keys before the
+  toggles. What opening at a search result turned on is a note of its own
+  beside the find, and a match that is no longer in the transcript says
+  so as a warning. A transcript whose every turn is hidden says so. Turns,
+  colors, find, and its landing are unchanged; in `[tui.theme]`, user
+  turns now follow `accent` (they followed the codex harness's color) and
+  the cwd `accent` (it followed `cwd_mark`), and compaction summaries take
+  the new key `transcript_compaction` (magenta; they followed
+  `pr_merged`).
 
 ### Fixed
 
