@@ -1,6 +1,6 @@
 //! The standard key tables and the action enums they bind: one table per
-//! standard control, so every menu, dialog, pager, prompt, checklist, and
-//! form takes the same keys.
+//! standard control, so every menu, dialog, pager, prompt, checklist,
+//! palette, and form takes the same keys.
 //!
 //! Each table starts with `Ctrl-C`, bound to its `Abort` action, and a
 //! table where nothing is typed binds `q` to it as well (house rule 4). Lists
@@ -397,6 +397,123 @@ impl KeyAction for ChecklistKey {
             Self::Toggle | Self::SelectAll | Self::SelectNone => KeyRole::Change,
             Self::Confirm => KeyRole::Apply,
             Self::Cancel => KeyRole::Leave,
+        }
+    }
+}
+
+/// What a palette's keys do. Keys no row binds edit the query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PaletteKey {
+    /// Dismiss the palette (`Ctrl-C`).
+    Abort,
+    /// Move the cursor to the previous result.
+    Up,
+    /// Move the cursor to the next result.
+    Down,
+    /// Move the cursor up by the rows the list shows.
+    PageUp,
+    /// Move the cursor down by the rows the list shows.
+    PageDown,
+    /// Pick the result under the cursor.
+    Pick,
+    /// Close the palette without picking.
+    Cancel,
+    /// Switch the palette's scope strip to its next choice. No standard
+    /// table binds it; a palette with scopes binds its own key (`Tab`)
+    /// under its own verb.
+    Scope,
+    /// Open the palette's options pane. No standard table binds it; a
+    /// palette with options binds `Ctrl-O` under its own verb.
+    Options,
+}
+
+/// A palette: `↑/↓ move · Enter pick · Esc close`. `PgUp`/`PgDn` move by
+/// the rows shown (aliases). Characters are the query's, so `q`, `j`, and
+/// `k` type; `Ctrl-C` dismisses. A palette with scopes or options builds
+/// its table on this one with [`include()`](super::include()) and adds
+/// its [`Scope`](PaletteKey::Scope) and [`Options`](PaletteKey::Options)
+/// rows with its own verbs.
+pub const PALETTE_KEYS: &[KeyRow<PaletteKey>] = &[
+    alias(ctrl('c'), PaletteKey::Abort),
+    shown(key(KeyCode::Up), PaletteKey::Up, marks::ARROW_UP, "move"),
+    shown(
+        key(KeyCode::Down),
+        PaletteKey::Down,
+        marks::ARROW_DOWN,
+        "move",
+    ),
+    alias(ctrl('n'), PaletteKey::Down),
+    alias(ctrl('p'), PaletteKey::Up),
+    alias(key(KeyCode::PageUp), PaletteKey::PageUp),
+    alias(key(KeyCode::PageDown), PaletteKey::PageDown),
+    shown(key(KeyCode::Enter), PaletteKey::Pick, "Enter", "pick"),
+    shown(key(KeyCode::Esc), PaletteKey::Cancel, "Esc", "close"),
+];
+
+impl KeyAction for PaletteKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Abort => KeyRole::Abort,
+            Self::Up | Self::Down => KeyRole::Move,
+            Self::PageUp | Self::PageDown => KeyRole::Page,
+            Self::Pick => KeyRole::Apply,
+            Self::Cancel => KeyRole::Leave,
+            Self::Scope | Self::Options => KeyRole::Other,
+        }
+    }
+}
+
+/// What the keys of a palette's options pane do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PaletteOptionKey {
+    /// Dismiss the whole palette (`Ctrl-C`, `q`).
+    Abort,
+    /// Move the cursor to the previous option.
+    Up,
+    /// Move the cursor to the next option.
+    Down,
+    /// Turn the option under the cursor on or off.
+    Toggle,
+    /// Close the pane and go back to the results.
+    Back,
+}
+
+/// A palette's options pane: `↑/↓ move · Space toggle · Esc back`.
+/// Nothing is typed in the pane, so `k`/`j` move and `q` dismisses the
+/// palette; `Enter` toggles as `Space` does, and `Ctrl-O`, the key that
+/// opens the pane, closes it again.
+pub const PALETTE_OPTION_KEYS: &[KeyRow<PaletteOptionKey>] = &[
+    alias(ctrl('c'), PaletteOptionKey::Abort),
+    shown(
+        key(KeyCode::Up),
+        PaletteOptionKey::Up,
+        marks::ARROW_UP,
+        "move",
+    ),
+    shown(
+        key(KeyCode::Down),
+        PaletteOptionKey::Down,
+        marks::ARROW_DOWN,
+        "move",
+    ),
+    alias(ctrl('n'), PaletteOptionKey::Down),
+    alias(ctrl('p'), PaletteOptionKey::Up),
+    alias(ch('k'), PaletteOptionKey::Up),
+    alias(ch('j'), PaletteOptionKey::Down),
+    shown(ch(' '), PaletteOptionKey::Toggle, "Space", "toggle"),
+    alias(key(KeyCode::Enter), PaletteOptionKey::Toggle),
+    shown(key(KeyCode::Esc), PaletteOptionKey::Back, "Esc", "back"),
+    alias(ctrl('o'), PaletteOptionKey::Back),
+    alias(ch('q'), PaletteOptionKey::Abort),
+];
+
+impl KeyAction for PaletteOptionKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Abort => KeyRole::Abort,
+            Self::Up | Self::Down => KeyRole::Move,
+            Self::Toggle => KeyRole::Change,
+            Self::Back => KeyRole::Leave,
         }
     }
 }

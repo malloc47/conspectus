@@ -49,7 +49,10 @@ entries that open a step, and a footer that stays in view while the
 entries scroll), the `dialog` module (the dialog that confirms, offers a
 choice of named verbs, or tells, on one key table), the `checklist`
 module (the checklist that checks one item, all, or none, counts what is
-checked, and hands the checked indices to its host), the `scroll`
+checked, and hands the checked indices to its host), the `palette`
+module (the palette: a query with its caret over results its host ranks
+or sends, with scope strips, a status row, an options pane, a debounce
+for a slow provider, and a footer that stays in view), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
 scrollbar gutter, and wrapped-row counts), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age
@@ -57,8 +60,8 @@ text, recency tint, and the age cell), the `frame` module (the modal
 frame, its footer on the bottom border, and its named sizes), the `selection` module (the list cursor's
 marker and highlight, the ghost and pending looks, and the wrap-or-clamp
 rule), the `keys` module (key tables, footers, key labels, roles, and the
-standard tables for menus, dialogs, pagers, prompts, checklists, and
-forms), the `overlay` module (the overlay contract, its outcomes, and the
+standard tables for menus, dialogs, pagers, prompts, checklists,
+palettes, and forms), the `overlay` module (the overlay contract, its outcomes, and the
 host-owned modal stack that routes keys to its top entry, opens a
 follow-up question as a step of the overlay that asks it, and draws every
 entry), the `help` and `feedback` modules, the `testkit` module behind its

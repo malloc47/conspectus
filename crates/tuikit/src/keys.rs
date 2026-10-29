@@ -36,7 +36,8 @@
 //! - **Standard tables** for the standard controls, with the action enums
 //!   they bind: [`MENU_KEYS`], [`DIALOG_KEYS`] for every dialog (a
 //!   choice's verbs are the dialog's own keys), [`PAGER_KEYS`],
-//!   [`TEXT_INPUT_KEYS`], [`CHECKLIST_KEYS`],
+//!   [`TEXT_INPUT_KEYS`], [`CHECKLIST_KEYS`], [`PALETTE_KEYS`] with
+//!   [`PALETTE_OPTION_KEYS`] for a palette's options pane,
 //!   [`FORM_KEYS`] with [`FORM_OPTION_KEYS`], [`LINE_EDIT_KEYS`], the
 //!   editing keys every text field shares, and [`PATH_FIELD_KEYS`], a path
 //!   field's completion key.
@@ -88,8 +89,9 @@ pub use matcher::{KeyMatcher, alt, alt_key, ch, ctrl, ctrl_key, key, key_label};
 pub use role::{Convention, EnterMeans, KeyAction, KeyRole, SpaceMeans, ctrl_c_first};
 pub use standard::{
     CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, EditKey, FORM_KEYS, FORM_OPTION_KEYS,
-    FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PATH_FIELD_KEYS, PagerKey, PathKey,
-    TEXT_INPUT_KEYS, TextInputKey,
+    FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PALETTE_KEYS, PALETTE_OPTION_KEYS,
+    PATH_FIELD_KEYS, PagerKey, PaletteKey, PaletteOptionKey, PathKey, TEXT_INPUT_KEYS,
+    TextInputKey,
 };
 pub use table::{
     Hint, KeyRow, Rows, alias, include, loose_characters, mislabeled, resolve, rows, shown,

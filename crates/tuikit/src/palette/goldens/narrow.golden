@@ -1,0 +1,28 @@
+frame 40x10
+text  |┌ Pick one  [ Here ] Everywhere  [ Coar┐|
+style |aaaaaaaaaaaabbbbbbbbaaaaaaaaaaaaabbbbbba|
+text  |│/                                     │|
+style |aac                                    a|
+text  |│3 found                               │|
+style |addddddd                               a|
+text  |│  alpha  · running                    │|
+style |a       ddddddddddd                    a|
+text  |│  beta  · gone · stopped              │|
+style |a      dddddddddddddddddd              a|
+text  |│► alphabet  · running                 │|
+style |aeeeeeeeeeefffffffffff                 a|
+text  |│↑/↓ move · Enter open · Esc close     │|
+style |addddddddddddddddddddddddddddddddd     a|
+text  |│Tab look here/everywhere              │|
+style |adddddddddddddddddddddddd              a|
+text  |│Ctrl-O set options · Ctrl-S keep      │|
+style |adddddddddddddddddddddddddddddddd      a|
+text  |└──────────────────────────────────────┘|
+style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+legend
+  a  fg Cyan
+  b  fg Cyan, bold, reversed
+  c  fg Black, bg White
+  d  dim
+  e  bold, reversed
+  f  bold, dim, reversed

@@ -1,8 +1,9 @@
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use tuikit::keys::{
     CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, FORM_KEYS, FORM_OPTION_KEYS,
-    HINT_SEPARATOR, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PATH_FIELD_KEYS,
-    TEXT_INPUT_KEYS, ctrl_c_first, footer, loose_characters, mislabeled, resolve, unresolved,
+    HINT_SEPARATOR, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PALETTE_KEYS,
+    PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, TEXT_INPUT_KEYS, ctrl_c_first, footer, loose_characters,
+    mislabeled, resolve, unresolved,
 };
 
 use super::*;
@@ -35,6 +36,8 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("PAGER_KEYS", problems(PAGER_KEYS)),
         ("TEXT_INPUT_KEYS", problems(TEXT_INPUT_KEYS)),
         ("CHECKLIST_KEYS", problems(CHECKLIST_KEYS)),
+        ("PALETTE_KEYS", problems(PALETTE_KEYS)),
+        ("PALETTE_OPTION_KEYS", problems(PALETTE_OPTION_KEYS)),
         ("FORM_KEYS", problems(FORM_KEYS)),
         ("FORM_OPTION_KEYS", problems(FORM_OPTION_KEYS)),
         ("LINE_EDIT_KEYS", problems(LINE_EDIT_KEYS)),

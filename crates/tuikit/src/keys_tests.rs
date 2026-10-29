@@ -473,6 +473,18 @@ fn the_standard_tables_keep_the_rules() {
         Convention::new("checklist", Submits, Toggles, ""),
     );
     check("form", FORM, Convention::new("form", Submits, Toggles, ""));
+    check(
+        "palette",
+        PALETTE_KEYS,
+        Convention::new("palette", Activates, Types, ""),
+    );
+    // The options pane is a level of a palette, where `Enter` flips the
+    // option as `Space` does: only the table checks apply.
+    let options = PALETTE_OPTION_KEYS;
+    assert!(mislabeled(options).is_empty(), "{:?}", mislabeled(options));
+    assert!(unresolved(options).is_empty(), "{:?}", unresolved(options));
+    assert!(loose_characters(options).is_empty());
+    assert!(ctrl_c_first(options));
 }
 
 #[test]
@@ -487,6 +499,12 @@ fn q_dismisses_where_nothing_is_typed() {
     assert_eq!(resolve(TEXT_INPUT_KEYS, q), None);
     assert_eq!(resolve(FORM_KEYS, q), None);
     assert_eq!(resolve(FORM_OPTION_KEYS, q), None);
+    // A palette's query types `q`; its options pane types nothing.
+    assert_eq!(resolve(PALETTE_KEYS, q), None);
+    assert_eq!(
+        resolve(PALETTE_OPTION_KEYS, q),
+        Some(PaletteOptionKey::Abort)
+    );
     // A chord of q is not q.
     assert_eq!(
         resolve(MENU_KEYS, chord(KeyModifiers::CONTROL, KeyCode::Char('q'))),
@@ -530,6 +548,14 @@ fn the_standard_footers_read_in_the_one_grammar() {
         ["↑/↓ move", "Tab complete/next", "S-Tab back"].join(sep)
     );
     assert_eq!(footer(FORM_OPTION_KEYS), "←/→/Space change");
+    assert_eq!(
+        footer(PALETTE_KEYS),
+        ["↑/↓ move", "Enter pick", "Esc close"].join(sep)
+    );
+    assert_eq!(
+        footer(PALETTE_OPTION_KEYS),
+        ["↑/↓ move", "Space toggle", "Esc back"].join(sep)
+    );
     for text in [
         footer(MENU_KEYS),
         footer(DIALOG_KEYS),
@@ -551,6 +577,16 @@ fn every_list_moves_with_ctrl_p_and_ctrl_n() {
     assert_eq!(resolve(CHECKLIST_KEYS, ctrl_p), Some(ChecklistKey::Up));
     assert_eq!(resolve(FORM_KEYS, ctrl_n), Some(FormKey::Down));
     assert_eq!(resolve(FORM_KEYS, ctrl_p), Some(FormKey::Up));
+    assert_eq!(resolve(PALETTE_KEYS, ctrl_n), Some(PaletteKey::Down));
+    assert_eq!(resolve(PALETTE_KEYS, ctrl_p), Some(PaletteKey::Up));
+    assert_eq!(
+        resolve(PALETTE_OPTION_KEYS, ctrl_n),
+        Some(PaletteOptionKey::Down)
+    );
+    assert_eq!(
+        resolve(PALETTE_OPTION_KEYS, ctrl_p),
+        Some(PaletteOptionKey::Up)
+    );
     // A pager has no cursor, and a dialog no list.
     assert_eq!(resolve(PAGER_KEYS, ctrl_n), None);
     assert_eq!(resolve(DIALOG_KEYS, ctrl_n), None);

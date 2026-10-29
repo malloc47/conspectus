@@ -101,7 +101,7 @@ pub enum Fit {
 /// | [`MENU`](Self::MENU) | up to 64, at least 40 | the body's | a list of choices, a settings list, a dialog |
 /// | [`FORM`](Self::FORM) | up to 80, at least 44 | the body's | labeled fields |
 /// | [`WIDE`](Self::WIDE) | up to 100, at least 40 | all, at least 10 | reading: help, a log, a long value; a long list |
-/// | [`PALETTE`](Self::PALETTE) | 85% of the screen, 60 to 200 | 80%, 12 to 50 | a search palette |
+/// | [`PALETTE`](Self::PALETTE) | 85% of the screen, 60 to 200 | 80%, 12 to 50 | a palette: a query over results |
 ///
 /// ```
 /// use ratatui::layout::Rect;
@@ -149,9 +149,9 @@ impl ModalSize {
         height: Extent::new(u16::MAX, 10, END_MARGIN),
         fit: Fit::Fill,
     };
-    /// A search palette: 85% of the screen's width (60 to 200 columns)
-    /// and 80% of its height (12 to 50 rows), so a large screen shows
-    /// more results.
+    /// A palette, a query over results (a filter picker, a search): 85%
+    /// of the screen's width (60 to 200 columns) and 80% of its height
+    /// (12 to 50 rows), so a large screen shows more results.
     pub const PALETTE: Self = Self {
         width: Extent::new(200, 60, SIDE_MARGIN).share(85),
         height: Extent::new(50, 12, END_MARGIN).share(80),
