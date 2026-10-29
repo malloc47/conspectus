@@ -1010,8 +1010,9 @@ default; the controls overlay switches them to the live pane, and
 load off the UI thread, and are cached in memory; `--no-live-preview`
 hides transcripts and pane captures.
 
-A transcript is bottom-anchored on its newest turns, and `J` / `K`
-scroll back through it. The pane capture (ADR 0025) is bottom-anchored
+A transcript is bottom-anchored on its newest turns, or anchored at the
+search match it opens on, and `J` / `K` scroll from there; a step past
+either end is taken back at once (ADR 0181). The pane capture (ADR 0025) is bottom-anchored
 on its last non-blank output. A wrap mode fits it to the pane's width: `smart` (the default)
 wraps content but truncates rules, borders, and padding; `plain` wraps
 everything; `none` keeps tmux's layout and clips. It's set by
@@ -1309,7 +1310,17 @@ the count of matches the toggles hide, the `t`, `T`, `I`, and `H` toggles
 as the content's keys, and opening at a search result by switching on what
 hides the hit. `src/viewer/` keeps that content, the model, and the
 parsers, imports nothing from the TUI, and draws from the framework's
-theme; the preview moves onto the pager later.
+theme.
+
+Rich text is a framework feature (ADR 0181). `tuikit::richtext`, behind a
+`richtext` cargo feature `conspectus` turns on, owns the rich-text crates:
+it parses a pane capture's ANSI escapes, fits the capture in its wrap mode,
+and renders the viewer's Markdown with its tables and highlighted code;
+`conspectus` keeps the wrap setting's tokens and the turns' gutters and
+chips. The Preview zone scrolls in the framework's `ScrollRegion`, whose
+offset counts from the top, a transcript's newest turns, or the search
+match it opened on, rather than in an embedded pager, since it draws from
+the App every frame and counts from its end or a match.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

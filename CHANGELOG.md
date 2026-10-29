@@ -372,6 +372,13 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   the cwd `accent` (it followed `cwd_mark`), and compaction summaries take
   the new key `transcript_compaction` (magenta; they followed
   `pr_merged`).
+- **The Preview's scroll stops at its ends at once.** Scrolled past the
+  end of a transcript the Preview opened at a search match, or past its
+  top, the first `J` or `K` back moves the Preview; it used to take as
+  many presses as had gone past, and a match on the transcript's last
+  page did not move on the first `K`. When a search appears or goes on
+  the row shown, the Preview starts at the match or at the newest turns
+  rather than at an older offset. What the Preview shows is unchanged.
 
 ### Fixed
 
