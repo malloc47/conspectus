@@ -23,6 +23,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tuikit::chip::{self, SegmentedTitle};
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
+use tuikit::palette::{Column, ColumnLayout, ColumnPlan};
 use tuikit::scroll::ScrollWindow;
 use tuikit::selection::{self, Cursor, Ends};
 use tuikit::text;
@@ -965,7 +966,7 @@ impl SearchBody<'_> {
                 content_row_line(
                     &view.rows[idx],
                     idx == self.state.cursor(),
-                    columns,
+                    &columns,
                     self.theme,
                 )
             })
@@ -1056,10 +1057,11 @@ impl SearchBody<'_> {
     }
 }
 
-/// The widths of a content result's cells.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The widths of a content result's cells, as the hit plan lays them
+/// out.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ContentColumns {
-    /// The row's width.
+    /// The row's width, the cursor gutter included.
     pub inner: usize,
     /// `session` or `pane`; 0 when dropped.
     pub source: usize,
@@ -1070,61 +1072,69 @@ pub(crate) struct ContentColumns {
     pub tag: usize,
     /// The age; 0 when dropped.
     pub age: usize,
+    layout: ColumnLayout,
 }
 
 /// The source word's width: the longer of `session` and `pane`.
 const SOURCE_WIDTH: usize = 7;
+/// The age's width: `999d` at most.
+const AGE_WIDTH: usize = 4;
 /// A snippet narrower than this is not worth showing, so cells give way
 /// to it.
 const MIN_SNIPPET: usize = 20;
+/// The hit count's or the position's width, by the row's width.
+const TAG_STEPS: &[(usize, usize)] = &[(100, 22), (78, 20), (0, 14)];
 /// Characters a one-line snippet drops: Markdown code ticks only add
 /// noise to a preview.
 pub(crate) const MARKDOWN_TICKS: &[char] = &['`'];
+
+/// Where each cell of a content result sits in [`hit_plan`].
+const SOURCE: usize = 0;
+const CHIP: usize = 1;
+const LABEL: usize = 2;
+const TAG: usize = 3;
+const AGE: usize = 4;
 
 impl ContentColumns {
     /// Cells the snippet gets: what is left after the other cells, their
     /// two-cell cursor mark, and the gaps between them.
     fn snippet(&self) -> usize {
-        let cells = [self.source, self.chip, self.age];
-        let gaps: usize = cells.iter().filter(|cell| **cell > 0).count();
-        // mark, label, tag, and one gap after each cell.
-        self.inner
-            .saturating_sub(2 + cells.iter().sum::<usize>() + gaps + self.label + self.tag + 2 + 2)
+        self.layout.fill()
     }
 }
 
-/// Split a content result `inner` cells wide: the chip is `chip` cells
-/// (a harness chip's footprint, from the theme), the label takes a fifth
-/// of the width (12 to 32 cells), and the snippet the rest. When the
-/// snippet would be narrower than [`MIN_SNIPPET`] the chip, then the
-/// source word, then the age give up their cells, then the label
-/// shrinks.
+/// The column plan of a content result, shared out over the row with its
+/// cursor gutter: where it was found, the harness chip or pane command
+/// (`chip` cells, a harness chip's footprint from the theme), the label
+/// (a fifth of the row, 12 to 32 cells), the hit count or position (by
+/// the row's width), the age, and the snippet, which keeps
+/// [`MIN_SNIPPET`] cells: the chip gives way first, then the source word,
+/// then the age, and the label narrows last, to 8 cells.
+pub(crate) fn hit_plan(chip: usize) -> ColumnPlan {
+    ColumnPlan::new([
+        Column::fixed(SOURCE_WIDTH).gap(1).drops(1),
+        Column::fixed(chip).gap(1).drops(0),
+        Column::share(1, 5).within(12, 32).gap(2).shrinks(3, 8),
+        Column::steps(TAG_STEPS).gap(2),
+        Column::fixed(AGE_WIDTH).gap(1).drops(2).end(),
+        Column::fill(MIN_SNIPPET),
+    ])
+    .lead(selection::GUTTER_WIDTH)
+}
+
+/// The content result's cells in a row `inner` cells wide, the cursor
+/// gutter included, with a chip `chip` cells wide: [`hit_plan`] laid out.
 pub(crate) fn content_columns(inner: usize, chip: usize) -> ContentColumns {
-    let mut columns = ContentColumns {
+    let layout = hit_plan(chip).layout(inner);
+    ContentColumns {
         inner,
-        source: SOURCE_WIDTH,
-        chip,
-        label: (inner / 5).clamp(12, 32),
-        tag: match inner {
-            100.. => 22,
-            78.. => 20,
-            _ => 14,
-        },
-        age: 4,
-    };
-    if columns.snippet() < MIN_SNIPPET {
-        columns.chip = 0;
+        source: layout.width(SOURCE),
+        chip: layout.width(CHIP),
+        label: layout.width(LABEL),
+        tag: layout.width(TAG),
+        age: layout.width(AGE),
+        layout,
     }
-    if columns.snippet() < MIN_SNIPPET {
-        columns.source = 0;
-    }
-    if columns.snippet() < MIN_SNIPPET {
-        columns.age = 0;
-    }
-    while columns.snippet() < MIN_SNIPPET && columns.label > 8 {
-        columns.label -= 1;
-    }
-    columns
 }
 
 /// One contents result: cursor mark, where it was found, harness chip or
@@ -1133,31 +1143,31 @@ pub(crate) fn content_columns(inner: usize, chip: usize) -> ContentColumns {
 fn content_row_line(
     row: &ContentRow,
     is_cursor: bool,
-    columns: ContentColumns,
+    columns: &ContentColumns,
     theme: &Theme,
 ) -> Line<'static> {
     use crate::tui::widgets::badge::harness_badge;
 
+    let layout = &columns.layout;
     let dim = Style::default().add_modifier(theme.muted);
     let mut spans: Vec<Span<'static>> = Vec::new();
-    if columns.source > 0 {
-        spans.push(span!(dim; "{} ", text::fit(row.target.source_word(), columns.source)));
+    if let Some(cell) = layout.fit(SOURCE, row.target.source_word()) {
+        spans.push(Span::styled(cell, dim));
     }
-    if columns.chip > 0 {
+    if layout.is_shown(CHIP) {
         match row.target {
             ContentTarget::Session { .. } => {
                 spans.push(harness_badge(&row.chip, theme));
-                spans.push(Span::raw(" "));
+                spans.push(Span::raw(" ".repeat(layout.gap(CHIP))));
             }
             ContentTarget::Pane { .. } => {
-                spans.push(span!(dim; "{} ", text::fit(&row.chip, columns.chip)));
+                if let Some(cell) = layout.fit(CHIP, &row.chip) {
+                    spans.push(Span::styled(cell, dim));
+                }
             }
         }
     }
-    spans.push(Span::raw(format!(
-        "{}  ",
-        text::fit(&row.label, columns.label)
-    )));
+    spans.push(Span::raw(layout.fit(LABEL, &row.label).unwrap_or_default()));
     let tag = match &row.turn {
         Some(turn) => turn.clone(),
         None => format!(
@@ -1166,10 +1176,9 @@ fn content_row_line(
             if row.hits == 1 { "hit" } else { "hits" }
         ),
     };
-    spans.push(span!(dim; "{}  ", text::fit(&tag, columns.tag)));
-    if columns.age > 0 {
-        spans
-            .push(span!(dim; "{} ", text::pad_start(&text::truncate_end(&row.age, columns.age), columns.age)));
+    spans.push(Span::styled(layout.fit(TAG, &tag).unwrap_or_default(), dim));
+    if let Some(cell) = layout.fit(AGE, &row.age) {
+        spans.push(Span::styled(cell, dim));
     }
     let budget = columns.snippet().max(8);
     let snippet = text::fit_snippet(
