@@ -2168,9 +2168,9 @@ mod modal_stack {
     // specialized dispatchers.
     #[test]
     fn open_rename_pushes_modal_rename_onto_stack() {
-        use crate::tui::widgets::input::TextInputState;
+        use crate::tui::widgets::input::TextPromptState;
         let mut app = App::new(RunConfig::defaults());
-        app.open_rename_overlay(TextInputState::new("rename", ""));
+        app.open_rename_overlay(TextPromptState::new("rename", ""));
         assert_eq!(app.modal_stack().len(), 1);
         assert!(matches!(
             app.modal_stack().iter().next(),
@@ -2181,9 +2181,9 @@ mod modal_stack {
 
     #[test]
     fn close_rename_pops_when_top_is_rename() {
-        use crate::tui::widgets::input::TextInputState;
+        use crate::tui::widgets::input::TextPromptState;
         let mut app = App::new(RunConfig::defaults());
-        app.open_rename_overlay(TextInputState::new("rename", ""));
+        app.open_rename_overlay(TextPromptState::new("rename", ""));
         app.close_rename_overlay();
         assert!(app.modal_stack().is_empty());
         assert!(app.rename_overlay().is_none());
@@ -2238,11 +2238,11 @@ mod modal_stack {
         // (ValueModal covered separately since it exercises
         // the Overlay trait path.) Peek accessors report the
         // exact top variant only; pop reveals each in turn.
-        use crate::tui::widgets::input::TextInputState;
+        use crate::tui::widgets::input::TextPromptState;
         let mut app = App::new(RunConfig::defaults());
         app.open_controls_overlay();
         app.open_search_overlay();
-        app.open_rename_overlay(TextInputState::new("rename", ""));
+        app.open_rename_overlay(TextPromptState::new("rename", ""));
         app.open_help_overlay();
         assert_eq!(app.modal_stack().len(), 4);
         assert!(app.help_overlay().is_some());
@@ -2342,13 +2342,19 @@ mod modal_stack {
         app.update(Msg::Viewer(ViewerMsg::FindOpen));
         for c in "needle".chars() {
             assert!(
-                app.update(Msg::ViewerFind(ViewerFindMsg::Insert(c)))
-                    .is_empty()
+                app.update(Msg::ViewerFind(ViewerFindMsg::Edit(
+                    tuikit::text_edit::EditKey::Insert(c)
+                )))
+                .is_empty()
             );
         }
         let state = app.viewer_modal().expect("viewer");
         assert_eq!(
-            state.find.prompt.as_ref().map(|p| p.text.as_str()),
+            state
+                .find
+                .prompt
+                .as_ref()
+                .map(tuikit::text_edit::LineEdit::value),
             Some("needle")
         );
         app.update(Msg::ViewerFind(ViewerFindMsg::Confirm));

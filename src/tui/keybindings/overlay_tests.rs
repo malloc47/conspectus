@@ -377,26 +377,14 @@ fn viewer_keys_resolve_as_the_old_match_did() {
 #[test]
 fn find_prompt_keys_edit_confirm_and_leave() {
     use crate::viewer::find::ViewerFindMsg as F;
+    use tuikit::text_edit::EditKey;
     let none = KeyModifiers::NONE;
     let ctrl_mod = KeyModifiers::CONTROL;
+    // The prompt's own keys.
     let cases = [
         (none, KeyCode::Enter, Some(F::Confirm)),
         (none, KeyCode::Esc, Some(F::Cancel)),
         (ctrl_mod, KeyCode::Char('c'), Some(F::Quit)),
-        (none, KeyCode::Backspace, Some(F::Backspace)),
-        (none, KeyCode::Delete, Some(F::Delete)),
-        (none, KeyCode::Left, Some(F::Left)),
-        (none, KeyCode::Right, Some(F::Right)),
-        (ctrl_mod, KeyCode::Left, Some(F::WordLeft)),
-        (ctrl_mod, KeyCode::Right, Some(F::WordRight)),
-        (KeyModifiers::ALT, KeyCode::Char('b'), Some(F::WordLeft)),
-        (KeyModifiers::ALT, KeyCode::Char('f'), Some(F::WordRight)),
-        (none, KeyCode::Home, Some(F::Home)),
-        (none, KeyCode::End, Some(F::End)),
-        (ctrl_mod, KeyCode::Char('u'), Some(F::ClearLine)),
-        // Everything else types: Space included.
-        (none, KeyCode::Char(' '), None),
-        (none, KeyCode::Char('n'), None),
     ];
     for (modifiers, code, expected) in cases {
         assert_eq!(
@@ -404,5 +392,33 @@ fn find_prompt_keys_edit_confirm_and_leave() {
             expected,
             "{modifiers:?} {code:?}"
         );
+    }
+    // Everything else is the line editor's, the shared editing keys and
+    // typed characters (Space included) alike.
+    let edits = [
+        (none, KeyCode::Backspace, EditKey::DeleteBefore),
+        (none, KeyCode::Delete, EditKey::DeleteAfter),
+        (none, KeyCode::Left, EditKey::Left),
+        (none, KeyCode::Right, EditKey::Right),
+        (ctrl_mod, KeyCode::Left, EditKey::WordLeft),
+        (ctrl_mod, KeyCode::Right, EditKey::WordRight),
+        (KeyModifiers::ALT, KeyCode::Char('b'), EditKey::WordLeft),
+        (KeyModifiers::ALT, KeyCode::Char('f'), EditKey::WordRight),
+        (none, KeyCode::Home, EditKey::Home),
+        (none, KeyCode::End, EditKey::End),
+        (ctrl_mod, KeyCode::Char('u'), EditKey::DeleteLine),
+        (ctrl_mod, KeyCode::Char('w'), EditKey::DeleteWordBefore),
+        (ctrl_mod, KeyCode::Char('k'), EditKey::DeleteToEnd),
+        (none, KeyCode::Char(' '), EditKey::Insert(' ')),
+        (none, KeyCode::Char('n'), EditKey::Insert('n')),
+    ];
+    for (modifiers, code, expected) in edits {
+        let key = chord(modifiers, code);
+        assert_eq!(
+            resolve(VIEWER_FIND_KEYS, key),
+            None,
+            "{modifiers:?} {code:?}"
+        );
+        assert_eq!(EditKey::of(key), Some(expected), "{modifiers:?} {code:?}");
     }
 }

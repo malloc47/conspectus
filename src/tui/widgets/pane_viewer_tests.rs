@@ -181,7 +181,7 @@ fn the_find_prompt_owns_the_keys_while_it_is_open() {
         press(&mut state, KeyCode::Char('q')),
         PaneViewerOutcome::Continue
     );
-    assert_eq!(state.prompt.as_ref().map(|p| p.text.as_str()), Some("aq"));
+    assert_eq!(state.prompt.as_ref().map(LineEdit::value), Some("aq"));
     press(&mut state, KeyCode::Esc);
     assert!(state.prompt.is_none());
 }

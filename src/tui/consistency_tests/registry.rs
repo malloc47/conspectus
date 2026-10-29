@@ -26,7 +26,7 @@ use super::layout::{Open, app_with, builders};
 use super::*;
 use crate::tui::Modal;
 use crate::tui::keymap::Action;
-use crate::tui::widgets::input::TextInputState;
+use crate::tui::widgets::input::TextPromptState;
 
 pub(super) fn open_viewer(app: &mut App) {
     let document = crate::viewer::model::TranscriptDocument::default();
@@ -147,7 +147,7 @@ fn an_open_modal_owns_every_key_press() {
 #[test]
 fn every_modal_stays_drawn_under_another() {
     use super::layout::modal_rect;
-    let prompt = || TextInputState::new("Above", "typed");
+    let prompt = || TextPromptState::new("Above", "typed");
     let (width, height) = (120, 40);
     let mut bare = app_in(View::Pinned);
     let screen = buffer_of(&mut bare, width, height);

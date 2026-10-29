@@ -4,7 +4,7 @@
 //! selected node's worktree facts at open time and drives a small
 //! state machine — a list of [`WorktreeAction`]s, then either a
 //! branch-name text input (create) or a confirm (remove). It reuses
-//! the shared [`TextInputState`] for the branch prompt and emits a
+//! the shared [`TextPromptState`] for the branch prompt and emits a
 //! single committed [`Msg`] that the runtime turns into a mutation
 //! effect.
 //!
@@ -33,7 +33,7 @@ use crate::model::{
 use crate::tui::Msg;
 use crate::tui::rows::RowId;
 use crate::tui::theme::Theme;
-use crate::tui::widgets::input::{InputOutcome, TextInputState, TextInputWidget};
+use crate::tui::widgets::input::{InputOutcome, TextPromptState, TextPromptWidget};
 use crate::tui::worktree_actions::{WorktreeAction, WorktreeContext, worktree_actions};
 use tuikit::overlay::Outcome;
 
@@ -278,7 +278,7 @@ fn is_reveal(action: WorktreeAction) -> bool {
 #[derive(Debug, Clone)]
 enum Mode {
     List,
-    BranchInput(TextInputState),
+    BranchInput(TextPromptState),
     ConfirmRemove,
     ConfirmMerge,
     /// Close-down: pick merge (land) vs discard, then commit.
@@ -354,7 +354,7 @@ impl WorktreeMenuState {
     fn activate(&mut self) -> Outcome<Msg> {
         match self.selected() {
             WorktreeAction::NewWorktree => {
-                self.mode = Mode::BranchInput(TextInputState::new("New worktree — branch", ""));
+                self.mode = Mode::BranchInput(TextPromptState::new("New worktree — branch", ""));
                 Outcome::Consumed
             }
             WorktreeAction::MergeWorktree => {
@@ -551,7 +551,7 @@ impl Widget for WorktreeMenuWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Branch input renders through the shared text-input widget.
         if let Mode::BranchInput(input) = &self.state.mode {
-            TextInputWidget::new(input, self.theme).render(area, buf);
+            TextPromptWidget::new(input, self.theme).render(area, buf);
             return;
         }
 

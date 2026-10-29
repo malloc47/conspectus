@@ -38,12 +38,12 @@ use crate::tui::widgets::form::{
     self, choice_row, derived_row, footer_lines, harness_row, input_row, options_row, path_row,
     static_value_row,
 };
-use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::{
     LaunchSpecFormState, LaunchSpecInit, SpecTextField, optional_string, parse_launch_argv,
 };
 use crate::tui::widgets::path_omnibox::PathOmniboxOutcome;
 use tuikit::overlay::Outcome;
+use tuikit::text_edit::LineEdit;
 
 const HARNESS_LABEL: &str = "harness";
 const CWD_LABEL: &str = "cwd";
@@ -132,7 +132,7 @@ pub struct MuxLaunchRequest {
 #[derive(Debug, Clone)]
 pub struct MuxLaunchFormState {
     spec: LaunchSpecFormState,
-    worktree_repo: TextInputState,
+    worktree_repo: LineEdit,
     focus: MuxLaunchField,
     pin: PinChoice,
     /// Whether the mux socket field is shown and used. Off means the
@@ -154,22 +154,16 @@ impl MuxLaunchFormState {
         known_mux_names: Vec<String>,
     ) -> Self {
         let spec = LaunchSpecFormState::new(LaunchSpecInit {
-            harness_label: HARNESS_LABEL,
             harness_value: harness.into(),
-            cwd_label: CWD_LABEL,
             cwd_value: cwd.into(),
-            mux_name_label: MUX_NAME_LABEL,
             mux_name_value: mux_name.into(),
-            mux_socket_label: MUX_SOCKET_LABEL,
-            launch_argv_label: LAUNCH_ARGV_LABEL,
-            worktree_branch_label: WORKTREE_BRANCH_LABEL,
             worktree_branch_value: String::new(),
             known_harness_keys,
             known_mux_names,
         });
         Self {
             spec,
-            worktree_repo: TextInputState::new(WORKTREE_REPO_LABEL, String::new()),
+            worktree_repo: LineEdit::default(),
             focus: MuxLaunchField::MuxName,
             pin: PinChoice::Off,
             socket_enabled: false,
@@ -188,7 +182,7 @@ impl MuxLaunchFormState {
     /// switching it on later starts from the launch directory.
     #[must_use]
     pub fn with_worktree_repo(mut self, repo: impl Into<String>) -> Self {
-        self.worktree_repo = TextInputState::new(WORKTREE_REPO_LABEL, repo.into());
+        self.worktree_repo = LineEdit::new(repo);
         self
     }
 
@@ -196,7 +190,7 @@ impl MuxLaunchFormState {
     #[must_use]
     pub fn with_worktree(mut self, repo: impl Into<String>) -> Self {
         self.spec.set_worktree_enabled(true);
-        self.worktree_repo = TextInputState::new(WORKTREE_REPO_LABEL, repo.into());
+        self.worktree_repo = LineEdit::new(repo);
         self
     }
 
@@ -414,10 +408,9 @@ impl MuxLaunchFormState {
                 if let Some(delta) = option_delta {
                     let cwd = self.spec.cwd().expanded_value();
                     let defaults = self.defaults.clone();
-                    self.spec
-                        .cycle_harness_keeping_argv(delta, HARNESS_LABEL, &|harness| {
-                            form::default_argv(defaults.as_ref(), harness, &cwd)
-                        });
+                    self.spec.cycle_harness_keeping_argv(delta, &|harness| {
+                        form::default_argv(defaults.as_ref(), harness, &cwd)
+                    });
                     self.spec.clear_error();
                     return Outcome::Consumed;
                 }
@@ -463,35 +456,30 @@ impl MuxLaunchFormState {
             }
             _ => {}
         }
-        let input_outcome = match self.focus {
-            MuxLaunchField::Harness => Some(self.spec.handle_text_key(SpecTextField::Harness, key)),
-            MuxLaunchField::MuxName => Some(self.spec.handle_text_key(SpecTextField::MuxName, key)),
-            MuxLaunchField::MuxSocket => {
-                Some(self.spec.handle_text_key(SpecTextField::MuxSocket, key))
+        // A key on a text field edits it; any key there clears the
+        // error, as the form's other fields do when they act.
+        let field = match self.focus {
+            MuxLaunchField::Harness => Some(SpecTextField::Harness),
+            MuxLaunchField::MuxName => Some(SpecTextField::MuxName),
+            MuxLaunchField::MuxSocket => Some(SpecTextField::MuxSocket),
+            MuxLaunchField::LaunchArgv => Some(SpecTextField::LaunchArgv),
+            MuxLaunchField::WorktreeBranch => Some(SpecTextField::WorktreeBranch),
+            MuxLaunchField::WorktreeRepo => {
+                self.worktree_repo.handle(key);
+                self.spec.clear_error();
+                return Outcome::Consumed;
             }
-            MuxLaunchField::LaunchArgv => {
-                Some(self.spec.handle_text_key(SpecTextField::LaunchArgv, key))
-            }
-            MuxLaunchField::WorktreeBranch => Some(
-                self.spec
-                    .handle_text_key(SpecTextField::WorktreeBranch, key),
-            ),
-            MuxLaunchField::WorktreeRepo => Some(self.worktree_repo.handle_key(key)),
             MuxLaunchField::LaunchOptions
             | MuxLaunchField::MuxSocketToggle
             | MuxLaunchField::WorktreeToggle
             | MuxLaunchField::Cwd
             | MuxLaunchField::Pin => None,
         };
-        match input_outcome {
-            Some(InputOutcome::Continue) => {
-                self.spec.clear_error();
-                Outcome::Consumed
-            }
-            Some(InputOutcome::Cancel | InputOutcome::Abort) => Outcome::Close,
-            Some(InputOutcome::Confirm(_)) => self.try_commit(),
-            None => Outcome::Consumed,
+        if let Some(field) = field {
+            self.spec.handle_text_key(field, key);
+            self.spec.clear_error();
         }
+        Outcome::Consumed
     }
 }
 
@@ -697,8 +685,7 @@ impl MuxLaunchFormState {
         };
         let line = form::value_row(
             MUX_NAME_LABEL,
-            self.spec.mux_name().value(),
-            self.spec.mux_name().cursor(),
+            self.spec.mux_name(),
             name_focused,
             cols,
             Some(suffix),

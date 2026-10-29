@@ -26,6 +26,7 @@ use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::scroll::ScrollWindow;
 use tuikit::selection::{self, Cursor, Ends};
 use tuikit::text;
+use tuikit::text_edit::{LineEdit, TextField};
 
 use crate::model::NodeId;
 use crate::tui::Theme;
@@ -34,7 +35,6 @@ use crate::tui::search_entities::{EntityIndex, EntityMatch, SearchEntity};
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::rows::RowId;
 use crate::tui::search::{SearchItem, SearchMatch, rank};
-use crate::tui::widgets::input::TextInputState;
 use crate::viewer::search::{ContentKinds, Grouping};
 
 /// How long the query rests before a contents scan starts, so typing a
@@ -154,7 +154,7 @@ pub enum DueSearch {
 /// query changes), and the cursor inside that list.
 #[derive(Debug, Clone)]
 pub struct SearchOverlayState {
-    input: TextInputState,
+    input: LineEdit,
     matches: Vec<SearchMatch>,
     cursor: usize,
     mode: SearchMode,
@@ -192,7 +192,7 @@ pub struct PastSearch {
 impl SearchOverlayState {
     pub fn new() -> Self {
         Self {
-            input: TextInputState::new(" search ", String::new()),
+            input: LineEdit::default(),
             matches: Vec::new(),
             cursor: 0,
             mode: SearchMode::Quick,
@@ -223,7 +223,7 @@ impl SearchOverlayState {
         query: &str,
     ) -> Self {
         let mut state = Self::new();
-        state.input = TextInputState::new(" search ", query.to_string());
+        state.input = LineEdit::new(query);
         state.group = group.granularity();
         state.kinds = kinds;
         state.contents_enabled = contents_enabled;
@@ -521,13 +521,10 @@ impl SearchOverlayState {
             Some(SearchKey::PrevQuery) => self.page_past(1),
             Some(SearchKey::NextQuery) => self.page_past(-1),
             None => {
-                // Let the text-input primitive handle the key. We
-                // ignore its outcome here because Enter/Esc are
-                // intercepted above; everything else is "still
-                // editing the query."
-                let before = self.input.value().to_string();
-                let _ = self.input.handle_key(event);
-                if contents && self.input.value() != before {
+                // Everything the table leaves is the query's to edit;
+                // a contents query that changed is searched again once
+                // it rests.
+                if self.input.handle(event).changed && contents {
                     self.cursor = 0;
                     self.edited_at = Some(Instant::now());
                 }
@@ -591,7 +588,7 @@ impl SearchOverlayState {
     }
 
     fn fill_query(&mut self, text: String) -> SearchOutcome {
-        self.input = TextInputState::new(" search ", text);
+        self.input = LineEdit::new(text);
         self.cursor = 0;
         self.edited_at = Some(Instant::now());
         SearchOutcome::Continue
@@ -772,22 +769,18 @@ impl ModalBody for SearchBody<'_> {
     }
 
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // First row: the query input (rendered as plain text with a
-        // leading `/` so the operator sees the live query). Reuse
-        // TextInputState's value rather than instantiating its
-        // widget, since we want the query and the result list in a
-        // single bordered modal.
-        let query_line = line![
-            span!(Style::default().fg(self.theme.accent); "/"),
-            self.state.query().to_string(),
-        ];
+        // First row: the query, after a `/`, with its caret while the
+        // field has the keys (the options pane takes them while open).
         let query_area = Rect {
             x: area.x,
             y: area.y,
             width: area.width,
             height: 1,
         };
-        Paragraph::new(query_line).render(query_area, buf);
+        TextField::new(&self.state.input)
+            .prefix(Span::styled("/", Style::default().fg(self.theme.accent)))
+            .focused(self.state.options_cursor().is_none())
+            .render(query_area, buf, self.theme);
 
         if self.state.mode() == SearchMode::Content {
             self.render_contents(area, buf);

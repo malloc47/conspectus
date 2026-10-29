@@ -94,7 +94,7 @@ pub(in crate::tui) fn open_rename_overlay(app: &mut App) {
             return;
         }
     };
-    let state = crate::tui::widgets::input::TextInputState::new(title, initial);
+    let state = crate::tui::widgets::input::TextPromptState::new(title, initial);
     app.open_rename_overlay(state);
     app.set_rename_node(node);
     app.update(Msg::SetStatus(Some(Feedback::info(format!(

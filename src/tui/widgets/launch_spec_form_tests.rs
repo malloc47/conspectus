@@ -2,15 +2,9 @@ use super::*;
 
 fn state() -> LaunchSpecFormState {
     LaunchSpecFormState::new(LaunchSpecInit {
-        harness_label: "Harness",
         harness_value: "codex".to_string(),
-        cwd_label: "Cwd",
         cwd_value: "/tmp".to_string(),
-        mux_name_label: "Mux name",
         mux_name_value: "adhoc".to_string(),
-        mux_socket_label: "Mux socket",
-        launch_argv_label: "Launch argv",
-        worktree_branch_label: "Worktree branch",
         worktree_branch_value: String::new(),
         known_harness_keys: vec!["codex".to_string(), "claude-code".to_string()],
         known_mux_names: vec!["existing".to_string()],
@@ -21,38 +15,32 @@ fn state() -> LaunchSpecFormState {
 fn cycle_harness_advances_and_wraps() {
     let mut s = state();
     assert_eq!(s.harness().value(), "codex");
-    let next = s.cycle_harness(1, "Harness").expect("cycled");
+    let next = s.cycle_harness(1).expect("cycled");
     assert_eq!(next, "claude-code");
     assert_eq!(s.harness().value(), "claude-code");
     // Wrap around from last back to first.
-    let next = s.cycle_harness(1, "Harness").expect("cycled");
+    let next = s.cycle_harness(1).expect("cycled");
     assert_eq!(next, "codex");
 }
 
 #[test]
 fn cycle_harness_returns_none_when_known_set_is_empty() {
     let mut s = LaunchSpecFormState::new(LaunchSpecInit {
-        harness_label: "Harness",
         harness_value: "codex".to_string(),
-        cwd_label: "Cwd",
         cwd_value: "/tmp".to_string(),
-        mux_name_label: "Mux name",
         mux_name_value: "adhoc".to_string(),
-        mux_socket_label: "Mux socket",
-        launch_argv_label: "Launch argv",
-        worktree_branch_label: "Worktree branch",
         worktree_branch_value: String::new(),
         known_harness_keys: Vec::new(),
         known_mux_names: Vec::new(),
     });
-    assert!(s.cycle_harness(1, "Harness").is_none());
+    assert!(s.cycle_harness(1).is_none());
     assert_eq!(s.harness().value(), "codex");
 }
 
 #[test]
 fn mux_name_collides_flags_known_names() {
     let mut s = state();
-    s.set_mux_name("Mux name", "existing");
+    s.set_mux_name("existing");
     assert!(s.mux_name_collides_with_known());
     assert_eq!(s.matching_known_mux_name(), Some("existing"));
 }
@@ -106,7 +94,7 @@ fn toggling_skip_permissions_adds_and_removes_the_flag() {
 #[test]
 fn an_option_toggle_keeps_the_operators_other_tokens() {
     let mut s = state();
-    s.set_launch_argv("Launch argv", "sandbox run codex");
+    s.set_launch_argv("sandbox run codex");
     s.toggle_launch_option(&argv(&["codex"]), 1);
     assert_eq!(
         s.launch_argv().value(),
@@ -117,7 +105,7 @@ fn an_option_toggle_keeps_the_operators_other_tokens() {
 #[test]
 fn a_harness_without_options_ignores_the_toggle() {
     let mut s = state();
-    s.set_harness("Harness", "opencode");
+    s.set_harness("opencode");
     assert!(s.launch_options().is_empty());
     s.toggle_launch_option(&argv(&["opencode"]), 1);
     assert_eq!(s.launch_argv().value(), "");
@@ -134,15 +122,15 @@ fn cycling_the_harness_drops_the_old_harnesss_flags() {
         }])
     };
     s.toggle_launch_option(&default_for("codex"), 1);
-    s.cycle_harness_keeping_argv(1, "Harness", &default_for);
+    s.cycle_harness_keeping_argv(1, &default_for);
     assert_eq!(s.harness().value(), "claude-code");
     assert_eq!(
         s.launch_argv().value(),
         "",
         "an argv that was only the old default and its flag is cleared"
     );
-    s.set_launch_argv("Launch argv", "claude --model opus");
-    s.cycle_harness_keeping_argv(1, "Harness", &default_for);
+    s.set_launch_argv("claude --model opus");
+    s.cycle_harness_keeping_argv(1, &default_for);
     assert_eq!(s.harness().value(), "codex");
     assert_eq!(
         s.launch_argv().value(),

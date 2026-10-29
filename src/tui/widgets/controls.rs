@@ -40,7 +40,7 @@ use crate::filter::{
     RowFilter,
 };
 use crate::tui::Theme;
-use crate::tui::widgets::input::{InputOutcome, TextInputState};
+use crate::tui::widgets::input::{InputOutcome, TextPromptState};
 use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState};
 use crate::tui::{Grouping, Sort, View};
 
@@ -165,9 +165,9 @@ pub enum ControlsCursor {
 #[derive(Debug, Clone)]
 pub enum SubEditor {
     Harness(MultiSelectState),
-    MaxAge(TextInputState),
+    MaxAge(TextPromptState),
     /// The content query text.
-    Content(TextInputState),
+    Content(TextPromptState),
     MuxState(MultiSelectState),
     PrState(MultiSelectState),
 }
@@ -348,7 +348,7 @@ impl ControlsOverlayState {
             }
             ControlsCursor::FilterContent => {
                 let initial = ctx.content.map(|(text, ..)| text).unwrap_or_default();
-                self.sub_editor = Some(SubEditor::Content(TextInputState::new(
+                self.sub_editor = Some(SubEditor::Content(TextPromptState::new(
                     " contains ",
                     initial.to_string(),
                 )));
@@ -600,12 +600,12 @@ fn with_pr_state(mut filter: RowFilter, values: Vec<PrStateKey>) -> RowFilter {
     filter
 }
 
-fn build_max_age_editor(filter: &RowFilter) -> TextInputState {
+fn build_max_age_editor(filter: &RowFilter) -> TextPromptState {
     let initial = filter
         .max_age
         .map(format_duration_for_input)
         .unwrap_or_default();
-    TextInputState::new(" max age ", initial)
+    TextPromptState::new(" max age ", initial)
 }
 
 fn indices_to_harness_values(indices: &[usize]) -> Vec<String> {
@@ -843,8 +843,8 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &T
             MultiSelectWidget::new(state, &labels, theme).render(area, buf);
         }
         SubEditor::MaxAge(state) | SubEditor::Content(state) => {
-            use crate::tui::widgets::input::TextInputWidget;
-            TextInputWidget::new(state, theme).render(area, buf);
+            use crate::tui::widgets::input::TextPromptWidget;
+            TextPromptWidget::new(state, theme).render(area, buf);
         }
     }
 }

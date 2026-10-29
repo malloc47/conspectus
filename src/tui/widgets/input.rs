@@ -1,30 +1,28 @@
-//! Centered modal text-input overlay, per ADR 0030.
+//! The modal text prompt, per ADR 0030: one line of text in a compact
+//! frame titled with what it asks for.
 //!
-//! Hosts a [`tui_input::Input`] inside a bordered Ratatui frame and
-//! locks the surrounding focus cycle while open. The rename overlay,
-//! the `/` search overlay, and the inline mux picker share this
-//! primitive.
-//! Bug fixes for Unicode cursor math, word navigation, and paste
-//! handling land once instead of three times.
+//! The rename prompts, the worktree branch prompt, and the Controls
+//! filter editors share it. The editing is the framework's line editor
+//! (`tuikit::text_edit::LineEdit`) and the line is drawn by its text
+//! field, so the prompt edits and windows text like every other field;
+//! what this module adds is the prompt's contract: `Enter` confirms,
+//! `Esc` cancels, `Ctrl-C` dismisses, and `Tab` is swallowed.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{Event as CrosstermEvent, KeyEvent};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
-use ratatui::widgets::{Paragraph, Widget};
-use tui_input::backend::crossterm::EventHandler;
-use tui_input::{Input, InputRequest};
+use ratatui::widgets::Widget;
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
+use tuikit::text_edit::{LineEdit, TextField};
 
 use crate::tui::Theme;
 
 /// What the host should do after passing a key event through the
-/// overlay. `Continue` means the overlay stays open; `Confirm`
-/// carries the trimmed buffer value back to the host; `Cancel`
-/// (`Esc`) means the prompt closes without committing, stepping back
-/// one level when it sits inside another overlay; `Abort` (`Ctrl-C`)
-/// dismisses the whole overlay the prompt is in.
+/// prompt. `Continue` means the prompt stays open; `Confirm` carries
+/// the buffer back to the host as typed; `Cancel` (`Esc`) means the
+/// prompt closes without committing, stepping back one level when it
+/// sits inside another overlay; `Abort` (`Ctrl-C`) dismisses the whole
+/// overlay the prompt is in.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InputOutcome {
     Continue,
@@ -33,24 +31,22 @@ pub enum InputOutcome {
     Abort,
 }
 
-/// Caller-owned state for a single text-input overlay. The state
-/// holds the underlying [`tui_input::Input`] plus the title that
-/// renders as the modal's border label.
+/// Caller-owned state for one text prompt: the line being edited and
+/// the title that renders as the modal's border label.
 #[derive(Debug, Clone)]
-pub struct TextInputState {
+pub struct TextPromptState {
     title: String,
-    input: Input,
+    edit: LineEdit,
 }
 
-impl TextInputState {
-    /// Create a new state pre-populated with `initial`. The cursor
-    /// lands at the end so typing appends naturally — the rename
-    /// flow wants the caller to be able to edit an existing alias
-    /// or harness title verbatim.
+impl TextPromptState {
+    /// A prompt pre-populated with `initial`. The cursor lands at the
+    /// end so typing appends naturally: the rename flow wants the caller
+    /// to be able to edit an existing alias or harness title verbatim.
     pub fn new(title: impl Into<String>, initial: impl Into<String>) -> Self {
         Self {
             title: title.into(),
-            input: Input::new(initial.into()),
+            edit: LineEdit::new(initial),
         }
     }
 
@@ -59,101 +55,78 @@ impl TextInputState {
     }
 
     pub fn value(&self) -> &str {
-        self.input.value()
+        self.edit.value()
     }
 
     pub fn cursor(&self) -> usize {
-        self.input.cursor()
+        self.edit.cursor()
     }
 
-    /// Pass a crossterm key event through the overlay.
+    /// The line being edited.
+    pub fn edit(&self) -> &LineEdit {
+        &self.edit
+    }
+
+    /// Pass a key press through the prompt.
     ///
     /// `Enter` returns `Confirm(value)`; `Esc` returns `Cancel`;
-    /// every other key is forwarded to the line editor. ADR 0030
-    /// locks the surrounding `Tab` focus cycle, so `Tab` is
-    /// swallowed here (the line editor itself drops it too).
+    /// `Ctrl-C` returns `Abort`; every other key goes to the line
+    /// editor. ADR 0030 locks the surrounding `Tab` focus cycle, so
+    /// `Tab` is swallowed here.
     pub fn handle_key(&mut self, event: KeyEvent) -> InputOutcome {
         use tuikit::keys::{TEXT_INPUT_KEYS, TextInputKey, resolve};
         match resolve(TEXT_INPUT_KEYS, event) {
-            Some(TextInputKey::Confirm) => InputOutcome::Confirm(self.input.value().to_string()),
+            Some(TextInputKey::Confirm) => InputOutcome::Confirm(self.edit.value().to_string()),
             Some(TextInputKey::Abort) => InputOutcome::Abort,
             Some(TextInputKey::Cancel) => InputOutcome::Cancel,
             Some(TextInputKey::Tab) => InputOutcome::Continue,
-            Some(TextInputKey::WordLeft) => {
-                self.input.handle(InputRequest::GoToPrevWord);
-                InputOutcome::Continue
-            }
-            Some(TextInputKey::WordRight) => {
-                self.input.handle(InputRequest::GoToNextWord);
-                InputOutcome::Continue
-            }
             None => {
-                self.input.handle_event(&CrosstermEvent::Key(event));
+                self.edit.handle(event);
                 InputOutcome::Continue
             }
         }
     }
-}
-
-/// The text a paste types into a single-line field. A line break would
-/// press Enter and submit the field, and a single line cannot show one,
-/// so the paste is flattened instead of cut at its first line: line
-/// breaks at either end are dropped (a copied line usually ends in one),
-/// each run of line breaks inside becomes one space, a tab becomes a
-/// space (Tab would complete or move to the next field), and any other
-/// control character is dropped.
-pub fn single_line_paste(text: &str) -> String {
-    let is_break = |c: char| c == '\n' || c == '\r';
-    let mut out = String::with_capacity(text.len());
-    let mut in_break = false;
-    for c in text.trim_matches(is_break).chars() {
-        if is_break(c) {
-            if !in_break {
-                out.push(' ');
-            }
-            in_break = true;
-            continue;
-        }
-        in_break = false;
-        if c == '\t' {
-            out.push(' ');
-        } else if !c.is_control() {
-            out.push(c);
-        }
-    }
-    out
 }
 
 /// How large a prompt is: one row in a compact frame.
 pub(crate) const PROMPT_SIZE: ModalSize = ModalSize::COMPACT;
 
-/// Centered modal rendering of [`TextInputState`]: the field in a
+/// Centered modal rendering of [`TextPromptState`]: the field in a
 /// compact frame titled with the prompt.
-pub struct TextInputWidget<'a> {
-    state: &'a TextInputState,
+pub struct TextPromptWidget<'a> {
+    state: &'a TextPromptState,
     theme: &'a Theme,
 }
 
-impl<'a> TextInputWidget<'a> {
-    pub fn new(state: &'a TextInputState, theme: &'a Theme) -> Self {
+impl<'a> TextPromptWidget<'a> {
+    pub fn new(state: &'a TextPromptState, theme: &'a Theme) -> Self {
         Self { state, theme }
     }
 }
 
-impl Widget for TextInputWidget<'_> {
+impl Widget for TextPromptWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         ModalFrame::new(self.theme, PROMPT_SIZE)
             .title(self.state.title.as_str())
-            .render(area, buf, TextInputBody { state: self.state });
+            .render(
+                area,
+                buf,
+                PromptBody {
+                    state: self.state,
+                    theme: self.theme,
+                },
+            );
     }
 }
 
-/// The visible window of the text, with the cursor cell reversed.
-struct TextInputBody<'a> {
-    state: &'a TextInputState,
+/// The prompt's one row: its line as a text field, windowed so the
+/// cursor stays in view.
+struct PromptBody<'a> {
+    state: &'a TextPromptState,
+    theme: &'a Theme,
 }
 
-impl ModalBody for TextInputBody<'_> {
+impl ModalBody for PromptBody<'_> {
     type Output = ();
 
     fn measure(&mut self, _width: u16) -> u16 {
@@ -161,48 +134,7 @@ impl ModalBody for TextInputBody<'_> {
     }
 
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let value = self.state.input.value();
-        let cursor = self.state.input.cursor();
-        let inner_width = area.width as usize;
-
-        let display = visible_window(value, cursor, inner_width);
-        Paragraph::new(Line::from(display.text.clone())).render(area, buf);
-
-        if let Some(cell) = buf.cell_mut((area.x + display.cursor_offset as u16, area.y)) {
-            cell.set_style(Style::default().add_modifier(Modifier::REVERSED));
-        }
-    }
-}
-
-struct VisibleWindow {
-    text: String,
-    cursor_offset: usize,
-}
-
-/// Slide the visible window so the cursor is always within
-/// `inner_width`. Mirrors the behavior in
-/// `tui_input::backend::crossterm::write` but written for Ratatui's
-/// buffer-mutation API.
-fn visible_window(value: &str, cursor: usize, inner_width: usize) -> VisibleWindow {
-    let inner_width = inner_width.max(1);
-    let chars: Vec<char> = value.chars().collect();
-    let total = chars.len();
-    // Leave one column for the cursor so the operator can see the
-    // tail of the value.
-    let visible = inner_width.saturating_sub(1).max(1);
-    let start = if total <= visible {
-        0
-    } else if cursor >= visible {
-        cursor.saturating_sub(visible)
-    } else {
-        0
-    };
-    let end = (start + inner_width).min(total);
-    let text: String = chars[start..end].iter().collect();
-    let cursor_offset = cursor.saturating_sub(start);
-    VisibleWindow {
-        text,
-        cursor_offset,
+        TextField::new(&self.state.edit).render(area, buf, self.theme);
     }
 }
 

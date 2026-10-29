@@ -33,7 +33,7 @@ use conspectus::tui::rows::RowId;
 use conspectus::tui::search::SearchItem;
 use conspectus::tui::theme::{KeyOrigin, TokenValue};
 use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
-use conspectus::tui::widgets::input::{TextInputState, TextInputWidget};
+use conspectus::tui::widgets::input::{TextPromptState, TextPromptWidget};
 use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
 use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
 use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
@@ -383,15 +383,15 @@ impl Ingredient for TextInputVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let mut state = TextInputState::new(self.title, self.initial);
-        // `TextInputState::new` lands the cursor at the end so typing
+        let mut state = TextPromptState::new(self.title, self.initial);
+        // `TextPromptState::new` lands the cursor at the end so typing
         // appends naturally; the preview moves it left when a variant
         // wants to show the cursor mid-string.
         for _ in 0..self.cursor_left {
             let event = press(KeyCode::Left);
             let _ = state.handle_key(event);
         }
-        TextInputWidget::new(&state, &theme).render(area, buf);
+        TextPromptWidget::new(&state, &theme).render(area, buf);
     }
 }
 
@@ -679,7 +679,7 @@ fn main() -> std::io::Result<()> {
             cursor_left: 0,
             variant_name: "Long value (cursor at end)",
             description_text:
-                "Value longer than the modal's inner width — exercises the `visible_window` truncation around the cursor.",
+                "Value longer than the modal's inner width — exercises the field's window around the cursor.",
         }),
         Box::new(ThemeHarnessIngredient),
     ];

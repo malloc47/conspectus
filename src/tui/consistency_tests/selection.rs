@@ -209,20 +209,10 @@ struct Reversed {
     reason: &'static str,
 }
 
-const REVERSED_ELSEWHERE: &[Reversed] = &[
-    Reversed {
-        path: "src/tui/widgets/input.rs",
-        reason: "the text cursor cell of the one-line prompt",
-    },
-    Reversed {
-        path: "src/viewer/widget.rs",
-        reason: "the text cursor cell of the reader's find prompt",
-    },
-    Reversed {
-        path: "src/viewer/highlight.rs",
-        reason: "the current find match in the reader",
-    },
-];
+const REVERSED_ELSEWHERE: &[Reversed] = &[Reversed {
+    path: "src/viewer/highlight.rs",
+    reason: "the current find match in the reader",
+}];
 
 const DRAWING_SOURCE: &[Tree] = &[Tree::new("src/tui", 100), Tree::new("src/viewer", 15)];
 

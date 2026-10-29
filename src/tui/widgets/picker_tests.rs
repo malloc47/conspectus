@@ -133,3 +133,27 @@ fn the_cursor_row_shows_the_marker_and_the_highlight() {
     let above: String = (x..x + 7).map(|x| buf[(x, y - 1)].symbol()).collect();
     assert_eq!(above, "  alpha", "other rows keep the label a gutter in");
 }
+
+#[test]
+fn the_query_line_draws_its_caret_and_windows_by_cells() {
+    use tuikit::testkit::{buffer, golden};
+    let theme = Theme::default();
+    let mut state = state();
+    type_text(&mut state, "東京 alpha");
+    press(&mut state, KeyCode::Home);
+    press(&mut state, KeyCode::Right);
+    let area = Rect::new(0, 0, 60, 12);
+    let mut buf = Buffer::empty(area);
+    PickerWidget::new(&state, &theme).render(area, &mut buf);
+    let at = buffer::find(&buf, "/東").expect("the query line");
+    let caret = &buf[(at.x + 3, at.y)];
+    assert_eq!(caret.symbol(), "京", "the caret is on the second character");
+    let cue = theme.field_cursor.into_style();
+    assert_eq!((Some(caret.fg), Some(caret.bg)), (cue.fg, cue.bg));
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/tui/widgets/goldens/picker-query.golden");
+    let row = Rect::new(at.x, at.y, 16, 1);
+    golden::assert_golden_text(&path, &golden::styled_region(&buf, row), |path, text| {
+        std::fs::write(path, text)
+    });
+}

@@ -25,10 +25,10 @@ use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
 use tuikit::selection::{self, Cursor};
 use tuikit::text;
+use tuikit::text_edit::{LineEdit, TextField};
 
 use crate::discovery::harness::{HarnessLaunchOption, argv_contains_fragment};
 use crate::tui::Theme;
-use crate::tui::widgets::input::TextInputState;
 use crate::tui::widgets::path_omnibox::{PathOmniboxState, PathValidation};
 
 pub const LABEL_WIDTH: usize = 11;
@@ -61,6 +61,8 @@ impl Cols {
 const VALUE_GAP: &str = "  ";
 const TEXT_GUTTER: &str = "  ";
 const PATH_SUFFIX_WIDTH: usize = 32;
+/// What an empty field shows.
+const EMPTY_VALUE: &str = "-";
 
 /// Spans drawn after a row's value, and the width they take.
 pub struct Suffix {
@@ -105,113 +107,33 @@ pub fn entry_style(active: bool, theme: &Theme) -> Style {
     }
 }
 
-fn edge_style(indicator: &str, edge: Style) -> Style {
-    if indicator.trim().is_empty() {
-        Style::default()
-    } else {
-        edge
-    }
-}
-
-struct Window {
-    left: &'static str,
-    before: String,
-    cursor_text: String,
-    after: String,
-    right: &'static str,
-    edge: Style,
-    cursor_style: Style,
-}
-
-/// The part of `value` that fits in `width` cells around the cursor,
-/// with `<` and `>` marking what scrolled out of view.
+/// A form field over `edit`, `width` cells wide: the value in the field's
+/// fill (`field_active` when focused, `field` otherwise), windowed around
+/// the cursor with `<` and `>` marking what scrolled out of view, the
+/// caret drawn while the field has focus, and `-` for an empty value.
 ///
-/// The result is always exactly `width` cells wide, focused or not: the
-/// cell the cursor sits on exists either way, so moving the focus never
-/// shifts what follows the value.
-fn window(value: &str, cursor: usize, width: usize, active: bool, theme: &Theme) -> Window {
-    let width = width.max(1);
-    // The scroll markers sit on the field's own fill, in the accent.
-    let edge = entry_style(active, theme)
-        .fg(theme.accent)
-        .add_modifier(Modifier::BOLD);
-    let cursor_style = if active {
-        theme.field_cursor.into_style()
-    } else {
-        Style::default()
-    };
-    let value = if value.trim().is_empty() { "-" } else { value };
-    // The characters, plus the blank cell a cursor at the end sits on.
-    let mut cells: Vec<char> = value.chars().collect();
-    let total = cells.len();
-    cells.push(' ');
-    let cursor = cursor.min(total);
-
-    if width <= 4 {
-        let ch = cells[cursor];
-        return Window {
-            left: "",
-            before: String::new(),
-            cursor_text: ch.to_string(),
-            after: " ".repeat(width.saturating_sub(1)),
-            right: "",
-            edge,
-            cursor_style,
-        };
-    }
-
-    let content_width = width - 4;
-    let start = if cells.len() <= content_width || cursor < content_width {
-        0
-    } else {
-        (cursor + 1 - content_width).min(cells.len() - content_width)
-    };
-    let end = (start + content_width).min(cells.len());
-    let before: String = cells[start..cursor].iter().collect();
-    let cursor_text = cells[cursor].to_string();
-    let mut after: String = cells[cursor + 1..end].iter().collect();
-    let used = before.chars().count() + 1 + after.chars().count();
-    after.push_str(&" ".repeat(content_width.saturating_sub(used)));
-    Window {
-        left: if start > 0 { "< " } else { "  " },
-        before,
-        cursor_text,
-        after,
-        right: if end < total { " >" } else { "  " },
-        edge,
-        cursor_style,
-    }
-}
-
-/// `value` windowed around `cursor` into exactly `width` cells.
+/// The field always takes exactly `width` cells, focused or not: the cell
+/// the cursor sits on exists either way, so moving the focus never shifts
+/// what follows the value.
 pub fn value_cells(
-    value: &str,
-    cursor: usize,
+    edit: &LineEdit,
     width: usize,
     active: bool,
     theme: &Theme,
 ) -> Vec<Span<'static>> {
-    window_spans(
-        &window(value, cursor, width, active, theme),
-        entry_style(active, theme),
-    )
-}
-
-fn window_spans(w: &Window, value_style: Style) -> Vec<Span<'static>> {
-    vec![
-        Span::styled(w.left.to_string(), edge_style(w.left, w.edge)),
-        Span::styled(w.before.clone(), value_style),
-        Span::styled(w.cursor_text.clone(), w.cursor_style),
-        Span::styled(w.after.clone(), value_style),
-        Span::styled(w.right.to_string(), edge_style(w.right, w.edge)),
-    ]
+    TextField::new(edit)
+        .focused(active)
+        .marks(true)
+        .fill(true)
+        .placeholder(EMPTY_VALUE)
+        .style(entry_style(active, theme))
+        .spans(width.max(1), theme)
 }
 
 /// A text value row, with an optional suffix after the value.
 pub fn value_row(
     label: &str,
-    value: &str,
-    value_cursor: usize,
+    edit: &LineEdit,
     active: bool,
     cols: Cols,
     suffix: Option<Suffix>,
@@ -224,9 +146,8 @@ pub fn value_row(
         .saturating_sub(lead_width(&prefix))
         .saturating_sub(suffix_width)
         .max(1);
-    let w = window(value, value_cursor, value_width, active, theme);
     let mut spans = vec![Span::raw(prefix)];
-    spans.extend(window_spans(&w, entry_style(active, theme)));
+    spans.extend(value_cells(edit, value_width, active, theme));
     if let Some(suffix) = suffix {
         spans.extend(suffix.spans);
     }
@@ -235,49 +156,12 @@ pub fn value_row(
 
 pub fn input_row(
     label: &str,
-    input: &TextInputState,
+    edit: &LineEdit,
     active: bool,
     cols: Cols,
     theme: &Theme,
 ) -> Line<'static> {
-    value_row(
-        label,
-        input.value(),
-        input.cursor(),
-        active,
-        cols,
-        None,
-        theme,
-    )
-}
-
-/// A text row followed by a dimmed note, such as where an inherited
-/// value came from.
-pub fn tagged_input_row(
-    label: &str,
-    input: &TextInputState,
-    tag: &str,
-    active: bool,
-    cols: Cols,
-    theme: &Theme,
-) -> Line<'static> {
-    let text = format!(" {tag}");
-    let width = tuikit::text::width(&text);
-    value_row(
-        label,
-        input.value(),
-        input.cursor(),
-        active,
-        cols,
-        Some(Suffix {
-            width,
-            spans: vec![Span::styled(
-                text,
-                Style::default().add_modifier(theme.muted),
-            )],
-        }),
-        theme,
-    )
+    value_row(label, edit, active, cols, None, theme)
 }
 
 /// A path field: the value, a mark for whether it exists, and the
@@ -291,8 +175,7 @@ pub fn path_row(
 ) -> Line<'static> {
     value_row(
         label,
-        omnibox.value(),
-        omnibox.cursor(),
+        omnibox.edit(),
         active,
         cols,
         Some(path_suffix(omnibox, active, theme)),
@@ -379,7 +262,7 @@ pub fn completion_remainder(typed: &str, suggestion: &str) -> Option<String> {
 /// isn't one of them.
 pub fn harness_row(
     label: &str,
-    input: &TextInputState,
+    edit: &LineEdit,
     known: &[String],
     active: bool,
     cols: Cols,
@@ -388,31 +271,19 @@ pub fn harness_row(
     let inner_width = cols.inner;
     let prefix = prefix(label, cols.label);
     let available = inner_width.saturating_sub(lead_width(&prefix));
-    let value = input.value().trim();
+    let value = edit.value().trim();
     if !value.is_empty() && !known.iter().any(|k| k == value) {
         let suffix = " [custom]";
         let value_width = available.saturating_sub(suffix.len()).max(1);
-        let w = window(input.value(), input.cursor(), value_width, active, theme);
         let mut spans = vec![Span::raw(prefix)];
-        spans.extend(window_spans(&w, entry_style(active, theme)));
+        spans.extend(value_cells(edit, value_width, active, theme));
         spans.push(Span::styled(suffix, Style::default().fg(theme.warning)));
         return row(spans, active, theme);
     }
     let value_width = VALUE_SLOT_WIDTH.min(available).max(1);
     let chips_budget = available.saturating_sub(value_width).min(48);
-    let w = window(input.value(), input.cursor(), value_width, active, theme);
-    let shown = w.left.chars().count()
-        + w.before.chars().count()
-        + w.cursor_text.chars().count()
-        + w.after.chars().count()
-        + w.right.chars().count();
-    let padding = value_width.saturating_sub(shown);
-    let style = entry_style(active, theme);
     let mut spans = vec![Span::raw(prefix)];
-    spans.extend(window_spans(&w, style));
-    if padding > 0 {
-        spans.push(Span::styled(" ".repeat(padding), style));
-    }
+    spans.extend(value_cells(edit, value_width, active, theme));
     spans.extend(harness_chips(value, known, chips_budget, theme));
     row(spans, active, theme)
 }

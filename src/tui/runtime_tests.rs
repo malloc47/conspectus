@@ -1975,7 +1975,7 @@ mod viewer_find_prompt {
         // `n`, `q`, and Space are viewer keys, but the prompt owns them now.
         type_text(&mut app, "n q");
         let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
-        assert_eq!(prompt.map(|p| p.text.as_str()), Some("n q"));
+        assert_eq!(prompt.map(tuikit::text_edit::LineEdit::value), Some("n q"));
         assert!(app.viewer_modal().is_some(), "q did not close the viewer");
     }
 
@@ -2011,6 +2011,6 @@ mod viewer_find_prompt {
         modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('/')));
         modal_key_pure(&mut app, chord(KeyModifiers::CONTROL, KeyCode::Char('a')));
         let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
-        assert_eq!(prompt.map(|p| p.text.as_str()), Some(""));
+        assert_eq!(prompt.map(tuikit::text_edit::LineEdit::value), Some(""));
     }
 }

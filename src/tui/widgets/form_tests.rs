@@ -2,6 +2,7 @@ use ratatui::style::Color;
 
 use super::*;
 use crate::tui::theme::OverrideValue::Text as OverrideText;
+use tuikit::text_edit::LineEdit;
 
 fn text(line: &Line<'_>) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
@@ -28,31 +29,53 @@ fn custom() -> Theme {
     theme
 }
 
+/// A line holding `value` with the cursor after `cursor` characters.
+fn edit(value: &str, cursor: usize) -> LineEdit {
+    LineEdit::new(value).with_cursor(cursor)
+}
+
+const ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz";
+
 #[test]
 fn a_long_value_scrolls_around_the_cursor_with_edge_marks() {
-    let value = "abcdefghijklmnopqrstuvwxyz";
-    let w = window(value, 20, 12, true, &theme());
-    assert_eq!(w.left, "< ", "the start is out of view");
-    assert_eq!(w.right, " >", "the end is out of view");
-    assert_eq!(w.cursor_text, "u");
-    let w = window(value, 0, 12, true, &theme());
-    assert_eq!(w.left, "  ");
-    assert_eq!(w.right, " >");
+    let spans = value_cells(&edit(ALPHABET, 20), 12, true, &theme());
+    let cells: String = spans.iter().map(|span| span.content.as_ref()).collect();
+    assert!(
+        cells.starts_with("< "),
+        "the start is out of view: {cells:?}"
+    );
+    assert!(cells.ends_with(" >"), "the end is out of view: {cells:?}");
+    assert_eq!(style_of(&spans, "u"), theme().field_cursor.into_style());
+    let spans = value_cells(&edit(ALPHABET, 0), 12, true, &theme());
+    let cells: String = spans.iter().map(|span| span.content.as_ref()).collect();
+    assert_eq!(cells, "  abcdefgh >");
+}
+
+#[test]
+fn wide_characters_fill_the_field_by_their_cells() {
+    // Twelve cells of field: the marks take four, so four two-cell
+    // characters and the caret do not fit, and the window scrolls.
+    let spans = value_cells(&edit("東京タワーと富士山", 9), 12, true, &theme());
+    assert_eq!(tuikit::text::spans_width(&spans), 12);
+    let cells: String = spans.iter().map(|span| span.content.as_ref()).collect();
+    assert_eq!(cells, "< 富士山    ", "the cursor rides the right edge");
+    let spans = value_cells(&edit("東京タワーと富士山", 0), 12, true, &theme());
+    let cells: String = spans.iter().map(|span| span.content.as_ref()).collect();
+    assert_eq!(cells, "  東京タワ >");
 }
 
 #[test]
 fn an_empty_value_shows_a_dash() {
-    let line = value_row("cwd", "", 0, false, Cols::new(40), None, &theme());
+    let line = value_row("cwd", &edit("", 0), false, Cols::new(40), None, &theme());
     assert!(text(&line).contains('-'), "{}", text(&line));
 }
 
 #[test]
 fn the_label_column_widens_for_long_labels() {
-    let narrow = value_row("cwd", "x", 0, false, Cols::new(60), None, &theme());
+    let narrow = value_row("cwd", &edit("x", 0), false, Cols::new(60), None, &theme());
     let wide = value_row(
         "worktree_branch",
-        "x",
-        0,
+        &edit("x", 0),
         false,
         Cols::new(60).with_label(15),
         None,
@@ -83,7 +106,7 @@ fn the_harness_row_marks_the_selected_chip_and_flags_a_custom_value() {
     let known: Vec<String> = ["claude-code", "codex"].map(String::from).to_vec();
     let line = harness_row(
         "harness",
-        &TextInputState::new("harness", "codex"),
+        &LineEdit::new("codex"),
         &known,
         false,
         Cols::new(70),
@@ -106,7 +129,7 @@ fn the_harness_row_marks_the_selected_chip_and_flags_a_custom_value() {
 
     let custom = harness_row(
         "harness",
-        &TextInputState::new("harness", "my-agent"),
+        &LineEdit::new("my-agent"),
         &known,
         false,
         Cols::new(70),
@@ -175,7 +198,7 @@ fn style_of(spans: &[Span<'_>], needle: &str) -> Style {
 
 #[test]
 fn the_default_theme_draws_the_form_as_it_always_has() {
-    let spans = value_cells("abcdefghijklmnopqrstuvwxyz", 20, 12, true, &theme());
+    let spans = value_cells(&edit(ALPHABET, 20), 12, true, &theme());
     // The scroll marks, the fill, and the cursor cell keep the fixed
     // look the forms had before they took the theme.
     assert_eq!(
@@ -193,14 +216,14 @@ fn the_default_theme_draws_the_form_as_it_always_has() {
         style_of(&spans, "u"),
         Style::default().fg(Color::Black).bg(Color::White)
     );
-    let idle = value_cells("abc", 0, 12, false, &theme());
+    let idle = value_cells(&edit("abc", 0), 12, false, &theme());
     assert_eq!(style_of(&idle, "bc"), Style::default().fg(Color::Gray));
 }
 
 #[test]
 fn a_custom_theme_restyles_the_field_its_marks_and_its_cursor() {
     let theme = custom();
-    let spans = value_cells("abcdefghijklmnopqrstuvwxyz", 20, 12, true, &theme);
+    let spans = value_cells(&edit(ALPHABET, 20), 12, true, &theme);
     assert_eq!(
         style_of(&spans, "<"),
         Style::default()
@@ -216,7 +239,7 @@ fn a_custom_theme_restyles_the_field_its_marks_and_its_cursor() {
         style_of(&spans, "u"),
         Style::default().fg(Color::White).bg(Color::Red)
     );
-    let idle = value_cells("abc", 0, 12, false, &theme);
+    let idle = value_cells(&edit("abc", 0), 12, false, &theme);
     assert_eq!(style_of(&idle, "bc"), Style::default().fg(Color::Green));
 }
 
@@ -255,7 +278,7 @@ fn chips_notes_footers_and_warnings_follow_the_theme() {
     );
     let custom_harness = harness_row(
         "harness",
-        &TextInputState::new("harness", "my-agent"),
+        &LineEdit::new("my-agent"),
         &known,
         false,
         Cols::new(70),
@@ -270,18 +293,18 @@ fn chips_notes_footers_and_warnings_follow_the_theme() {
 #[test]
 fn path_marks_follow_the_theme() {
     let theme = custom();
-    let empty = PathOmniboxState::new("cwd", "");
+    let empty = PathOmniboxState::new("");
     assert_eq!(
         path_mark(&empty, &theme)[1].style,
         Style::default().fg(Color::Blue)
     );
-    let missing = PathOmniboxState::new("cwd", "/no/such/place/for/this/test");
+    let missing = PathOmniboxState::new("/no/such/place/for/this/test");
     assert_eq!(
         path_mark(&missing, &theme)[1].style,
         Style::default().fg(Color::LightRed)
     );
     let here = tempfile::tempdir().expect("temp dir");
-    let exists = PathOmniboxState::new("cwd", here.path().display().to_string());
+    let exists = PathOmniboxState::new(here.path().display().to_string());
     assert_eq!(
         path_mark(&exists, &theme)[1].style,
         Style::default().fg(Color::LightCyan)
@@ -292,8 +315,8 @@ fn path_marks_follow_the_theme() {
 fn the_focused_row_carries_the_cursor_marker_and_highlight_and_its_value_keeps_its_fill() {
     let theme = theme();
     let cols = Cols::new(60);
-    let focused = value_row("name", "xyz", 1, true, cols, None, &theme);
-    let idle = value_row("name", "xyz", 1, false, cols, None, &theme);
+    let focused = value_row("name", &edit("xyz", 1), true, cols, None, &theme);
+    let idle = value_row("name", &edit("xyz", 1), false, cols, None, &theme);
     assert!(
         text(&focused).starts_with(&format!("{} name", marks::POINTER)),
         "{}",

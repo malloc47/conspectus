@@ -158,22 +158,22 @@ modals! {
 /// here.
 #[derive(Debug, Clone)]
 pub struct RenameOverlayState {
-    inner: crate::tui::widgets::input::TextInputState,
+    inner: crate::tui::widgets::input::TextPromptState,
 }
 
 impl RenameOverlayState {
     /// Wrap a fresh text-input state seeded for a rename.
-    pub fn new(inner: crate::tui::widgets::input::TextInputState) -> Self {
+    pub fn new(inner: crate::tui::widgets::input::TextPromptState) -> Self {
         Self { inner }
     }
 
     /// The wrapped text-input state.
-    pub fn inner(&self) -> &crate::tui::widgets::input::TextInputState {
+    pub fn inner(&self) -> &crate::tui::widgets::input::TextPromptState {
         &self.inner
     }
 
     /// The wrapped text-input state, mutably, for seeding the buffer.
-    pub fn inner_mut(&mut self) -> &mut crate::tui::widgets::input::TextInputState {
+    pub fn inner_mut(&mut self) -> &mut crate::tui::widgets::input::TextPromptState {
         &mut self.inner
     }
 

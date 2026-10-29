@@ -106,7 +106,7 @@ fn launch_argv_parses_shell_quoted() {
     );
     state
         .spec_mut()
-        .set_launch_argv(LAUNCH_ARGV_LABEL, "codex --model 'gpt-5 pro'".to_string());
+        .set_launch_argv("codex --model 'gpt-5 pro'".to_string());
     let req = state.build_request().expect("parse ok");
     assert_eq!(req.launch_argv, vec!["codex", "--model", "gpt-5 pro"]);
 }
@@ -150,7 +150,7 @@ fn a_typed_argv_replaces_the_default_hint() {
         Vec::new(),
     )
     .with_defaults(profile_defaults(&["codex", "--flag"]));
-    state.spec.set_launch_argv("Launch argv", "codex --mine");
+    state.spec.set_launch_argv("codex --mine");
 
     assert_eq!(state.default_hint(), None);
 }

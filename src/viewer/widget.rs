@@ -401,11 +401,11 @@ fn find_chip_text(state: &ViewerState) -> Option<String> {
     Some(text)
 }
 
-/// Draw the find prompt over the footer: `/` and the text with a block
-/// cursor, then the key hint. A long query scrolls so the cursor stays
-/// in view.
+/// Draw the find prompt over the footer: `/` and the query as a text
+/// field with its caret, then the key hint. A long query scrolls so the
+/// cursor stays in view.
 pub(crate) fn draw_find_prompt(
-    prompt: &crate::viewer::find::FindPrompt,
+    prompt: &tuikit::text_edit::LineEdit,
     hint: &str,
     theme: &Theme,
     buf: &mut Buffer,
@@ -417,45 +417,19 @@ pub(crate) fn draw_find_prompt(
         format!("   {hint}")
     };
     let hint_cells = tuikit::text::width(&hint_text);
-    let width = area.width as usize;
-    // Cells for the text and the cursor after the leading `/`.
-    let room = width.saturating_sub(1 + hint_cells).max(4);
-    let chars: Vec<char> = prompt.text.chars().collect();
-    let cells = |c: char| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-    let cursor = prompt.cursor.min(chars.len());
-    let at_char = chars.get(cursor).copied();
-    let at_cells = at_char.map_or(1, |c| cells(c).max(1));
-    // Scroll so the cursor cell stays visible: drop text from the left
-    // until what precedes the cursor and the cursor itself fit, counting
-    // display cells (a CJK character is two) rather than characters.
-    let mut start = 0usize;
-    let mut before_cells: usize = chars[..cursor].iter().map(|&c| cells(c)).sum();
-    while start < cursor && before_cells + at_cells > room {
-        before_cells -= cells(chars[start]);
-        start += 1;
-    }
-    let before: String = chars[start..cursor].iter().collect();
-    let at: String = at_char.map_or_else(|| " ".to_string(), |c| c.to_string());
-    let mut after = String::new();
-    let mut used = before_cells + at_cells;
-    for &c in chars.iter().skip(cursor + 1) {
-        if used + cells(c) > room {
-            break;
-        }
-        used += cells(c);
-        after.push(c);
-    }
-    let line = Line::from(vec![
-        Span::styled("/", Style::new().add_modifier(Modifier::BOLD)),
-        Span::raw(before),
-        Span::styled(at, Style::new().add_modifier(Modifier::REVERSED)),
-        Span::raw(after),
-        Span::styled(
-            hint_text,
-            Style::new().fg(theme.inert).add_modifier(theme.muted),
-        ),
-    ]);
-    Widget::render(Paragraph::new(line), area, buf);
+    // Cells for the text and the cursor after the leading `/`; the field
+    // keeps a few even when the hint leaves none.
+    let room = usize::from(area.width)
+        .saturating_sub(1 + hint_cells)
+        .max(4);
+    let mut spans = tuikit::text_edit::TextField::new(prompt)
+        .prefix(Span::styled("/", Style::new().add_modifier(Modifier::BOLD)))
+        .spans(1 + room, theme);
+    spans.push(Span::styled(
+        hint_text,
+        Style::new().fg(theme.inert).add_modifier(theme.muted),
+    ));
+    Widget::render(Paragraph::new(Line::from(spans)), area, buf);
 }
 
 /// `tools·sum (t)` / `tools·off (t)`: the current tool detail level and

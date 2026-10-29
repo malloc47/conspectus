@@ -16,6 +16,7 @@
 use crate::viewer::input::ViewerEffect;
 use crate::viewer::model::TurnKind;
 use tuikit::text::find_ci;
+use tuikit::text_edit::{EditKey, LineEdit};
 
 use crate::viewer::search::{ContentKinds, ContentQuery, matching_turns};
 use crate::viewer::state::{ToolDetail, ViewerOpen, ViewerState};
@@ -24,7 +25,8 @@ use crate::viewer::state::{ToolDetail, ViewerOpen, ViewerState};
 /// transcript has changed since the search that found it.
 const NEARBY_TURNS: usize = 25;
 
-/// Keys of the find prompt. Typed characters arrive as [`Self::Insert`].
+/// Keys of the find prompt: what the prompt means, and the edits every
+/// text field shares.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewerFindMsg {
     /// Leave the viewer from the prompt (`Ctrl-C`): dismissing reaches
@@ -34,124 +36,8 @@ pub enum ViewerFindMsg {
     Cancel,
     /// Run the find and jump to its first match.
     Confirm,
-    Backspace,
-    Delete,
-    Left,
-    Right,
-    /// Move to the start of the word before the cursor.
-    WordLeft,
-    /// Move to the start of the word after the cursor.
-    WordRight,
-    Home,
-    End,
-    /// Delete everything before the cursor.
-    ClearLine,
-    /// A typed character.
-    Insert(char),
-}
-
-/// The line being typed at the find prompt.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FindPrompt {
-    pub text: String,
-    /// Cursor position in characters.
-    pub cursor: usize,
-}
-
-impl FindPrompt {
-    pub fn with_text(text: &str) -> Self {
-        Self {
-            text: text.to_string(),
-            cursor: text.chars().count(),
-        }
-    }
-
-    fn byte_at(&self, chars: usize) -> usize {
-        self.text
-            .char_indices()
-            .nth(chars)
-            .map_or(self.text.len(), |(index, _)| index)
-    }
-
-    pub fn insert(&mut self, c: char) {
-        let at = self.byte_at(self.cursor);
-        self.text.insert(at, c);
-        self.cursor += 1;
-    }
-
-    pub fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        self.cursor -= 1;
-        let at = self.byte_at(self.cursor);
-        self.text.remove(at);
-    }
-
-    pub fn delete(&mut self) {
-        let at = self.byte_at(self.cursor);
-        if at < self.text.len() {
-            self.text.remove(at);
-        }
-    }
-
-    pub fn left(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
-    }
-
-    pub fn right(&mut self) {
-        self.cursor = (self.cursor + 1).min(self.text.chars().count());
-    }
-
-    /// Move to the start of the word before the cursor, the way the
-    /// TUI's other text fields do: back over anything that isn't part of
-    /// a word, then over the word.
-    pub fn word_left(&mut self) {
-        let chars: Vec<char> = self.text.chars().collect();
-        let mut at = self.cursor.min(chars.len());
-        while at > 0 && !is_word_char(chars[at - 1]) {
-            at -= 1;
-        }
-        while at > 0 && is_word_char(chars[at - 1]) {
-            at -= 1;
-        }
-        self.cursor = at;
-    }
-
-    /// Move to the start of the word after the cursor (the end of the
-    /// text when there is none): over the rest of this word, then over
-    /// what separates it from the next.
-    pub fn word_right(&mut self) {
-        let chars: Vec<char> = self.text.chars().collect();
-        let mut at = self.cursor.min(chars.len());
-        while at < chars.len() && is_word_char(chars[at]) {
-            at += 1;
-        }
-        while at < chars.len() && !is_word_char(chars[at]) {
-            at += 1;
-        }
-        self.cursor = at;
-    }
-
-    pub fn home(&mut self) {
-        self.cursor = 0;
-    }
-
-    pub fn end(&mut self) {
-        self.cursor = self.text.chars().count();
-    }
-
-    pub fn clear_line(&mut self) {
-        let at = self.byte_at(self.cursor);
-        self.text.drain(..at);
-        self.cursor = 0;
-    }
-}
-
-/// Whether `c` is part of a word for word motion: anything but
-/// whitespace and ASCII punctuation, as in the TUI's line editor.
-fn is_word_char(c: char) -> bool {
-    !c.is_whitespace() && !c.is_ascii_punctuation()
+    /// Edit the query: a typed character or an editing key.
+    Edit(EditKey),
 }
 
 /// The find in progress: the prompt while it is open, and the active
@@ -159,7 +45,7 @@ fn is_word_char(c: char) -> bool {
 #[derive(Clone, Debug, Default)]
 pub struct FindState {
     /// `Some` while the operator is typing a query.
-    pub prompt: Option<FindPrompt>,
+    pub prompt: Option<LineEdit>,
     /// The active query, trimmed. Empty when no find is active.
     pub query: String,
     /// Indices of the shown turns that match, in order.
@@ -220,7 +106,7 @@ impl ViewerState {
     /// Open the find prompt, filled with the active query so it can be
     /// edited.
     pub(crate) fn open_find_prompt(&mut self) {
-        self.find.prompt = Some(FindPrompt::with_text(&self.find.query));
+        self.find.prompt = Some(LineEdit::new(self.find.query.as_str()));
     }
 
     /// The turn that holds the top line of the viewport, from the last
@@ -430,20 +316,13 @@ pub fn reduce_find(mut state: ViewerState, msg: ViewerFindMsg) -> (ViewerState, 
         return (state, ViewerEffect::None);
     };
     match msg {
-        ViewerFindMsg::Insert(c) => prompt.insert(c),
-        ViewerFindMsg::Backspace => prompt.backspace(),
-        ViewerFindMsg::Delete => prompt.delete(),
-        ViewerFindMsg::Left => prompt.left(),
-        ViewerFindMsg::Right => prompt.right(),
-        ViewerFindMsg::WordLeft => prompt.word_left(),
-        ViewerFindMsg::WordRight => prompt.word_right(),
-        ViewerFindMsg::Home => prompt.home(),
-        ViewerFindMsg::End => prompt.end(),
-        ViewerFindMsg::ClearLine => prompt.clear_line(),
+        ViewerFindMsg::Edit(edit) => {
+            prompt.apply(edit);
+        }
         ViewerFindMsg::Quit => return (state, ViewerEffect::Close),
         ViewerFindMsg::Cancel => state.find.prompt = None,
         ViewerFindMsg::Confirm => {
-            let text = prompt.text.trim().to_string();
+            let text = prompt.value().trim().to_string();
             state.find.prompt = None;
             if text.is_empty() {
                 state.find.clear();

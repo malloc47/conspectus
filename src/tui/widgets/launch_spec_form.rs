@@ -22,21 +22,21 @@ use crate::discovery::harness::{
     launch_options_for, strip_known_launch_option_fragments,
 };
 use crate::tui::widgets::form::display_argv;
-use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
+use tuikit::text_edit::{Edit, LineEdit};
 
 /// Owned state for the launch-spec form's shared fields.
 /// `MuxLaunchFormState` embeds this exactly once and routes every
 /// read/write of a shared field through the accessors.
 #[derive(Debug, Clone)]
 pub struct LaunchSpecFormState {
-    harness: TextInputState,
+    harness: LineEdit,
     cwd: PathOmniboxState,
-    mux_name: TextInputState,
-    mux_socket: TextInputState,
-    launch_argv: TextInputState,
+    mux_name: LineEdit,
+    mux_socket: LineEdit,
+    launch_argv: LineEdit,
     worktree_enabled: bool,
-    worktree_branch: TextInputState,
+    worktree_branch: LineEdit,
     known_harness_keys: Vec<String>,
     known_mux_names: Vec<String>,
     error: Option<String>,
@@ -47,38 +47,28 @@ pub struct LaunchSpecFormState {
 /// budget and readers can spot each field without matching positional
 /// arguments to parameter names.
 #[derive(Debug, Clone)]
-pub struct LaunchSpecInit<'a> {
-    pub harness_label: &'a str,
+pub struct LaunchSpecInit {
     pub harness_value: String,
-    pub cwd_label: &'a str,
     pub cwd_value: String,
-    pub mux_name_label: &'a str,
     pub mux_name_value: String,
-    pub mux_socket_label: &'a str,
-    pub launch_argv_label: &'a str,
-    pub worktree_branch_label: &'a str,
     pub worktree_branch_value: String,
     pub known_harness_keys: Vec<String>,
     pub known_mux_names: Vec<String>,
 }
 
 impl LaunchSpecFormState {
-    /// Build a spec with pre-populated defaults. The caller decides
-    /// the field labels (they show up on the wrapper's rendered rows,
-    /// not inside the primitive) — pass the same labels the previous
-    /// standalone widgets used so snapshot tests stay green.
-    pub fn new(init: LaunchSpecInit<'_>) -> Self {
+    /// Build a spec with pre-populated defaults. The field labels are
+    /// the wrapper's: they show up on its rendered rows, not inside the
+    /// primitive.
+    pub fn new(init: LaunchSpecInit) -> Self {
         Self {
-            harness: TextInputState::new(init.harness_label.to_string(), init.harness_value),
-            cwd: PathOmniboxState::new(init.cwd_label.to_string(), init.cwd_value),
-            mux_name: TextInputState::new(init.mux_name_label.to_string(), init.mux_name_value),
-            mux_socket: TextInputState::new(init.mux_socket_label.to_string(), String::new()),
-            launch_argv: TextInputState::new(init.launch_argv_label.to_string(), String::new()),
+            harness: LineEdit::new(init.harness_value),
+            cwd: PathOmniboxState::new(init.cwd_value),
+            mux_name: LineEdit::new(init.mux_name_value),
+            mux_socket: LineEdit::default(),
+            launch_argv: LineEdit::default(),
             worktree_enabled: false,
-            worktree_branch: TextInputState::new(
-                init.worktree_branch_label.to_string(),
-                init.worktree_branch_value,
-            ),
+            worktree_branch: LineEdit::new(init.worktree_branch_value),
             known_harness_keys: init.known_harness_keys,
             known_mux_names: init.known_mux_names,
             error: None,
@@ -87,25 +77,25 @@ impl LaunchSpecFormState {
 
     // -- read accessors ---------------------------------------------
 
-    pub fn harness(&self) -> &TextInputState {
+    pub fn harness(&self) -> &LineEdit {
         &self.harness
     }
     pub fn cwd(&self) -> &PathOmniboxState {
         &self.cwd
     }
-    pub fn mux_name(&self) -> &TextInputState {
+    pub fn mux_name(&self) -> &LineEdit {
         &self.mux_name
     }
-    pub fn mux_socket(&self) -> &TextInputState {
+    pub fn mux_socket(&self) -> &LineEdit {
         &self.mux_socket
     }
-    pub fn launch_argv(&self) -> &TextInputState {
+    pub fn launch_argv(&self) -> &LineEdit {
         &self.launch_argv
     }
     pub fn worktree_enabled(&self) -> bool {
         self.worktree_enabled
     }
-    pub fn worktree_branch(&self) -> &TextInputState {
+    pub fn worktree_branch(&self) -> &LineEdit {
         &self.worktree_branch
     }
     pub fn known_harness_keys(&self) -> &[String] {
@@ -120,22 +110,22 @@ impl LaunchSpecFormState {
 
     // -- mutable field access ---------------------------------------
 
-    pub fn harness_mut(&mut self) -> &mut TextInputState {
+    pub fn harness_mut(&mut self) -> &mut LineEdit {
         &mut self.harness
     }
     pub fn cwd_mut(&mut self) -> &mut PathOmniboxState {
         &mut self.cwd
     }
-    pub fn mux_name_mut(&mut self) -> &mut TextInputState {
+    pub fn mux_name_mut(&mut self) -> &mut LineEdit {
         &mut self.mux_name
     }
-    pub fn mux_socket_mut(&mut self) -> &mut TextInputState {
+    pub fn mux_socket_mut(&mut self) -> &mut LineEdit {
         &mut self.mux_socket
     }
-    pub fn launch_argv_mut(&mut self) -> &mut TextInputState {
+    pub fn launch_argv_mut(&mut self) -> &mut LineEdit {
         &mut self.launch_argv
     }
-    pub fn worktree_branch_mut(&mut self) -> &mut TextInputState {
+    pub fn worktree_branch_mut(&mut self) -> &mut LineEdit {
         &mut self.worktree_branch
     }
 
@@ -144,20 +134,20 @@ impl LaunchSpecFormState {
     /// Replace the harness field wholesale. Used when a wrapper cycles
     /// through `known_harness_keys` or when a mode change re-seeds
     /// the harness default.
-    pub fn set_harness(&mut self, title: impl Into<String>, value: impl Into<String>) {
-        self.harness = TextInputState::new(title.into(), value);
+    pub fn set_harness(&mut self, value: impl Into<String>) {
+        self.harness = LineEdit::new(value);
     }
 
     /// Replace the mux-name field wholesale.
-    pub fn set_mux_name(&mut self, title: impl Into<String>, value: impl Into<String>) {
-        self.mux_name = TextInputState::new(title.into(), value);
+    pub fn set_mux_name(&mut self, value: impl Into<String>) {
+        self.mux_name = LineEdit::new(value);
     }
 
     /// Replace the launch-argv field wholesale (harness cycling
     /// rebuilds this when the previous value matched the old
     /// harness's default).
-    pub fn set_launch_argv(&mut self, title: impl Into<String>, value: impl Into<String>) {
-        self.launch_argv = TextInputState::new(title.into(), value);
+    pub fn set_launch_argv(&mut self, value: impl Into<String>) {
+        self.launch_argv = LineEdit::new(value);
     }
 
     /// Toggle the worktree flag. Returns the new value.
@@ -195,7 +185,7 @@ impl LaunchSpecFormState {
     /// Cycle to the next (delta > 0) or previous (delta < 0) known
     /// harness key. Returns the newly-selected key when the cycle
     /// moved, `None` when the known-key list is empty.
-    pub fn cycle_harness(&mut self, delta: i32, harness_label: &str) -> Option<String> {
+    pub fn cycle_harness(&mut self, delta: i32) -> Option<String> {
         if self.known_harness_keys.is_empty() {
             return None;
         }
@@ -210,7 +200,7 @@ impl LaunchSpecFormState {
             None => 0,
         };
         let next = self.known_harness_keys[idx].clone();
-        self.harness = TextInputState::new(harness_label.to_string(), next.clone());
+        self.harness = LineEdit::new(next.clone());
         Some(next)
     }
 
@@ -243,13 +233,12 @@ impl LaunchSpecFormState {
     /// that is just the default so the default keeps following the
     /// harness.
     pub fn set_effective_argv(&mut self, argv: &[String], default: &[String]) {
-        let title = self.launch_argv.title().to_string();
         let value = if argv.is_empty() || argv == default {
             String::new()
         } else {
             display_argv(argv)
         };
-        self.launch_argv = TextInputState::new(title, value);
+        self.launch_argv = LineEdit::new(value);
     }
 
     /// Flip a launch option. `delta` steps through the options when
@@ -290,7 +279,6 @@ impl LaunchSpecFormState {
     pub fn cycle_harness_keeping_argv(
         &mut self,
         delta: i32,
-        harness_label: &str,
         default_for: &dyn Fn(&str) -> Vec<String>,
     ) {
         if self.known_harness_keys.is_empty() {
@@ -298,7 +286,7 @@ impl LaunchSpecFormState {
         }
         let old_default = default_for(self.harness.value().trim());
         let typed = parse_launch_argv(self.launch_argv.value().trim(), "launch").ok();
-        self.cycle_harness(delta, harness_label);
+        self.cycle_harness(delta);
         let Some(typed) = typed.filter(|argv| !argv.is_empty()) else {
             return;
         };
@@ -341,16 +329,16 @@ impl LaunchSpecFormState {
         self.cwd.handle_key(event)
     }
 
-    /// Route a key event into whichever `TextInputState` field the
-    /// caller names. Convenience for wrappers that switch on their
-    /// own cursor enum and want to avoid boilerplate at each arm.
-    pub fn handle_text_key(&mut self, field: SpecTextField, event: KeyEvent) -> InputOutcome {
+    /// Route a key event into whichever text field the caller names,
+    /// and say what it did. Convenience for wrappers that switch on
+    /// their own cursor enum and want to avoid boilerplate at each arm.
+    pub fn handle_text_key(&mut self, field: SpecTextField, event: KeyEvent) -> Edit {
         match field {
-            SpecTextField::Harness => self.harness.handle_key(event),
-            SpecTextField::MuxName => self.mux_name.handle_key(event),
-            SpecTextField::MuxSocket => self.mux_socket.handle_key(event),
-            SpecTextField::LaunchArgv => self.launch_argv.handle_key(event),
-            SpecTextField::WorktreeBranch => self.worktree_branch.handle_key(event),
+            SpecTextField::Harness => self.harness.handle(event),
+            SpecTextField::MuxName => self.mux_name.handle(event),
+            SpecTextField::MuxSocket => self.mux_socket.handle(event),
+            SpecTextField::LaunchArgv => self.launch_argv.handle(event),
+            SpecTextField::WorktreeBranch => self.worktree_branch.handle(event),
         }
     }
 }
@@ -358,7 +346,7 @@ impl LaunchSpecFormState {
 /// Identifier for one of the primitive's text-input fields.
 /// [`LaunchSpecFormState::handle_text_key`] uses this to route
 /// per-field key events without exposing the underlying
-/// `TextInputState` mutable borrow at every caller.
+/// `LineEdit` mutable borrow at every caller.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SpecTextField {
     Harness,

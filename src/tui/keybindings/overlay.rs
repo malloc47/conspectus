@@ -20,7 +20,7 @@ use ratatui::crossterm::event::KeyCode;
 use tuikit::glyphs::marks;
 use tuikit::keys::{
     ChoiceKey, Convention, EnterMeans, FORM_KEYS, FORM_OPTION_KEYS, FormKey, KeyAction, KeyRole,
-    KeyRow, PAGER_KEYS, PagerKey, SpaceMeans, alias, alt, ch, ctrl, ctrl_key, include, key, shown,
+    KeyRow, PAGER_KEYS, PagerKey, SpaceMeans, alias, ch, ctrl, include, key, shown,
 };
 
 use crate::tui::widgets::pane_viewer::PaneViewerMsg;
@@ -502,35 +502,19 @@ impl KeyAction for ViewerFindMsg {
             Self::Quit => KeyRole::Abort,
             Self::Cancel => KeyRole::Leave,
             Self::Confirm => KeyRole::Apply,
-            Self::Left
-            | Self::Right
-            | Self::WordLeft
-            | Self::WordRight
-            | Self::Home
-            | Self::End => KeyRole::Move,
-            Self::Backspace | Self::Delete | Self::ClearLine | Self::Insert(_) => KeyRole::Other,
+            Self::Edit(edit) => edit.role(),
         }
     }
 }
 
-/// The find prompt inside the viewers. Keys no row binds type into the
-/// prompt (see `tuikit::keys::typed_char`), so `q` types; `Ctrl-C` leaves
-/// the viewer, as it does from anywhere in it.
+/// The find prompt inside the viewers. Keys no row binds go to the line
+/// editor (`tuikit::text_edit::EditKey::of`), so `q` types and the
+/// editing keys are every text field's; `Ctrl-C` leaves the viewer, as
+/// it does from anywhere in it.
 pub const VIEWER_FIND_KEYS: &[KeyRow<ViewerFindMsg>] = &[
     alias(ctrl('c'), ViewerFindMsg::Quit),
     shown(key(KeyCode::Enter), ViewerFindMsg::Confirm, "Enter", "find"),
     shown(key(KeyCode::Esc), ViewerFindMsg::Cancel, "Esc", "cancel"),
-    alias(key(KeyCode::Backspace), ViewerFindMsg::Backspace),
-    alias(key(KeyCode::Delete), ViewerFindMsg::Delete),
-    alias(alt('b'), ViewerFindMsg::WordLeft),
-    alias(alt('f'), ViewerFindMsg::WordRight),
-    alias(ctrl_key(KeyCode::Left), ViewerFindMsg::WordLeft),
-    alias(ctrl_key(KeyCode::Right), ViewerFindMsg::WordRight),
-    alias(key(KeyCode::Left), ViewerFindMsg::Left),
-    alias(key(KeyCode::Right), ViewerFindMsg::Right),
-    alias(key(KeyCode::Home), ViewerFindMsg::Home),
-    alias(key(KeyCode::End), ViewerFindMsg::End),
-    alias(ctrl('u'), ViewerFindMsg::ClearLine),
 ];
 
 // ---------------------------------------------------------------------

@@ -30,10 +30,10 @@ use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
     self, Cols, SplitBody, display_argv, footer_lines, note_row, options_row,
 };
-use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::parse_launch_argv;
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
 use tuikit::overlay::Outcome;
+use tuikit::text_edit::LineEdit;
 
 /// What the form saves: a rename, overrides to set, overrides to drop.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,9 +67,9 @@ pub struct PinEditInit {
 
 #[derive(Debug, Clone)]
 enum Control {
-    Text(TextInputState),
+    Text(LineEdit),
     Path(PathOmniboxState),
-    Harness(TextInputState),
+    Harness(LineEdit),
 }
 
 impl Control {
@@ -91,10 +91,7 @@ impl Control {
 
     fn replace(&mut self, value: String) {
         match self {
-            Self::Text(input) => *input = TextInputState::new(input.title().to_string(), value),
-            Self::Harness(input) => {
-                *input = TextInputState::new(input.title().to_string(), value);
-            }
+            Self::Text(input) | Self::Harness(input) => *input = LineEdit::new(value),
             Self::Path(path) => path.set_value(value),
         }
     }
@@ -255,7 +252,7 @@ impl PinEditFormState {
         let mut rows = vec![Row {
             which: Which::PinName,
             label: "pin name".to_string(),
-            control: Control::Text(TextInputState::new("pin name", init.pin.clone())),
+            control: Control::Text(LineEdit::new(init.pin.clone())),
             initial: init.pin.clone(),
             overridden: false,
             inherited: (init.pin.clone(), None),
@@ -273,14 +270,12 @@ impl PinEditFormState {
                 (PinKind::Mux, "cwd")
                 | (PinKind::Checkout, "location")
                 | (PinKind::Repo, "path") => {
-                    let mut path = PathOmniboxState::new(field, effective.clone());
+                    let mut path = PathOmniboxState::new(effective.clone());
                     path.set_known_candidates(init.cwd_candidates.clone());
                     Control::Path(path)
                 }
-                (PinKind::Mux, "harness") => {
-                    Control::Harness(TextInputState::new(field, effective.clone()))
-                }
-                _ => Control::Text(TextInputState::new(field, effective.clone())),
+                (PinKind::Mux, "harness") => Control::Harness(LineEdit::new(effective.clone())),
+                _ => Control::Text(LineEdit::new(effective.clone())),
             };
             rows.push(Row {
                 which: Which::Field(field),
@@ -549,24 +544,18 @@ impl PinEditFormState {
         }
     }
 
+    /// A key on a text row: an edit that changes the value takes back
+    /// a pending follow and clears the error.
     fn typed(&mut self, idx: usize, key: KeyEvent) -> Outcome<Msg> {
-        let before = self.rows[idx].control.value().to_string();
-        let outcome = match &mut self.rows[idx].control {
-            Control::Text(input) | Control::Harness(input) => input.handle_key(key),
-            Control::Path(path) => {
-                path.handle_key(key);
-                InputOutcome::Continue
-            }
+        let changed = match &mut self.rows[idx].control {
+            Control::Text(input) | Control::Harness(input) => input.handle(key).changed,
+            Control::Path(path) => path.handle_key(key) == PathOmniboxOutcome::Changed,
         };
-        if self.rows[idx].control.value() != before {
+        if changed {
             self.rows[idx].cleared = false;
             self.error = None;
         }
-        match outcome {
-            InputOutcome::Continue => Outcome::Consumed,
-            InputOutcome::Cancel | InputOutcome::Abort => Outcome::Close,
-            InputOutcome::Confirm(_) => self.try_commit(),
-        }
+        Outcome::Consumed
     }
 }
 
@@ -804,23 +793,11 @@ fn render_row(
             if custom {
                 let mark = " [custom]";
                 let width = grid.value.saturating_sub(tuikit::text::width(mark));
-                spans.extend(form::value_cells(
-                    input.value(),
-                    input.cursor(),
-                    width,
-                    active,
-                    theme,
-                ));
+                spans.extend(form::value_cells(input, width, active, theme));
                 spans.push(Span::styled(mark, Style::default().fg(theme.warning)));
             } else {
                 let slot = 18.min(grid.value);
-                spans.extend(form::value_cells(
-                    input.value(),
-                    input.cursor(),
-                    slot,
-                    active,
-                    theme,
-                ));
+                spans.extend(form::value_cells(input, slot, active, theme));
                 let chips =
                     form::harness_chips(value, &state.known_harness_keys, grid.value - slot, theme);
                 let used = tuikit::text::spans_width(&chips);
@@ -830,23 +807,11 @@ fn render_row(
         }
         Control::Path(path) => {
             let width = grid.value.saturating_sub(2);
-            spans.extend(form::value_cells(
-                path.value(),
-                path.cursor(),
-                width,
-                active,
-                theme,
-            ));
+            spans.extend(form::value_cells(path.edit(), width, active, theme));
             spans.extend(form::path_mark(path, theme));
         }
         Control::Text(input) => {
-            spans.extend(form::value_cells(
-                input.value(),
-                input.cursor(),
-                grid.value,
-                active,
-                theme,
-            ));
+            spans.extend(form::value_cells(input, grid.value, active, theme));
         }
     }
     spans.push(Span::raw(" "));

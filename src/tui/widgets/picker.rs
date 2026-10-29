@@ -21,8 +21,8 @@ use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Msg;
 use crate::tui::theme::Theme;
-use crate::tui::widgets::input::TextInputState;
 use tuikit::overlay::Outcome;
+use tuikit::text_edit::{LineEdit, TextField};
 
 /// One candidate: what is shown, and what choosing it commits.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub struct PickerState {
     title: String,
     purpose: PickerPurpose,
     items: Vec<PickerItem>,
-    query: TextInputState,
+    query: LineEdit,
     /// Indices into `items` that match the query, in list order.
     visible: Vec<usize>,
     cursor: usize,
@@ -62,7 +62,7 @@ impl PickerState {
             title: title.into(),
             purpose,
             items,
-            query: TextInputState::new(" filter ", String::new()),
+            query: LineEdit::default(),
             visible,
             cursor: 0,
         }
@@ -157,8 +157,9 @@ impl PickerState {
             }
             // The picker has no scopes; its table binds none of these.
             Some(_) | None => {
-                let _ = self.query.handle_key(key);
-                self.refilter();
+                if self.query.handle(key).changed {
+                    self.refilter();
+                }
                 Outcome::Consumed
             }
         }
@@ -210,11 +211,9 @@ impl ModalBody for PickerBody<'_> {
     }
 
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let query = line![
-            span!(Style::default().fg(self.theme.accent); "/"),
-            self.state.query().to_string(),
-        ];
-        Paragraph::new(query).render(Rect { height: 1, ..area }, buf);
+        TextField::new(&self.state.query)
+            .prefix(Span::styled("/", Style::default().fg(self.theme.accent)))
+            .render(Rect { height: 1, ..area }, buf, self.theme);
 
         let list = Rect {
             y: area.y.saturating_add(1),

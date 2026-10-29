@@ -6093,7 +6093,7 @@ fn slot_prompts_commit_to_their_own_store_write() {
     app.update(Msg::OpenSlotRename("conspectus-main".into()));
     assert_eq!(
         app.rename_overlay()
-            .map(crate::tui::widgets::input::TextInputState::value),
+            .map(crate::tui::widgets::input::TextPromptState::value),
         Some("conspectus-main")
     );
     assert_eq!(
@@ -6139,7 +6139,7 @@ fn a_cancelled_slot_prompt_does_not_capture_the_next_rename() {
     // A later rename of the selected mux opens its own overlay, which
     // forgets the abandoned slot prompt.
     app.set_selection(mux_row("scratch"));
-    app.open_rename_overlay(crate::tui::widgets::input::TextInputState::new(
+    app.open_rename_overlay(crate::tui::widgets::input::TextPromptState::new(
         "Rename mux",
         "scratch",
     ));

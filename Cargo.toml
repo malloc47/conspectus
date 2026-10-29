@@ -198,7 +198,6 @@ terminal_size = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true }
-tui-input = { workspace = true }
 tui-markdown = { workspace = true }
 # The TUI framework crate (ADR 0150): design tokens, controls, and
 # interaction conventions. It depends on nothing from this package.

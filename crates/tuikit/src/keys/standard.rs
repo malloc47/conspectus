@@ -183,17 +183,14 @@ pub enum TextInputKey {
     Cancel,
     /// Swallowed, so a tab never reaches the text.
     Tab,
-    /// Move to the start of the word before the cursor.
-    WordLeft,
-    /// Move to the start of the word after the cursor.
-    WordRight,
 }
 
 /// A single-line text prompt: `Enter confirm · Esc cancel`.
 ///
-/// `Alt-b` and `Alt-f` move by words: a terminal sends Alt as an Esc
-/// prefix, which arrives as the Alt modifier, so the word motions are
-/// bound here rather than left to the edit engine.
+/// The prompt binds only what a prompt means; every other key goes to
+/// the line editor, whose own table
+/// ([`LINE_EDIT_KEYS`](crate::text_edit::LINE_EDIT_KEYS)) holds the
+/// editing keys, word motion included.
 pub const TEXT_INPUT_KEYS: &[KeyRow<TextInputKey>] = &[
     alias(ctrl('c'), TextInputKey::Abort),
     shown(
@@ -204,8 +201,6 @@ pub const TEXT_INPUT_KEYS: &[KeyRow<TextInputKey>] = &[
     ),
     shown(key(KeyCode::Esc), TextInputKey::Cancel, "Esc", "cancel"),
     alias(key(KeyCode::Tab), TextInputKey::Tab),
-    alias(alt('b'), TextInputKey::WordLeft),
-    alias(alt('f'), TextInputKey::WordRight),
 ];
 
 impl KeyAction for TextInputKey {
@@ -215,7 +210,6 @@ impl KeyAction for TextInputKey {
             Self::Confirm => KeyRole::Apply,
             Self::Cancel => KeyRole::Leave,
             Self::Tab => KeyRole::Other,
-            Self::WordLeft | Self::WordRight => KeyRole::Move,
         }
     }
 }

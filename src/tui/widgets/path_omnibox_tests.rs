@@ -4,7 +4,7 @@ use tuikit::testkit::keys::press;
 
 #[test]
 fn ranks_known_candidates_before_filesystem_matches() {
-    let mut state = PathOmniboxState::new(" cwd ", "/tmp");
+    let mut state = PathOmniboxState::new("/tmp");
     state.set_known_candidates(vec![
         PathCandidate::new("/tmp/low", "agent", 20),
         PathCandidate::new("/tmp/high", "selected", 100),
@@ -22,7 +22,7 @@ fn ranks_known_candidates_before_filesystem_matches() {
 
 #[test]
 fn tab_completes_highest_ranked_candidate() {
-    let mut state = PathOmniboxState::new(" cwd ", "/work");
+    let mut state = PathOmniboxState::new("/work");
     state.set_known_candidates(vec![
         PathCandidate::new("/workspace/beta", "agent", 20),
         PathCandidate::new("/workspace/alpha", "selected", 100),
@@ -37,7 +37,7 @@ fn tab_completes_highest_ranked_candidate() {
 
 #[test]
 fn reports_missing_paths_without_rejecting_typed_value() {
-    let state = PathOmniboxState::new(" cwd ", "/definitely/not/here");
+    let state = PathOmniboxState::new("/definitely/not/here");
     assert_eq!(state.validation(), PathValidation::Missing);
     assert_eq!(state.value(), "/definitely/not/here");
 }
@@ -47,8 +47,7 @@ fn filesystem_suggestions_match_typed_prefix() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let alpha = tmp.path().join("alpha");
     std::fs::create_dir(&alpha).expect("mkdir");
-    let mut state =
-        PathOmniboxState::new(" cwd ", tmp.path().join("a").to_string_lossy().to_string());
+    let mut state = PathOmniboxState::new(tmp.path().join("a").to_string_lossy().to_string());
     state.set_known_candidates(Vec::new());
 
     assert!(
@@ -81,7 +80,7 @@ fn tilde_query_matches_absolute_known_candidate_and_completes_tilde_path() {
         .map(PathBuf::from)
         .expect("HOME must be set for tilde completion test");
     let target = home.join("conspectus-tilde-candidate");
-    let mut state = PathOmniboxState::new(" cwd ", "~/cons");
+    let mut state = PathOmniboxState::new("~/cons");
     state.set_known_candidates(vec![PathCandidate::new(
         target.to_string_lossy(),
         "selected",

@@ -4,14 +4,14 @@ use tuikit::testkit::keys::{ctrl, press};
 
 #[test]
 fn enter_confirms_with_current_value() {
-    let mut state = TextInputState::new(" rename ", "hello");
+    let mut state = TextPromptState::new(" rename ", "hello");
     let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(outcome, InputOutcome::Confirm("hello".to_string()));
 }
 
 #[test]
 fn esc_cancels_without_committing() {
-    let mut state = TextInputState::new(" rename ", "hello");
+    let mut state = TextPromptState::new(" rename ", "hello");
     let outcome = state.handle_key(press(KeyCode::Esc));
     assert_eq!(outcome, InputOutcome::Cancel);
     // Cancel must not mutate the buffer.
@@ -20,7 +20,7 @@ fn esc_cancels_without_committing() {
 
 #[test]
 fn tab_is_swallowed_while_overlay_is_open() {
-    let mut state = TextInputState::new(" rename ", "hello");
+    let mut state = TextPromptState::new(" rename ", "hello");
     let outcome = state.handle_key(press(KeyCode::Tab));
     assert_eq!(outcome, InputOutcome::Continue);
     assert_eq!(state.value(), "hello");
@@ -28,7 +28,7 @@ fn tab_is_swallowed_while_overlay_is_open() {
 
 #[test]
 fn ctrl_c_aborts_and_esc_cancels() {
-    let mut state = TextInputState::new(" rename ", "hello");
+    let mut state = TextPromptState::new(" rename ", "hello");
     let event = ctrl('c');
     let outcome = state.handle_key(event);
     assert_eq!(outcome, InputOutcome::Abort, "Ctrl-C dismisses the overlay");
@@ -37,7 +37,7 @@ fn ctrl_c_aborts_and_esc_cancels() {
 
 #[test]
 fn typing_appends_to_buffer() {
-    let mut state = TextInputState::new(" rename ", "abc");
+    let mut state = TextPromptState::new(" rename ", "abc");
     let outcome = state.handle_key(press(KeyCode::Char('d')));
     assert_eq!(outcome, InputOutcome::Continue);
     assert_eq!(state.value(), "abcd");
@@ -45,7 +45,7 @@ fn typing_appends_to_buffer() {
 
 #[test]
 fn backspace_deletes_char_before_cursor() {
-    let mut state = TextInputState::new(" rename ", "abc");
+    let mut state = TextPromptState::new(" rename ", "abc");
     state.handle_key(press(KeyCode::Backspace));
     assert_eq!(state.value(), "ab");
 }
@@ -53,7 +53,7 @@ fn backspace_deletes_char_before_cursor() {
 #[test]
 fn alt_b_and_alt_f_move_by_word() {
     let alt = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT);
-    let mut state = TextInputState::new(" rename ", "alpha beta-gamma");
+    let mut state = TextPromptState::new(" rename ", "alpha beta-gamma");
     assert_eq!(state.handle_key(alt('b')), InputOutcome::Continue);
     assert_eq!(state.cursor(), 11, "back to the start of `gamma`");
     state.handle_key(alt('b'));
@@ -64,22 +64,11 @@ fn alt_b_and_alt_f_move_by_word() {
 }
 
 #[test]
-fn a_paste_flattens_to_one_line() {
-    assert_eq!(single_line_paste("one\ntwo"), "one two");
-    assert_eq!(single_line_paste("one\r\ntwo\r\n"), "one two");
-    assert_eq!(single_line_paste("\n\none\n\n\ntwo\n"), "one two");
-    assert_eq!(single_line_paste("a\tb"), "a b");
-    assert_eq!(single_line_paste("a\u{1b}[31mb"), "a[31mb");
-    assert_eq!(single_line_paste("  keep  spaces  "), "  keep  spaces  ");
-    assert_eq!(single_line_paste("~/src/über"), "~/src/über");
-}
-
-#[test]
 fn enter_returns_trimmed_or_raw_value_per_caller_choice() {
     // The widget never trims itself — callers decide how to
     // treat whitespace. Round-trip an all-whitespace buffer to
     // prove the widget keeps it intact.
-    let mut state = TextInputState::new(" rename ", "   ");
+    let mut state = TextPromptState::new(" rename ", "   ");
     let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(outcome, InputOutcome::Confirm("   ".to_string()));
 }
@@ -112,11 +101,31 @@ fn centered_modal_floors_width_at_20_within_the_terminal() {
     assert_eq!(prompt_rect(Rect::new(0, 0, 18, 6)).width, 18);
 }
 
+/// The prompt drawn alone on a `width` by 5 screen, and its body row.
+fn drawn(state: &TextPromptState, width: u16) -> String {
+    let buffer = tuikit::testkit::render::render_widget(
+        TextPromptWidget::new(state, &Theme::default()),
+        width,
+        5,
+    );
+    tuikit::testkit::buffer::rows(&buffer)[2].clone()
+}
+
 #[test]
-fn visible_window_keeps_cursor_in_view_for_long_values() {
-    let value: String = (b'a'..=b'z').map(|b| b as char).collect();
-    let cursor = value.chars().count();
-    let window = visible_window(&value, cursor, 10);
-    assert!(window.text.len() <= 10);
-    assert!(window.cursor_offset < window.text.len() + 1);
+fn a_long_value_keeps_the_cursor_in_view() {
+    let value: String = (b'a'..=b'z').map(char::from).collect();
+    let state = TextPromptState::new(" rename ", value);
+    let row = drawn(&state, 20);
+    assert!(row.contains("klmnopqrstuvwxyz "), "{row:?}");
+}
+
+#[test]
+fn wide_characters_scroll_by_their_cells() {
+    let state = TextPromptState::new(" rename ", "東京タワーと富士山の写真です");
+    // The buffer's text writes a blank after each two-cell character.
+    let row = drawn(&state, 20).replace(' ', "");
+    // Fourteen two-cell characters; the 18-cell field shows the last
+    // eight and the caret after them.
+    assert!(row.contains("富士山の写真です"), "{row:?}");
+    assert!(!row.contains("と"), "{row:?}");
 }

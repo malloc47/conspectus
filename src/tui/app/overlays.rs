@@ -99,7 +99,7 @@ impl App {
     /// Active rename-overlay state, if any. Lives on the modal
     /// stack (ADR 0085 contract 3); this accessor peeks the top
     /// entry.
-    pub fn rename_overlay(&self) -> Option<&crate::tui::widgets::input::TextInputState> {
+    pub fn rename_overlay(&self) -> Option<&crate::tui::widgets::input::TextPromptState> {
         match self.modal_stack.top()? {
             crate::tui::Modal::Rename(state) => Some(state.inner()),
             _ => None,
@@ -120,7 +120,7 @@ impl App {
     /// state is wrapped in a `RenameOverlayState` so the
     /// overlay's Confirm(String) maps to Msg::CommitRename via
     /// the uniform Overlay trait.
-    pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextInputState) {
+    pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextPromptState) {
         self.slot_prompt = None;
         self.modal_stack.push(crate::tui::Modal::Rename(
             crate::tui::RenameOverlayState::new(state),
@@ -139,7 +139,7 @@ impl App {
         title: &str,
         initial: &str,
     ) {
-        self.open_rename_overlay(crate::tui::widgets::input::TextInputState::new(
+        self.open_rename_overlay(crate::tui::widgets::input::TextPromptState::new(
             title, initial,
         ));
         self.slot_prompt = Some(prompt);

@@ -25,9 +25,9 @@ use tuikit::frame::Lines;
 use crate::tui::Msg;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{self, footer_lines, input_row, path_row};
-use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
 use tuikit::overlay::Outcome;
+use tuikit::text_edit::LineEdit;
 
 /// Which field currently holds the cursor.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -50,7 +50,7 @@ impl NewMuxField {
 /// from the selected row).
 #[derive(Debug, Clone)]
 pub struct NewMuxFormState {
-    name: TextInputState,
+    name: LineEdit,
     cwd: PathOmniboxState,
     focus: NewMuxField,
 }
@@ -62,8 +62,8 @@ impl NewMuxFormState {
     /// good as-is.
     pub fn new(name: impl Into<String>, cwd: impl Into<String>) -> Self {
         Self {
-            name: TextInputState::new("name", name),
-            cwd: PathOmniboxState::new("cwd", cwd),
+            name: LineEdit::new(name),
+            cwd: PathOmniboxState::new(cwd),
             focus: NewMuxField::Name,
         }
     }
@@ -152,15 +152,12 @@ impl NewMuxFormState {
         match self.focus {
             NewMuxField::Cwd => {
                 self.cwd.handle_key(key);
-                Outcome::Consumed
             }
-            NewMuxField::Name => match self.name.handle_key(key) {
-                InputOutcome::Continue => Outcome::Consumed,
-                InputOutcome::Cancel | InputOutcome::Abort => Outcome::Close,
-                // Enter is intercepted above; kept for safety.
-                InputOutcome::Confirm(_) => self.try_commit(),
-            },
+            NewMuxField::Name => {
+                self.name.handle(key);
+            }
         }
+        Outcome::Consumed
     }
 }
 

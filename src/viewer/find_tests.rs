@@ -5,6 +5,7 @@ use crate::viewer::model::{
 };
 use crate::viewer::theme::Theme;
 use crate::viewer::widget::{buffer_to_string, render_to_buffer};
+use tuikit::text_edit::EditKey;
 
 fn turn(role: TurnRole, kind: TurnKind, body: &str) -> TranscriptTurn {
     TranscriptTurn {
@@ -65,7 +66,7 @@ fn msg(state: ViewerState, msg: ViewerMsg) -> ViewerState {
 
 fn typed(mut state: ViewerState, text: &str) -> ViewerState {
     for c in text.chars() {
-        state = reduce_find(state, ViewerFindMsg::Insert(c)).0;
+        state = reduce_find(state, ViewerFindMsg::Edit(EditKey::Insert(c))).0;
     }
     state
 }
@@ -74,7 +75,7 @@ fn typed(mut state: ViewerState, text: &str) -> ViewerState {
 fn find(state: ViewerState, query: &str) -> ViewerState {
     let state = msg(state, ViewerMsg::FindOpen);
     // The prompt starts from the active query; clear it to type a new one.
-    let state = reduce_find(state, ViewerFindMsg::ClearLine).0;
+    let state = reduce_find(state, ViewerFindMsg::Edit(EditKey::DeleteLine)).0;
     let state = typed(state, query);
     let mut state = reduce_find(state, ViewerFindMsg::Confirm).0;
     draw(&mut state, 80, 8);
@@ -93,49 +94,30 @@ fn first_line_of(state: &ViewerState, turn: usize) -> usize {
         .line
 }
 
-#[test]
-fn the_prompt_edits_like_a_line() {
-    let mut prompt = FindPrompt::default();
-    for c in "héllo".chars() {
-        prompt.insert(c);
-    }
-    assert_eq!((prompt.text.as_str(), prompt.cursor), ("héllo", 5));
-    prompt.left();
-    prompt.left();
-    prompt.backspace();
-    assert_eq!((prompt.text.as_str(), prompt.cursor), ("hélo", 2));
-    prompt.delete();
-    assert_eq!(prompt.text, "hélo".replacen('l', "", 1));
-    prompt.home();
-    prompt.insert('>');
-    assert_eq!((prompt.text.as_str(), prompt.cursor), (">héo", 1));
-    prompt.end();
-    assert_eq!(prompt.cursor, 4);
-    prompt.right();
-    assert_eq!(prompt.cursor, 4, "the cursor stops at the end");
-    prompt.left();
-    prompt.clear_line();
-    assert_eq!((prompt.text.as_str(), prompt.cursor), ("o", 0));
-    prompt.backspace();
-    assert_eq!(prompt.text, "o", "backspace at the start does nothing");
+/// The query the open prompt holds.
+fn prompt_text(state: &ViewerState) -> Option<&str> {
+    state
+        .find
+        .prompt
+        .as_ref()
+        .map(tuikit::text_edit::LineEdit::value)
 }
 
 #[test]
-fn the_prompt_moves_by_word_like_the_other_text_fields() {
-    let mut prompt = FindPrompt::with_text("héllo wörld-two  ");
-    prompt.word_left();
-    assert_eq!(prompt.cursor, 12, "back over the spaces to `two`");
-    prompt.word_left();
-    assert_eq!(prompt.cursor, 6, "punctuation separates words");
-    prompt.word_left();
-    prompt.word_left();
-    assert_eq!(prompt.cursor, 0, "stops at the start");
-    prompt.word_right();
-    assert_eq!(prompt.cursor, 6, "to the start of the next word");
-    prompt.word_right();
-    prompt.word_right();
-    assert_eq!(prompt.cursor, 17, "past the last word, to the end");
-    assert_eq!(prompt.text, "héllo wörld-two  ", "motion never types");
+fn the_prompt_edits_like_every_text_field() {
+    let state = msg(drawn(document()), ViewerMsg::FindOpen);
+    let state = typed(state, "alpha beta");
+    let state = reduce_find(state, ViewerFindMsg::Edit(EditKey::WordLeft)).0;
+    let state = typed(state, "X");
+    assert_eq!(prompt_text(&state), Some("alpha Xbeta"));
+    let state = reduce_find(state, ViewerFindMsg::Edit(EditKey::DeleteWordBefore)).0;
+    assert_eq!(prompt_text(&state), Some("alpha beta"));
+    // `Ctrl-U` deletes the whole line, wherever the cursor is.
+    let state = reduce_find(state, ViewerFindMsg::Edit(EditKey::Left)).0;
+    let state = reduce_find(state, ViewerFindMsg::Edit(EditKey::DeleteLine)).0;
+    assert_eq!(prompt_text(&state), Some(""));
+    let state = reduce_find(state, ViewerFindMsg::Edit(EditKey::Yank)).0;
+    assert_eq!(prompt_text(&state), Some("alpha beta"));
 }
 
 #[test]
@@ -224,7 +206,7 @@ fn escape_cancels_the_prompt_and_keeps_the_earlier_find() {
     let state = find(drawn(document()), "needle");
     let state = msg(state, ViewerMsg::FindOpen);
     assert_eq!(
-        state.find.prompt.as_ref().map(|p| p.text.as_str()),
+        prompt_text(&state),
         Some("needle"),
         "the prompt starts from the active query"
     );
@@ -284,7 +266,7 @@ fn quitting_from_the_find_prompt_leaves_the_viewer() {
 fn an_empty_query_clears_the_find() {
     let state = find(drawn(document()), "needle");
     let state = msg(state, ViewerMsg::FindOpen);
-    let state = reduce_find(state, ViewerFindMsg::ClearLine).0;
+    let state = reduce_find(state, ViewerFindMsg::Edit(EditKey::DeleteLine)).0;
     let state = reduce_find(state, ViewerFindMsg::Confirm).0;
     assert!(!state.find.is_active());
     assert!(state.find.matches.is_empty());
@@ -318,6 +300,39 @@ fn the_prompt_replaces_the_footer_and_shows_the_hint() {
     let last = screen.lines().last().expect("a footer");
     assert!(last.starts_with("/abc"), "{last:?}");
     assert!(last.contains("Enter find · Esc cancel"), "{last:?}");
+}
+
+#[test]
+fn the_prompt_draws_its_caret_and_windows_by_cells() {
+    use tuikit::testkit::golden;
+    let theme = Theme::default();
+    let mut state = drawn(document());
+    state.find_hint = "Enter find · Esc cancel".to_string();
+    let state = msg(state, ViewerMsg::FindOpen);
+    let state = typed(state, "東京 needle");
+    let state = reduce_find(state, ViewerFindMsg::Edit(EditKey::Home)).0;
+    let mut state = reduce_find(state, ViewerFindMsg::Edit(EditKey::Right)).0;
+    let buffer = render_to_buffer(&mut state, &theme, 60, 8);
+    let caret = &buffer[(3, 7)];
+    assert_eq!(caret.symbol(), "京", "the caret is on the second character");
+    let cue = theme.field_cursor.into_style();
+    assert_eq!((Some(caret.fg), Some(caret.bg)), (cue.fg, cue.bg));
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/viewer/goldens/find-prompt.golden");
+    let footer = ratatui::layout::Rect::new(0, 7, 60, 1);
+    golden::assert_golden_text(
+        &path,
+        &golden::styled_region(&buffer, footer),
+        |path, text| std::fs::write(path, text),
+    );
+    // A query longer than the room before the hint scrolls; the hint
+    // stays put.
+    let state = typed(state, &"x".repeat(60));
+    let mut state = state;
+    let screen = draw(&mut state, 60, 8);
+    let last = screen.lines().last().expect("a footer");
+    assert!(last.starts_with("/xxx"), "{last:?}");
+    assert!(last.ends_with("Enter find · Esc cancel"), "{last:?}");
 }
 
 fn tool_document() -> TranscriptDocument {

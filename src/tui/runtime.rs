@@ -838,7 +838,7 @@ pub(super) fn action_for_event(app: &App, event: Event) -> Option<Action> {
 /// choice, or the tree.
 pub(super) fn type_paste(app: &mut App, text: &str, dispatch: &mut dyn FnMut(&mut App, Action)) {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    for c in crate::tui::widgets::input::single_line_paste(text).chars() {
+    for c in tuikit::text_edit::single_line_paste(text).chars() {
         if !app.text_field_has_keys() {
             break;
         }

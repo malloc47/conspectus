@@ -8,8 +8,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use ratatui::crossterm::event::KeyEvent;
-
-use crate::tui::widgets::input::TextInputState;
+use tuikit::text_edit::LineEdit;
 
 const MAX_CANDIDATES: usize = 6;
 
@@ -46,18 +45,15 @@ pub struct PathSuggestion {
 
 #[derive(Debug, Clone)]
 pub struct PathOmniboxState {
-    title: String,
-    input: TextInputState,
+    input: LineEdit,
     known: Vec<PathCandidate>,
     selected: usize,
 }
 
 impl PathOmniboxState {
-    pub fn new(title: impl Into<String>, initial: impl Into<String>) -> Self {
-        let title = title.into();
+    pub fn new(initial: impl Into<String>) -> Self {
         Self {
-            input: TextInputState::new(title.clone(), initial),
-            title,
+            input: LineEdit::new(initial),
             known: Vec::new(),
             selected: 0,
         }
@@ -71,9 +67,14 @@ impl PathOmniboxState {
         self.input.cursor()
     }
 
+    /// The line being edited.
+    pub fn edit(&self) -> &LineEdit {
+        &self.input
+    }
+
     /// Replace the text, keeping the known candidates.
     pub fn set_value(&mut self, value: impl Into<String>) {
-        self.input = TextInputState::new(self.title.clone(), value);
+        self.input = LineEdit::new(value);
         self.selected = 0;
     }
 
@@ -111,21 +112,17 @@ impl PathOmniboxState {
         use tuikit::keys::resolve;
         if let Some(OmniboxKey::Complete) = resolve(OMNIBOX_KEYS, event) {
             if let Some(path) = self.selected_suggestion_path() {
-                self.input = TextInputState::new(self.title.clone(), path);
+                self.input = LineEdit::new(path);
                 self.selected = 0;
                 PathOmniboxOutcome::Completed
             } else {
                 PathOmniboxOutcome::NoCompletion
             }
+        } else if self.input.handle(event).changed {
+            self.selected = 0;
+            PathOmniboxOutcome::Changed
         } else {
-            let before = self.input.value().to_string();
-            let _ = self.input.handle_key(event);
-            if self.input.value() == before {
-                PathOmniboxOutcome::Continue
-            } else {
-                self.selected = 0;
-                PathOmniboxOutcome::Changed
-            }
+            PathOmniboxOutcome::Continue
         }
     }
 

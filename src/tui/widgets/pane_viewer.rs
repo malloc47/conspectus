@@ -20,12 +20,13 @@ use ratatui::widgets::{Paragraph, Widget};
 use tuikit::chip::{PositionChip, StatusChip, Tone};
 use tuikit::glyphs::marks;
 use tuikit::help::{HelpAction, HelpEntry, HelpScroll};
-use tuikit::keys::{resolve, typed_char};
+use tuikit::keys::resolve;
+use tuikit::text_edit::{EditKey, LineEdit};
 
 use crate::content_search::PaneRef;
 use crate::tui::Theme;
 use crate::tui::keybindings::overlay::{PANE_VIEWER_KEYS, VIEWER_FIND_KEYS};
-use crate::viewer::find::{FindPrompt, ViewerFindMsg};
+use crate::viewer::find::ViewerFindMsg;
 
 /// Lines of context kept above a line the viewer jumps to.
 const CONTEXT_ABOVE: usize = 2;
@@ -138,7 +139,7 @@ pub struct PaneViewerState {
     /// Lines the body showed last draw; paging moves by it.
     pub viewport: u16,
     /// The prompt while it is open.
-    pub prompt: Option<FindPrompt>,
+    pub prompt: Option<LineEdit>,
     /// The active query; empty when no find is active.
     pub query: String,
     /// Indices of the lines that hold the query, in order.
@@ -297,7 +298,7 @@ impl PaneViewerState {
             PaneViewerMsg::JumpToStart => self.scroll = 0,
             PaneViewerMsg::JumpToEnd => self.scroll = self.max_scroll(),
             PaneViewerMsg::FindOpen => {
-                self.prompt = Some(FindPrompt::with_text(&self.query));
+                self.prompt = Some(LineEdit::new(self.query.as_str()));
             }
             PaneViewerMsg::FindNext => self.step_find(true),
             PaneViewerMsg::FindPrev => self.step_find(false),
@@ -348,7 +349,7 @@ impl PaneViewerState {
             ViewerFindMsg::Quit => return PaneViewerOutcome::Close,
             ViewerFindMsg::Cancel => self.prompt = None,
             ViewerFindMsg::Confirm => {
-                let text = prompt.text.clone();
+                let text = prompt.value().to_string();
                 self.prompt = None;
                 self.run_find(&text);
                 if self.find_is_active() {
@@ -364,16 +365,9 @@ impl PaneViewerState {
                     }
                 }
             }
-            ViewerFindMsg::Backspace => prompt.backspace(),
-            ViewerFindMsg::Delete => prompt.delete(),
-            ViewerFindMsg::Left => prompt.left(),
-            ViewerFindMsg::Right => prompt.right(),
-            ViewerFindMsg::WordLeft => prompt.word_left(),
-            ViewerFindMsg::WordRight => prompt.word_right(),
-            ViewerFindMsg::Home => prompt.home(),
-            ViewerFindMsg::End => prompt.end(),
-            ViewerFindMsg::ClearLine => prompt.clear_line(),
-            ViewerFindMsg::Insert(c) => prompt.insert(c),
+            ViewerFindMsg::Edit(edit) => {
+                prompt.apply(edit);
+            }
         }
         PaneViewerOutcome::Continue
     }
@@ -383,7 +377,7 @@ impl PaneViewerState {
     pub fn handle_key(&mut self, key: KeyEvent) -> PaneViewerOutcome {
         if self.prompt.is_some() {
             let msg = resolve(VIEWER_FIND_KEYS, key)
-                .or_else(|| typed_char(key).map(ViewerFindMsg::Insert));
+                .or_else(|| EditKey::of(key).map(ViewerFindMsg::Edit));
             return match msg {
                 Some(msg) => self.apply_find(msg),
                 None => PaneViewerOutcome::Continue,

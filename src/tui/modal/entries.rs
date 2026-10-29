@@ -20,7 +20,7 @@ use crate::tui::widgets::{
     clean_up::{CleanUpState, CleanUpWidget},
     controls::{ControlsOutcome, ControlsOverlayState, ControlsOverlayWidget},
     help::{HelpOutcome, HelpOverlayState, HelpOverlayWidget},
-    input::TextInputWidget,
+    input::TextPromptWidget,
     messages::{MessagesOverlayState, MessagesWidget},
     mux_launch::{MuxLaunchFormState, MuxLaunchFormWidget},
     mux_menu::{MuxMenuState, MuxMenuWidget},
@@ -74,7 +74,7 @@ impl Overlay<Msg, App> for RenameOverlayState {
     }
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        TextInputWidget::new(self.inner(), app.theme()).render(area, buf);
+        TextPromptWidget::new(self.inner(), app.theme()).render(area, buf);
     }
 
     fn takes_text(&self) -> bool {
@@ -190,14 +190,15 @@ impl Overlay<Msg, App> for MessagesOverlayState {
 impl Overlay<Msg, App> for crate::viewer::state::ViewerState {
     /// A nested reducer: the key becomes a viewer message, which the App's
     /// reducer applies to this entry (closing it when the viewer says to
-    /// leave). While the find prompt is open it owns the keys: bound keys
-    /// edit or leave it, and anything else types.
+    /// leave). While the find prompt is open it owns the keys: its own
+    /// keys confirm or leave it, and the editing keys edit the query.
     fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
         use crate::tui::keybindings::overlay::{VIEWER_FIND_KEYS, VIEWER_KEYS};
-        use tuikit::keys::typed_char;
+        use crate::viewer::find::ViewerFindMsg;
+        use tuikit::text_edit::EditKey;
         if self.find.prompt.is_some() {
             return resolve(VIEWER_FIND_KEYS, key)
-                .or_else(|| typed_char(key).map(crate::viewer::find::ViewerFindMsg::Insert))
+                .or_else(|| EditKey::of(key).map(ViewerFindMsg::Edit))
                 .map_or(Outcome::Consumed, |msg| Outcome::Stay(Msg::ViewerFind(msg)));
         }
         resolve(VIEWER_KEYS, key).map_or(Outcome::Consumed, |msg| Outcome::Stay(Msg::Viewer(msg)))
