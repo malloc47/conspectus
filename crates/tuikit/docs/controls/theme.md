@@ -135,7 +135,8 @@ description of each.
 | `recency_active` | style | `green` | the recency scale, second step |
 | `recency_recent` | style | `yellow` | the recency scale, third step |
 | `recency_cold` | style | `dim` | the recency scale, oldest step |
-| `surface` | color | `default` | the background of a floating surface (a toast) |
+| `surface` | color | `default` | the background of a floating surface (a modal frame, a toast) |
+| `toast_text` | color | white | a toast's text; its border takes its severity's color |
 | `field` | style | `light_gray` | an input field's value when the field is not focused |
 | `field_active` | style | `white on dark_gray` | an input field's value when the field is focused |
 | `field_cursor` | style | `black on white` | the cell under the text cursor |

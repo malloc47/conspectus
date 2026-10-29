@@ -22,6 +22,9 @@ pub enum Tone {
     Inert,
     /// Draws the eye: the `accent` color. For work in progress.
     Accent,
+    /// The `info` color: something worth noting that is neither good nor
+    /// bad news.
+    Info,
     /// The `success` color: something is on or worked.
     Success,
     /// The `warning` color: something needs attention.
@@ -38,6 +41,7 @@ impl Tone {
             Self::Muted => style.add_modifier(theme.muted),
             Self::Inert => style.fg(theme.inert).add_modifier(theme.muted),
             Self::Accent => style.fg(theme.accent),
+            Self::Info => style.fg(theme.info),
             Self::Success => style.fg(theme.success),
             Self::Warning => style.fg(theme.warning),
             Self::Error => style.fg(theme.error),

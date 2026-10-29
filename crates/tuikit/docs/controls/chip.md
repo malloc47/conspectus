@@ -166,6 +166,7 @@ binds; the binding lives in the host's key table.
 | `badge` | the filled chip's look (reversed and bold by default) and the chosen word of a segmented title |
 | `badge_width` | a filled chip's label width, so every chip in a column lines up |
 | `accent` | the chosen word of a segmented title; `Tone::Accent` and busy chips |
+| `info` | `Tone::Info` |
 | `success` | an on toggle chip; `Tone::Success` |
 | `muted` | `Tone::Muted`; with `inert`, `Tone::Inert` and off toggle chips |
 | `inert` | `Tone::Inert` and off toggle chips |
@@ -198,7 +199,7 @@ controls that hold them follow those rules.
 - **Clickable chips.** A toggle chip's text and width are known before it
   is drawn, which is what a mouse hit test on the footer would map a click
   through.
-- **Severity.** `Tone` is the look; the feedback module's severity will map
-  onto it when it lands, so a status chip and a toast agree.
+- **Severity.** `Tone` is the look; `feedback::Severity::tone` maps each
+  severity onto it, so a status chip and a toast of one severity agree.
 - **Dimmed chips.** A host that draws a gone row dims its chips by patching
   the span's style; a `dim` variant of the look would carry that here.

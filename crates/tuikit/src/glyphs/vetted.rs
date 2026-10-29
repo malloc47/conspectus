@@ -26,6 +26,11 @@ use super::scan::{Drawn, drawn_glyphs};
 const WGL4_SHAPE: &str = "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous";
 /// The note for the box-drawing family.
 const BOX: &str = "Box Drawing; drawn by the terminal itself in most; ambiguous";
+/// The note for a half block (the sides of a toast's border).
+const HALF_BLOCK: &str = "WGL4 block elements; every font; drawn by the terminal itself in most";
+/// The note for a quadrant block (the corners of a toast's border).
+const QUADRANT: &str = "Block Elements; DejaVu Sans Mono 1.00, not in the other WGL4 fonts; \
+     drawn by the terminal itself in most";
 /// The note for a spinner frame.
 const BRAILLE: &str =
     "Braille Patterns; kept by operator preference; some fonts draw it past one cell";
@@ -84,6 +89,15 @@ const FRAMEWORK: &[(&str, &str)] = &[
     ("╗", BOX),
     ("╚", BOX),
     ("╝", BOX),
+    // The block border of a toast (ratatui's quadrant border set).
+    ("▀", HALF_BLOCK),
+    ("▄", HALF_BLOCK),
+    ("▌", HALF_BLOCK),
+    ("▐", HALF_BLOCK),
+    ("▛", QUADRANT),
+    ("▜", QUADRANT),
+    ("▙", QUADRANT),
+    ("▟", QUADRANT),
 ];
 
 /// Why a glyph could not be registered.

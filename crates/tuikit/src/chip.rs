@@ -22,8 +22,8 @@
 //!   title is as wide whichever is chosen.
 //! - **[`PositionChip`]**: where a reader is, `[ n/m ]`.
 //! - **[`StatusChip`]**: a short status in a [`Tone`] (muted, inert,
-//!   accent, success, warning, error), optionally led by a mark or a busy
-//!   spinner frame ([`spinner_frame`]), at its natural width.
+//!   accent, info, success, warning, error), optionally led by a mark or
+//!   a busy spinner frame ([`spinner_frame`]), at its natural width.
 //!
 //! What a chip says (which label, which color for which kind of thing,
 //! when a switch is on) is the host's; the chip only draws it.

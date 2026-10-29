@@ -384,6 +384,10 @@ tokens! {
     /// `Reset` keeps the terminal's own background.
     surface: Color = Color::Reset, TokenKind::Color,
         "background of floating surfaces";
+    /// The message of a toast. The toast's border takes the color of its
+    /// severity; its text keeps this one, so every toast reads alike.
+    toast_text: Color = Color::White, TokenKind::Color,
+        "a toast's message";
     /// An input field's value when the field is not focused.
     field: StyleSpec = StyleSpec::fg(Color::Gray), TokenKind::Style,
         "input value, unfocused field";

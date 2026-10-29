@@ -21,8 +21,10 @@ selection highlight cuts it in half. The module has four parts:
   one cell of a rule, the separator dot, and the eight frames of a spinner. A control draws a
   mark by constant, so two surfaces cannot drift to look-alike codepoints.
 - **The vetted table** (`VettedGlyphs`): the glyphs that have been measured,
-  each with a note on how. The framework's own glyphs are in it; a host
-  registers the glyphs of its own vocabulary on top.
+  each with a note on how. The framework's own glyphs are in it (the
+  marks, a few punctuation and arrow glyphs, the box drawing of frames,
+  and the half and quadrant blocks of a toast's border); a host registers
+  the glyphs of its own vocabulary on top.
 - **The checks** (`cell_width`, `glyph_risk`): a glyph is registered only if
   it is exactly one cell and is not one terminals commonly draw as a wide
   emoji or need a joiner or selector for.

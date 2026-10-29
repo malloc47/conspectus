@@ -254,6 +254,9 @@ Work through this list in order. Each step names the rule it applies.
 5. **Return outcomes.** Handling a key returns an outcome carrying the host's
    `M` where something is committed. The control performs no effect. Anything
    external arrives through a trait, a closure, or a sink supplied by the host.
+   A control that has something to tell the user (a refusal, a confirmation)
+   says it through the host as a `feedback::Feedback` of the severity that
+   fits (house rule 11; see [controls/feedback.md](controls/feedback.md)).
 6. **Measure in cells.** Truncation, padding, and wrapping go through the
    `text` module and measure terminal cells (house rule 14). A control
    that needs its row count (a scroll range, a scrollbar, a height) wraps

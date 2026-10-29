@@ -279,6 +279,7 @@ recency_active     = "green"
 recency_recent     = "yellow"
 recency_cold       = "dim"
 surface            = "default"         # the background of modals and toasts
+toast_text         = "white"           # a toast's text (its border takes the severity's color)
 field              = "light_gray"      # a form field's value
 field_active       = "white on dark_gray"  # the focused form field
 field_cursor       = "black on white"  # the text cursor in a form field

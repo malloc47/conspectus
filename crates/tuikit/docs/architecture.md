@@ -66,7 +66,7 @@ each names its module path.
 | Reading | `Pager` with `Find`; `LogList`; `richtext` (a cargo feature) | planned |
 | Reading | `HelpPage` (in the `help` convention module, below) | landed |
 | Data display | `TreeView<R>` with `TreeState<Id>` and `ColumnSchema`; `PropertyGrid`; `Explorer` | planned |
-| Feedback | `Toasts` | planned |
+| Feedback | `Toasts` (in the `feedback` convention module, below) | landed |
 | Chrome | `AppFrame`; `TabBar`; `StatusBar`; `EmptyState`; the pane frame with its focus cue | planned |
 
 ### Conventions (layer 2)
@@ -77,7 +77,7 @@ each names its module path.
 | `overlay` | The `Overlay<M, Cx>` contract (`handle` and `render`, and whether an overlay fills the screen), `Outcome<M>` (consumed, close, commit, stay), and `ModalStack<E>` over the host's entry type, which the host owns and passes its state to as `&Cx`, which routes a key to the top entry and closes it for a close or a commit, and which draws every entry from bottom to top. Page: [controls/overlay.md](controls/overlay.md) | landed |
 | `help` | `HelpPage`, the one help page: bold headings, keys in an accent column with descriptions wrapped beside them, legend rows for marks, a scrollbar, and a footer generated from the key table that scrolls and closes it, in the reader-sized modal frame; `sections_for`, which generates a page from a key table and a `HelpAction` description per action, and `undescribed`, which finds a key the page would leave out; `HelpScroll`, which pages by the rows shown and takes an offset past the end back at the next draw. Page: [controls/help.md](controls/help.md) | landed |
 | `focus` | Declared focus rules: the pane focus cue, the modal focus lock, the Tab cycle | planned |
-| `feedback` | One `Feedback { severity, text, ttl }` type feeding three channels (status line, toast, message log); a bounded, repeat-collapsing log; the clipboard sink | planned |
+| `feedback` | `Severity` (info, success, warning, error: each with its theme color, chip tone, mark, and toast lifetime) and one `Feedback { severity, text, ttl }` type feeding three channels: the status line (`Feedback::span`), `Toasts` (bottom-centered boxes bordered in the severity's color, replaced or stacked, each gone after its lifetime, errors last longest), and `Log<T>` (bounded, newest-last, repeat-collapsing, counting unseen warnings and errors, over the host's payload `T`); `clipboard::copy`, which writes OSC 52 to a sink the host supplies. Page: [controls/feedback.md](controls/feedback.md) | landed |
 | `testkit` | Buffer inspection; a key DSL; an ANSI-preserving one-frame driver; a convention conformance suite (`assert_conventions` over a registry of overlays); source-scan helpers; documentation-table sync | planned |
 
 ## The one-way dependency rule
