@@ -21,6 +21,11 @@ the grid of decision 4, read in a pager framed at `HelpPage::SIZE`, which
 draws the scrollbar and the footer and does the scrolling; `HelpScroll`
 and the page's own drawing are removed, and the footer rule of decision 4
 is now every framed pager's.
+Amended by
+[ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md):
+the transcript viewer's page is the pager's
+`?` level too, generated from `READER_KEYS` and `TRANSCRIPT_KEYS`, and
+the `viewer_help` adapter is removed.
 
 ## Context
 

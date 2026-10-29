@@ -1302,8 +1302,14 @@ context on every key and draw, lists its entries newest first (the
 severity's mark, the age, the summary with its repeat count) in a kept
 window, and shows the selected entry's record in an embedded pager;
 `conspectus` keeps the payload (target and command record), the record's
-text, the copy message, and the preview banner. The transcript viewer and
-the preview move onto the pager later.
+text, the copy message, and the preview banner. The transcript viewer is a
+pager over the viewer's transcript content (ADR 0180): the turns laid out
+as rows behind their gutter chips, a find whose unit is a shown turn with
+the count of matches the toggles hide, the `t`, `T`, `I`, and `H` toggles
+as the content's keys, and opening at a search result by switching on what
+hides the hit. `src/viewer/` keeps that content, the model, and the
+parsers, imports nothing from the TUI, and draws from the framework's
+theme; the preview moves onto the pager later.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

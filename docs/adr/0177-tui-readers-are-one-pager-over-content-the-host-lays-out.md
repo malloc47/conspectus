@@ -31,7 +31,9 @@ with `conformance::part`. Amended by
 keeps the footer's last rows and scrolls its first rows with the body, and
 `PAGER_HELP_KEYS` binds `?` as another `Close`, the help level being a
 pager over that table; the value modal and the help page's body are
-pager contents.
+pager contents. Amended by
+[ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md): the
+transcript viewer is a pager content too, with its own `TRANSCRIPT_KEYS`.
 
 ## Context
 

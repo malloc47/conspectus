@@ -27,6 +27,11 @@ the contract's new `render_under_step`. Amended by
 [ADR 0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md):
 the pane viewer (decision 7) is the framework's pager, an overlay for any
 context, which still asks to attach with `Stay(Msg::AttachPane)`.
+Amended by
+[ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) (decision 7):
+the transcript viewer is the
+framework's pager on the stack, not a nested reducer; `Msg::Viewer` and
+`Msg::ViewerFind` are gone.
 
 ## Context
 

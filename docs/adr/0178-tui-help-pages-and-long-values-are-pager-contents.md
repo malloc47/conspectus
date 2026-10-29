@@ -14,6 +14,10 @@ footer, and scrolling are the pager's. Amends ADR 0177 decisions 3 and 7:
 a framed pager fits a footer too tall for its frame by the help page's
 rule, and `PAGER_HELP_KEYS` binds `?` as another `Close`, since a pager's
 help level is now a pager over that table.
+Amended by
+[ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) (decision 6):
+the transcript viewer is on the
+pager, so its interim help pager is gone.
 
 ## Context
 

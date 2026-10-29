@@ -10,6 +10,12 @@ Amended by
 [ADR 0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md):
 the typed tokens gain `toast_text` (white, a toast's message), and the
 four status tokens now also color the status line and toasts.
+Amended by
+[ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md):
+the host registers `transcript_compaction` (a
+compaction summary's chip in the transcript viewer, magenta), and the
+viewer reads the framework's tokens and that role instead of
+`harness.codex`, `cwd_mark`, and `pr_merged`.
 
 ## Context
 

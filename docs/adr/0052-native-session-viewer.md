@@ -5,6 +5,13 @@
 Accepted. Supersedes the *default* viewer path established by ADR
 0019 (external launch) for Claude Code, Codex, and OpenCode
 sessions. External launches remain available as an escape hatch.
+The extraction-ready boundary is narrowed by
+[ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md): the
+full-screen reader (chrome, scrolling, find prompt, keys, help page) is
+the framework's pager over the viewer's transcript content, the
+`crate::tui::theme` carve-out of rule 1 is gone (the viewer draws from
+the framework's theme), and the framework crate is a permitted
+dependency; the model, parsers, rendering, and bridge stay as below.
 
 ## Context
 

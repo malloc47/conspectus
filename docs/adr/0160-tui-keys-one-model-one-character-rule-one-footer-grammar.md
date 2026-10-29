@@ -39,6 +39,11 @@ its scroll rows in the `PAGER_SCROLL_KEYS` fragment; `READER_KEYS`,
 [ADR 0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md):
 `LOG_LIST_KEYS` (`LogListKey`) is the standard log list table, `q`
 dismissing as `Ctrl-C` does, and the host's `MessagesKey` is gone.
+Amended by
+[ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md):
+`VIEWER_KEYS` and `VIEWER_FIND_KEYS` are gone; the
+transcript viewer resolves `READER_KEYS`, then the viewer's own
+`TRANSCRIPT_KEYS`, and its find prompt `FIND_KEYS`.
 
 ## Context
 
