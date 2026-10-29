@@ -171,7 +171,7 @@ not shown in the footer.
 | `PAGER_SCROLL_KEYS` (`PagerKey`) | a part of a pager's table, after its `Ctrl-C`: `j`/`↓` down; `k`/`↑` up; `PgDn`/`Space` page down; `PgUp` page up; `Ctrl-D`/`Ctrl-U` half a page (aliases); `g`/`Home` top; `G`/`End` bottom | `j/k/PgDn/PgUp scroll` |
 | `PAGER_KEYS` (`PagerKey`) | `Ctrl-C` abort; the scroll rows; `Esc` close (a step back); `q` abort (a pager types nothing) | `j/k/PgDn/PgUp scroll · Esc/q close` |
 | `READER_KEYS` (`PagerKey`) | `PAGER_KEYS`; `/` find; `n`/`N` next and previous match (aliases); `?` help (the default table of `Pager`; see [pager.md](pager.md)) | `j/k/PgDn/PgUp scroll · Esc/q close · / find · ? help` |
-| `PAGER_HELP_KEYS` (`PagerKey`) | `Ctrl-C` abort; the scroll rows; `Esc` and `?` back to the pager; `q` abort (a pager's help page) | `j/k/PgDn/PgUp scroll · Esc/? back · q close` |
+| `PAGER_HELP_KEYS` (`PagerKey`) | `Ctrl-C` abort; the scroll rows; `Esc` and `?` (the key that opened the page) close, back to the pager; `q` abort (a pager's help page, read in a pager of its own) | `j/k/PgDn/PgUp scroll · Esc/? back · q close` |
 | `FIND_KEYS` (`FindKey`) | `Ctrl-C` abort; `Enter` confirm; `Esc` cancel; every other key edits the query, so `q` types (a pager's find prompt) | `Enter find · Esc cancel` |
 | `TEXT_INPUT_KEYS` (`TextInputKey`) | `Ctrl-C` abort; `Enter` confirm; `Esc` cancel; `Tab` swallowed; every other key goes to the line editor (the table of `TextPrompt`) | `Enter confirm · Esc cancel` |
 | `LINE_EDIT_KEYS` (`EditKey`) | the editing keys every text field shares, all aliases: arrows and `Home`/`End` with their readline chords, word motion on `Alt-b`/`Alt-f` and the Control and Alt arrows, the delete, kill, and yank keys (see [text_edit.md](text_edit.md)) | none |

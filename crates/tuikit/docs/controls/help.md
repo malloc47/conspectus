@@ -4,30 +4,31 @@
 | --- | --- |
 | Module | `tuikit::help` |
 | Layer | 2 (convention) |
-| Type parameters | `A`: the action enum of the key table a page is generated from (it implements `HelpAction`); the key table that scrolls and closes the page is any table, over its own enum |
+| Type parameters | `A`: the action enum of the key table a page is generated from (it implements `HelpAction`); `M` (default `()`): the message type of the pager the page is read in, so the page can sit on a host's stack (the page sends none) |
 | Cargo feature | none |
-| Outcomes | none of its own: the page draws and returns the `ScrollWindow` it showed; the control that shows it resolves its keys (usually through a pager table) and moves its `HelpScroll` |
+| Outcomes | none of its own: the page is a `PagerContent` with no keys, and its pager (`HelpPage::pager(table)`) answers `Close` for the table's closes, `Dismiss` for `q` and `Ctrl-C`, and `Consumed` for the rest |
 
 ## Purpose
 
-`HelpPage` is the one help page. It draws sections of keys and what they
-do (the keys in an accent column, the descriptions wrapped beside them),
-legends for the marks a screen draws, a scrollbar when the page is taller
-than its frame, and a footer generated from the key table that scrolls and
-closes it, in the reader-sized modal frame. `sections_for` generates the
-sections from a key table and a description for each action, so a page
-cannot disagree with the keys it describes, and `undescribed` finds a key
-the page would leave out. `HelpScroll` keeps where the page is: a key may
-ask past the end, the draw brings it back, and a page key moves by the
-rows on screen.
+`HelpPage` is the one help page. It lays out sections of keys and what
+they do (the keys in an accent column, the descriptions wrapped beside
+them) and legends for the marks a screen draws, and it is a pager's
+content: `HelpPage::pager(table)` reads it in the framework's
+[`Pager`](pager.md), framed at the reader size, which scrolls it as every
+reader scrolls, draws the scrollbar when the page is taller than its
+frame, and generates the footer from the key table that scrolls and
+closes it. `sections_for` generates the sections from a key table and a
+description for each action, so a page cannot disagree with the keys it
+describes, and `undescribed` finds a key the page would leave out.
 
 The module replaces what a program grows help page by help page: a
 generator copied for every viewer that differs only in its message type,
 hand-written key strings and an inert binding struct kept apart from the
 key tables, a page renderer that each page reached into for its row
 helpers, pages that stepped by a fixed number of rows or by the height of
-the screen behind them, and scroll offsets that kept growing past the end
-so the next key up did nothing.
+the screen behind them, scroll offsets that kept growing past the end so
+the next key up did nothing, and a scroll state and renderer of the
+page's own beside the readers' pager.
 
 The host keeps what each action does and where it is listed (its
 `HelpAction` impl), the prose of the rows it writes by hand where a table's
@@ -37,8 +38,8 @@ are available now.
 
 ## Usage example
 
-A reader's page generated from its key table, a hand-written page with a
-legend, and the scroll kept between draws:
+A reader's page generated from its key table, read in its pager, and a
+hand-written page with a legend:
 
 ```rust
 use ratatui::buffer::Buffer;
@@ -46,13 +47,11 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Span;
-use tuikit::help::{
-    HelpAction, HelpEntry, HelpPage, HelpScroll, HelpSection, sections_for, undescribed,
-};
+use tuikit::help::{HelpAction, HelpEntry, HelpPage, HelpSection, sections_for, undescribed};
 use tuikit::keys::{
-    KeyRow, PAGER_KEYS, PagerKey, alias, ch, ctrl, include, key, resolve, shown,
-    with_availability,
+    KeyRow, PAGER_KEYS, PagerKey, alias, ch, ctrl, include, key, shown, with_availability,
 };
+use tuikit::overlay::Outcome;
 use tuikit::theme::Theme;
 
 /// What a document reader's keys do.
@@ -96,26 +95,17 @@ const HELP_KEYS: &[KeyRow<PagerKey>] = &[
 let theme = Theme::default();
 let area = Rect::new(0, 0, 80, 24);
 
-// The reader's page: one row per action, every key bound to it.
+// The reader's page: one row per action, every key bound to it, read in
+// a pager whose table scrolls and closes it and generates its footer.
 assert!(undescribed(READER_KEYS).is_empty(), "every key is described");
-let sections = sections_for(READER_KEYS);
-let mut scroll = HelpScroll::new();
+let mut page = HelpPage::<()>::new(sections_for(READER_KEYS)).pager(HELP_KEYS);
 let mut buf = Buffer::empty(area);
-let window = HelpPage::new(&theme, &sections)
-    .footer(HELP_KEYS)
-    .scrolled(&scroll)
-    .render(area, &mut buf);
-scroll.keep(window);
+page.draw(area, &mut buf, &theme);
 
-// The page's keys: a pager's, moving the scroll the host keeps.
+// The page's keys are its pager's: `G` goes to the last page, `?` closes.
 let press = |code| KeyEvent::new(code, KeyModifiers::NONE);
-match resolve(HELP_KEYS, press(KeyCode::Char('G'))) {
-    Some(PagerKey::Abort | PagerKey::Close) => { /* close the page */ }
-    Some(step) => {
-        scroll.apply(step);
-    }
-    None => {}
-}
+assert_eq!(page.handle_key(press(KeyCode::Char('G'))), Outcome::Consumed);
+assert_eq!(page.handle_key(press(KeyCode::Char('?'))), Outcome::Close);
 
 // An action that cannot act now is dimmed on the page.
 let dimmed = with_availability(READER_KEYS, |action| action != Reader::Up);
@@ -130,8 +120,8 @@ let marks = [
         .legend(Span::styled("*", Style::default().fg(theme.warning)), "Changed", "edited since it was opened")
         .legend(Span::styled("+", Style::default().fg(theme.success)), "Added", "new since it was opened"),
 ];
-let mut buf = Buffer::empty(area);
-HelpPage::new(&theme, &marks).footer(HELP_KEYS).render(area, &mut buf);
+let lines = HelpPage::<()>::new(marks.to_vec()).lines(&theme, 76);
+assert_eq!(lines.len(), 7, "two headings, three rows, two blank lines");
 ```
 
 ### The API
@@ -144,11 +134,10 @@ HelpPage::new(&theme, &marks).footer(HELP_KEYS).render(area, &mut buf);
 | `undescribed(table)` | the keys a table binds that its page would not describe | an action left out of `LISTED`, or one whose entry is empty; a host asserts it is empty for every table it generates a page for |
 | `HelpSection::new(title)`, `keys`, `legend`, `row` | a heading and its rows, built by hand | for prose a table's descriptions cannot hold |
 | `HelpRow::Keys`, `HelpRow::Legend` | a row of keys and what they do; a legend entry | `HelpRow::keys(..).available(false)` dims a row |
-| `HelpPage::new(&theme, &sections)` | a page titled `Help`, at the top, with no footer | `SIZE` is `ModalSize::WIDE` |
-| `title`, `footer(table)`, `scrolled(&scroll)` | set the title, generate the footer from the keys that scroll and close the page, scroll it | the footer cannot name a key the table does not bind |
-| `lines(width)`, `footer_lines(width)` | the page laid out in cells, above and in its footer | what `render` draws; `usize::MAX` wraps nothing |
-| `render(area, buf)` | draws the page in its frame | returns the `ScrollWindow` its scrolling part showed |
-| `HelpScroll` | where a page is scrolled, kept between draws | `down`, `up`, `page_down`, `page_up`, `half_page_down`, `half_page_up`, `to_top`, `to_bottom`, `apply(PagerKey)`, `keep(window)`, `offset`, `page` |
+| `HelpPage::new(sections)`, `title` | a page of `sections`, titled `Help` unless `title` says otherwise | `HelpPage::SIZE` is `ModalSize::WIDE` |
+| `HelpPage::pager(table)` | the page in a `Pager` framed at `SIZE`, resolving `table`, the keys that scroll and close it | the footer is generated from `table`, so it cannot name a key the table does not bind |
+| `lines(theme, width)`, `sections()` | the page laid out in cells, as its pager draws its rows; the sections | `usize::MAX` wraps nothing |
+| `PagerContent for HelpPage<M>` | rows laid out once per width, the title as the header, no keys (`NoKeys`) | the pager does the scrolling, the scrollbar, and the footer |
 
 ### Generated rows
 
@@ -178,42 +167,46 @@ Every width follows one grid, so every help page of a program lines up:
   under a hanging indent at the name column's end.
 - Below 25 cells beside its column, a description stays on one row and
   the frame clips it.
-- The footer is muted and wraps only between its segments. It stays on
-  the frame's last rows whatever the scroll and leaves the page at least
-  one row; footer rows that do not fit there scroll with the page.
-- When the page is taller than the frame, a scrollbar takes a 1-column
-  gutter on the right and the text is laid out one cell narrower.
+- The footer is the pager's: muted, wrapped only between its segments,
+  and on the frame's last rows whatever the scroll, leaving the page at
+  least one row; when it does not fit, its last rows (the keys that leave)
+  stay and its first rows scroll with the page, after its last row, the
+  rule every framed pager follows.
+- When the page is taller than the frame, the pager's scrollbar takes a
+  1-column gutter on the right and the text is laid out one cell
+  narrower.
 
 ### Scrolling
 
-`HelpScroll` holds the offset the page asks for and the rows the last draw
-showed. A step may carry the offset past the end (so `G` works before the
-first draw); each draw shows the page at the offset brought inside it and
-returns that window, and `keep` takes it back, so after any number of keys
-past the end the next key up scrolls up. A page key moves by the rows the
-page showed, a half-page key by half of them (at least one), never by the
-height of a screen behind the page.
+The pager's (see [pager.md](pager.md)): one window, clamped on every draw
+and kept, so after any number of keys past the end the next key up
+scrolls up; a page key moves by the rows the page showed, a half-page key
+by half of them (at least one), never by the height of a screen behind
+the page; `G` (pressed before the first draw too) shows the last page and
+keeps to it.
 
 ## Key table
 
-The page binds no keys itself. The control that shows it resolves the keys
-that scroll and close it, and the same table generates the footer. A help
-page opened by a key is the standard pager plus that key:
+The page binds no keys itself. Its pager resolves the table it was given
+(`HelpPage::pager(table)`), the keys that scroll and close it, and the same
+table generates the footer. A help page opened by a key is the standard
+pager plus that key:
 
 | Key | Action | Notes |
 | --- | --- | --- |
-| `j` / `↓`, `k` / `↑` | scroll a row | `PAGER_KEYS`; `HelpScroll::apply(PagerKey::Down)` |
+| `j` / `↓`, `k` / `↑` | scroll a row | `PAGER_KEYS` |
 | `PgDn` / `Space`, `PgUp` | scroll a page | `PAGER_KEYS`; a page is the rows shown |
-| `Ctrl-D`, `Ctrl-U` | scroll half a page | `PAGER_KEYS` (aliases); `HelpScroll::apply(PagerKey::HalfPageDown)` |
+| `Ctrl-D`, `Ctrl-U` | scroll half a page | `PAGER_KEYS` (aliases) |
 | `g` / `Home`, `G` / `End` | the top, the end | `PAGER_KEYS` |
 | `Esc`, `q`, `Ctrl-C` | close | `PAGER_KEYS` (`Ctrl-C` first, as an alias; `q` with it as `Abort`) |
 | the key that opened it (`?`) | close | the host's row, `shown(ch('?'), PagerKey::Close, "?", "close")` |
 
-A page that is a level of a reader (the `Pager`'s `?` page) resolves
-`PAGER_HELP_KEYS` instead: the same scrolling, `Esc` and `?` going back to
-the reader, and `q` leaving it, with the footer `j/k/PgDn/PgUp scroll ·
-Esc/? back · q close`. A control with its own keys maps its movement
-actions onto the same `HelpScroll` steps, half pages included.
+A page that is a level of a reader (the `Pager`'s `?` page) is read in a
+pager over `PAGER_HELP_KEYS` instead: the same scrolling, `Esc` and `?`
+closing it, back to the reader, and `q` leaving the reader, with the
+footer `j/k/PgDn/PgUp scroll · Esc/? back · q close`. A control with its
+own keys maps its movement actions onto the page's pager's scroll calls
+(`scroll_by`, `page_down`, `half_page_up`, `to_end`).
 
 ## Theme tokens
 
@@ -251,13 +244,11 @@ the pager decides).
   `KeyRow`s; the scoped program-wide keymap planned for `keys` carries
   help text on its rows and generates the main page, with hand-written
   rows kept as annotations beside the generated ones.
-- **The pager.** The page's body is a reader that keeps its window; a
-  pager control with a modal mode can take it over, keeping the layout and
-  the generator here.
 - **Hiding instead of dimming.** An unavailable row is dimmed; hiding it
   is a filter over the sections, and explaining it is the control's.
 - **Per-section ordering and columns.** The key column is one width for
   every page so pages line up; a page with only short keys could narrow
   it, at the cost of the shared grid.
-- **Search within the page.** A find over the laid-out lines would sit
-  with the pager's find.
+- **Search within the page.** The page finds nothing (its tables bind no
+  find); a `find` over the laid-out lines and a table that binds `/` would
+  give it the pager's.

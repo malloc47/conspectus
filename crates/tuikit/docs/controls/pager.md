@@ -146,13 +146,24 @@ to rows (`line_of`, `rows_of`), which is what `match_rows` and `paint` need.
 | Mode | Chrome | Position | Footer |
 | --- | --- | --- | --- |
 | `Screen` (the default) | the header, a rule, the body, a rule, a one-row footer; it fills the screen (`fills_screen`) | the `[ n/m ]` chip leading the footer: the first row shown and the rows in all | the position, the find chip, the note, the content's chips, then the keys, fitted to one row |
-| `Modal(size)` | a `ModalFrame` of the named size, titled with the header | the shared scrollbar, in a column the rows give up when they overflow | the find chip and note (or the prompt), then the keys, receding and broken only between segments, on the frame's last rows |
+| `Modal(size)` | a `ModalFrame` of the named size, titled with the header | the shared scrollbar, in a column the rows give up when they overflow | the find chip and note (or the prompt), then the keys, receding and broken only between segments, at the body's text width, on the frame's last rows; a footer too tall keeps its last rows and scrolls the rest (below) |
 | `Embedded` | none: the body in the area the host gives it | the shared scrollbar | none; the host routes the keys it wants (`scroll_by`, `page_down`, `to_end`) |
 
 A full-screen footer too narrow for everything drops, in turn, the keys
 that scroll, the pager's other keys (find, help), the content's chips
 from the last, and the content's keys; the keys that leave stay, and what
 is still too wide is cut with `…`. The header is cut with `…` too.
+
+A framed pager leaves its body at least one row. When the prompt (or the
+find chip and the note) and the footer need more rows than that leaves,
+the prompt or chip row stays, the footer keeps its last rows (the keys
+that leave), and its first rows (the keys that scroll) go after the
+content's last row and scroll with it, so no key is lost and the keys
+that leave are the last out of view, the same priority as the full-screen
+footer's. The rows under the body are laid out at the body's text width,
+a cell narrower beside the scrollbar when the body overflows. A frame
+whose size fills its extent (`Fit::Fill`, as `WIDE` does) lays the
+content out in the draw only.
 
 ### Scrolling
 
@@ -213,10 +224,13 @@ in its severity's tone.
 
 `?` opens a `help::HelpPage` over the pager, generated from the pager's
 table and the content's: the pager's sections (moving, finding), the
-content's sections, then the pager's section of the keys that leave. Its
-footer is `PAGER_HELP_KEYS`: `j/k/PgDn/PgUp scroll · Esc/? back · q close`.
-While it is open the scroll keys move the page, `Esc` and `?` go back, `q`
-and `Ctrl-C` leave the pager, and every other key waits.
+content's sections, then the pager's section of the keys that leave. The
+page is read in a pager of its own over `PAGER_HELP_KEYS`, so it scrolls,
+fits its footer, and shows its scrollbar as every framed pager does
+(`help_page` is that pager while it is open). Its footer is `j/k/PgDn/PgUp
+scroll · Esc/? back · q close`. While it is open the scroll keys move the
+page, `Esc` and `?` (another `Close` there) go back, `q` and `Ctrl-C`
+leave the pager, and every other key waits.
 
 ## Key table
 
@@ -308,16 +322,14 @@ the host's).
 - **Copy of a selection.** The copy hook copies what the content holds; a
   copy of the rows shown or of the current match would pass the window or
   the find to the hook.
-- **A framed footer taller than its frame.** It keeps its first rows and
-  drops the rest; the help page instead scrolls its overflow with the
-  body, which a framed pager could do by counting those rows as content.
 - **Mouse.** No mouse wheel; the scroll calls are public for a host that
   routes one.
 
 ## Ports
 
 How each reader a host has moves onto the pager, as a check that the
-content trait carries what each needs. None of these is built here.
+content trait carries what each needs. Those marked built are; the rest
+are sketches.
 
 - **A snapshot of a terminal's scrollback** (built). `layout` numbers the
   lines in a five-cell gutter and wraps them under it
@@ -343,15 +355,25 @@ content trait carries what each needs. None of these is built here.
   styles read from the theme it is given, and `describe` keeps its own
   words for the ends and the find (`a match in hidden content turns that
   content on`).
-- **A long value** (a framed reader opened by `o`). `Modal(ModalSize::WIDE)`
-  with a table of `PAGER_KEYS`, `o` as another close, and `y` bound to
-  `PagerKey::Copy`; `layout` wraps the value, styling command lines;
-  `header` is the value's label; `copy` returns the host's copy message;
-  no find and no help, since the table binds neither.
-- **The help page's body.** `Modal(HelpPage::SIZE)` with `HELP_KEYS`
-  (`PAGER_KEYS` and `?` as another close); `layout` is `HelpPage::lines`
-  at the width; `header` is `Help`. The footer the pager composes from
-  `HELP_KEYS` is the one the page draws today.
+- **A long value** (built; a framed reader opened by `o`).
+  `Modal(ModalSize::WIDE)` with a table of `PAGER_KEYS`, `o` as another
+  close, and `y` bound to `PagerKey::Copy`; `layout` wraps each line of the
+  value at the width and keeps the rows while the width is the same,
+  drawing a plan's command lines in the accent (the host's own hook, in
+  its layout); `header` is the value's label; `copy` returns the host's
+  copy message, carrying what to copy and the words its notice uses; no
+  find and no help, since the table binds neither. The footer is the
+  pager's order, `j/k/PgDn/PgUp scroll · y copy · Esc/q/o close`.
+- **The help page** (built). `help::HelpPage` is itself the content:
+  `layout` is the page's grid at the width, kept while the width is the
+  same, and `header` its title (`Help`); it has no keys. A page opened by
+  a key is `HelpPage::new(sections).pager(table)`, framed at
+  `HelpPage::SIZE`, with the pager's keys and that key as another close
+  (`PAGER_KEYS` and `?`): its footer, `j/k/PgDn/PgUp scroll · Esc/q/?
+  close`, and its frames are the ones the page drew on its own. A
+  pager's `?` level is the same page over `PAGER_HELP_KEYS`. A reader not
+  yet on the pager keeps such a page and routes its own movement keys to
+  the page's scroll calls.
 - **A log's detail.** `Embedded` in the detail pane beside the log's list:
   `layout` wraps the selected entry's text; the host routes its detail
   keys (`J`/`K` to `scroll_by`, `PgDn` to `page_down`) and replaces the
