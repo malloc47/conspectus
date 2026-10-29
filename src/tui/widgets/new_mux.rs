@@ -141,7 +141,10 @@ impl NewMuxFormState {
                 return Outcome::Consumed;
             }
             Some(FormKey::Submit) => return self.try_commit(),
-            Some(FormKey::OptionPrev | FormKey::OptionNext | FormKey::Inherit) | None => {}
+            Some(
+                FormKey::OptionPrev | FormKey::OptionNext | FormKey::Toggle | FormKey::Inherit,
+            )
+            | None => {}
         }
         match self.focus {
             NewMuxField::Cwd => {

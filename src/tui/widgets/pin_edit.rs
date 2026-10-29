@@ -597,7 +597,7 @@ impl PinEditFormState {
             }
             Some(FormKey::Submit) => return self.try_commit(),
             Some(FormKey::OptionPrev) => Some(-1),
-            Some(FormKey::OptionNext) => Some(1),
+            Some(FormKey::OptionNext | FormKey::Toggle) => Some(1),
             None => None,
         };
         match stop {

@@ -413,6 +413,10 @@ pub enum FormKey {
     OptionPrev,
     /// Step the focused option on, or flip the focused toggle.
     OptionNext,
+    /// Flip the focused toggle or the option under a check group's
+    /// cursor; on any other option row, step it on as
+    /// [`OptionNext`](Self::OptionNext) does.
+    Toggle,
     /// Drop the focused field's own value and take the inherited one
     /// again.
     Inherit,
@@ -433,7 +437,9 @@ pub const FORM_KEYS: &[KeyRow<FormKey>] = &[
 ];
 
 /// Changing a form's option and toggle rows: `←/→/Space change`. On a
-/// text field these keys edit the text instead; the form decides.
+/// text field these keys edit the text instead; the form decides. `Space`
+/// is its own action ([`FormKey::Toggle`]) so a row of several checkboxes
+/// can move between them with the arrows and flip one with `Space`.
 pub const FORM_OPTION_KEYS: &[KeyRow<FormKey>] = &[
     shown(
         key(KeyCode::Left),
@@ -447,7 +453,7 @@ pub const FORM_OPTION_KEYS: &[KeyRow<FormKey>] = &[
         marks::ARROW_RIGHT,
         "change",
     ),
-    shown(ch(' '), FormKey::OptionNext, "Space", "change"),
+    shown(ch(' '), FormKey::Toggle, "Space", "change"),
 ];
 
 impl KeyAction for FormKey {
@@ -458,7 +464,7 @@ impl KeyAction for FormKey {
             Self::Up | Self::Down | Self::Back => KeyRole::Move,
             Self::Tab => KeyRole::Other,
             Self::Submit => KeyRole::Apply,
-            Self::OptionPrev | Self::OptionNext | Self::Inherit => KeyRole::Change,
+            Self::OptionPrev | Self::OptionNext | Self::Toggle | Self::Inherit => KeyRole::Change,
         }
     }
 }

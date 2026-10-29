@@ -176,13 +176,17 @@ not shown in the footer.
 | `PATH_FIELD_KEYS` (`PathKey`) | `Tab` completes the path, an alias (a path field's own key, consulted after its form's table; see [path_field.md](path_field.md)) | none |
 | `CHECKLIST_KEYS` (`ChecklistKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Space` toggle; `Enter` confirm; `Esc` cancel | `↑/↓ move · Space toggle · Enter confirm · Esc cancel` |
 | `FORM_KEYS` (`FormKey`) | `Ctrl-C` abort; `↑`/`Ctrl-P` previous field; `↓`/`Ctrl-N` next field; `Tab` complete or next; `S-Tab` back | `↑/↓ move · Tab complete/next · S-Tab back` |
-| `FORM_OPTION_KEYS` (`FormKey`) | `←` option back; `→`/`Space` option on | `←/→/Space change` |
+| `FORM_OPTION_KEYS` (`FormKey`) | `←` option back; `→` option on; `Space` toggle | `←/→/Space change` |
 
 A form's table includes `FORM_KEYS` first, then `FORM_OPTION_KEYS` if it
 has option or toggle rows, its own rows, its `Enter` row with the form's
-verb (`Enter save`), and `Esc cancel`. `FormKey::Inherit` drops a field's
-own value and takes the inherited one again, for forms with override
-rows. `PagerKey::Copy` is bound by a pager whose content can be copied.
+verb (`Enter save`), and `Esc cancel`. `Space` is its own action,
+`FormKey::Toggle`, so a row of several checkboxes can move between them
+with `←`/`→` and flip one with `Space`; on every other option row it steps
+the option on as `→` does (see [form.md](form.md)). `FormKey::Inherit`
+drops a field's own value and takes the inherited one again, for forms
+with override rows. `PagerKey::Copy` is bound by a pager whose content can
+be copied.
 
 ## Theme tokens
 

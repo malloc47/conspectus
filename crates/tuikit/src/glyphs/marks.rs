@@ -8,10 +8,12 @@
 //! mark's character typed anywhere else in the framework.
 //!
 //! Every mark is exactly one terminal cell, is in the framework's vetted
-//! table, and is listed in [`ALL`]; [`SPACED_SEPARATOR`] is the one
-//! constant here that is not a mark of its own but [`SEPARATOR`] padded
-//! with spaces. A host adds marks of its own to its copy of the table
-//! with [`super::VettedGlyphs::register`].
+//! table, and is listed in [`ALL`]. A few constants here are not marks of
+//! their own but are built from them, three cells each: [`SPACED_SEPARATOR`]
+//! ([`SEPARATOR`] padded with spaces) and the boxes a form draws before an
+//! option ([`CHECKED`], [`UNCHECKED`], [`CHOSEN`], [`NOT_CHOSEN`]). A host
+//! adds marks of its own to its copy of the table with
+//! [`super::VettedGlyphs::register`].
 
 /// The row cursor in a list and the focus marker in a pane title.
 pub const POINTER: &str = "►";
@@ -33,7 +35,8 @@ pub const OK: &str = "√";
 pub const FAIL: &str = "×";
 /// Something that needs attention but is not an error.
 pub const WARNING: &str = "▲";
-/// An unchecked item in a list of choices.
+/// An unchecked item in a list of choices, and, between parentheses, the
+/// chosen option of a one-of-N row ([`CHOSEN`]).
 pub const BULLET: &str = "•";
 /// Text cut to fit: the end of a truncated label.
 pub const ELLIPSIS: &str = "…";
@@ -41,6 +44,22 @@ pub const ELLIPSIS: &str = "…";
 pub const NO_VALUE: &str = "—";
 /// One cell of a horizontal rule.
 pub const RULE: &str = "─";
+/// The corner that leads in a line derived from the rows above it (the
+/// command a form will run), so it reads as output, not as a field.
+pub const DERIVED: &str = "└";
+/// An option that is on, in a row of options any number of which can be
+/// on (a checkbox): `[x]`. Three cells, all ASCII.
+pub const CHECKED: &str = "[x]";
+/// An option that is off, in a row of options any number of which can be
+/// on: `[ ]`. Three cells, all ASCII.
+pub const UNCHECKED: &str = "[ ]";
+/// The chosen option of a one-of-N row (a radio button): [`BULLET`]
+/// between parentheses, `(•)`. Three cells; its shape tells it from a
+/// checkbox ([`CHECKED`]) without color.
+pub const CHOSEN: &str = "(•)";
+/// An option of a one-of-N row that is not the chosen one: `( )`. Three
+/// cells, all ASCII.
+pub const NOT_CHOSEN: &str = "( )";
 /// The separator between the parts of one item, such as a name and its
 /// state in a chip (`wrap·on`), and between short items in a line.
 pub const SEPARATOR: &str = "·";
@@ -77,6 +96,7 @@ pub const ALL: &[&str] = &[
     ELLIPSIS,
     NO_VALUE,
     RULE,
+    DERIVED,
     SEPARATOR,
     ARROW_UP,
     ARROW_DOWN,

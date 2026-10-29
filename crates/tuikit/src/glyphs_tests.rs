@@ -38,6 +38,34 @@ fn the_pointer_and_the_back_mark_are_the_plain_pointers_not_emoji_capable_ones()
 }
 
 #[test]
+fn the_option_boxes_are_three_vetted_cells_and_a_choice_is_not_a_checkbox() {
+    let table = VettedGlyphs::default();
+    for boxed in [
+        marks::CHECKED,
+        marks::UNCHECKED,
+        marks::CHOSEN,
+        marks::NOT_CHOSEN,
+    ] {
+        assert_eq!(cell_width(boxed), 3, "`{boxed}` is not three cells");
+        for c in boxed.chars() {
+            let glyph = c.to_string();
+            assert!(
+                table.contains(&glyph),
+                "`{glyph}` in `{boxed}` is not vetted"
+            );
+            assert_eq!(cell_width(&glyph), 1, "`{glyph}` in `{boxed}`");
+        }
+    }
+    // A one-of-N row and a checkbox row differ in shape, so neither
+    // needs color to be told apart, on or off.
+    assert!(marks::CHOSEN.starts_with('(') && marks::CHECKED.starts_with('['));
+    assert!(marks::NOT_CHOSEN.starts_with('(') && marks::UNCHECKED.starts_with('['));
+    assert!(marks::CHOSEN.contains(marks::BULLET));
+    assert_ne!(marks::CHOSEN, marks::NOT_CHOSEN);
+    assert_ne!(marks::CHECKED, marks::UNCHECKED);
+}
+
+#[test]
 fn the_spinner_is_eight_braille_frames() {
     assert_eq!(marks::SPINNER.len(), 8);
     for frame in marks::SPINNER {
