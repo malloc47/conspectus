@@ -191,8 +191,28 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   used to post a toast, and renaming a pin or a tmux session to nothing
   closed the prompt with a toast (`pin: nothing entered`, `mux rename:
   name cannot be empty`) where it now stays open for a fix.
+- **Path fields show one hint, and give the path the rest of the row.**
+  The new tmux session and launch forms kept 32 cells after every path
+  for a `Tab: …` hint, so a 60-column form showed four characters of the
+  path; the hint now shows, and takes its cells (at most 30, and at most
+  half the row), only while the field is focused and `Tab` has something
+  to add, and the pin edit form's path rows show it too. The hint names
+  exactly what `Tab` adds, and a long one is shortened in the middle.
+  The launch form's worktree repo completes and is marked like the cwd.
+  A path that is missing or not a directory is marked `▲` (it was `!`).
+  Typing a name that only appears inside a known directory (`src` for
+  `~/work/src/app`) no longer completes to it; type the start of the
+  path.
 
 ### Fixed
+
+- **A file no longer passes for a working directory.** The TUI's path
+  fields offered files as completions and marked an existing file `√`, a
+  path `mux new`, `mux launch`, and a rebuild then refused. They now
+  offer only directories and mark a file `▲`.
+- **Drawing a form reads no files.** A path field listed a directory and
+  checked its path on every frame drawn; it now looks only when its text
+  changes.
 
 - **Text fields keep their cursor in view.** The quick select, content
   search, and picker queries show a cursor and scroll to keep it on

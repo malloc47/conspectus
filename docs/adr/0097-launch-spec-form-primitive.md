@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. Narrowed by
+[ADR 0167](0167-tui-path-fields-complete-behind-a-source-and-expand-tilde-on-commit.md):
+the cwd field is the framework's `path_field::PathField`, a directory field
+over Conspectus's read-only file-system source, in place of
+`PathOmniboxState`; the launch form's worktree repo is one too.
 
 ## Context
 

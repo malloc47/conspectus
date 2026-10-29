@@ -1202,10 +1202,21 @@ on the `argv` row. `↑`/`↓` move between rows, `Enter` saves, and `Esc`
 cancels.
 
 The launch and new mux forms work the same way: `↑`/`↓` move between fields,
-`Tab` completes a directory in a path field (offering directories from
-the graph as well as the filesystem) and moves on elsewhere, `←`/`→`/`Space`
-choose among the harnesses, options, and toggles, and a line shows the command
-the form will run.
+`Tab` completes a directory in a path field and moves on elsewhere,
+`←`/`→`/`Space` choose among the harnesses, options, and toggles, and a line
+shows the command the form will run.
+
+Every path field (the forms' cwd, the launch form's worktree repo, and a
+pin's path rows) asks for a directory. `Tab` adds the rest of the best
+completion: directories from the graph come first (the selected row's, then
+pins', live sessions', muxes', and so on), then the directories on disk that
+start with what you typed. While the field is focused and has a completion,
+`Tab: …` after it shows exactly what `Tab` would add; otherwise the path gets
+the whole row. The mark after the path is `√` for an existing directory, `▲`
+for a path that is missing or is not a directory (a file), and `?` for an
+empty field; it is advice, and the form still takes the path. A leading `~`
+is your home directory: the mark and the completions read it that way, and
+the form saves or runs the expanded path.
 
 `N`, or `m` then **Launch harness in new mux…**, opens the mux launch form
 with the worktree toggle off (switch it on to create or reuse a worktree). The

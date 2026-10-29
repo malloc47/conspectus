@@ -1181,6 +1181,18 @@ close it silently; inside the worktree menu and Controls, `Esc` steps back to
 the menu or the panel and `Ctrl-C` closes them. The parsers (`parse_max_age`)
 and the mapping to `Msg` stay in `conspectus`.
 
+Path fields are one field (ADR 0167). The new mux and launch forms' cwd, the
+launch form's worktree repo, and the pin edit form's path rows are the
+framework's `PathField`, asking for a directory: `Tab` adds the best
+completion (the known directories `conspectus` ranks from the graph first,
+then the directories the file system lists), and a hint shows what it would
+add only while the field is focused and has a completion. A mark beside the
+field says whether the path is an existing directory (advisory; a file or a
+missing path is still taken), and a leading `~` is expanded when the form
+commits. The field reads the file system only through a read-only source
+`conspectus` supplies, and only when its text changes, so drawing does no
+I/O. The pin store and the config loader expand `~` with the same rule.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

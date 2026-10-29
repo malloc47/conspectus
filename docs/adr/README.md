@@ -78,7 +78,7 @@ What Conspectus remembers about entities that are gone, the slots the operator p
 | [0094](0094-worktree-backed-pins-realized-at-launch.md) | Worktree-Backed Pins Realized at Launch | Superseded by 0142 |
 | [0095](0095-bare-mux-session-creation.md) | Bare Mux Session Creation (No Pin, No Agent) | Accepted (amended by 0142) |
 | [0096](0096-ephemeral-harness-mux-launch.md) | Mux Launch — Harness in a New Mux Without a Pin | Accepted (amended by 0142) |
-| [0097](0097-launch-spec-form-primitive.md) | Shared Launch-Spec Form Primitive | Accepted |
+| [0097](0097-launch-spec-form-primitive.md) | Shared Launch-Spec Form Primitive | Accepted (narrowed by 0167) |
 | [0098](0098-pin-resume-preserves-launch-argv.md) | Pin Resume Preserves the Pin's Launch Argv | Accepted (amended by 0142) |
 | [0102](0102-pin-bindings-are-one-to-one.md) | Pin Bindings Are One-To-One | Superseded by 0140 |
 | [0103](0103-launches-keep-failed-panes.md) | Launches Keep Failed Panes And Confirm The Harness Started | Accepted |
@@ -189,6 +189,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md) | The Test Kit Drives Frames, Keeps Colors In Goldens, And Holds Every Modal To The Conventions | Accepted |
 | [0165](0165-tui-text-entry-one-line-editor-and-one-text-field.md) | Text Entry Has One Line Editor And One Text Field | Accepted |
 | [0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md) | Text Prompts Are One Overlay That Explains Its Refusals | Accepted |
+| [0167](0167-tui-path-fields-complete-behind-a-source-and-expand-tilde-on-commit.md) | Path Fields Complete Behind A Source, Ask For A Kind, And Expand `~` On Commit | Accepted |
 
 ## Transcript viewer
 
