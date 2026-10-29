@@ -10,7 +10,7 @@ use ratatui::widgets::{Paragraph, Widget};
 
 use super::{CONTEXT_ROWS, Pager, PagerContent};
 use crate::chip::{PositionChip, StatusChip, Tone};
-use crate::frame::{ModalBody, ModalFrame, ModalSize};
+use crate::frame::{Fit, ModalBody, ModalFrame, ModalSize};
 use crate::glyphs::marks;
 use crate::keys::{FIND_KEYS, Footer, HINT_SEPARATOR};
 use crate::scroll::{ScrollGutter, ScrollWindow};
@@ -46,7 +46,7 @@ pub(super) fn screen<C: PagerContent>(
     };
     Paragraph::new(title).render(header, buf);
     rule(top_rule, buf, theme);
-    draw_body(pager, body, buf, theme, false);
+    draw_body(pager, body, buf, theme, false, &[]);
     rule(bottom_rule, buf, theme);
     let line = if pager.find.prompt().is_some() {
         prompt_line(pager, width, theme)
@@ -58,7 +58,7 @@ pub(super) fn screen<C: PagerContent>(
 
 /// Draws a framed pager: the header as the frame's title, the body with
 /// its scrollbar, and under it the find chip or prompt and the footer,
-/// which keep the frame's last rows.
+/// which keep the frame's last rows (see [`Below::fit`]).
 pub(super) fn modal<C: PagerContent>(
     pager: &mut Pager<C>,
     size: ModalSize,
@@ -69,9 +69,16 @@ pub(super) fn modal<C: PagerContent>(
     let frame = ModalFrame::new(theme, size);
     let width = usize::from(frame.inner_width(area));
     let title = pager.content.header(width, theme);
-    frame
-        .title(title)
-        .render(area, buf, Framed { pager, theme });
+    let fills = size.fit == Fit::Fill;
+    frame.title(title).render(
+        area,
+        buf,
+        Framed {
+            pager,
+            theme,
+            fills,
+        },
+    );
 }
 
 /// Draws an embedded pager: the body and its scrollbar.
@@ -81,100 +88,151 @@ pub(super) fn embedded<C: PagerContent>(
     buf: &mut Buffer,
     theme: &Theme,
 ) {
-    draw_body(pager, area, buf, theme, true);
+    draw_body(pager, area, buf, theme, true, &[]);
 }
 
 /// A framed pager inside its frame.
 struct Framed<'p, 't, C> {
     pager: &'p mut Pager<C>,
     theme: &'t Theme,
+    /// Whether the frame fills its extent, so its height does not follow
+    /// the rows.
+    fills: bool,
 }
 
 impl<C: PagerContent> ModalBody for Framed<'_, '_, C> {
     type Output = ();
 
     /// The rows the content lays out at `width`, and the status and
-    /// footer rows under them, for a frame that hugs its body.
+    /// footer rows under them, for a frame that hugs its body; nothing
+    /// for one that fills its extent, which lays the rows out in
+    /// `render` only.
     fn measure(&mut self, width: u16) -> u16 {
+        if self.fills {
+            return 0;
+        }
         let rows = self.pager.content.layout(width, self.theme);
-        let below = self.below(usize::from(width)).len();
+        let (status, footer) = below(self.pager, usize::from(width), self.theme);
+        let below = usize::from(status.is_some()) + footer.len();
         u16::try_from(rows + below).unwrap_or(u16::MAX)
     }
 
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let mut below = self.below(usize::from(area.width));
-        let keep = below.len().min(usize::from(area.height).saturating_sub(1));
-        below.truncate(keep);
-        let keep = u16::try_from(keep).unwrap_or(0);
+        let below = Below::fit(self.pager, area, self.theme);
+        let kept = u16::try_from(below.kept.len()).unwrap_or(area.height);
         let body = Rect {
-            height: area.height - keep,
+            height: area.height - kept,
             ..area
         };
-        draw_body(self.pager, body, buf, self.theme, true);
+        draw_body(self.pager, body, buf, self.theme, true, &below.spill);
         let rows = Rect {
             y: area.y + body.height,
-            height: keep,
+            width: below.width,
+            height: kept,
             ..area
         };
-        Paragraph::new(below).render(rows, buf);
+        Paragraph::new(below.kept).render(rows, buf);
     }
 }
 
-impl<C: PagerContent> Framed<'_, '_, C> {
-    /// What a framed pager draws under its body at `width`: the find
-    /// prompt, or the find chip and the note, then the footer, receding
-    /// and broken only between its segments.
-    fn below(&self, width: usize) -> Vec<Line<'static>> {
-        let pager = &*self.pager;
-        let theme = self.theme;
-        let mut out = Vec::new();
-        if pager.find.prompt().is_some() {
-            out.push(prompt_line(pager, width, theme));
-        } else {
-            let status = status_spans(pager, theme);
-            if !status.is_empty() {
-                out.push(Line::from(text::fit_spans(status, width)));
-            }
+/// What a framed pager draws under its body, fitted to its frame.
+struct Below {
+    /// The rows kept under the body: the find prompt, or the find chip
+    /// and the note, then the footer's last rows.
+    kept: Vec<Line<'static>>,
+    /// The footer's first rows, which do not fit under the body: they
+    /// scroll with it, after its last row.
+    spill: Vec<Line<'static>>,
+    /// The cells the rows are laid out in: the frame's inner width, one
+    /// fewer when the body overflows and the scrollbar takes a column.
+    width: u16,
+}
+
+impl Below {
+    /// Fits the rows under the body to `area`, the frame's inside.
+    ///
+    /// The find prompt (or the find chip and the note) and the footer
+    /// keep the frame's last rows and leave the body at least one. A
+    /// footer taller than the room left keeps its last rows, the keys
+    /// that leave, and its first rows, the keys that scroll, go after the
+    /// content's last row and scroll with it, so no key is lost. When the
+    /// body overflows, everything is laid out a cell narrower, beside the
+    /// scrollbar's column.
+    fn fit<C: PagerContent>(pager: &mut Pager<C>, area: Rect, theme: &Theme) -> Self {
+        let room = usize::from(area.height).saturating_sub(1);
+        let split = |pager: &Pager<C>, width: u16| {
+            let (status, mut footer) = below(pager, usize::from(width), theme);
+            let mut kept: Vec<Line<'static>> = status.into_iter().take(room).collect();
+            let stay = footer.len().min(room - kept.len());
+            let spill: Vec<Line<'static>> = footer.drain(..footer.len() - stay).collect();
+            kept.extend(footer);
+            Self { kept, spill, width }
+        };
+        let below = split(pager, area.width);
+        let rows = pager.content.layout(area.width, theme) + below.spill.len();
+        if rows <= usize::from(area.height) - below.kept.len() || area.width < 2 {
+            return below;
         }
-        let footer = pager.footer();
-        if !footer.is_empty() {
-            let width = if width <= MIN_FOOTER {
-                usize::MAX
-            } else {
-                width
-            };
-            let muted = Style::default().add_modifier(theme.muted);
-            out.extend(footer.lines(width, theme).into_iter().map(|mut line| {
-                for span in &mut line.spans {
-                    span.style = muted.patch(span.style);
-                }
-                line
-            }));
-        }
-        out
+        split(pager, area.width - 1)
     }
+}
+
+/// What a framed pager draws under its body at `width`: the find prompt,
+/// or the find chip and the note, or neither; and the footer, receding and
+/// broken only between its segments.
+fn below<C: PagerContent>(
+    pager: &Pager<C>,
+    width: usize,
+    theme: &Theme,
+) -> (Option<Line<'static>>, Vec<Line<'static>>) {
+    let status = if pager.find.prompt().is_some() {
+        Some(prompt_line(pager, width, theme))
+    } else {
+        let status = status_spans(pager, theme);
+        (!status.is_empty()).then(|| Line::from(text::fit_spans(status, width)))
+    };
+    let footer = pager.footer();
+    if footer.is_empty() {
+        return (status, Vec::new());
+    }
+    let width = if width <= MIN_FOOTER {
+        usize::MAX
+    } else {
+        width
+    };
+    let muted = Style::default().add_modifier(theme.muted);
+    let lines = footer.lines(width, theme).into_iter().map(|mut line| {
+        for span in &mut line.spans {
+            span.style = muted.patch(span.style);
+        }
+        line
+    });
+    (status, lines.collect())
 }
 
 /// Lays the content out for `area`, settles the window (a find's landing,
 /// the end it keeps to, the clamp), draws the rows it shows with their
-/// matches picked out, and keeps the window. With `gutter`, rows that
-/// overflow give their last column to the scrollbar and are laid out one
-/// cell narrower.
+/// matches picked out, and keeps the window. `tail` is rows that scroll
+/// after the content's last (a framed footer's that do not fit under the
+/// body). With `gutter`, rows that overflow give their last column to the
+/// scrollbar and are laid out one cell narrower.
 fn draw_body<C: PagerContent>(
     pager: &mut Pager<C>,
     area: Rect,
     buf: &mut Buffer,
     theme: &Theme,
     gutter: bool,
+    tail: &[Line<'static>],
 ) {
     let mut width = area.width;
-    let mut total = pager.content.layout(width, theme);
-    let bar = gutter.then(|| ScrollGutter::layout(area, total));
+    let mut rows = pager.content.layout(width, theme);
+    let bar = gutter.then(|| ScrollGutter::layout(area, rows + tail.len()));
     if let Some(bar) = bar.filter(|bar| bar.bar().is_some()) {
         width = bar.content().width;
-        total = pager.content.layout(width, theme);
+        rows = pager.content.layout(width, theme);
     }
     pager.laid_out = Some(width);
+    let total = rows + tail.len();
     let viewport = usize::from(area.height);
     // A find's landing puts the match one row of context below the top;
     // the window below brings that inside the content.
@@ -191,21 +249,27 @@ fn draw_body<C: PagerContent>(
     let window = ScrollWindow::new(viewport, total).at(offset);
     pager.scroll.keep(window);
     let target = bar.map_or(area, |bar| bar.content());
-    if total == 0 {
+    if rows == 0 {
         let empty = Line::from(Span::styled(
             pager.content.empty().into_owned(),
             Style::default().add_modifier(theme.muted),
         ));
-        let rows = text::wrap_line(&empty, usize::from(target.width), 0);
-        Paragraph::new(rows).render(target, buf);
+        let mut shown = text::wrap_line(&empty, usize::from(target.width), 0);
+        shown.extend(tail.iter().cloned());
+        Paragraph::new(shown).render(target, buf);
         return;
     }
-    let first = window.offset();
-    let mut rows = pager.content.rows(window.visible(), theme);
+    let visible = window.visible();
+    let first = visible.start;
+    let mut shown = pager
+        .content
+        .rows(first.min(rows)..visible.end.min(rows), theme);
     if pager.find.is_active() && !pager.find.matches().is_empty() {
-        pager.content.paint(&mut rows, first, &pager.find, theme);
+        pager.content.paint(&mut shown, first, &pager.find, theme);
     }
-    Paragraph::new(rows).render(target, buf);
+    let after = first.saturating_sub(rows)..visible.end.saturating_sub(rows);
+    shown.extend(tail[after].iter().cloned());
+    Paragraph::new(shown).render(target, buf);
     if let Some(bar) = bar {
         bar.render(&window, buf);
     }

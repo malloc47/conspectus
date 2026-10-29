@@ -797,6 +797,36 @@ fn a_framed_pager_shows_its_find_above_the_footer() {
 }
 
 #[test]
+fn a_framed_footer_too_tall_keeps_the_keys_that_leave_and_scrolls_the_rest() {
+    // Four rows of screen, two inside the frame: the body keeps one, and
+    // the footer its last row, the keys that leave. Its first rows go
+    // after the content's last row and scroll with it.
+    let mut pager =
+        Pager::new(Doc::rows_of(3, &[])).mode(PagerMode::Modal(crate::frame::ModalSize::WIDE));
+    let footer = pager.footer().lines(26, &theme());
+    assert!(footer.len() > 1, "{footer:?}");
+    let shown = draw(&mut pager, 30, 4);
+    assert!(shown[1].contains("row 1"), "{shown:?}");
+    assert!(shown[2].contains("Esc/q close"), "{shown:?}");
+    assert_eq!(pager.window().content(), 3 + footer.len() - 1);
+    pager.handle_key(shift('G'));
+    let shown = draw(&mut pager, 30, 4);
+    assert!(
+        shown[1].contains("a ask"),
+        "the last spilled row: {shown:?}"
+    );
+    assert!(shown[2].contains("Esc/q close"), "{shown:?}");
+    // The find prompt keeps its row above the footer's last; the body
+    // keeps one.
+    pager.handle_key(typed('/'));
+    let shown = draw(&mut pager, 30, 5);
+    assert!(shown[1].contains("a ask"), "{shown:?}");
+    assert!(shown[2].starts_with("│/"), "{shown:?}");
+    assert!(shown[2].contains("Enter find"), "{shown:?}");
+    assert!(shown[3].contains("Esc/q close"), "{shown:?}");
+}
+
+#[test]
 fn an_embedded_pager_draws_its_body_and_a_scrollbar_and_nothing_else() {
     let mut pager = Pager::new(Doc::rows_of(60, &[])).mode(PagerMode::Embedded);
     let shown = draw(&mut pager, 30, 8);

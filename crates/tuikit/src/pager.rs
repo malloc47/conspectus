@@ -10,8 +10,10 @@
 //!   rule, the body, a rule, and a one-row footer with the `[ n/m ]`
 //!   position chip. `Modal` draws in a [`ModalFrame`](crate::frame::ModalFrame)
 //!   of a named size, titled with the header, with a scrollbar and its
-//!   footer kept on the frame's last rows. `Embedded` is the body and a
-//!   scrollbar in an area a host lays out (a preview, a detail pane).
+//!   footer kept on the frame's last rows; a footer too tall for them
+//!   keeps its last rows (the keys that leave) and scrolls its first rows
+//!   with the body. `Embedded` is the body and a scrollbar in an area a
+//!   host lays out (a preview, a detail pane).
 //! - **Scrolling.** One window, clamped on every draw and kept: page keys
 //!   move by the rows the last draw showed, `Ctrl-D`/`Ctrl-U` by half of
 //!   them, `g`/`G` to the ends. `G` (and [`Pager::at_end`]) makes the
@@ -149,7 +151,8 @@ pub enum PagerMode {
     /// with the `[ n/m ]` position chip.
     Screen,
     /// In a modal frame of this size, titled with the header, with a
-    /// scrollbar and the footer on the frame's last rows.
+    /// scrollbar and the footer on the frame's last rows (its first rows
+    /// scroll with the body when they do not all fit).
     Modal(ModalSize),
     /// The body and a scrollbar in the area a host gives it, with no
     /// chrome: a preview or a detail pane, whose keys the host routes.
