@@ -2,8 +2,8 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use tuikit::keys::{
     CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, FORM_KEYS, FORM_OPTION_KEYS,
     HINT_SEPARATOR, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PALETTE_KEYS,
-    PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, PaletteKey, TEXT_INPUT_KEYS, ctrl_c_first, footer,
-    loose_characters, mislabeled, resolve, unresolved,
+    PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, PaletteKey, PaletteOptionKey, TEXT_INPUT_KEYS,
+    ctrl_c_first, footer, loose_characters, mislabeled, resolve, unresolved,
 };
 
 use super::*;
@@ -42,7 +42,6 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("FORM_OPTION_KEYS", problems(FORM_OPTION_KEYS)),
         ("LINE_EDIT_KEYS", problems(LINE_EDIT_KEYS)),
         ("PATH_FIELD_KEYS", problems(PATH_FIELD_KEYS)),
-        ("SEARCH_OPTION_KEYS", problems(SEARCH_OPTION_KEYS)),
         ("SEARCH_KEYS", problems(SEARCH_KEYS)),
         ("SEARCH_CONTENT_KEYS", problems(SEARCH_CONTENT_KEYS)),
         ("CONTROLS_KEYS", problems(CONTROLS_KEYS)),
@@ -138,8 +137,9 @@ fn the_registry_names_every_table() {
 #[test]
 fn generated_footers_read_in_the_one_grammar() {
     let joined = |segments: &[&str]| segments.join(HINT_SEPARATOR);
+    // The search options pane is the palette's.
     assert_eq!(
-        footer(SEARCH_OPTION_KEYS),
+        footer(PALETTE_OPTION_KEYS),
         joined(&["↑/↓ move", "Space toggle", "Esc back"])
     );
     // The picker is a palette: the standard palette footer.
@@ -232,7 +232,7 @@ fn generated_footers_read_in_the_one_grammar() {
     // One grammar: a short imperative verb after the keys, never "to"
     // or "=".
     for text in [
-        footer(SEARCH_OPTION_KEYS),
+        footer(PALETTE_OPTION_KEYS),
         footer(SEARCH_CONTENT_KEYS),
         footer(CONTROLS_KEYS),
         footer(HELP_KEYS),
@@ -305,8 +305,8 @@ fn every_list_moves_with_ctrl_n_and_ctrl_p() {
     assert_eq!(resolve(PALETTE_KEYS, ctrl_n), Some(PaletteKey::Down));
     assert_eq!(resolve(PALETTE_KEYS, ctrl_p), Some(PaletteKey::Up));
     assert_eq!(
-        resolve(SEARCH_OPTION_KEYS, ctrl_n),
-        Some(SearchOptionKey::Down)
+        resolve(PALETTE_OPTION_KEYS, ctrl_n),
+        Some(PaletteOptionKey::Down)
     );
     // The viewers are pagers with no cursor; Ctrl-N is not their `n`.
     assert_eq!(resolve(VIEWER_KEYS, ctrl_n), None);

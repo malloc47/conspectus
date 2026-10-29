@@ -2,13 +2,14 @@
 //!
 //! The key-table model and the standard tables (menus, dialogs, pagers,
 //! text prompts, checklists, palettes, forms) are `tuikit::keys`; the
-//! picker is a palette on the standard palette table. This module holds
-//! the tables of the overlays that are the TUI's own: search and its
-//! options, Controls, the help page, the value modal, Messages, the
-//! worktree close-down choice, the three forms
-//! (built on the standard form rows), the path field, the transcript and
-//! pane viewers, and the viewers' find prompt; and the modal key
-//! convention every modal is checked against.
+//! picker is a palette on the standard palette table, and quick select and
+//! content search are palettes on tables of their own (their options pane
+//! takes the standard palette option keys). This module holds the tables
+//! of the overlays that are the TUI's own: search, Controls, the help
+//! page, the value modal, Messages, the worktree close-down choice, the
+//! three forms (built on the standard form rows), the path field, the
+//! transcript and pane viewers, and the viewers' find prompt; and the
+//! modal key convention every modal is checked against.
 //!
 //! Every overlay resolves its keys through one of these tables or a
 //! standard one and renders its footer from the same table, so the
@@ -29,58 +30,10 @@ use crate::viewer::find::ViewerFindMsg;
 use crate::viewer::input::ViewerMsg;
 
 // ---------------------------------------------------------------------
-// Search: quick select, content search, and its options pane. Unbound
-// keys, `j` and `k` included, edit the query.
+// Search: quick select and content search, two palettes; their options
+// pane takes `tuikit::keys::PALETTE_OPTION_KEYS`. Unbound keys, `j` and
+// `k` included, edit the query.
 // ---------------------------------------------------------------------
-
-/// What the search options pane binds. Space and Enter both flip the
-/// option under the cursor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchOptionKey {
-    Abort,
-    Back,
-    Down,
-    Up,
-    Toggle,
-}
-
-impl KeyAction for SearchOptionKey {
-    fn role(self) -> KeyRole {
-        match self {
-            Self::Abort => KeyRole::Abort,
-            Self::Back => KeyRole::Leave,
-            Self::Down | Self::Up => KeyRole::Move,
-            Self::Toggle => KeyRole::Change,
-        }
-    }
-}
-
-/// The pane behind `Ctrl-O` in the contents modal: what a search looks in.
-pub const SEARCH_OPTION_KEYS: &[KeyRow<SearchOptionKey>] = &[
-    alias(ctrl('c'), SearchOptionKey::Abort),
-    shown(
-        key(KeyCode::Up),
-        SearchOptionKey::Up,
-        marks::ARROW_UP,
-        "move",
-    ),
-    shown(
-        key(KeyCode::Down),
-        SearchOptionKey::Down,
-        marks::ARROW_DOWN,
-        "move",
-    ),
-    alias(ctrl('n'), SearchOptionKey::Down),
-    alias(ctrl('p'), SearchOptionKey::Up),
-    alias(ch('k'), SearchOptionKey::Up),
-    alias(ch('j'), SearchOptionKey::Down),
-    shown(ch(' '), SearchOptionKey::Toggle, "Space", "toggle"),
-    alias(key(KeyCode::Enter), SearchOptionKey::Toggle),
-    shown(key(KeyCode::Esc), SearchOptionKey::Back, "Esc", "back"),
-    alias(ctrl('o'), SearchOptionKey::Back),
-    // Nothing is typed in the pane, so `q` dismisses the search.
-    alias(ch('q'), SearchOptionKey::Abort),
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchKey {
