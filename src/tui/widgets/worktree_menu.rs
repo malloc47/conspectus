@@ -2,8 +2,10 @@
 //!
 //! The `w` menu: a self-contained (`Ctx = ()`) modal that captures the
 //! selected node's worktree facts at open time and drives a small
-//! state machine — a list of [`WorktreeAction`]s, then either a
-//! branch-name text input (create) or a confirm (remove). The branch
+//! state machine — a list of [`WorktreeAction`]s (the framework's
+//! [`ActionMenu`], held as the menu's first level, whose pick is the
+//! action), then either a branch-name text input (create) or a confirm
+//! (remove). The branch
 //! prompt is the framework's [`TextPrompt`], held as a level of the menu:
 //! `Esc` there steps back to the list, `Ctrl-C` closes the menu, and a
 //! blank name is refused in the prompt. The menu emits a single committed
@@ -19,13 +21,13 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::Widget;
 
 use std::path::Path;
+use tuikit::action_menu::{ActionMenu, Entry};
 use tuikit::frame::{Lines, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
-use tuikit::selection::{self, Cursor, Ends};
 
 use crate::model::{
     CheckoutNode, GraphNode, GraphSnapshot, NodeId, RepoId, SnapshotIndex, WorktreeKind,
@@ -303,14 +305,24 @@ enum Mode {
     ConfirmPrune,
 }
 
-/// Overlay state: the captured context, the offered actions, a cursor,
+/// Overlay state: the captured context, the list of offered actions,
 /// and the current sub-mode.
 #[derive(Debug, Clone)]
 pub struct WorktreeMenuState {
     ctx: WorktreeMenuContext,
-    actions: Vec<WorktreeAction>,
-    cursor: usize,
+    list: ActionMenu<WorktreeAction>,
     mode: Mode,
+}
+
+/// The menu's first level: the offered actions, each picking itself.
+fn action_list(actions: &[WorktreeAction]) -> ActionMenu<WorktreeAction> {
+    ActionMenu::new(
+        "Worktree",
+        actions
+            .iter()
+            .map(|action| Entry::new(action.label(), *action))
+            .collect(),
+    )
 }
 
 impl WorktreeMenuState {
@@ -333,8 +345,7 @@ impl WorktreeMenuState {
         }
         Some(Self {
             ctx,
-            actions,
-            cursor: 0,
+            list: action_list(&actions),
             mode: Mode::List,
         })
     }
@@ -348,8 +359,7 @@ impl WorktreeMenuState {
             return None;
         }
         Some(Self {
-            actions: vec![WorktreeAction::CloseDownWorktree],
-            cursor: 0,
+            list: action_list(&[WorktreeAction::CloseDownWorktree]),
             mode: Mode::CloseDownChoice,
             ctx,
         })
@@ -364,12 +374,24 @@ impl WorktreeMenuState {
         matches!(self.mode, Mode::BranchInput(_))
     }
 
-    fn selected(&self) -> WorktreeAction {
-        self.actions[self.cursor.min(self.actions.len() - 1)]
+    /// The offered actions, in the list's order.
+    #[cfg(test)]
+    fn actions(&self) -> Vec<WorktreeAction> {
+        self.list
+            .entries()
+            .iter()
+            .map(|entry| entry.outcome)
+            .collect()
     }
 
-    fn activate(&mut self) -> Outcome<Msg> {
-        match self.selected() {
+    /// The action under the list's cursor.
+    #[cfg(test)]
+    fn selected(&self) -> WorktreeAction {
+        self.list.entries()[self.list.cursor()].outcome
+    }
+
+    fn activate(&mut self, action: WorktreeAction) -> Outcome<Msg> {
+        match action {
             WorktreeAction::NewWorktree => {
                 let Some(repo_root) = self.ctx.repo_root.clone() else {
                     return Outcome::Close;
@@ -402,20 +424,13 @@ impl WorktreeMenuState {
         }
     }
 
+    /// One key for the list: the menu moves and closes as every menu
+    /// does, and its pick opens the action's next step here.
     fn handle_list(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
-        match resolve(MENU_KEYS, key) {
-            Some(MenuKey::Abort | MenuKey::Close) => Outcome::Close,
-            Some(MenuKey::Up) => {
-                self.cursor = Ends::Wrap.step(self.cursor, self.actions.len(), -1);
-                Outcome::Consumed
-            }
-            Some(MenuKey::Down) => {
-                self.cursor = Ends::Wrap.step(self.cursor, self.actions.len(), 1);
-                Outcome::Consumed
-            }
-            Some(MenuKey::Pick) => self.activate(),
-            None => Outcome::Consumed,
+        match self.list.handle(key, &()) {
+            Outcome::Commit(action) => self.activate(action),
+            Outcome::Close => Outcome::Close,
+            Outcome::Consumed | Outcome::Stay(_) => Outcome::Consumed,
         }
     }
 
@@ -548,43 +563,38 @@ impl WorktreeMenuState {
 }
 
 /// Renders the worktree menu (list / branch input / confirm) in a
-/// centered popup.
+/// centered popup. It takes the state mutably because the list keeps the
+/// scroll window it drew.
 pub struct WorktreeMenuWidget<'a> {
-    state: &'a WorktreeMenuState,
+    state: &'a mut WorktreeMenuState,
     theme: &'a Theme,
 }
 
 impl<'a> WorktreeMenuWidget<'a> {
-    pub fn new(state: &'a WorktreeMenuState, theme: &'a Theme) -> Self {
+    pub fn new(state: &'a mut WorktreeMenuState, theme: &'a Theme) -> Self {
         Self { state, theme }
     }
 }
 
 impl Widget for WorktreeMenuWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // The branch prompt draws itself, in place of the list.
-        if let Mode::BranchInput(input) = &self.state.mode {
-            input.draw(area, buf, self.theme);
-            return;
+        match &self.state.mode {
+            // The branch prompt and the list draw themselves.
+            Mode::BranchInput(input) => {
+                input.draw(area, buf, self.theme);
+                return;
+            }
+            Mode::List => {
+                self.state.list.draw(area, buf, self.theme);
+                return;
+            }
+            _ => {}
         }
 
         // The key hints of a confirmation, wrapped apart from the body so
         // they break only between hints.
-        let mut footer = None;
+        let footer;
         let lines: Vec<Line> = match &self.state.mode {
-            Mode::List => self
-                .state
-                .actions
-                .iter()
-                .enumerate()
-                .map(|(i, action)| {
-                    selection::row(
-                        [Span::raw(action.label())],
-                        Cursor::of(i == self.state.cursor, true),
-                        self.theme,
-                    )
-                })
-                .collect(),
             Mode::ConfirmRemove => {
                 let branch = self.state.ctx.branch.as_deref().unwrap_or("(unknown)");
                 let mut lines = vec![
@@ -605,7 +615,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                footer = Some(tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS));
+                footer = tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS);
                 lines
             }
             Mode::ConfirmMerge => {
@@ -629,7 +639,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                footer = Some(tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS));
+                footer = tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS);
                 lines
             }
             Mode::CloseDownChoice => {
@@ -658,13 +668,11 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                footer = Some(tuikit::keys::footer(
-                    crate::tui::keybindings::overlay::CLOSE_DOWN_KEYS,
-                ));
+                footer = tuikit::keys::footer(crate::tui::keybindings::overlay::CLOSE_DOWN_KEYS);
                 lines
             }
             Mode::ConfirmPrune => {
-                footer = Some(tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS));
+                footer = tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS);
                 vec![
                     Line::styled(
                         "Prune merged worktrees?",
@@ -675,7 +683,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                     Line::from(""),
                 ]
             }
-            Mode::BranchInput(_) => unreachable!("handled above"),
+            Mode::BranchInput(_) | Mode::List => unreachable!("drawn above"),
         };
 
         // Wrapped to the frame's inner width, so the height counts the rows
@@ -686,14 +694,12 @@ impl Widget for WorktreeMenuWidget<'_> {
             .iter()
             .flat_map(|line| tuikit::text::wrap_line(line, inner_width, 0))
             .collect();
-        if let Some(footer) = footer {
-            let separator = tuikit::keys::HINT_SEPARATOR;
-            rows.extend(
-                tuikit::text::wrap_at(&footer, separator, inner_width)
-                    .into_iter()
-                    .map(Line::from),
-            );
-        }
+        let separator = tuikit::keys::HINT_SEPARATOR;
+        rows.extend(
+            tuikit::text::wrap_at(&footer, separator, inner_width)
+                .into_iter()
+                .map(Line::from),
+        );
         frame.render(area, buf, Lines::new(rows));
     }
 }

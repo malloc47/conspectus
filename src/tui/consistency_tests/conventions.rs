@@ -94,7 +94,15 @@ const SCROLLS: &[&str] = &["Help", "ValueModal"];
 const READS_THE_APP: &[&str] = &["Controls", "Search", "Messages"];
 
 /// Modals whose arrow keys must move a selection the check compares.
-const MOVES: &[&str] = &["PinEdit", "RowMenu", "Picker", "MuxLaunch", "NewMux"];
+const MOVES: &[&str] = &[
+    "PinEdit",
+    "RowMenu",
+    "MuxMenu",
+    "WorktreeMenu",
+    "Picker",
+    "MuxLaunch",
+    "NewMux",
+];
 
 /// The modal's row of the modal key convention.
 fn convention(name: &str) -> Convention {
@@ -166,13 +174,13 @@ fn case(name: &'static str, variant: &'static str, view: View, open: Open) -> Ca
         ("ValueModal", _) => case.footer(VALUE_MODAL_KEYS),
         ("Messages", _) => case.footer(MESSAGES_KEYS),
         ("NewMux", _) => case.footer(NEW_MUX_KEYS),
-        ("MuxMenu" | "RowMenu", _) => case.footer(MENU_KEYS),
+        // The worktree menu opens on its list, an action menu.
+        ("MuxMenu" | "RowMenu" | "WorktreeMenu", _) => case.footer(MENU_KEYS),
         ("MuxLaunch", _) => case.footer(MUX_LAUNCH_KEYS),
         ("PinEdit", _) => case.footer(PIN_EDIT_KEYS),
         // The prompt draws its keys on its bottom border.
         ("Rename", _) => case.footer(TEXT_INPUT_KEYS),
-        // The worktree menu's list, Clean up, and the picker draw no
-        // footer of their own.
+        // Clean up and the picker draw no footer of their own.
         _ => case,
     }
 }

@@ -21,7 +21,7 @@ fn worktree_ctx(guard: Vec<String>, can_mutate: bool) -> WorktreeMenuContext {
 fn new_offers_wired_mutations_for_a_worktree() {
     let state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
     assert_eq!(
-        state.actions,
+        state.actions(),
         vec![
             WorktreeAction::NewWorktree,
             WorktreeAction::MergeWorktree,
@@ -114,7 +114,7 @@ fn a_blank_branch_is_refused_in_the_prompt_until_a_name_is_typed() {
     assert!(state.editing_branch(), "the prompt stays open");
     let theme = crate::tui::theme::Theme::default();
     let drawn = tuikit::testkit::buffer::text(&tuikit::testkit::render::render_widget(
-        WorktreeMenuWidget::new(&state, &theme),
+        WorktreeMenuWidget::new(&mut state, &theme),
         80,
         24,
     ));
@@ -126,7 +126,7 @@ fn a_blank_branch_is_refused_in_the_prompt_until_a_name_is_typed() {
         state.handle_key(press(KeyCode::Char(c)));
     }
     let drawn = tuikit::testkit::buffer::text(&tuikit::testkit::render::render_widget(
-        WorktreeMenuWidget::new(&state, &theme),
+        WorktreeMenuWidget::new(&mut state, &theme),
         80,
         24,
     ));
@@ -320,7 +320,7 @@ fn repo_prune_flow_commits_prune() {
     };
     let mut state = WorktreeMenuState::new(ctx).expect("actions");
     assert_eq!(
-        state.actions,
+        state.actions(),
         vec![WorktreeAction::NewWorktree, WorktreeAction::PruneWorktrees],
     );
     // Navigate to prune, confirm.
@@ -364,7 +364,7 @@ fn context_for_worktree_reveal_targets_first_session() {
         ..ctx
     })
     .expect("reveal offered");
-    assert!(state.actions.contains(&WorktreeAction::RevealSessions));
+    assert!(state.actions().contains(&WorktreeAction::RevealSessions));
 }
 
 #[test]
@@ -388,7 +388,7 @@ fn reveal_dropped_without_a_target() {
     // A worktree with no live sessions has no reveal target, so the
     // reveal action isn't offered.
     let state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
-    assert!(!state.actions.contains(&WorktreeAction::RevealSessions));
+    assert!(!state.actions().contains(&WorktreeAction::RevealSessions));
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn the_cursor_action_shows_the_marker_and_the_highlight() {
     state.handle_key(press(KeyCode::Down));
     let area = Rect::new(0, 0, 80, 20);
     let mut buf = Buffer::empty(area);
-    WorktreeMenuWidget::new(&state, &theme).render(area, &mut buf);
+    WorktreeMenuWidget::new(&mut state, &theme).render(area, &mut buf);
     let marked: Vec<(u16, u16)> = (0..area.height)
         .flat_map(|y| (0..area.width).map(move |x| (x, y)))
         .filter(|(x, y)| buf[(*x, *y)].symbol() == marks::POINTER)
