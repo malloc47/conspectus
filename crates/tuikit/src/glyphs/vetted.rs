@@ -26,6 +26,12 @@ use super::scan::{Drawn, drawn_glyphs};
 const WGL4_SHAPE: &str = "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous";
 /// The note for the box-drawing family.
 const BOX: &str = "Box Drawing; drawn by the terminal itself in most; ambiguous";
+/// The note for the box-drawing joints and double rules a rendered table's
+/// borders use.
+const TABLE: &str = "Box Drawing; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous";
+/// The note for the dotted box-drawing lines a rendered table separates its
+/// columns with.
+const DOTTED: &str = "Box Drawing; DejaVu Sans Mono 1.00; ambiguous";
 /// The note for a half block (the sides of a toast's border).
 const HALF_BLOCK: &str = "WGL4 block elements; every font; drawn by the terminal itself in most";
 /// The note for a quadrant block (the corners of a toast's border).
@@ -89,6 +95,24 @@ const FRAMEWORK: &[(&str, &str)] = &[
     ("╗", BOX),
     ("╚", BOX),
     ("╝", BOX),
+    // The borders of a rendered table (`richtext`): its joints, its double
+    // header rule, and its dotted column separators.
+    ("├", TABLE),
+    ("┤", TABLE),
+    ("┬", TABLE),
+    ("┴", TABLE),
+    ("┼", TABLE),
+    ("═", TABLE),
+    ("╞", TABLE),
+    ("╡", TABLE),
+    ("╪", TABLE),
+    ("╤", TABLE),
+    ("╧", TABLE),
+    ("╠", TABLE),
+    ("╣", TABLE),
+    ("╬", TABLE),
+    ("┆", DOTTED),
+    ("╌", DOTTED),
     // The block border of a toast (ratatui's quadrant border set).
     ("▀", HALF_BLOCK),
     ("▄", HALF_BLOCK),

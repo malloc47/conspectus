@@ -86,6 +86,16 @@ pub fn glyph_risk(glyph: &str) -> Option<&'static str> {
     }
 }
 
+/// The box-drawing characters a rendered table's borders are made of: the
+/// single lines and their joints, the double header rule, and the dotted
+/// column separators. Rich text tells a table's borders from its cells'
+/// text by them; every one is in the vetted table.
+#[cfg(feature = "richtext")]
+pub(crate) const TABLE_BORDERS: &[char] = &[
+    '│', '─', '┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼', '═', '╞', '╡', '╪', '╤', '╧', '╠', '╣',
+    '╬', '║', '┆', '╌',
+];
+
 /// Characters that have an emoji presentation and so may draw wide: a
 /// deny-list of the ones near a terminal interface's vocabulary.
 const EMOJI_CAPABLE: &[u32] = &[

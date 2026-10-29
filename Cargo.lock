@@ -2477,9 +2477,12 @@ dependencies = [
 name = "tuikit"
 version = "0.1.0"
 dependencies = [
+ "ansi-to-tui",
+ "comfy-table",
  "ratatui",
  "toml 0.8.23",
  "tui-input",
+ "tui-markdown",
  "tuikit",
  "unicode-width",
 ]

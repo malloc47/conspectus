@@ -2,8 +2,8 @@
 //!
 //! `tuikit::glyphs` vets the characters every control shares. The glyphs
 //! below are Conspectus's own: one per node kind, one per row state, and
-//! the few others its sources draw (the transcript viewer's table borders
-//! and result arrow, the graph export's star). [`register_glyphs`] adds
+//! the few others its sources draw (the transcript viewer's result arrow,
+//! the graph export's star). [`register_glyphs`] adds
 //! them with a note on how each was measured, so the source scan can check
 //! every character either crate draws against one table.
 //!
@@ -16,10 +16,6 @@
 use tuikit::glyphs::{RegisterError, VettedGlyphs};
 
 use super::{NodeKind, state};
-
-/// The shared note for the transcript viewer's table borders, which
-/// `comfy-table` draws from the box-drawing block.
-const TABLE: &str = "Box Drawing; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous";
 
 /// How a node kind's default glyph was vetted. `None` for a kind that
 /// draws a state glyph (a pin), which [`STATES`] registers.
@@ -97,22 +93,6 @@ const OTHERS: &[(&str, &str)] = &[
         "★",
         "Miscellaneous Symbols; DejaVu Sans Mono 1.00; marks the resolver's pick in the graph export",
     ),
-    ("├", TABLE),
-    ("┤", TABLE),
-    ("┬", TABLE),
-    ("┴", TABLE),
-    ("┼", TABLE),
-    ("═", TABLE),
-    ("╞", TABLE),
-    ("╡", TABLE),
-    ("╪", TABLE),
-    ("╤", TABLE),
-    ("╧", TABLE),
-    ("╠", TABLE),
-    ("╣", TABLE),
-    ("╬", TABLE),
-    ("┆", "Box Drawing; DejaVu Sans Mono 1.00; ambiguous"),
-    ("╌", "Box Drawing; DejaVu Sans Mono 1.00; ambiguous"),
 ];
 
 /// Registers the node-kind glyphs, the state glyphs, and the other

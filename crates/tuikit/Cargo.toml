@@ -18,8 +18,22 @@ unicode-width = { workspace = true }
 # The one line-edit engine, behind `text_edit::LineEdit`. Already shared
 # through `[workspace.dependencies]`; ADR 0152 names it.
 tui-input = { workspace = true }
+# The rich-text crates, behind the `richtext` feature (ADR 0152): ANSI
+# escapes into styled lines, Markdown into styled lines (the shared entry
+# turns on its fenced-code highlighting, which brings its highlighter),
+# and table layout. All three are already shared through
+# `[workspace.dependencies]`.
+ansi-to-tui = { workspace = true, optional = true }
+comfy-table = { workspace = true, optional = true }
+tui-markdown = { workspace = true, optional = true }
 
 [features]
+# Rich text (`tuikit::richtext`): captured terminal output laid out in a
+# wrap mode, ANSI text, Markdown with tables and highlighted code, and
+# syntax highlighting. Off by default, so a program that shows no rich
+# content builds none of the parsing crates; a host that does turns it on
+# in its dependency on the framework.
+richtext = ["dep:ansi-to-tui", "dep:comfy-table", "dep:tui-markdown"]
 # The test kit (`tuikit::testkit`): key scripts, the one-frame driver,
 # buffer probes, the ANSI writer, style-aware goldens, the conformance
 # suite, and the source-scan helpers. Off by default, so a production

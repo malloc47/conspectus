@@ -31,6 +31,9 @@ pub mod overlay;
 pub mod pager;
 pub mod palette;
 pub mod path_field;
+// Rich text pulls in the parsing crates, so it is a feature a host turns on.
+#[cfg(feature = "richtext")]
+pub mod richtext;
 pub mod scroll;
 pub mod selection;
 pub mod settings_panel;
