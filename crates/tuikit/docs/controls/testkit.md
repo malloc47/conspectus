@@ -139,8 +139,13 @@ conformance::assert_conventions(&registry);
 A host's real registry lists every modal it registers, one `Case` each (a
 modal with several modes, such as a search, takes one case per mode with a
 `variant`), and fails a test of its own when a modal it registers is
-missing from it. Run the checks one per test (`assert_conventions_of` with
-one `Check`) so they run in parallel.
+missing from it. A modal that opens as a step of another (a menu's
+confirmation, a settings panel's editor) is marked `Case::step`: the
+entry under it may draw its cursor row in the inactive selection look
+while the step is open, so outside the step's frame the `Contained` check
+accepts a cell whose only change is the selection modifiers. Run the
+checks one per test (`assert_conventions_of` with one `Check`) so they run
+in parallel.
 
 ## Key table
 

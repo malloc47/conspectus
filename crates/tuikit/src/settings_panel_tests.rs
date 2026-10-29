@@ -880,3 +880,83 @@ fn the_settings_table_passes_the_table_checks() {
     assert!(ctrl_c_first(SETTINGS_KEYS));
     assert!(footer(SETTINGS_KEYS).ends_with("changes apply as you make them"));
 }
+
+/// A host whose stack holds a panel with an editor open over it as a
+/// step.
+struct StepHost(Theme, Prefs);
+
+impl Rig for StepHost {
+    type State = ModalStack<Box<dyn Overlay<Msg, Prefs>>>;
+
+    fn render(&self, stack: &mut Self::State, area: Rect) -> Buffer {
+        let mut buf = Buffer::empty(area);
+        Paragraph::new("the screen under the panel").render(area, &mut buf);
+        stack.draw::<Msg, Prefs>(area, &mut buf, &self.1, &self.0);
+        buf
+    }
+
+    fn close_top(&self, stack: &mut Self::State) {
+        stack.pop();
+    }
+
+    fn press(&self, stack: &mut Self::State, key: KeyEvent) {
+        if let Some(outcome) = stack.route::<Msg, Prefs>(key, &self.1) {
+            let _ = stack.settle(outcome);
+        }
+    }
+
+    fn depth(&self, stack: &Self::State) -> usize {
+        stack.len()
+    }
+
+    fn theme(&self) -> &Theme {
+        &self.0
+    }
+}
+
+/// The panel on a row the prompt does not cover, with an editor (a
+/// prompt) open over it as a step.
+fn with_editor() -> ModalStack<Box<dyn Overlay<Msg, Prefs>>> {
+    let mut stack: ModalStack<Box<dyn Overlay<Msg, Prefs>>> = ModalStack::new();
+    stack.push(Box::new(panel().at("Gamma")));
+    let prompt = crate::text_prompt::TextPrompt::new("name", "ada", |text: &str| {
+        crate::text_prompt::PromptResult::Back(Msg::Pick(text.len(), 0))
+    });
+    stack.push_step(Box::new(prompt));
+    stack
+}
+
+#[test]
+fn an_editor_over_the_panel_keeps_the_conventions_as_a_step() {
+    use crate::testkit::conformance::Check;
+    let convention = Convention::new("Prompt", EnterMeans::Submits, SpaceMeans::Types, "");
+    let keys = || {
+        [conformance::table(
+            "TEXT_INPUT_KEYS",
+            crate::keys::TEXT_INPUT_KEYS,
+        )]
+    };
+    let step = Registry::new(StepHost(Theme::default(), Prefs::new())).case(
+        Case::new("Prompt", with_editor)
+            .typed()
+            .step()
+            .keys(convention, keys())
+            .footer(crate::keys::TEXT_INPUT_KEYS),
+    );
+    conformance::assert_conventions(&step);
+    // Not marked as a step, the panel's receding cursor row is a change
+    // outside the prompt's frame.
+    let plain = Registry::new(StepHost(Theme::default(), Prefs::new())).case(
+        Case::new("Prompt", with_editor)
+            .typed()
+            .keys(convention, keys())
+            .footer(crate::keys::TEXT_INPUT_KEYS),
+    );
+    let failures = conformance::check_conventions_of(&plain, &[Check::Contained]);
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.to_string().contains("outside the frame")),
+        "{failures:?}"
+    );
+}

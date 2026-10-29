@@ -52,6 +52,19 @@ fn with_and_without<R: Rig>(rig: &R, case: &Case<R::State>, size: (u16, u16)) ->
     (with, without)
 }
 
+/// Whether `shown` is `under` with only some of the `selection`
+/// modifiers added or taken away: the same symbol, colors, and every
+/// other modifier.
+fn only_selection_changed(shown: &Cell, under: &Cell, selection: Modifier) -> bool {
+    let changed = shown.modifier ^ under.modifier;
+    if changed.is_empty() || !selection.contains(changed) {
+        return false;
+    }
+    let mut restyled = under.clone();
+    restyled.modifier = shown.modifier;
+    &restyled == shown
+}
+
 /// Every size the frame checks draw at.
 fn frame_sizes() -> impl Iterator<Item = (u16, u16)> {
     WIDTHS
@@ -73,6 +86,8 @@ pub(super) fn contained<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
     if case.look == Look::FullScreen {
         return Vec::new();
     }
+    let theme = rig.theme();
+    let selection = theme.selection_active | theme.selection_inactive;
     let mut out = Vec::new();
     for size in frame_sizes() {
         let (with, without) = with_and_without(rig, case, size);
@@ -81,9 +96,15 @@ pub(super) fn contained<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
             out.push(format!("draws no frame at {at}"));
             continue;
         };
+        // Under a step, the entry it is a step of shows its cursor row
+        // in the inactive look; nothing else may change.
+        let changed = |x: u16, y: u16| {
+            let (shown, under) = (&with[(x, y)], &without[(x, y)]);
+            shown != under && !(case.step && only_selection_changed(shown, under, selection))
+        };
         let escaped = (0..with.area.height)
             .flat_map(|y| (0..with.area.width).map(move |x| (x, y)))
-            .find(|&(x, y)| !rect.contains((x, y).into()) && with[(x, y)] != without[(x, y)]);
+            .find(|&(x, y)| !rect.contains((x, y).into()) && changed(x, y));
         if let Some((x, y)) = escaped {
             out.push(format!(
                 "at {at}, cell ({x},{y}) outside the frame {} changed to {:?}",

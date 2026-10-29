@@ -10,7 +10,7 @@
 //! | [`Check`] | What it holds |
 //! | --- | --- |
 //! | `Drawn` | The screen with the modal open differs from the screen without it, at 100 by 30 and 60 by 20. |
-//! | `Contained` | At every one of five widths ([`WIDTHS`]) by two heights ([`HEIGHTS`]) the modal draws a frame, nothing it draws escapes that frame, and no text runs into the frame's sides. |
+//! | `Contained` | At every one of five widths ([`WIDTHS`]) by two heights ([`HEIGHTS`]) the modal draws a frame, nothing it draws escapes that frame, and no text runs into the frame's sides. A [step](Case::step) may change only the selection look of the entry under it outside its frame. |
 //! | `Title` | The frame's corners and title are the theme's `accent`, the title has one space on each side, and outside the chips it carries (cells in the theme's `badge` look) it is regular weight. |
 //! | `Selection` | Moving the selection (down four times, up once) neither moves nor resizes the frame, and moves no text above the last row it repaints, outside the two-cell cursor gutter. |
 //! | `Words` | No row inside the frame, at any of the ten sizes, ends at the frame's edge in the start of a longer word the same modal shows whole on a wide screen; a deliberate cut ends in the ellipsis mark. |
@@ -252,6 +252,7 @@ pub struct Case<S> {
     open: Box<dyn Fn() -> S>,
     look: Look,
     typed: bool,
+    step: bool,
     selection: Selection,
     levels: Vec<KeyLevel>,
     footer: Option<Footer>,
@@ -268,6 +269,7 @@ impl<S> Case<S> {
             open: Box::new(open),
             look: Look::Framed,
             typed: false,
+            step: false,
             selection: Selection::MayMove,
             levels: Vec::new(),
             footer: None,
@@ -295,6 +297,20 @@ impl<S> Case<S> {
     #[must_use]
     pub fn typed(mut self) -> Self {
         self.typed = true;
+        self
+    }
+
+    /// The modal opens as a step of the entry under it
+    /// ([`ModalStack::push_step`](crate::overlay::ModalStack::push_step)),
+    /// which the stack draws with
+    /// [`render_under_step`](crate::overlay::Overlay::render_under_step)
+    /// while it is open: a list there shows its cursor row in the
+    /// inactive selection look. Outside the modal's frame the `Contained`
+    /// check accepts a cell whose only change is the theme's selection
+    /// modifiers, and still fails any other.
+    #[must_use]
+    pub fn step(mut self) -> Self {
+        self.step = true;
         self
     }
 
