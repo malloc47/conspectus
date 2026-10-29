@@ -507,11 +507,13 @@ pub fn retarget_candidates(
         if PinKind::of_node(&id) != Some(pin.kind) || Some(&id) == current.as_ref() {
             continue;
         }
-        items.push(PickerItem {
-            label: crate::tui::explorer::title_line(snapshot, node),
-            detail: "running".to_string(),
-            value: id.to_string(),
-        });
+        items.push(
+            PickerItem::new(
+                crate::tui::explorer::title_line(snapshot, node),
+                id.to_string(),
+            )
+            .detail("running"),
+        );
     }
     let history_kind = match pin.kind {
         PinKind::Mux => Some(HistoryKind::Mux),
@@ -539,11 +541,7 @@ pub fn retarget_candidates(
                 ),
                 None => crate::model::gone_word(history_kind.node_kind()).to_string(),
             };
-            items.push(PickerItem {
-                label,
-                detail,
-                value: meta.id.clone(),
-            });
+            items.push(PickerItem::new(label, meta.id.clone()).detail(detail));
         }
     }
     items

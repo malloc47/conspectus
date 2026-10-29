@@ -20,7 +20,9 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use tuikit::keys::{CHECKLIST_KEYS, Convention, DIALOG_KEYS, MENU_KEYS, TEXT_INPUT_KEYS};
+use tuikit::keys::{
+    CHECKLIST_KEYS, Convention, DIALOG_KEYS, MENU_KEYS, PALETTE_KEYS, TEXT_INPUT_KEYS,
+};
 use tuikit::testkit::conformance::{self, Case, Check, KeyTable, Registry, Rig, table};
 
 use super::layout::{Open, app_with, builders};
@@ -28,8 +30,8 @@ use super::registry::{open_pane_viewer, open_viewer};
 use super::*;
 use crate::tui::keybindings::overlay::{
     CONTROLS_KEYS, HELP_KEYS, MESSAGES_KEYS, MODAL_CONVENTION, MUX_LAUNCH_KEYS, NEW_MUX_KEYS,
-    PANE_VIEWER_KEYS, PICKER_KEYS, PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS,
-    VALUE_MODAL_KEYS, VIEWER_FIND_KEYS, VIEWER_KEYS,
+    PANE_VIEWER_KEYS, PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, VALUE_MODAL_KEYS,
+    VIEWER_FIND_KEYS, VIEWER_KEYS,
 };
 
 /// The App drawn and driven as the fixture TUI does: the whole screen,
@@ -128,7 +130,7 @@ fn tables(modal: &str) -> Vec<KeyTable> {
             table("SEARCH_KEYS", SEARCH_KEYS),
             table("SEARCH_CONTENT_KEYS", SEARCH_CONTENT_KEYS),
         ],
-        "Picker" => vec![table("PICKER_KEYS", PICKER_KEYS)],
+        "Picker" => vec![table("PALETTE_KEYS", PALETTE_KEYS)],
         "ValueModal" => vec![table("VALUE_MODAL_KEYS", VALUE_MODAL_KEYS)],
         "Messages" => vec![table("MESSAGES_KEYS", MESSAGES_KEYS)],
         "Viewer" => vec![table("VIEWER_KEYS", VIEWER_KEYS)],
@@ -177,6 +179,7 @@ fn case(name: &'static str, variant: &'static str, view: View, open: Open) -> Ca
         ("MuxLaunch", _) => case.footer(MUX_LAUNCH_KEYS),
         ("PinEdit", _) => case.footer(PIN_EDIT_KEYS),
         ("CleanUp", _) => case.footer(CHECKLIST_KEYS),
+        ("Picker", _) => case.footer(PALETTE_KEYS),
         // The prompts draw their keys on their bottom border.
         ("Rename" | "Prompt", _) => case.footer(TEXT_INPUT_KEYS),
         // A dialog's footer depends on its form: the one the dialog that
@@ -188,7 +191,6 @@ fn case(name: &'static str, variant: &'static str, view: View, open: Open) -> Ca
             };
             case.footer(dialog.footer())
         }
-        // The picker draws no footer of its own.
         _ => case,
     }
 }

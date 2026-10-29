@@ -7,9 +7,9 @@
 //! that were on screen. Every entry draws through the shared modal frame,
 //! which clears what it covers, or fills the screen. The rename and step
 //! prompts, the new mux form, the row, mux, and worktree menus, the
-//! dialogs, and Clean up have no impl here: they are the framework's text
-//! prompt, form, action menu, dialog, and checklist, which implement the
-//! trait for any context.
+//! dialogs, Clean up, and the picker have no impl here: they are the
+//! framework's text prompt, form, action menu, dialog, checklist, and
+//! palette, which implement the trait for any context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
@@ -25,7 +25,6 @@ use crate::tui::widgets::{
     messages::{MessagesOverlayState, MessagesWidget},
     mux_launch::MuxLaunchForm,
     pane_viewer::{PaneViewerOutcome, PaneViewerState},
-    picker::{PickerState, PickerWidget},
     pin_edit::PinEditForm,
     search::SearchOverlayState,
     value_modal::{ValueModalOutcome, ValueModalState, ValueModalWidget},
@@ -257,19 +256,5 @@ impl Overlay<Msg, App> for PinEditForm {
 
     fn takes_text(&self) -> bool {
         PinEditForm::takes_text(self)
-    }
-}
-
-impl Overlay<Msg, App> for PickerState {
-    fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
-        self.handle_key(key)
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        PickerWidget::new(self, app.theme()).render(area, buf);
-    }
-
-    fn takes_text(&self) -> bool {
-        true
     }
 }

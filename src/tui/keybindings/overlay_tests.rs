@@ -2,8 +2,8 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use tuikit::keys::{
     CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, FORM_KEYS, FORM_OPTION_KEYS,
     HINT_SEPARATOR, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PALETTE_KEYS,
-    PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, TEXT_INPUT_KEYS, ctrl_c_first, footer, loose_characters,
-    mislabeled, resolve, unresolved,
+    PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, PaletteKey, TEXT_INPUT_KEYS, ctrl_c_first, footer,
+    loose_characters, mislabeled, resolve, unresolved,
 };
 
 use super::*;
@@ -43,7 +43,6 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("LINE_EDIT_KEYS", problems(LINE_EDIT_KEYS)),
         ("PATH_FIELD_KEYS", problems(PATH_FIELD_KEYS)),
         ("SEARCH_OPTION_KEYS", problems(SEARCH_OPTION_KEYS)),
-        ("PICKER_KEYS", problems(PICKER_KEYS)),
         ("SEARCH_KEYS", problems(SEARCH_KEYS)),
         ("SEARCH_CONTENT_KEYS", problems(SEARCH_CONTENT_KEYS)),
         ("CONTROLS_KEYS", problems(CONTROLS_KEYS)),
@@ -143,7 +142,11 @@ fn generated_footers_read_in_the_one_grammar() {
         footer(SEARCH_OPTION_KEYS),
         joined(&["↑/↓ move", "Space toggle", "Esc back"])
     );
-    assert_eq!(footer(PICKER_KEYS), "");
+    // The picker is a palette: the standard palette footer.
+    assert_eq!(
+        footer(PALETTE_KEYS),
+        joined(&["↑/↓ move", "Enter pick", "Esc close"])
+    );
     assert_eq!(
         footer(SEARCH_KEYS),
         joined(&[
@@ -294,10 +297,13 @@ fn every_list_moves_with_ctrl_n_and_ctrl_p() {
         assert_eq!(resolve(form, ctrl_n), Some(FormKey::Down));
         assert_eq!(resolve(form, ctrl_p), Some(FormKey::Up));
     }
-    for search in [SEARCH_KEYS, SEARCH_CONTENT_KEYS, PICKER_KEYS] {
+    for search in [SEARCH_KEYS, SEARCH_CONTENT_KEYS] {
         assert_eq!(resolve(search, ctrl_n), Some(SearchKey::Down));
         assert_eq!(resolve(search, ctrl_p), Some(SearchKey::Up));
     }
+    // The picker's table.
+    assert_eq!(resolve(PALETTE_KEYS, ctrl_n), Some(PaletteKey::Down));
+    assert_eq!(resolve(PALETTE_KEYS, ctrl_p), Some(PaletteKey::Up));
     assert_eq!(
         resolve(SEARCH_OPTION_KEYS, ctrl_n),
         Some(SearchOptionKey::Down)

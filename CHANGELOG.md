@@ -291,6 +291,19 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   keys stay at the bottom and its items scroll with the cursor (at 40x10
   it showed more items and no keys), and a long label still ends with
   `…`.
+- **The picker works like the search lists and shows its keys.** The
+  **Retarget…** list and the remembered searches take the size quick
+  select and content search have (85% of the screen's width and 80% of
+  its height, at least 60 columns and 12 rows) instead of filling the
+  screen like the help, so a wide screen shows the panes around them and
+  a 60-column one is covered edge to edge. They show their keys at the
+  bottom (`↑/↓ move · Enter pick · Esc close`), move by a screen with
+  `PgUp`/`PgDn`, and show a scrollbar beside a list taller than the
+  frame, which scrolls only as far as the cursor needs (moving back up no
+  longer drags the list along). A candidate too long for its row ends
+  with `…`, and every change to the filter puts the cursor back on the
+  first match (it stayed at the same position). The count in the title
+  sits two spaces after the title (`Retarget project-main  (3/7)`).
 
 ### Fixed
 

@@ -377,7 +377,7 @@ impl App {
     }
 
     /// The open picker, if it is on top of the stack.
-    pub fn picker(&self) -> Option<&crate::tui::widgets::picker::PickerState> {
+    pub fn picker(&self) -> Option<&crate::tui::widgets::picker::Picker> {
         match self.modal_stack.top()? {
             crate::tui::Modal::Picker(state) => Some(state.as_ref()),
             _ => None,
@@ -385,14 +385,14 @@ impl App {
     }
 
     /// Mutable access for the runtime's per-key forwarding.
-    pub fn picker_mut(&mut self) -> Option<&mut crate::tui::widgets::picker::PickerState> {
+    pub fn picker_mut(&mut self) -> Option<&mut crate::tui::widgets::picker::Picker> {
         match self.modal_stack.top_mut()? {
             crate::tui::Modal::Picker(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_picker(&mut self, state: crate::tui::widgets::picker::PickerState) {
+    pub fn open_picker(&mut self, state: crate::tui::widgets::picker::Picker) {
         self.modal_stack
             .push(crate::tui::Modal::Picker(Box::new(state)));
     }

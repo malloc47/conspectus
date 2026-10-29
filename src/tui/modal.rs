@@ -168,6 +168,8 @@ modals! {
     /// [`Modal`] small.
     CleanUp(Box<tuikit::checklist::Checklist<Msg>>),
     /// A pick-one list with type-to-filter: where a pin points next, or a
-    /// remembered search.
-    Picker(Box<crate::tui::widgets::picker::PickerState>),
+    /// remembered search. The framework's palette over the candidates,
+    /// whose pick its closure turns into the message it means. Boxed to
+    /// keep [`Modal`] small.
+    Picker(Box<crate::tui::widgets::picker::Picker>),
 }

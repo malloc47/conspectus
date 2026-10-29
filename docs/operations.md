@@ -1507,6 +1507,15 @@ selected`). `PgUp` and `PgDn` move by the rows shown, and `Home`/`End`
 screen keeps its keys at the bottom and scrolls its items with the
 cursor.
 
+The picker (**Retarget…** in the pin menu, and the remembered searches
+in Controls) types into its filter, so `j`, `k`, and `q` are letters
+there. Every word typed must appear in a candidate's name or details,
+and each change to the filter puts the cursor back on the first match.
+The arrows and `Ctrl-P`/`Ctrl-N` move, wrapping, `PgUp`/`PgDn` move by
+the rows shown, `Enter` picks, and `Esc` or `Ctrl-C` closes it. It is
+the size of quick select and content search, keeps its keys at the
+bottom, and scrolls a long list with a scrollbar beside it.
+
 Every dialog takes the same keys. A confirmation (the worktree menu's
 merge, remove, and prune) goes ahead on `Enter` or `y` and goes back on
 `Esc` or `n`; a choice (close-down's `m` merge and `d` discard) takes its

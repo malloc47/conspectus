@@ -1105,21 +1105,19 @@ impl App {
                     .iter()
                     .enumerate()
                     .rev()
-                    .map(|(index, entry)| crate::tui::widgets::picker::PickerItem {
-                        label: format!("\"{}\"", entry.search.text),
-                        detail: entry.describe(now),
-                        value: index.to_string(),
+                    .map(|(index, entry)| {
+                        crate::tui::widgets::picker::PickerItem::new(
+                            format!("\"{}\"", entry.search.text),
+                            index.to_string(),
+                        )
+                        .detail(entry.describe(now))
                     })
                     .collect();
-                let mut picker = crate::tui::widgets::picker::PickerState::new(
-                    "Searches",
-                    crate::tui::widgets::picker::PickerPurpose::SearchHistory,
+                let viewed = viewed.map(|viewed| viewed.to_string());
+                self.open_picker(crate::tui::widgets::picker::search_history(
                     items,
-                );
-                if let Some(viewed) = viewed {
-                    picker = picker.at_value(&viewed.to_string());
-                }
-                self.open_picker(picker);
+                    viewed.as_deref(),
+                ));
             }
             Msg::ApplySearchEntry if self.active_view != View::Search => {
                 effects.push(Effect::Toast(Feedback::warning(

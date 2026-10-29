@@ -1808,11 +1808,7 @@ impl App {
                         "pin `{pin}`: there is nothing else of its kind to point it at"
                     ))));
                 } else {
-                    self.open_picker(crate::tui::widgets::picker::PickerState::new(
-                        format!("Retarget {pin}"),
-                        crate::tui::widgets::picker::PickerPurpose::Retarget { pin },
-                        candidates,
-                    ));
+                    self.open_picker(crate::tui::widgets::picker::retarget(pin, candidates));
                 }
             }
             Msg::CommitRetarget { pin, target } => {

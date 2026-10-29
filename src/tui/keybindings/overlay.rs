@@ -1,10 +1,11 @@
 //! The TUI's own overlay key tables (ADR 0123, ADR 0160).
 //!
-//! The key-table model and the standard tables (menus, confirmations,
-//! pagers, text prompts, checklists, forms) are `tuikit::keys`. This
-//! module holds the tables of the overlays that are the TUI's own:
-//! search and its options, the picker, Controls, the help page, the
-//! value modal, Messages, the worktree close-down choice, the three forms
+//! The key-table model and the standard tables (menus, dialogs, pagers,
+//! text prompts, checklists, palettes, forms) are `tuikit::keys`; the
+//! picker is a palette on the standard palette table. This module holds
+//! the tables of the overlays that are the TUI's own: search and its
+//! options, Controls, the help page, the value modal, Messages, the
+//! worktree close-down choice, the three forms
 //! (built on the standard form rows), the path field, the transcript and
 //! pane viewers, and the viewers' find prompt; and the modal key
 //! convention every modal is checked against.
@@ -28,8 +29,8 @@ use crate::viewer::find::ViewerFindMsg;
 use crate::viewer::input::ViewerMsg;
 
 // ---------------------------------------------------------------------
-// Search: quick select, content search, its options pane, the picker.
-// Unbound keys, `j` and `k` included, edit the query.
+// Search: quick select, content search, and its options pane. Unbound
+// keys, `j` and `k` included, edit the query.
 // ---------------------------------------------------------------------
 
 /// What the search options pane binds. Space and Enter both flip the
@@ -122,17 +123,6 @@ impl KeyAction for SearchKey {
         }
     }
 }
-
-/// The picker shares the list-and-query keys but has no scopes.
-pub const PICKER_KEYS: &[KeyRow<SearchKey>] = &[
-    alias(ctrl('c'), SearchKey::Abort),
-    alias(key(KeyCode::Esc), SearchKey::Cancel),
-    alias(key(KeyCode::Enter), SearchKey::Pick),
-    alias(key(KeyCode::Down), SearchKey::Down),
-    alias(key(KeyCode::Up), SearchKey::Up),
-    alias(ctrl('n'), SearchKey::Down),
-    alias(ctrl('p'), SearchKey::Up),
-];
 
 /// `/` quick select. Tab and Shift-Tab both switch the reach, which is
 /// only ever one of two (and the same in the contents modal).
