@@ -136,7 +136,7 @@ left over going before it (ratatui's own centering).
 | Policy | Width | Height | Margin | For |
 | --- | --- | --- | --- | --- |
 | `COMPACT` | up to 60, at least 20 | the body's, at least 3 | 2 columns, 1 row | a one-line prompt, a short checklist |
-| `MENU` | up to 64, at least 40 | the body's, at least 3 | 2 columns, 1 row | a list of choices, a settings list, a short notice |
+| `MENU` | up to 64, at least 40 | the body's, at least 3 | 2 columns, 1 row | a list of choices, a settings list, a dialog |
 | `FORM` | up to 80, at least 44 | the body's, at least 3 | 2 columns, 1 row | labeled fields |
 | `WIDE` | up to 100, at least 40 | all, at least 10 | 2 columns, 1 row | reading (help, a log, a long value); a long list that is filtered |
 | `PALETTE` | 85% of the screen, 60 to 200 | 80%, 12 to 50 | 2 columns, 1 row | a search palette, which shows more of each result on a large screen |

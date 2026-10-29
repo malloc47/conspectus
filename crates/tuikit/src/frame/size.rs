@@ -98,7 +98,7 @@ pub enum Fit {
 /// | Policy | Width | Height | For |
 /// | --- | --- | --- | --- |
 /// | [`COMPACT`](Self::COMPACT) | up to 60, at least 20 | the body's | a one-line prompt, a short checklist |
-/// | [`MENU`](Self::MENU) | up to 64, at least 40 | the body's | a list of choices, a settings list |
+/// | [`MENU`](Self::MENU) | up to 64, at least 40 | the body's | a list of choices, a settings list, a dialog |
 /// | [`FORM`](Self::FORM) | up to 80, at least 44 | the body's | labeled fields |
 /// | [`WIDE`](Self::WIDE) | up to 100, at least 40 | all, at least 10 | reading: help, a log, a long value; a long list |
 /// | [`PALETTE`](Self::PALETTE) | 85% of the screen, 60 to 200 | 80%, 12 to 50 | a search palette |
