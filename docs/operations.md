@@ -1162,8 +1162,8 @@ migrated.
 
 `p` pins the selected row in any view with one keypress, and unpins it at
 once when a pin already points at it (`u` undoes either; see below). `.` opens the menu for the
-row: **Pin** for an unpinned entity, and for a pinned one every pin verb above,
-whichever view you are in.
+row: **Pin** for an unpinned entity (`p` there pins too, as on the list), and
+for a pinned one every pin verb above, whichever view you are in.
 
 Accelerators act on what you are looking at. With the right pane focused,
 `p`, `.`, `v`, `a`, `R`, `w`, and `X` act on the entity shown there (the
@@ -1335,8 +1335,10 @@ rebuilt and focus moves to where it now lives). `.` opens the row menu:
 **Pin** (the same as `pin add <record id>`; the full pin menu once a pin points
 at it), **Rebuild** (without attaching), **Show rebuild plan** (the output of
 `rebuild --dry-run --assume-stopped` in a scrollable modal; `y` copies the
-commands as a script), **Forget** (press `Enter` twice; the record leaves history
-and any pin pointing at it falls back to its snapshot), and **Clean up…**.
+commands as a script), **Forget** (press `Enter` twice: the first press arms it
+and the entry reads `Forget · press Enter again to confirm`, and moving off it
+disarms it; the record leaves history and any pin pointing at it falls back to
+its snapshot), and **Clean up…**.
 
 Clean up lists what `conspectus history reap` would remove: gone records past
 their `[history.reap_after]` age, minus records a pin targets. All are
@@ -1482,6 +1484,15 @@ as it is for `PgDn`/`PgUp` in the tree, and scrolling stops at the last
 line. Help and the other long dialogs wrap
 their text to the dialog's width, and menus cut a label that cannot fit
 with an ellipsis, so no word is clipped at the edge.
+
+Every menu (`.`, `m`, the worktree menu's list, and the menu `p` opens when
+several pins point at a row) works the same way. An entry that has a key of
+its own shows it in a column before its label, and pressing it picks the
+entry from anywhere in the menu: `p` on **Pin** in the row menu, and `n` and
+`N` in the mux menu, the keys that do the same on the list. An entry that
+asks for a second `Enter` says so on its row once armed. A menu taller than
+the screen keeps its keys at the bottom and scrolls its entries, with a
+scrollbar beside them, moving only as far as the cursor needs.
 
 Inside the transcript viewer, `?` opens a help page drawn like the main
 help: the same frame and size, section headings, an accent-colored key

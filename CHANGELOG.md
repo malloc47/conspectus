@@ -245,6 +245,20 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   longer puts back the old name), and on a field that had no value of
   your own it puts back the value the field had and shows where that
   comes from again (it said `will follow`).
+- **Menus work one way.** The row menu (`.`), the mux menu (`m`), the
+  worktree menu's list, and the menu `p` opens when several pins point
+  at a row are one control. An entry's own key sits in a column before
+  its label and picks it from anywhere in the menu: `p` on **Pin** (its
+  explanation no longer says `(p)`), and `n` and `N` in the mux menu, the
+  keys that open the same forms from the list; in a menu with such a key
+  the labels sit three columns further right. The mux menu loses its
+  `Mux actions` heading, so at 40x10 its keys stay in view. The worktree
+  menu's list shows the menu's keys (`↑/↓ move · Enter pick · Esc
+  close`) and scrolls on a short terminal instead of cutting its last
+  entries. A menu taller than the screen shows a scrollbar beside its
+  entries, which then wrap a column narrower, and scrolls only as far as
+  the cursor needs instead of keeping the cursor on the last line. The
+  armed **Forget** reads `Forget · press Enter again to confirm`.
 
 ### Fixed
 

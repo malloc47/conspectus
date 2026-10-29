@@ -8,7 +8,11 @@ launched mux is recorded in history with its argv, `--pin` and `--pin
 comes from launch profiles. Narrowed by
 [ADR 0169](0169-tui-launch-form-is-a-form-and-one-grammar-splits-every-argv.md):
 the TUI form is the framework's `Form`, not the launch-spec primitive
-described under **Form** below.
+described under **Form** below. Amended by
+[ADR 0171](0171-tui-menus-one-control-entries-as-data.md): the Mux action
+menu is the framework's action menu fed two entries (new tmux session,
+launch harness), with no heading of its own inside its frame, and its
+entries show `n` and `N`, the keys that open the same forms from the list.
 
 ## Context
 

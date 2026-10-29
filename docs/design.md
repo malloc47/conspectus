@@ -1214,6 +1214,18 @@ following on `Ctrl-R`, a key only that form's table binds. `conspectus` keeps
 the fields by pin kind, their labels and layer words, the rename's checks,
 and the save to the pin store.
 
+Menus are one control (ADR 0171). The row menu (`.`), the mux menu (`m`),
+the worktree menu's list, and the menu `p` opens when several pins point at a
+row are the framework's `ActionMenu`, over entries that are data: a label, a
+detail, a shortcut shown in a key column, whether the entry can run now, an
+inline second-`Enter` confirmation, and the message it commits. `conspectus`
+builds the entries from the selection each time a menu opens, so an entity
+offers the same verbs in every view, and shows a shortcut only for a key that
+does the same thing on the list (`p` on Pin, `n` and `N` in the mux menu). The
+cursor wraps and steps over entries that cannot run, an armed entry says what
+`Enter` will do, and the footer generated from the menu key table stays at the
+bottom while the entries scroll.
+
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
 argv someone types (the forms, `pin edit --set`) is refused when it ends
