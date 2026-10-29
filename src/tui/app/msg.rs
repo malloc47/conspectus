@@ -225,6 +225,10 @@ pub enum Msg {
     /// executor per lockstep. A pin's rename prompt commits
     /// [`Msg::CommitSlotRename`] instead.
     CommitRename(String),
+    /// Open a Controls editor as a step over the panel: the checklist or
+    /// prompt `editor` names, seeded from the live settings. Its answer
+    /// steps back to the panel with the message that sets what it edited.
+    OpenControlsEditor(crate::tui::widgets::controls::ControlsEditor),
     /// Open the worktree menu's next step for `action` over the menu: the
     /// branch prompt, a confirmation, or the close-down choice, built
     /// from the worktree facts the menu captured when it opened. The

@@ -21,9 +21,8 @@
 //! file and the `tui-pantry` dev-dep both retire.
 
 use conspectus::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
-use conspectus::tui::widgets::controls::{
-    ControlsContext, ControlsOverlayState, ControlsOverlayWidget,
-};
+use conspectus::tui::Modal;
+use conspectus::tui::widgets::controls::{self, ControlsContext, ControlsCursor, ControlsEditor};
 use std::borrow::Cow;
 
 use conspectus::tui::rows::RowId;
@@ -102,31 +101,27 @@ impl Ingredient for ChecklistVariant {
     }
 }
 
-/// Pre-open shape for the controls overlay sub-editor. The
-/// `ControlsOverlayState` private fields force us to drive open
-/// states via `handle_key`, so each variant picks the row to
-/// land on, optionally navigates down before pressing Enter,
-/// and ends with the sub-editor (or nothing) open.
+/// Pre-open shape for the controls overlay: the panel alone, or one of
+/// its editors open over it as the reducer opens it, a step whose panel
+/// shows its cursor row in the inactive look.
 #[derive(Clone, Copy)]
 enum ControlsOpenState {
-    /// Default open: cursor at View > active, no sub-editor.
+    /// Default open: cursor at View > active, no editor.
     Closed,
-    /// Cursor parked on Filters > Harness; press Enter to open
-    /// the harness checklist.
+    /// Cursor on Filters > Harness with the harness checklist open.
     HarnessOpen,
-    /// Cursor at Filters > Max Age; Enter opens the max-age
-    /// text input pre-seeded from `filter.max_age`.
+    /// Cursor on Filters > Max Age with the max-age prompt open,
+    /// seeded from `filter.max_age`.
     MaxAgeOpen,
-    /// Cursor at Filters > Mux State; Enter opens the mux-state
-    /// checklist pre-seeded from `filter.mux_state`.
+    /// Cursor on Filters > Mux State with the mux-state checklist open,
+    /// seeded from `filter.mux_state`.
     MuxStateOpen,
 }
 
-/// Configuration for one controls-overlay preview variant. The
-/// state is rebuilt fresh per `render`, since drawing it needs
-/// `&mut` (an open checklist keeps its scroll window). The
-/// `RowFilter` lives on the variant; the `ControlsContext` borrows
-/// from it transiently each frame.
+/// Configuration for one controls-overlay preview variant, which is also
+/// the panel's context: [`ControlsVariant::context`] lends its settings
+/// out as the App does. The panel is rebuilt fresh per `render`, since
+/// drawing it needs `&mut` (it keeps its scroll window).
 struct ControlsVariant {
     view: View,
     grouping: Grouping,
@@ -138,11 +133,20 @@ struct ControlsVariant {
 }
 
 impl ControlsVariant {
-    fn handle_key(state: &mut ControlsOverlayState, ctx: &ControlsContext<'_>, code: KeyCode) {
-        let event = press(code);
-        // Outcome is discarded — the preview is render-only, and
-        // outcomes describe what the reducer would apply.
-        let _ = state.handle_key(ctx, event);
+    fn context(&self) -> ControlsContext<'_> {
+        ControlsContext {
+            view: self.view,
+            grouping: self.grouping,
+            filter: &self.filter,
+            sort: self.sort,
+            mux_recency: conspectus::tui::MuxRecency::default(),
+            preview_wrap: conspectus::tui::PreviewWrap::default(),
+            session_preview: conspectus::tui::SessionPreview::default(),
+            content: None,
+            search_kinds: Default::default(),
+            content_group: Default::default(),
+            search_history: None,
+        }
     }
 }
 
@@ -165,48 +169,30 @@ impl Ingredient for ControlsVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let ctx = ControlsContext {
-            view: self.view,
-            grouping: self.grouping,
-            filter: &self.filter,
-            sort: self.sort,
-            mux_recency: conspectus::tui::MuxRecency::default(),
-            preview_wrap: conspectus::tui::PreviewWrap::default(),
-            session_preview: conspectus::tui::SessionPreview::default(),
-            content: None,
-            search_kinds: Default::default(),
-            content_group: Default::default(),
-            search_history: None,
-        };
-        let mut state = match self.open_state {
-            ControlsOpenState::Closed => ControlsOverlayState::new(&ctx),
-            ControlsOpenState::HarnessOpen
-            | ControlsOpenState::MaxAgeOpen
-            | ControlsOpenState::MuxStateOpen => {
-                // `new_at_filters` lands the cursor on Filters >
-                // Harness; we drive Down to reach Max Age / Mux
-                // State before pressing Enter to open.
-                ControlsOverlayState::new_at_filters(&ctx)
-            }
-        };
-
-        match self.open_state {
-            ControlsOpenState::Closed => {}
+        let open = |row, editor| (row, Some(editor));
+        let (row, editor) = match self.open_state {
+            ControlsOpenState::Closed => (controls::opening_row(&self.context()), None),
             ControlsOpenState::HarnessOpen => {
-                Self::handle_key(&mut state, &ctx, KeyCode::Enter);
+                open(ControlsCursor::FilterHarness, ControlsEditor::Harness)
             }
             ControlsOpenState::MaxAgeOpen => {
-                Self::handle_key(&mut state, &ctx, KeyCode::Down);
-                Self::handle_key(&mut state, &ctx, KeyCode::Enter);
+                open(ControlsCursor::FilterMaxAge, ControlsEditor::MaxAge)
             }
             ControlsOpenState::MuxStateOpen => {
-                Self::handle_key(&mut state, &ctx, KeyCode::Down);
-                Self::handle_key(&mut state, &ctx, KeyCode::Down);
-                Self::handle_key(&mut state, &ctx, KeyCode::Enter);
+                open(ControlsCursor::FilterMuxState, ControlsEditor::MuxState)
             }
+        };
+        let mut panel = controls::panel(Self::context).at(row);
+        let Some(which) = editor else {
+            panel.draw(area, buf, self, &theme);
+            return;
+        };
+        panel.draw_under_step(area, buf, self, &theme);
+        match controls::editor(which, &self.context()) {
+            Modal::Checklist(mut list) => list.draw(area, buf, &theme),
+            Modal::Prompt(prompt) => prompt.draw(area, buf, &theme),
+            _ => {}
         }
-
-        ControlsOverlayWidget::new(&mut state, ctx, &theme).render(area, buf);
     }
 }
 

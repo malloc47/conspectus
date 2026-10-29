@@ -285,7 +285,7 @@ fn a_startup_search_with_live_preview_off_says_it_cannot_run() {
 #[test]
 fn the_controls_content_row_refuses_with_the_shared_notice_when_live_preview_is_off() {
     use crate::tui::runtime::modal_key_pure;
-    use crate::tui::widgets::controls::{ControlsCursor, ControlsOverlayState};
+    use crate::tui::widgets::controls::ControlsCursor;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = live_preview_off();
@@ -294,7 +294,9 @@ fn the_controls_content_row_refuses_with_the_shared_notice_when_live_preview_is_
         modal_key_pure(app, KeyEvent::new(code, KeyModifiers::NONE));
     };
     for _ in 0..60 {
-        if app.controls_overlay().map(ControlsOverlayState::cursor)
+        if app
+            .controls_overlay()
+            .and_then(|panel| panel.cursor().copied())
             == Some(ControlsCursor::FilterContent)
         {
             break;
@@ -302,7 +304,8 @@ fn the_controls_content_row_refuses_with_the_shared_notice_when_live_preview_is_
         press(&mut app, KeyCode::Down);
     }
     assert_eq!(
-        app.controls_overlay().map(ControlsOverlayState::cursor),
+        app.controls_overlay()
+            .and_then(|panel| panel.cursor().copied()),
         Some(ControlsCursor::FilterContent),
         "the Content row is reachable"
     );

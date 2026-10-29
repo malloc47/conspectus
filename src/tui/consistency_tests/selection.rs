@@ -32,6 +32,7 @@ const LISTS: &[&str] = &[
     "RowMenu",
     "Picker",
     "CleanUp",
+    "Checklist",
 ];
 
 /// The list modals, with Messages holding entries so it lists some.
@@ -70,11 +71,15 @@ fn marked_rows(buf: &Buffer, rect: (u16, u16, u16, u16)) -> Vec<u16> {
         .collect()
 }
 
-/// The last column of row `y` inside the frame that draws a character.
+/// The last column of row `y` inside the frame that draws a character of
+/// the row: the scrollbar of a list taller than its frame has a column
+/// of its own at the right edge, which is not part of the row.
 fn last_text_column(buf: &Buffer, rect: (u16, u16, u16, u16), y: u16) -> u16 {
+    const BAR: [&str; 4] = ["║", "█", "▲", "▼"];
     let (x0, _, x1, _) = rect;
     (x0 + 1..x1)
         .rev()
+        .filter(|&x| x + 1 != x1 || !BAR.contains(&buf[(x, y)].symbol()))
         .find(|&x| buf[(x, y)].symbol() != " ")
         .unwrap_or(x0 + 1)
 }

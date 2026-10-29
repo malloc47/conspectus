@@ -27,7 +27,6 @@ use crate::tui::View;
 use crate::tui::actions::AttachTarget;
 use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::effect::Effect;
-use crate::tui::keybindings::overlay as overlay_keymap;
 use crate::tui::messages::{LogEntry, LogEntryExt};
 use crate::tui::preview::{
     PreviewContent, PreviewSource, capture_via, load_offline_preview, pane_native_id,
@@ -537,7 +536,7 @@ impl LoopMode for LiveMode {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(Feedback::info(format!(
                     "controls: {}",
-                    tuikit::keys::footer(overlay_keymap::CONTROLS_KEYS)
+                    tuikit::keys::footer(tuikit::keys::SETTINGS_KEYS)
                 )))));
             }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
@@ -647,7 +646,7 @@ impl StaticMode {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(Feedback::info(format!(
                     "controls: {}",
-                    tuikit::keys::footer(overlay_keymap::CONTROLS_KEYS)
+                    tuikit::keys::footer(tuikit::keys::SETTINGS_KEYS)
                 )))));
             }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),

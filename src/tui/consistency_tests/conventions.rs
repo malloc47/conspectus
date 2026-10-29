@@ -21,7 +21,8 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use tuikit::keys::{
-    CHECKLIST_KEYS, Convention, DIALOG_KEYS, MENU_KEYS, PALETTE_KEYS, TEXT_INPUT_KEYS,
+    CHECKLIST_KEYS, Convention, DIALOG_KEYS, MENU_KEYS, PALETTE_KEYS, SETTINGS_KEYS,
+    TEXT_INPUT_KEYS,
 };
 use tuikit::testkit::conformance::{self, Case, Check, KeyTable, Registry, Rig, table};
 
@@ -29,9 +30,9 @@ use super::layout::{Open, app_with, builders};
 use super::registry::{open_pane_viewer, open_viewer};
 use super::*;
 use crate::tui::keybindings::overlay::{
-    CONTROLS_KEYS, HELP_KEYS, MESSAGES_KEYS, MODAL_CONVENTION, MUX_LAUNCH_KEYS, NEW_MUX_KEYS,
-    PANE_VIEWER_KEYS, PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, VALUE_MODAL_KEYS,
-    VIEWER_FIND_KEYS, VIEWER_KEYS,
+    HELP_KEYS, MESSAGES_KEYS, MODAL_CONVENTION, MUX_LAUNCH_KEYS, NEW_MUX_KEYS, PANE_VIEWER_KEYS,
+    PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, VALUE_MODAL_KEYS, VIEWER_FIND_KEYS,
+    VIEWER_KEYS,
 };
 
 /// The App drawn and driven as the fixture TUI does: the whole screen,
@@ -94,10 +95,12 @@ const SCROLLS: &[&str] = &["Help", "ValueModal"];
 
 /// Modals whose keys change the App they draw from (a setting, a search,
 /// the log), so a frame after a key is not the same modal moved.
-const READS_THE_APP: &[&str] = &["Controls", "Search", "Messages"];
+const READS_THE_APP: &[&str] = &["Search", "Messages"];
 
 /// Modals whose arrow keys must move a selection the check compares.
 const MOVES: &[&str] = &[
+    "Controls",
+    "Checklist",
     "PinEdit",
     "RowMenu",
     "MuxMenu",
@@ -121,10 +124,8 @@ fn convention(name: &str) -> Convention {
 fn tables(modal: &str) -> Vec<KeyTable> {
     match modal {
         "Help" => vec![table("HELP_KEYS", HELP_KEYS)],
-        "Controls" => vec![
-            table("CONTROLS_KEYS", CONTROLS_KEYS),
-            table("CHECKLIST_KEYS", CHECKLIST_KEYS),
-        ],
+        // Its editors are steps of their own: a checklist and prompts.
+        "Controls" => vec![table("SETTINGS_KEYS", SETTINGS_KEYS)],
         "Rename" => vec![table("TEXT_INPUT_KEYS", TEXT_INPUT_KEYS)],
         "Search" => vec![
             table("SEARCH_KEYS", SEARCH_KEYS),
@@ -140,6 +141,7 @@ fn tables(modal: &str) -> Vec<KeyTable> {
         // dialogs.
         "WorktreeMenu" => vec![table("MENU_KEYS", MENU_KEYS)],
         "Prompt" => vec![table("TEXT_INPUT_KEYS", TEXT_INPUT_KEYS)],
+        "Checklist" => vec![table("CHECKLIST_KEYS", CHECKLIST_KEYS)],
         "Dialog" => vec![table("DIALOG_KEYS", DIALOG_KEYS)],
         "NewMux" => vec![table("NEW_MUX_KEYS", NEW_MUX_KEYS)],
         "MuxMenu" | "RowMenu" => vec![table("MENU_KEYS", MENU_KEYS)],
@@ -166,9 +168,18 @@ fn case(name: &'static str, variant: &'static str, view: View, open: Open) -> Ca
     } else if MOVES.contains(&name) {
         case = case.moves();
     }
+    // The builders open these over the overlay that asked for them, as
+    // steps of it.
+    if matches!(
+        (name, variant),
+        ("Checklist" | "Prompt", _) | ("Dialog", "remove" | "close-down")
+    ) {
+        case = case.step();
+    }
     match (name, variant) {
         ("Help", _) => case.footer(HELP_KEYS),
-        ("Controls", _) => case.footer(CONTROLS_KEYS),
+        ("Controls", _) => case.footer(SETTINGS_KEYS),
+        ("Checklist", _) => case.footer(CHECKLIST_KEYS),
         ("Search", "contents") => case.footer(SEARCH_CONTENT_KEYS),
         ("Search", _) => case.footer(SEARCH_KEYS),
         ("ValueModal", _) => case.footer(VALUE_MODAL_KEYS),
@@ -204,10 +215,12 @@ pub(super) fn registry() -> Registry<Host> {
     // order.
     let mut searches = ["", "contents", "all"].into_iter();
     let mut dialogs = ["remove", "close-down", "clean up notice"].into_iter();
+    let mut prompts = ["max age", "branch"].into_iter();
     for (name, view, open) in builders() {
         let variant = match name {
             "Search" => searches.next().unwrap_or(""),
             "Dialog" => dialogs.next().unwrap_or(""),
+            "Prompt" => prompts.next().unwrap_or(""),
             _ => "",
         };
         registry.push(case(name, variant, view, open));

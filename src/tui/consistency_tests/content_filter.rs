@@ -259,29 +259,30 @@ fn clearing_everything_with_f_removes_the_search_too() {
 
 #[test]
 fn the_controls_clear_button_clears_a_search_with_no_other_filter() {
-    use crate::tui::widgets::controls::{ControlsCursor, ControlsOutcome, ControlsOverlayState};
+    use crate::tui::widgets::controls::ControlsCursor;
+    use tuikit::overlay::{Outcome, Overlay};
     let (snapshot, matched, _) = matched_and_not();
     let mut app = app_over(View::Sessions, &snapshot);
     start(&mut app, "needle");
     finish_with(&mut app, &[&matched], true);
 
-    let ctx = app.controls_context();
     assert!(
-        ctx.filter.is_empty(),
+        app.controls_context().filter.is_empty(),
         "the structured filter is empty; only the search is active"
     );
-    let mut state = ControlsOverlayState::new(&ctx);
+    app.open_controls_overlay();
+    let mut panel = app.controls_overlay().cloned().expect("the panel");
     let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
     for _ in 0..60 {
-        if state.cursor() == ControlsCursor::FilterClear {
+        if panel.cursor() == Some(&ControlsCursor::FilterClear) {
             break;
         }
-        state.handle_key(&ctx, down);
+        panel.handle(down, &app);
     }
-    assert_eq!(state.cursor(), ControlsCursor::FilterClear);
+    assert_eq!(panel.cursor(), Some(&ControlsCursor::FilterClear));
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-    let outcome = state.handle_key(&ctx, enter);
-    assert_eq!(outcome, ControlsOutcome::ApplyAndStay(Msg::ClearFilters));
+    let outcome = panel.handle(enter, &app);
+    assert_eq!(outcome, Outcome::Stay(Msg::ClearFilters));
 }
 
 #[test]

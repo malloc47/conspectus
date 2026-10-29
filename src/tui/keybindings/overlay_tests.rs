@@ -2,8 +2,8 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use tuikit::keys::{
     CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, FORM_KEYS, FORM_OPTION_KEYS,
     HINT_SEPARATOR, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PALETTE_KEYS,
-    PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, PaletteKey, PaletteOptionKey, TEXT_INPUT_KEYS,
-    ctrl_c_first, footer, loose_characters, mislabeled, resolve, unresolved,
+    PALETTE_OPTION_KEYS, PATH_FIELD_KEYS, PaletteKey, PaletteOptionKey, SETTINGS_KEYS, SettingsKey,
+    TEXT_INPUT_KEYS, ctrl_c_first, footer, loose_characters, mislabeled, resolve, unresolved,
 };
 
 use super::*;
@@ -36,6 +36,7 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("PAGER_KEYS", problems(PAGER_KEYS)),
         ("TEXT_INPUT_KEYS", problems(TEXT_INPUT_KEYS)),
         ("CHECKLIST_KEYS", problems(CHECKLIST_KEYS)),
+        ("SETTINGS_KEYS", problems(SETTINGS_KEYS)),
         ("PALETTE_KEYS", problems(PALETTE_KEYS)),
         ("PALETTE_OPTION_KEYS", problems(PALETTE_OPTION_KEYS)),
         ("FORM_KEYS", problems(FORM_KEYS)),
@@ -44,7 +45,6 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("PATH_FIELD_KEYS", problems(PATH_FIELD_KEYS)),
         ("SEARCH_KEYS", problems(SEARCH_KEYS)),
         ("SEARCH_CONTENT_KEYS", problems(SEARCH_CONTENT_KEYS)),
-        ("CONTROLS_KEYS", problems(CONTROLS_KEYS)),
         ("HELP_KEYS", problems(HELP_KEYS)),
         ("VALUE_MODAL_KEYS", problems(VALUE_MODAL_KEYS)),
         ("MESSAGES_KEYS", problems(MESSAGES_KEYS)),
@@ -171,7 +171,7 @@ fn generated_footers_read_in_the_one_grammar() {
         ])
     );
     assert_eq!(
-        footer(CONTROLS_KEYS),
+        footer(SETTINGS_KEYS),
         joined(&[
             "↑/↓ move",
             "Space select/toggle",
@@ -234,7 +234,7 @@ fn generated_footers_read_in_the_one_grammar() {
     for text in [
         footer(PALETTE_OPTION_KEYS),
         footer(SEARCH_CONTENT_KEYS),
-        footer(CONTROLS_KEYS),
+        footer(SETTINGS_KEYS),
         footer(HELP_KEYS),
         footer(VALUE_MODAL_KEYS),
         footer(MESSAGES_KEYS),
@@ -279,7 +279,7 @@ fn a_character_never_fires_on_its_control_or_alt_chord() {
     );
     // Menus and settings move with plain `j` and `k`, not their chords.
     assert_eq!(resolve(MENU_KEYS, chord(ctrl, KeyCode::Char('j'))), None);
-    assert_eq!(resolve(CONTROLS_KEYS, chord(alt, KeyCode::Char('k'))), None);
+    assert_eq!(resolve(SETTINGS_KEYS, chord(alt, KeyCode::Char('k'))), None);
 }
 
 #[test]
@@ -288,8 +288,8 @@ fn every_list_moves_with_ctrl_n_and_ctrl_p() {
     let ctrl_p = chord(KeyModifiers::CONTROL, KeyCode::Char('p'));
     assert_eq!(resolve(MENU_KEYS, ctrl_n), Some(MenuKey::Down));
     assert_eq!(resolve(MENU_KEYS, ctrl_p), Some(MenuKey::Up));
-    assert_eq!(resolve(CONTROLS_KEYS, ctrl_n), Some(ControlsKey::Down));
-    assert_eq!(resolve(CONTROLS_KEYS, ctrl_p), Some(ControlsKey::Up));
+    assert_eq!(resolve(SETTINGS_KEYS, ctrl_n), Some(SettingsKey::Down));
+    assert_eq!(resolve(SETTINGS_KEYS, ctrl_p), Some(SettingsKey::Up));
     assert_eq!(resolve(CHECKLIST_KEYS, ctrl_n), Some(ChecklistKey::Down));
     assert_eq!(resolve(MESSAGES_KEYS, ctrl_n), Some(MessagesKey::Next));
     assert_eq!(resolve(MESSAGES_KEYS, ctrl_p), Some(MessagesKey::Prev));

@@ -7,9 +7,10 @@
 //! that were on screen. Every entry draws through the shared modal frame,
 //! which clears what it covers, or fills the screen. The rename and step
 //! prompts, the new mux form, the row, mux, and worktree menus, the
-//! dialogs, Clean up, and the picker have no impl here: they are the
-//! framework's text prompt, form, action menu, dialog, checklist, and
-//! palette, which implement the trait for any context.
+//! dialogs, Clean up, the Controls panel and its editors, and the picker
+//! have no impl here: they are the framework's text prompt, form, action
+//! menu, dialog, checklist, settings panel, and palette, which implement
+//! the trait for any context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
@@ -20,7 +21,6 @@ use tuikit::overlay::{Outcome, Overlay};
 use tuikit::theme::Theme as KitTheme;
 
 use crate::tui::widgets::{
-    controls::{ControlsOutcome, ControlsOverlayState, ControlsOverlayWidget},
     help::{HelpOutcome, HelpOverlayState, HelpOverlayWidget},
     messages::{MessagesOverlayState, MessagesWidget},
     mux_launch::MuxLaunchForm,
@@ -42,25 +42,6 @@ impl Overlay<Msg, App> for HelpOverlayState {
     fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
         let window = HelpOverlayWidget::new(self, app.theme()).draw(area, buf);
         self.fit(window);
-    }
-}
-
-impl Overlay<Msg, App> for ControlsOverlayState {
-    fn handle(&mut self, key: KeyEvent, app: &App) -> Outcome<Msg> {
-        match self.handle_key(&app.controls_context(), key) {
-            ControlsOutcome::Continue => Outcome::Consumed,
-            ControlsOutcome::Close => Outcome::Close,
-            ControlsOutcome::ApplyAndStay(msg) => Outcome::Stay(msg),
-            ControlsOutcome::ApplyAndClose(msg) => Outcome::Commit(msg),
-        }
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        ControlsOverlayWidget::new(self, app.controls_context(), app.theme()).render(area, buf);
-    }
-
-    fn takes_text(&self) -> bool {
-        self.editor_takes_text()
     }
 }
 

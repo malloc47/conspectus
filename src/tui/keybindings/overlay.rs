@@ -1,15 +1,16 @@
 //! The TUI's own overlay key tables (ADR 0123, ADR 0160).
 //!
 //! The key-table model and the standard tables (menus, dialogs, pagers,
-//! text prompts, checklists, palettes, forms) are `tuikit::keys`; the
-//! picker is a palette on the standard palette table, and quick select and
-//! content search are palettes on tables of their own (their options pane
-//! takes the standard palette option keys). This module holds the tables
-//! of the overlays that are the TUI's own: search, Controls, the help
-//! page, the value modal, Messages, the worktree close-down choice, the
-//! three forms (built on the standard form rows), the path field, the
-//! transcript and pane viewers, and the viewers' find prompt; and the
-//! modal key convention every modal is checked against.
+//! text prompts, checklists, palettes, settings panels, forms) are
+//! `tuikit::keys`; the picker is a palette on the standard palette table,
+//! Controls is a settings panel on the standard settings table, and quick
+//! select and content search are palettes on tables of their own (their
+//! options pane takes the standard palette option keys). This module holds
+//! the tables of the overlays that are the TUI's own: search, the help
+//! page, the value modal, Messages, the three forms (built on the standard
+//! form rows), the path field, the transcript and pane viewers, and the
+//! viewers' find prompt; and the modal key convention every modal is
+//! checked against.
 //!
 //! Every overlay resolves its keys through one of these tables or a
 //! standard one and renders its footer from the same table, so the
@@ -132,66 +133,6 @@ pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     shown(ctrl('o'), SearchKey::Options, "Ctrl-O", "set options"),
     shown(ctrl('f'), SearchKey::ApplyFilter, "Ctrl-F", "filter lists"),
     shown(ctrl('s'), SearchKey::Keep, "Ctrl-S", "open Search view"),
-];
-
-// ---------------------------------------------------------------------
-// Controls: a panel whose changes apply as they are made. Space acts on
-// the focused row (selects a choice, toggles a checkbox, opens an
-// editor); Enter applies the focused choice and closes; Esc closes with
-// everything already applied kept.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ControlsKey {
-    Abort,
-    /// `q`: dismisses the overlay, except in an editor that takes text,
-    /// where it types.
-    Quit,
-    Up,
-    Down,
-    /// Select the focused choice, toggle the focused checkbox, or open
-    /// the focused row's editor.
-    Toggle,
-    /// Apply the focused choice (if it is one) and close.
-    Done,
-    Close,
-}
-
-impl KeyAction for ControlsKey {
-    fn role(self) -> KeyRole {
-        match self {
-            Self::Abort | Self::Quit => KeyRole::Abort,
-            Self::Up | Self::Down => KeyRole::Move,
-            Self::Toggle => KeyRole::Change,
-            Self::Done => KeyRole::Apply,
-            Self::Close => KeyRole::Leave,
-        }
-    }
-}
-
-pub const CONTROLS_KEYS: &[KeyRow<ControlsKey>] = &[
-    alias(ctrl('c'), ControlsKey::Abort),
-    alias(ch('q'), ControlsKey::Quit),
-    shown(key(KeyCode::Up), ControlsKey::Up, marks::ARROW_UP, "move"),
-    alias(ch('k'), ControlsKey::Up),
-    alias(ctrl('p'), ControlsKey::Up),
-    shown(
-        key(KeyCode::Down),
-        ControlsKey::Down,
-        marks::ARROW_DOWN,
-        "move",
-    ),
-    alias(ch('j'), ControlsKey::Down),
-    alias(ctrl('n'), ControlsKey::Down),
-    shown(ch(' '), ControlsKey::Toggle, "Space", "select/toggle"),
-    shown(
-        key(KeyCode::Enter),
-        ControlsKey::Done,
-        "Enter",
-        "apply & close",
-    ),
-    shown(key(KeyCode::Esc), ControlsKey::Close, "Esc", "close"),
-    KeyRow::Note("changes apply as you make them"),
 ];
 
 // ---------------------------------------------------------------------
@@ -452,6 +393,7 @@ pub const MODAL_CONVENTION: &[Convention] = &[
     ),
     conv("Rename", EnterMeans::Submits, SpaceMeans::Types, ""),
     conv("Prompt", EnterMeans::Submits, SpaceMeans::Types, ""),
+    conv("Checklist", EnterMeans::Submits, SpaceMeans::Toggles, ""),
     conv("Dialog", EnterMeans::Submits, SpaceMeans::Types, ""),
     conv("Search", EnterMeans::Activates, SpaceMeans::Types, ""),
     conv(

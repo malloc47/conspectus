@@ -78,11 +78,33 @@ pub(super) fn open_worktree_step(app: &mut App, downs: usize) {
     crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Enter));
 }
 
+/// The Controls panel opened on `row`, with that row's editor open over
+/// it as a step, picked through the stack as the loops route keys.
+pub(super) fn open_controls_editor(
+    app: &mut App,
+    row: crate::tui::widgets::controls::ControlsCursor,
+) {
+    app.open_controls_at(row);
+    crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Enter));
+}
+
 /// Every modal that can be built, by name.
 pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
+    use crate::tui::widgets::controls::ControlsCursor;
     vec![
         ("Help", View::Pinned, |app| app.open_help_overlay()),
         ("Controls", View::Pinned, |app| app.open_controls_overlay()),
+        // The Controls editors, each open over the panel: the harness
+        // checklist, and the max-age prompt with an age typed.
+        ("Checklist", View::Pinned, |app| {
+            open_controls_editor(app, ControlsCursor::FilterHarness);
+        }),
+        ("Prompt", View::Pinned, |app| {
+            open_controls_editor(app, ControlsCursor::FilterMaxAge);
+            for c in "14d".chars() {
+                crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Char(c)));
+            }
+        }),
         ("Rename", View::Pinned, |app| {
             open_pinned(app, Msg::OpenSlotRename("conspectus-main".into()));
         }),

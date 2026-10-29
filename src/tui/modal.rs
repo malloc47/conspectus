@@ -88,6 +88,18 @@ macro_rules! modals {
                 }
             }
 
+            fn render_under_step(
+                &mut self,
+                area: Rect,
+                buf: &mut Buffer,
+                app: &App,
+                theme: &tuikit::theme::Theme,
+            ) {
+                match self {
+                    $(Self::$variant(entry) => entry.render_under_step(area, buf, app, theme),)*
+                }
+            }
+
             fn fills_screen(&self) -> bool {
                 match self {
                     $(Self::$variant(entry) => Overlay::<Msg, App>::fills_screen(entry),)*
@@ -106,10 +118,11 @@ macro_rules! modals {
 modals! {
     /// `?` help page.
     Help(crate::tui::widgets::help::HelpOverlayState),
-    /// Controls overlay (ADR 0031): view, grouping, filters, sort, and
-    /// search settings, applied as they change. Reads the App's settings
-    /// on every key and every frame.
-    Controls(crate::tui::widgets::controls::ControlsOverlayState),
+    /// Controls overlay (ADR 0031, ADR 0176): the framework's settings
+    /// panel over view, grouping, filters, sort, and search settings,
+    /// applied as they change. Its rows are built from the App on every
+    /// key and every frame; its editors open as steps over it.
+    Controls(crate::tui::widgets::controls::ControlsPanel),
     /// Rename prompt (ADR 0029): the framework's text prompt, whose
     /// confirm the opener's closure turns into the rename it means (a
     /// session's alias, a live mux's name, or a pin's name).
@@ -141,9 +154,13 @@ modals! {
     /// [`Modal`] small.
     Dialog(Box<tuikit::dialog::Dialog<Msg>>),
     /// A text prompt that is a step of another overlay (the worktree
-    /// menu's branch prompt), whose confirm its closure turns into the
-    /// message it means.
+    /// menu's branch prompt, a Controls editor), whose confirm its
+    /// closure turns into the message it means.
     Prompt(tuikit::text_prompt::TextPrompt<Msg>),
+    /// A checklist that is a step of another overlay (a Controls filter
+    /// editor), whose confirm its closure turns into the message it
+    /// means. Boxed to keep [`Modal`] small.
+    Checklist(Box<tuikit::checklist::Checklist<Msg>>),
     /// `n` bare tmux new-session form (ADR 0095): the framework's form,
     /// whose submit its closure turns into the new mux.
     NewMux(tuikit::form::Form<Msg>),

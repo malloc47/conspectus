@@ -6,6 +6,7 @@ use super::*;
 
 use crate::tui::Modal;
 use crate::tui::modal::ModalStack;
+use crate::tui::widgets::controls::ControlsPanel;
 use tuikit::overlay::Settled;
 
 impl App {
@@ -649,33 +650,35 @@ impl App {
         }
     }
 
-    /// Active controls-overlay state (ADR 0031), if any.
-    /// Lives on the modal stack (ADR 0085 contract 3); this
-    /// accessor peeks the top entry.
-    pub fn controls_overlay(&self) -> Option<&crate::tui::widgets::controls::ControlsOverlayState> {
+    /// The Controls panel (ADR 0031), if it is on top of the stack. An
+    /// editor open over it is a step on top of it, so this is `None`
+    /// while one is.
+    pub fn controls_overlay(&self) -> Option<&ControlsPanel> {
         match self.modal_stack.top()? {
-            crate::tui::Modal::Controls(state) => Some(state),
+            crate::tui::Modal::Controls(panel) => Some(panel),
             _ => None,
         }
     }
 
-    /// Mutable access for the runtime's per-key forwarding.
-    pub fn controls_overlay_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::controls::ControlsOverlayState> {
+    /// Mutable access to the Controls panel on top of the stack.
+    pub fn controls_overlay_mut(&mut self) -> Option<&mut ControlsPanel> {
         match self.modal_stack.top_mut()? {
-            crate::tui::Modal::Controls(state) => Some(state),
+            crate::tui::Modal::Controls(panel) => Some(panel),
             _ => None,
         }
     }
 
-    /// Push a fresh controls overlay onto the modal stack, cursor
-    /// on the active view row.
+    /// Push a fresh Controls panel onto the modal stack, cursor on the
+    /// active view row.
     pub fn open_controls_overlay(&mut self) {
-        let ctx = self.controls_context();
-        self.modal_stack.push(crate::tui::Modal::Controls(
-            crate::tui::widgets::controls::ControlsOverlayState::new(&ctx),
-        ));
+        let row = crate::tui::widgets::controls::opening_row(&self.controls_context());
+        self.open_controls_at(row);
+    }
+
+    /// Push a fresh Controls panel with the cursor on `row`.
+    pub fn open_controls_at(&mut self, row: crate::tui::widgets::controls::ControlsCursor) {
+        let panel = crate::tui::widgets::controls::panel(App::controls_context).at(row);
+        self.modal_stack.push(crate::tui::Modal::Controls(panel));
     }
 
     /// Pop the controls overlay if it's on top; no-op otherwise.

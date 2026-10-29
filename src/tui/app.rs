@@ -1668,6 +1668,12 @@ impl App {
                     crate::tui::effect::StoreOp::RenameSlot { slot, new_name },
                 ));
             }
+            Msg::OpenControlsEditor(which) => {
+                // The editor opens over the panel that asked, so Esc there
+                // comes back to it and Ctrl-C closes both.
+                let step = crate::tui::widgets::controls::editor(which, &self.controls_context());
+                self.open_modal_step(step);
+            }
             Msg::OpenWorktreeStep { action, context } => {
                 // The step opens over the menu that asked, so Esc there
                 // comes back to it and a commit or Ctrl-C closes both.

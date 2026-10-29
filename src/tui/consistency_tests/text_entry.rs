@@ -16,7 +16,6 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use super::*;
 use crate::tui::effect::{Effect, ExecSpec, StoreOp};
 use crate::tui::keymap::Action;
-use crate::tui::widgets::controls::ControlsOverlayState;
 use crate::tui::widgets::mux_launch::{self, MuxLaunchForm};
 use tuikit::testkit::keys::{alt, chord, press};
 
@@ -108,7 +107,11 @@ fn open_branch_prompt(app: &mut App) {
 fn open_controls_editor(app: &mut App, row: crate::tui::widgets::controls::ControlsCursor) {
     app.open_controls_overlay();
     for _ in 0..80 {
-        if app.controls_overlay().map(ControlsOverlayState::cursor) == Some(row) {
+        if app
+            .controls_overlay()
+            .and_then(|panel| panel.cursor().copied())
+            == Some(row)
+        {
             send(app, press(KeyCode::Char(' ')));
             return;
         }
@@ -386,9 +389,8 @@ fn an_invalid_max_age_says_why_and_keeps_the_editor_open() {
     type_text(&mut app, "15");
     send(&mut app, press(KeyCode::Enter));
     assert!(
-        app.controls_overlay()
-            .is_some_and(|controls| controls.sub_editor().is_some()),
-        "the editor stays open for a fix"
+        app.top_modal_name() == Some("Prompt") && app.modal_stack().top_is_step(),
+        "the editor stays open over the panel for a fix"
     );
     assert_eq!(app.filter().max_age, None, "no filter is applied");
     says_in_the_prompt(&mut app, "max age: missing unit (expected ms/s/m/h/d)");

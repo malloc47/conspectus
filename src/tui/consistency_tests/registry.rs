@@ -24,7 +24,7 @@
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent};
 use tuikit::testkit::keys::{ctrl, press, release};
 
-use super::layout::{Open, app_with, builders, open_worktree_step};
+use super::layout::{Open, app_with, builders, open_controls_editor, open_worktree_step};
 use super::*;
 use crate::tui::Modal;
 use crate::tui::keymap::Action;
@@ -198,13 +198,6 @@ struct Level {
     open: fn(&mut App),
 }
 
-fn controls_at_filters(app: &mut App) {
-    let state = crate::tui::widgets::controls::ControlsOverlayState::new_at_filters(
-        &app.controls_context(),
-    );
-    app.open_modal(Modal::Controls(state));
-}
-
 fn keys(app: &mut App, keys: &[KeyEvent]) {
     for key in keys {
         assert!(route(app, *key), "{key:?} was not the modal's");
@@ -213,24 +206,6 @@ fn keys(app: &mut App, keys: &[KeyEvent]) {
 
 fn levels() -> Vec<Level> {
     vec![
-        Level {
-            name: "the Controls harness checklist",
-            modal: "Controls",
-            typed: false,
-            open: |app| {
-                controls_at_filters(app);
-                keys(app, &[press(KeyCode::Enter)]);
-            },
-        },
-        Level {
-            name: "the Controls max-age editor",
-            modal: "Controls",
-            typed: true,
-            open: |app| {
-                controls_at_filters(app);
-                keys(app, &[press(KeyCode::Down), press(KeyCode::Enter)]);
-            },
-        },
         Level {
             name: "the content search options",
             modal: "Search",
@@ -321,6 +296,7 @@ struct Step {
 }
 
 fn steps() -> Vec<Step> {
+    use crate::tui::widgets::controls::ControlsCursor;
     let step = |name, modal, typed, open| Step {
         name,
         modal,
@@ -328,7 +304,25 @@ fn steps() -> Vec<Step> {
         typed,
         open,
     };
+    let editor = |name, modal, typed, open| Step {
+        name,
+        modal,
+        under: "Controls",
+        typed,
+        open,
+    };
     vec![
+        editor(
+            "the Controls harness checklist",
+            "Checklist",
+            false,
+            |app| {
+                open_controls_editor(app, ControlsCursor::FilterHarness);
+            },
+        ),
+        editor("the Controls max-age editor", "Prompt", true, |app| {
+            open_controls_editor(app, ControlsCursor::FilterMaxAge);
+        }),
         step("the worktree branch prompt", "Prompt", true, |app| {
             open_worktree_step(app, 0);
         }),
