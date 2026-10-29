@@ -79,6 +79,17 @@ fn a_commit_closes_the_prompt_with_the_hosts_message() {
 }
 
 #[test]
+fn a_step_back_closes_the_prompt_one_level_with_the_hosts_message() {
+    let mut prompt = TextPrompt::new("Ask", "7d", |text: &str| {
+        PromptResult::Back(Msg::Named(text.to_string()))
+    });
+    assert_eq!(
+        key(&mut prompt, press(KeyCode::Enter)),
+        Outcome::Back(Msg::Named("7d".into()))
+    );
+}
+
+#[test]
 fn a_rejection_stays_open_and_says_why_until_the_next_edit() {
     let mut prompt = naming("");
     assert_eq!(key(&mut prompt, press(KeyCode::Enter)), Outcome::Consumed);

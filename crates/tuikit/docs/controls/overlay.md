@@ -6,7 +6,7 @@
 | Layer | 2 (convention) |
 | Type parameters | `M`: the host's message, which a commit carries; `Cx`: the host's context, borrowed for every key and every draw; `E`: the stack's entry type, the host's own enum of overlays or a boxed trait object |
 | Cargo feature | none |
-| Outcomes | `Consumed`, `Close` (step back: close this entry), `Dismiss` (close this entry and every entry it is a step of), `Commit(M)` (close like `Dismiss`, then the host handles `M`), `Stay(M)` (stay open, and the host handles `M`) |
+| Outcomes | `Consumed`, `Close` (step back: close this entry), `Dismiss` (close this entry and every entry it is a step of), `Commit(M)` (close like `Dismiss`, then the host handles `M`), `Back(M)` (close like `Close`, then the host handles `M`), `Stay(M)` (stay open, and the host handles `M`) |
 
 ## Purpose
 
@@ -22,8 +22,8 @@ is the host's.
 passes its own state as `&Cx` while the stack holds its entries mutably, so
 an overlay reads live host data on every key and every frame rather than a
 copy taken when it opened. A key goes to the top entry only; settling the
-outcome closes the top entry for `Close`, `Dismiss`, and `Commit` and hands
-the message back. Every entry is drawn, bottom to top; each clears what it
+outcome closes the top entry for `Close`, `Back`, `Dismiss`, and `Commit`
+and hands the message back. Every entry is drawn, bottom to top; each clears what it
 covers, so a smaller overlay shows the one under it around its frame, and an
 overlay that fills the screen hides everything below it.
 
@@ -33,8 +33,18 @@ itself (`push_step`) instead of switching modes inside its own state. The
 entry and its steps are one flow: `Esc` in a step is a `Close`, which
 closes the step and gives the keys back to the entry under it, and a
 `Commit` or a `Dismiss` (`Ctrl-C`, `q`) closes the whole flow, since the
-overlay is done or dismissed rather than one level of it. An entry opened
+overlay is done or dismissed rather than one level of it. A step that
+applies its answer and returns to the entry under it (a settings panel's
+editor, whose panel stays open with the new value) answers `Back(M)`:
+it closes as `Close` does and hands the host its message. An entry opened
 with `push` is an overlay of its own, never part of the flow under it.
+
+While a step is open over an entry, the stack draws that entry with
+`render_under_step` instead of `render`. The entry's keys went to a level
+of itself, so a list in it can draw its cursor as a list without focus
+does (house rule 10). By default the call is `render`, so an overlay that
+does not say otherwise looks the same under its steps; an overlay opened
+on its own over another is no step of it and leaves it drawn as it is.
 
 The module replaces what a program grows one overlay at a time: a key
 forwarder and a handler per overlay that differ only in names, a draw call
@@ -188,15 +198,16 @@ assert!(stack.is_empty());
 | --- | --- | --- |
 | `Overlay::handle(&mut self, key, &cx)` | one key press while the overlay is on top | returns an `Outcome<M>`; performs no effect |
 | `Overlay::render(&mut self, area, buf, &cx, &theme)` | draws the overlay over the screen | clears what it covers; `&mut self` so a scrolled overlay keeps the window it drew |
+| `Overlay::render_under_step(&mut self, area, buf, &cx, &theme)` | draws the overlay while a step of its own is open over it | `render` by default; a list draws its cursor with the inactive selection pair |
 | `Overlay::fills_screen(&self)` | whether the overlay covers the whole screen | `false` by default; nothing under it is drawn |
 | `Overlay::takes_text(&self)` | whether a text field in the overlay has the keys now | `false` by default; a host types a paste only into an overlay that says so |
 | `impl Overlay for Box<T>` | a boxed overlay is an overlay | so `ModalStack<Box<dyn Overlay<M, Cx>>>` works |
-| `Outcome::{Consumed, Close, Dismiss, Commit(M), Stay(M)}` | what the key asks the host to do | `map`, `closes`, `message` |
+| `Outcome::{Consumed, Close, Dismiss, Commit(M), Back(M), Stay(M)}` | what the key asks the host to do | `map`, `closes`, `message` |
 | `ModalStack::new`, `push`, `push_step`, `pop`, `pop_if`, `close_flow`, `close_all` | open and close entries | `push_step` opens an entry as a step of the one on top (on an empty stack, as `push` does); `pop_if` closes one kind of overlay only when it is on top; `close_flow` closes the top entry and every entry it is a step of; `close_flow` and `close_all` return the entries top first |
 | `top`, `top_mut`, `top_is_step`, `iter`, `iter_mut`, `len`, `is_empty` | look at the entries | `iter` runs bottom to top; `top_is_step` says whether a `Close` from the top gives the keys back to the entry under it |
 | `route(key, &cx)` | gives the key to the top entry | `None` when the stack is empty: the key is the host's |
-| `settle(outcome)` | the stack's part of an outcome | closes the top for `Close`, and the top's whole flow for `Commit` and `Dismiss`; returns a `Settled { closed, message }`, `closed` top first |
-| `draw(area, buf, &cx, &theme)` | draws every entry, bottom to top | starts at the topmost entry that fills the screen, on a cleared area |
+| `settle(outcome)` | the stack's part of an outcome | closes the top for `Close` and `Back`, and the top's whole flow for `Commit` and `Dismiss`; returns a `Settled { closed, message }`, `closed` top first |
+| `draw(area, buf, &cx, &theme)` | draws every entry, bottom to top | starts at the topmost entry that fills the screen, on a cleared area; an entry with a step of its own over it draws through `render_under_step` |
 | `fills_screen()` | whether any open entry fills the screen | the host skips its own screen when it does |
 | `takes_text()` | whether the top entry takes a paste | `false` when the stack is empty |
 
@@ -234,11 +245,12 @@ table, and `q` in the menu, dialog, checklist, and pager tables.
 
 | # | Rule | How this module follows it |
 | --- | --- | --- |
-| 4 | Close keys | `Outcome` names the ways out: `Consumed` for a step back inside the overlay's own state, `Close` for leaving its first level (a step's `Close` returning to the entry under it), and `Dismiss` for leaving the whole overlay from any level; the stack closes a step's flow for `Dismiss` and `Commit` and never the overlays under the flow |
+| 4 | Close keys | `Outcome` names the ways out: `Consumed` for a step back inside the overlay's own state, `Close` for leaving its first level (a step's `Close` returning to the entry under it), `Back` for leaving it with a result, and `Dismiss` for leaving the whole overlay from any level; the stack closes a step's flow for `Dismiss` and `Commit` and never the overlays under the flow |
 | 5 | Close feedback | `Close` and `Dismiss` carry no message, so a cancel reaches the host as a silent close; a host posts nothing for it |
 | 8 | Footers and hints | the stack adds no keys an overlay's table does not have, so every footer generated from a table stays the whole truth |
+| 10 | Unfocused cursor | the stack tells an entry that a step of its own has the keys (`render_under_step`), so its list can show the inactive selection pair |
 
-Not applicable: 1, 2, 10 (list looks and ends are `selection`'s), 3 (a
+Not applicable: 1, 2 (list looks and ends are `selection`'s), 3 (a
 confirmation is a dialog, opened as a step of what asks), 6 (forms), 7 (an
 error line is the
 overlay's footer slot), 9 (the focus cue is the pane frame's), 11
@@ -253,14 +265,11 @@ rule 4 through `Consumed`).
   `Outcome` has no "not mine". A variant that lets a key fall through to
   the host (a global key that works over a passive notice) would join
   `Outcome`, and `route` would hand it back.
-- **Dimming what is underneath.** Every entry draws as it is; a stack that
-  dims the entries under the top one would pass each entry whether it is on
-  top. A step's menu keeps its active cursor under the step for now.
-- **Acting and stepping back.** A step can step back (`Close`) or finish
-  the flow (`Commit`, `Dismiss`), but not hand the host a message and then
-  return to the entry under it; a step that applied something and went
-  back would take an outcome of its own (or `Stay` followed by the host
-  popping the step).
+- **Dimming what is underneath.** An entry under a step of its own is told
+  so (`render_under_step`), and the settings panel draws its cursor
+  inactive there; an action menu keeps its active cursor under its steps
+  for now, and every other entry draws as it is. A stack that dimmed every
+  entry under the top one would pass each entry whether it is on top.
 - **Rendered areas.** An entry could report the rect it drew, for mouse hit
   testing and for a conformance check that each entry clears exactly its
   frame.

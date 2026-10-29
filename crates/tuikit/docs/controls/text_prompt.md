@@ -6,7 +6,7 @@
 | Layer | 1 (control) |
 | Type parameters | `M`, the host's message, which a confirmed text becomes; the prompt implements `Overlay<M, Cx>` for every context `Cx` and reads none |
 | Cargo feature | none |
-| Outcomes | `Commit(M)` when `on_confirm` takes the text; `Close` for `Esc`; `Dismiss` for `Ctrl-C`; `Consumed` for an edit, a swallowed `Tab`, a refusal, or a confirm that stays; never `Stay(M)` |
+| Outcomes | `Commit(M)` when `on_confirm` takes the text, or `Back(M)` when it takes it and steps back; `Close` for `Esc`; `Dismiss` for `Ctrl-C`; `Consumed` for an edit, a swallowed `Tab`, a refusal, or a confirm that stays; never `Stay(M)` |
 
 ## Purpose
 
@@ -15,6 +15,9 @@ setting's value, a filter's text. `Enter` hands the text to a closure the
 host gives it, `on_confirm`, which answers with a `PromptResult`:
 
 - `Commit(M)`: take the text; the prompt closes and the host handles `M`.
+- `Back(M)`: take the text and step back; the prompt closes as `Esc`
+  closes it, so the overlay it is a step of stays open, and the host
+  handles `M`.
 - `Reject(String)`: refuse it and say why; the prompt stays open with the
   reason on its error line until the next edit.
 - `Stay`: neither; the prompt stays open as it is.
@@ -110,14 +113,15 @@ assert!(bottom.starts_with("└ Enter confirm · Esc cancel ─"));
 A prompt that is a menu's follow-up question (the value a menu entry
 needs) opens as a step of the menu, with `ModalStack::push_step`: `Esc`
 gives the menu its keys back, and a commit or `Ctrl-C` closes the prompt
-and the menu together. A host whose overlay holds the prompt as one of its
-own levels instead (a settings panel's editor) keeps the prompt in its
-state, routes keys to it with `Overlay::handle`, draws it with
-`TextPrompt::draw`, takes the prompt's `Close` as `Esc` stepping back to
-its own level, and takes `Dismiss` as `Ctrl-C` dismissing its whole
-overlay. A prompt whose result is not yet the host's message (a parsed
-value the panel turns into a message with its live context) is a
-`TextPrompt` over that value, and the host maps the commit.
+and the menu together. A prompt that edits one value of an overlay that
+stays open (a settings panel's editor) opens as a step too, and its
+`on_confirm` answers `PromptResult::Back`: the value applies, the prompt
+closes, and the panel under it has the keys again, while `Ctrl-C` still
+dismisses both. A host whose overlay holds the prompt as one of its own
+levels instead keeps the prompt in its state, routes keys to it with
+`Overlay::handle`, draws it with `TextPrompt::draw`, takes the prompt's
+`Close` as `Esc` stepping back to its own level, and takes `Dismiss` as
+`Ctrl-C` dismissing its whole overlay.
 
 ### Size
 

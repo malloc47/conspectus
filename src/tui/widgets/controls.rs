@@ -530,7 +530,7 @@ fn settle_editor<T>(
     apply: impl FnOnce(T) -> crate::tui::Msg,
 ) -> ControlsOutcome {
     match outcome {
-        Outcome::Commit(value) => {
+        Outcome::Commit(value) | Outcome::Back(value) => {
             *slot = None;
             ControlsOutcome::ApplyAndStay(apply(value))
         }

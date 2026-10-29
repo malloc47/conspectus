@@ -14,9 +14,10 @@ struct Shelf {
     word: &'static str,
 }
 
-/// A test overlay: a rect it clears and fills with its mark, and keys
-/// that say what it asks for. `Enter` commits the context's word, `s`
-/// stays with its own mark, `Esc` closes, `d` dismisses, anything else is
+/// A test overlay: a rect it clears and fills with its mark (`#` while a
+/// step of its own is open over it), and keys that say what it asks for.
+/// `Enter` commits the context's word, `s` stays with its own mark, `b`
+/// steps back with it, `Esc` closes, `d` dismisses, anything else is
 /// used.
 #[derive(Debug, Clone, PartialEq)]
 struct Tile {
@@ -25,6 +26,7 @@ struct Tile {
     fills: bool,
     keys: usize,
     drawn: usize,
+    under: usize,
 }
 
 impl Tile {
@@ -35,6 +37,7 @@ impl Tile {
             fills: false,
             keys: 0,
             drawn: 0,
+            under: 0,
         }
     }
 
@@ -52,6 +55,7 @@ impl Overlay<String, Shelf> for Tile {
         match key.code {
             KeyCode::Enter => Outcome::Commit(shelf.word.to_string()),
             KeyCode::Char('s') => Outcome::Stay(self.mark.to_string()),
+            KeyCode::Char('b') => Outcome::Back(self.mark.to_string()),
             KeyCode::Esc => Outcome::Close,
             KeyCode::Char('d') => Outcome::Dismiss,
             _ => Outcome::Consumed,
@@ -67,6 +71,17 @@ impl Overlay<String, Shelf> for Tile {
         for y in rect.top()..rect.bottom() {
             for x in rect.left()..rect.right() {
                 buf[(x, y)].set_symbol(self.mark);
+            }
+        }
+    }
+
+    fn render_under_step(&mut self, area: Rect, buf: &mut Buffer, shelf: &Shelf, theme: &Theme) {
+        self.render(area, buf, shelf, theme);
+        self.under += 1;
+        let rect = if self.fills { area } else { self.rect };
+        for y in rect.top()..rect.bottom() {
+            for x in rect.left()..rect.right() {
+                buf[(x, y)].set_symbol("#");
             }
         }
     }
@@ -207,6 +222,41 @@ fn a_commit_or_a_dismissal_closes_the_whole_flow_and_nothing_under_it() {
 }
 
 #[test]
+fn stepping_back_with_a_message_closes_the_step_only() {
+    let shelf = Shelf { word: "w" };
+    let mut stack = flow();
+    let back = stack.route(press(KeyCode::Char('b')), &shelf).unwrap();
+    assert_eq!(back, Outcome::Back("c".to_string()));
+    let settled = stack.settle(back);
+    assert_eq!(marks(&settled.closed), ["c"], "only the step closed");
+    assert_eq!(settled.message.as_deref(), Some("c"), "with its message");
+    assert_eq!(marks(stack.iter().as_slice()), ["a", "b"]);
+    // An entry that is no step closes alone, as a commit closes it.
+    let back = stack.route(press(KeyCode::Char('b')), &shelf).unwrap();
+    let settled = stack.settle(back);
+    assert_eq!(marks(&settled.closed), ["b"]);
+    assert_eq!(settled.message.as_deref(), Some("b"));
+    assert_eq!(marks(stack.iter().as_slice()), ["a"]);
+}
+
+#[test]
+fn an_entry_under_a_step_of_its_own_draws_as_under_a_step() {
+    let mut stack = ModalStack::new();
+    stack.push(Tile::new("a", Rect::new(0, 0, 8, 1)));
+    stack.push(Tile::new("b", Rect::new(1, 0, 6, 1)));
+    stack.push_step(Tile::new("c", Rect::new(3, 0, 2, 1)));
+    let buf = draw(&mut stack, 8, 1);
+    assert_eq!(row(&buf, 0), "a##cc##a", "b is drawn under its step");
+    let under: Vec<usize> = stack.iter().map(|tile| tile.under).collect();
+    assert_eq!(under, [0, 1, 0], "a has no step over it, c is on top");
+    // An overlay opened on its own over another is no step of it.
+    stack.pop();
+    stack.push(Tile::new("d", Rect::new(3, 0, 2, 1)));
+    let buf = draw(&mut stack, 8, 1);
+    assert_eq!(row(&buf, 0), "abbddbba");
+}
+
+#[test]
 fn a_flow_runs_through_every_step_of_it() {
     let shelf = Shelf { word: "w" };
     let mut stack = flow();
@@ -261,6 +311,10 @@ fn outcomes_say_whether_they_close_and_what_they_carry() {
     assert_eq!(dismiss.map(str::len), Outcome::Dismiss);
     assert!(!Outcome::Stay("s").closes());
     assert!(Outcome::<()>::Close.closes());
+    let back = Outcome::Back("b");
+    assert!(back.closes());
+    assert_eq!(back.map(str::len), Outcome::Back(1));
+    assert_eq!(back.message(), Some("b"));
 }
 
 #[test]

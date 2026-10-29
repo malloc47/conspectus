@@ -26,7 +26,11 @@ use crate::theme::Theme;
 /// which closes the step and gives the keys back to the entry under it;
 /// an [`Outcome::Commit`] or an [`Outcome::Dismiss`] (`Ctrl-C`) closes
 /// the whole flow, because the overlay is done or dismissed, not one
-/// level of it.
+/// level of it. An [`Outcome::Back`] closes the step as `Esc` does and
+/// hands the host a message: a step that applies its answer and returns
+/// to the entry under it. An entry with a step of its own open over it
+/// is drawn with [`Overlay::render_under_step`], since its keys went to
+/// that level.
 ///
 /// ```
 /// use ratatui::buffer::Buffer;
@@ -72,11 +76,11 @@ pub struct ModalStack<E> {
 #[must_use]
 pub struct Settled<E, M> {
     /// The entries the outcome closed, top first: the top one for
-    /// `Close`, and for `Commit` and `Dismiss` the top one with every
-    /// entry it is a step of. Empty for `Consumed` and `Stay`.
+    /// `Close` and `Back`, and for `Commit` and `Dismiss` the top one
+    /// with every entry it is a step of. Empty for `Consumed` and `Stay`.
     pub closed: Vec<E>,
-    /// The message the host handles: from `Commit` (after the entry
-    /// closed) or `Stay`.
+    /// The message the host handles: from `Commit` or `Back` (after the
+    /// entries closed) or `Stay`.
     pub message: Option<M>,
 }
 
@@ -202,13 +206,13 @@ impl<E> ModalStack<E> {
     }
 
     /// Does the stack's part of `outcome`: closes the top entry for
-    /// [`Outcome::Close`], and the top entry's whole flow (it and every
-    /// entry it is a step of) for [`Outcome::Commit`] and
-    /// [`Outcome::Dismiss`]. Returns the entries it closed and the message
-    /// the host handles next.
+    /// [`Outcome::Close`] and [`Outcome::Back`], and the top entry's whole
+    /// flow (it and every entry it is a step of) for [`Outcome::Commit`]
+    /// and [`Outcome::Dismiss`]. Returns the entries it closed and the
+    /// message the host handles next.
     pub fn settle<M>(&mut self, outcome: Outcome<M>) -> Settled<E, M> {
         let closed = match outcome {
-            Outcome::Close => self.pop().into_iter().collect(),
+            Outcome::Close | Outcome::Back(_) => self.pop().into_iter().collect(),
             Outcome::Commit(_) | Outcome::Dismiss => self.close_flow(),
             Outcome::Consumed | Outcome::Stay(_) => Vec::new(),
         };
@@ -222,7 +226,9 @@ impl<E> ModalStack<E> {
     /// context and the theme. Each entry clears what it covers, so an
     /// entry shows the ones under it around its own frame. Drawing starts
     /// at the topmost entry that [fills the screen](Overlay::fills_screen),
-    /// on a cleared area: nothing under it would show.
+    /// on a cleared area: nothing under it would show. An entry with a
+    /// step of its own open over it draws through
+    /// [`Overlay::render_under_step`].
     pub fn draw<M, Cx: ?Sized>(&mut self, area: Rect, buf: &mut Buffer, cx: &Cx, theme: &Theme)
     where
         E: Overlay<M, Cx>,
@@ -236,7 +242,11 @@ impl<E> ModalStack<E> {
             if index == start && Overlay::<M, Cx>::fills_screen(entry) {
                 Clear.render(area, buf);
             }
-            entry.render(area, buf, cx, theme);
+            if self.steps.get(index + 1).copied().unwrap_or(false) {
+                entry.render_under_step(area, buf, cx, theme);
+            } else {
+                entry.render(area, buf, cx, theme);
+            }
         }
     }
 

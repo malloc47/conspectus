@@ -624,7 +624,9 @@ fn search_outcome<M>(
     picked: impl FnOnce(M) -> SearchOutcome,
 ) -> SearchOutcome {
     match outcome {
-        Outcome::Commit(message) | Outcome::Stay(message) => picked(message),
+        Outcome::Commit(message) | Outcome::Back(message) | Outcome::Stay(message) => {
+            picked(message)
+        }
         Outcome::Close | Outcome::Dismiss => SearchOutcome::Cancel,
         Outcome::Consumed => SearchOutcome::Continue,
     }

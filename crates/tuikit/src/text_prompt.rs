@@ -10,9 +10,12 @@
 //!   [`Overlay<M, Cx>`](crate::overlay::Overlay) for any context. `Enter`
 //!   hands the text to the host's `on_confirm`, which answers with a
 //!   [`PromptResult`]: [`Commit`](PromptResult::Commit) closes the prompt
-//!   with the host's message, [`Reject`](PromptResult::Reject) keeps it
-//!   open with the reason on its error line, and
-//!   [`Stay`](PromptResult::Stay) keeps it open as it is. `Esc` closes
+//!   with the host's message, [`Back`](PromptResult::Back) closes it as
+//!   `Esc` would with the host's message (a step that applies its answer
+//!   and returns to the overlay under it),
+//!   [`Reject`](PromptResult::Reject) keeps it open with the reason on
+//!   its error line, and [`Stay`](PromptResult::Stay) keeps it open as it
+//!   is. `Esc` closes
 //!   it and `Ctrl-C` dismisses it (with any flow it is a step of),
 //!   saying nothing; `Tab` is swallowed; every other key edits the line,
 //!   `q` included.
@@ -71,10 +74,10 @@
 //! step of the menu
 //! ([`ModalStack::push_step`](crate::overlay::ModalStack::push_step)):
 //! `Esc` returns to the menu, and a commit or `Ctrl-C` closes both. A
-//! host that holds the prompt as a level inside an overlay of its own (a
-//! settings panel's editor) routes keys to it, takes `Close` as stepping
-//! back to its own level, and takes `Dismiss` as dismissing the whole
-//! overlay.
+//! prompt that edits one value of an overlay that stays open (a settings
+//! panel's editor) opens as a step too and answers with
+//! [`PromptResult::Back`], so the value applies and the overlay has the
+//! keys again.
 
 use std::fmt;
 use std::sync::Arc;
@@ -102,6 +105,11 @@ pub const PROMPT_SIZE: ModalSize = ModalSize::COMPACT;
 pub enum PromptResult<M> {
     /// Take the text: the prompt closes, then the host handles `M`.
     Commit(M),
+    /// Take the text and step back: the prompt closes as `Esc` closes it
+    /// (a step gives the keys back to the overlay under it, which stays
+    /// open), then the host handles `M`. The prompt answers
+    /// [`Outcome::Back`].
+    Back(M),
     /// Refuse the text and say why: the prompt stays open and shows the
     /// reason on its error line until the next edit.
     Reject(String),
@@ -254,6 +262,7 @@ impl<M, Cx: ?Sized> Overlay<M, Cx> for TextPrompt<M> {
             Some(TextInputKey::Tab) => Outcome::Consumed,
             Some(TextInputKey::Confirm) => match (self.on_confirm)(self.edit.value()) {
                 PromptResult::Commit(message) => Outcome::Commit(message),
+                PromptResult::Back(message) => Outcome::Back(message),
                 PromptResult::Reject(reason) => {
                     self.error = Some(reason);
                     Outcome::Consumed

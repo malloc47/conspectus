@@ -11,8 +11,8 @@
 //!   [`handle`](Overlay::handle) takes one key press and the host's
 //!   context `&Cx` and returns an [`Outcome<M>`](Outcome): the key was
 //!   used, the overlay closes (stepping back, or dismissed as a whole),
-//!   or it hands the host a message `M` (closing as it does, or staying
-//!   open). [`render`](Overlay::render)
+//!   or it hands the host a message `M` (closing as it does, stepping
+//!   back, or staying open). [`render`](Overlay::render)
 //!   draws it over an area with the same context and the theme. The
 //!   overlay performs no effect: what a message does is the host's.
 //! - **The stack.** [`ModalStack<E>`](ModalStack) holds the open
@@ -20,7 +20,7 @@
 //!   own enum of overlays, or a boxed trait object. A key goes to the top
 //!   entry only ([`route`](ModalStack::route)); the host settles the
 //!   outcome ([`settle`](ModalStack::settle)), which closes the top entry
-//!   for [`Outcome::Close`], [`Outcome::Dismiss`], and
+//!   for [`Outcome::Close`], [`Outcome::Back`], [`Outcome::Dismiss`], and
 //!   [`Outcome::Commit`] and gives back the message to handle. Every
 //!   entry is drawn, bottom to top
 //!   ([`draw`](ModalStack::draw)): each one clears what it covers, so a
@@ -28,11 +28,16 @@
 //!   overlay that [fills the screen](Overlay::fills_screen) hides
 //!   everything below it.
 //! - **Steps.** An overlay that asks a further question (a menu whose
-//!   pick needs a confirmation or a value) opens it as a step of itself
+//!   pick needs a confirmation or a value, a settings panel's editor)
+//!   opens it as a step of itself
 //!   ([`push_step`](ModalStack::push_step)) rather than as a mode inside
 //!   its own state. `Esc` in the step closes it and gives the keys back
 //!   to the entry under it; a commit, or `Ctrl-C` ([`Outcome::Dismiss`]),
-//!   closes the step and every entry it is a step of.
+//!   closes the step and every entry it is a step of; a step that applies
+//!   its answer and goes back answers [`Outcome::Back`], which closes the
+//!   step only. The entry under a step is drawn with
+//!   [`render_under_step`](Overlay::render_under_step), so its cursor
+//!   shows that its keys went to the step.
 //! - **The host owns the stack.** It keeps the stack beside (or lends it
 //!   out of) its own state and passes that state as `&Cx` while the stack
 //!   holds its entries mutably, so an overlay reads live host data on

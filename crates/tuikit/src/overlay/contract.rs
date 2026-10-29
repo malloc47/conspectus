@@ -25,6 +25,10 @@ use crate::theme::Theme;
 ///   rect), so the overlays below show only around it. It takes `&mut
 ///   self` so a scrolled overlay keeps the window it drew, and the next
 ///   key moves by the rows that were on screen.
+/// - **Under a step.** While a step of the overlay's own is open over it,
+///   the stack draws it with [`render_under_step`](Self::render_under_step)
+///   instead, so a list whose keys went to that step shows its cursor as
+///   a list without focus does.
 /// - **Full screen.** An overlay that covers the whole screen (a reader
 ///   with its own header and footer) says so with
 ///   [`fills_screen`](Self::fills_screen); its stack draws nothing under
@@ -39,6 +43,17 @@ pub trait Overlay<M, Cx: ?Sized> {
 
     /// Draws the overlay over `area` with the host's context and theme.
     fn render(&mut self, area: Rect, buf: &mut Buffer, cx: &Cx, theme: &Theme);
+
+    /// Draws the overlay while a step of its own is open over it (an
+    /// editor a settings panel opened): a level of the overlay has the
+    /// keys, so a list in it draws its cursor row with the inactive
+    /// selection pair (house rule 10). The stack draws such an entry with
+    /// this instead of [`render`](Self::render); by default it is
+    /// `render`, so an overlay that does not override it looks the same
+    /// under its steps.
+    fn render_under_step(&mut self, area: Rect, buf: &mut Buffer, cx: &Cx, theme: &Theme) {
+        self.render(area, buf, cx, theme);
+    }
 
     /// Whether the overlay covers the whole screen, so nothing under it
     /// needs drawing. `false` unless an overlay says otherwise.
@@ -65,6 +80,10 @@ impl<M, Cx: ?Sized, T: Overlay<M, Cx> + ?Sized> Overlay<M, Cx> for Box<T> {
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, cx: &Cx, theme: &Theme) {
         (**self).render(area, buf, cx, theme);
+    }
+
+    fn render_under_step(&mut self, area: Rect, buf: &mut Buffer, cx: &Cx, theme: &Theme) {
+        (**self).render_under_step(area, buf, cx, theme);
     }
 
     fn fills_screen(&self) -> bool {

@@ -4,9 +4,9 @@
 ///
 /// An overlay never acts on the world; it reports what the key meant.
 /// The host's stack does the stack's part ([`ModalStack::settle`]
-/// closes the top entry for `Close`, and for `Commit` and `Dismiss` the
-/// top entry with every entry it is a step of), and the host handles the
-/// message `M` that `Commit` and `Stay` carry.
+/// closes the top entry for `Close` and `Back`, and for `Commit` and
+/// `Dismiss` the top entry with every entry it is a step of), and the
+/// host handles the message `M` that `Commit`, `Back`, and `Stay` carry.
 ///
 /// How the close keys map (house rule 4): `Esc` steps back one level,
 /// which is `Consumed` while the overlay has a level of its own to return
@@ -32,6 +32,13 @@ pub enum Outcome<M> {
     /// The overlay is done with a result: it closes, and so does every
     /// entry it is a step of, then the host handles `M`.
     Commit(M),
+    /// The overlay steps back one level with a result: it closes as
+    /// `Close` closes it (a step gives the keys back to the entry under
+    /// it, which stays open), then the host handles `M`. A settings
+    /// panel's editor answers this way, so the change applies and the
+    /// panel is there again. For an overlay that is no step, the same as
+    /// `Commit`.
+    Back(M),
     /// The overlay stays open and the host handles `M`: a setting applied
     /// as it changes, a notice about input it refused, or a request to
     /// open the overlay's next step over it.
@@ -48,20 +55,25 @@ impl<M> Outcome<M> {
             Self::Close => Outcome::Close,
             Self::Dismiss => Outcome::Dismiss,
             Self::Commit(message) => Outcome::Commit(f(message)),
+            Self::Back(message) => Outcome::Back(f(message)),
             Self::Stay(message) => Outcome::Stay(f(message)),
         }
     }
 
-    /// Whether the overlay closes: `Close`, `Dismiss`, or `Commit`.
+    /// Whether the overlay closes: `Close`, `Dismiss`, `Commit`, or
+    /// `Back`.
     pub fn closes(&self) -> bool {
-        matches!(self, Self::Close | Self::Dismiss | Self::Commit(_))
+        matches!(
+            self,
+            Self::Close | Self::Dismiss | Self::Commit(_) | Self::Back(_)
+        )
     }
 
-    /// The message the host handles, if the outcome carries one (`Commit`
-    /// or `Stay`).
+    /// The message the host handles, if the outcome carries one
+    /// (`Commit`, `Back`, or `Stay`).
     pub fn message(self) -> Option<M> {
         match self {
-            Self::Commit(message) | Self::Stay(message) => Some(message),
+            Self::Commit(message) | Self::Back(message) | Self::Stay(message) => Some(message),
             Self::Consumed | Self::Close | Self::Dismiss => None,
         }
     }
