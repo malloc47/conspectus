@@ -84,7 +84,9 @@ for drawn in vetted.unvetted(source) {
 `marks::ALL` lists every mark once, spinner frames included, and a test keeps
 the list and the module's source in step. `marks::SPACED_SEPARATOR` is
 `SEPARATOR` with a space on each side (` · `), what joins the hints of a
-footer; it is three cells, so it is not one of the marks. The boxes a form
+footer; it is three cells, so it is not one of the marks. `marks::TIMES`
+is `FAIL`'s character read as the multiplication sign in a count of
+repeats (`(×3)`), so it is not a mark of its own either. The boxes a form
 draws before an option are three cells too, built from vetted glyphs, and
 not marks of their own: `CHECKED` (`[x]`) and `UNCHECKED` (`[ ]`) for a
 checkbox, any number of which can be on, and `CHOSEN` (`(•)`, `BULLET`

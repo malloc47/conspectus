@@ -177,6 +177,7 @@ not shown in the footer.
 | `LINE_EDIT_KEYS` (`EditKey`) | the editing keys every text field shares, all aliases: arrows and `Home`/`End` with their readline chords, word motion on `Alt-b`/`Alt-f` and the Control and Alt arrows, the delete, kill, and yank keys (see [text_edit.md](text_edit.md)) | none |
 | `PATH_FIELD_KEYS` (`PathKey`) | `Tab` completes the path, an alias (a path field's own key, consulted after its form's table; see [path_field.md](path_field.md)) | none |
 | `CHECKLIST_KEYS` (`ChecklistKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `PgUp`/`PgDn` page; `g`/`Home` top and `G`/`End` bottom (aliases); `Space` toggle; `a` select all; `n` select none; `Enter` confirm; `Esc` cancel | `↑/↓ move · Space toggle · a select all · n select none · Enter confirm · Esc cancel` |
+| `LOG_LIST_KEYS` (`LogListKey`) | `Ctrl-C` and `q` abort; `j`/`↓`/`Ctrl-N` down and `k`/`↑`/`Ctrl-P` up a row of the list, stopping at the ends; `g`/`Home` the newest and `G`/`End` the oldest (aliases); `J`/`K` the detail a row; `PgDn`/`Space` and `PgUp` the detail a page (aliases); `Esc` close (the table of `LogList`; see [log_list.md](log_list.md)) | `j/k select · J/K scroll detail · Esc close` |
 | `SETTINGS_KEYS` (`SettingsKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `PgUp`/`PgDn` page; `g`/`Home` top and `G`/`End` bottom (aliases); `Space` change; `Enter` apply; `Esc` close; a note that changes apply as they are made (the table of `SettingsPanel`; see [settings_panel.md](settings_panel.md)) | `↑/↓ move · Space select/toggle · Enter apply & close · Esc close · changes apply as you make them` |
 | `PALETTE_KEYS` (`PaletteKey`) | `Ctrl-C` abort; `↑`/`Ctrl-P` up; `↓`/`Ctrl-N` down; `PgUp`/`PgDn` page (aliases); `Enter` pick; `Esc` cancel; every other key edits the query, so `q`, `j`, and `k` type (the table of `Palette`; a palette with a scope or options includes it and binds `PaletteKey::Scope` and `PaletteKey::Options` with its own verbs, by convention on `Tab` and `Ctrl-O`; see [palette.md](palette.md)) | `↑/↓ move · Enter pick · Esc close` |
 | `PALETTE_OPTION_KEYS` (`PaletteOptionKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Space` and `Enter` toggle; `Esc` and `Ctrl-O` back (a palette's options pane) | `↑/↓ move · Space toggle · Esc back` |
@@ -193,7 +194,8 @@ drops a field's own value and takes the inherited one again, for forms
 with override rows; no standard table binds it, so a form binds its own
 reset key (a chord such as `Ctrl-R`) in its own table and the chord stays
 free to mean something else in another overlay. `PagerKey::Copy` is bound
-by a pager whose content can be copied; no standard table binds it.
+by a pager whose content can be copied, and `LogListKey::Copy` by a log
+list whose entries can; no standard table binds either.
 
 ## Theme tokens
 

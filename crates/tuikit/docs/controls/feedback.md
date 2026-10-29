@@ -121,7 +121,7 @@ assert_eq!(sink, b"\x1b]52;c;Zm9v\x07");
 | `Feedback::span(theme)` | the status line's rendering: the text in its severity's color |
 | `Toasts` | the toasts on screen; `show` replaces them, `push` stacks one above them (the oldest goes when `with_capacity` are shown, 4 by default), `tick(now)` retires the expired, `render(area, buf, theme)` draws them, `areas(area)` says where |
 | `Log<T>` | `new(capacity)` (or `default`, 200), `push`, `newest_first`, `newest_where`, `unseen`, `mark_seen`, `len`, `capacity` |
-| `Entry<T> { at, severity, summary, item, repeats }` | one logged outcome; `Entry::new(at, severity, summary, item)`; `feedback()` is its severity and summary as a `Feedback` |
+| `Entry<T> { at, severity, summary, item, repeats }` | one logged outcome; `Entry::new(at, severity, summary, item)`; `feedback()` is its severity and summary as a `Feedback`; `summary_with_repeats()` is the summary with its count of repeats once it repeated (`save failed (×3)`) |
 | `clipboard::copy(sink, text)` | writes `ESC ] 52 ; c ; <base64> BEL` to `sink` and flushes it |
 
 ### A toast's look
@@ -151,8 +151,8 @@ seconds; a repeat moves it to the latest.
 
 ## Key table
 
-None: no part of the module handles keys. The control that shows the log
-(a reader over its entries) has the keys; a toast is dismissed by time.
+None: no part of the module handles keys. The control that shows the log,
+[`LogList`](log_list.md), has the keys; a toast is dismissed by time.
 
 ## Theme tokens
 
@@ -193,9 +193,6 @@ and 18 a pager's.
   clear of a region (a status line that must stay readable) is a change to
   the free area `render` is given, which a host can make today by passing
   a smaller area.
-- **A reader for the log.** `Log` is the model; the `LogList` reader that
-  draws its rows (severity mark, age, summary, and the repeat count) is a
-  later control.
 - **Other clipboard routes.** The sequence is OSC 52 only; wrapping it for
   a terminal multiplexer's passthrough, or a platform clipboard, would be
   another function writing to the same kind of sink.

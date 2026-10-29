@@ -49,7 +49,9 @@ entries that open a step, and a footer that stays in view while the
 entries scroll), the `dialog` module (the dialog that confirms, offers a
 choice of named verbs, or tells, on one key table), the `checklist`
 module (the checklist that checks one item, all, or none, counts what is
-checked, and hands the checked indices to its host), the
+checked, and hands the checked indices to its host), the `log_list`
+module (the reader of a log: its entries newest first over the selected
+one's detail in an embedded pager, read from the host's context), the
 `settings_panel` module (the settings panel whose rows its host builds
 from its context, which applies each change as it is made and opens its
 editors as steps over itself), the `palette`
@@ -63,7 +65,7 @@ text, recency tint, and the age cell), the `frame` module (the modal
 frame, its footer on the bottom border, and its named sizes), the `selection` module (the list cursor's
 marker and highlight, the ghost and pending looks, and the wrap-or-clamp
 rule), the `keys` module (key tables, footers, key labels, roles, and the
-standard tables for menus, dialogs, pagers, prompts, checklists,
+standard tables for menus, dialogs, pagers, prompts, checklists, log lists,
 palettes, settings panels, and forms), the `overlay` module (the overlay contract, its outcomes, and the
 host-owned modal stack that routes keys to its top entry, opens a
 follow-up question as a step of the overlay that asks it, and draws every

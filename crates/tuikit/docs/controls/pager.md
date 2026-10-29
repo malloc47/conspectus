@@ -374,10 +374,14 @@ are sketches.
   pager's `?` level is the same page over `PAGER_HELP_KEYS`. A reader not
   yet on the pager keeps such a page and routes its own movement keys to
   the page's scroll calls.
-- **A log's detail.** `Embedded` in the detail pane beside the log's list:
-  `layout` wraps the selected entry's text; the host routes its detail
-  keys (`J`/`K` to `scroll_by`, `PgDn` to `page_down`) and replaces the
-  content when the selection moves (`content_mut`, `refresh`, `to_top`).
+- **A log's detail** (built; the framework's own `log_list::LogList`).
+  `Embedded` under the log's list: `layout` wraps the selected entry's
+  text a line at a time (`WrappedRows`); the list routes its detail keys
+  (`J`/`K` to `scroll_by`, `PgDn` to `page_down`, `PgUp` to `page_up`),
+  goes back to the top when the selection moves (`to_top`), and replaces
+  the text when the selected entry's detail changes (`content_mut`,
+  `refresh`). A footer too tall for the list's frame scrolls its first
+  rows after the detail's last row, by the framed pager's rule.
 - **A preview region.** `Embedded` under the host's banner. A source whose
   newest rows matter opens `at_end`; one showing a search's match calls
   `land` with the query; a source that cuts its own window lays out lazily,
