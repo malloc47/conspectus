@@ -24,7 +24,9 @@ struct Found {
 /// [`widest`](Self::widest). A [`ragged`](super::Column::ragged) column
 /// is widened only by the cells that something follows on their row, and
 /// a capped column ([`Width::Cap`](super::Width::Cap)) counts each cell
-/// at most its cap.
+/// at most its cap. The pass also keeps the least lead a row had
+/// ([`least_lead`](Self::least_lead)): the lead every row of the list
+/// shares, such as a cursor gutter.
 ///
 /// ```
 /// use ratatui::style::Style;
@@ -39,15 +41,21 @@ struct Found {
 /// assert_eq!(measure.widest("name"), 12);
 /// assert!(measure.any("name"));
 /// assert!(!measure.any("size"));
+/// assert_eq!(measure.least_lead(), 0);
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Measure<K> {
     found: Vec<(K, Found)>,
+    /// The least lead of a row measured; `None` before the first.
+    least_lead: Option<usize>,
 }
 
 impl<K> Default for Measure<K> {
     fn default() -> Self {
-        Self { found: Vec::new() }
+        Self {
+            found: Vec::new(),
+            least_lead: None,
+        }
     }
 }
 
@@ -60,6 +68,7 @@ impl<K: Copy + Eq> Measure<K> {
     /// Measures one row drawn from `schema` after `lead` cells of its own
     /// (a tree row's indent), whose cells are `cells`.
     pub fn add(&mut self, schema: &ColumnSchema<K>, lead: usize, cells: &[(K, Cell)]) {
+        self.least_lead = Some(self.least_lead.map_or(lead, |least| least.min(lead)));
         let filled: Vec<bool> = schema
             .columns
             .iter()
@@ -131,6 +140,15 @@ impl<K: Copy + Eq> Measure<K> {
     /// Whether any row has a cell under `key` that is not blank.
     pub fn any(&self, key: K) -> bool {
         self.found(key).any
+    }
+
+    /// The least lead a measured row had (0 before any row is measured):
+    /// the lead every row of the list shares, such as a list's cursor
+    /// gutter, beside each row's own (a tree row's indent). A column that
+    /// [absorbs the lead](super::Column::absorbs_lead) absorbs only a
+    /// row's own.
+    pub fn least_lead(&self) -> usize {
+        self.least_lead.unwrap_or(0)
     }
 }
 

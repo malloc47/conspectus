@@ -183,25 +183,29 @@ fn of_row(width: Width, row: usize) -> Option<usize> {
 
 impl<K: Copy + Eq> ColumnSchema<K> {
     /// The columns that line up, laid out for `room` after a `lead`. When
-    /// one of them absorbs the lead, they are laid out as a row with no
-    /// lead would be in the whole width (`lead + room`), and the lead is
-    /// taken off the column that absorbs it: rows at every depth then give
-    /// way alike, at the same widths, and the columns after it stay in one
-    /// place, though a deeper row's cell may narrow below its floor.
+    /// one of them absorbs the lead, they are laid out as the list's
+    /// shallowest row would be (after the lead every row shares, the
+    /// measure's least) in the whole width (`lead + room`), and the row's
+    /// own lead is taken off the column that absorbs it: rows at every
+    /// depth then give way alike, at the same widths, and the columns
+    /// after it stay in one place, though a deeper row's cell may narrow
+    /// below its floor.
     fn aligned(&self, measure: &Measure<K>, lead: usize, room: usize) -> Vec<Item> {
         let absorbs =
             |column: &Column<K>| column.absorbs_lead && matches!(column.width, Width::Cap(_));
-        if lead == 0 || !self.columns[..self.split].iter().any(absorbs) {
+        let shared = measure.least_lead().min(lead);
+        if lead == shared || !self.columns[..self.split].iter().any(absorbs) {
             return self.laid_out(measure, lead, room);
         }
-        let mut items = self.laid_out(measure, 0, lead + room);
+        let own = lead - shared;
+        let mut items = self.laid_out(measure, shared, own + room);
         for item in items
             .iter_mut()
             .filter(|item| absorbs(&self.columns[item.index]))
         {
-            item.width = item.width.map(|width| width.saturating_sub(lead));
-            item.wanted = item.wanted.saturating_sub(lead);
-            item.own = item.own.saturating_sub(lead);
+            item.width = item.width.map(|width| width.saturating_sub(own));
+            item.wanted = item.wanted.saturating_sub(own);
+            item.own = item.own.saturating_sub(own);
         }
         items
     }

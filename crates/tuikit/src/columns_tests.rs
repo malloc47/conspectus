@@ -4,6 +4,7 @@ use ratatui::text::Span;
 use super::*;
 use crate::age::{Age, Recency};
 use crate::glyphs::marks;
+use crate::selection::GUTTER_WIDTH;
 use crate::text;
 use crate::theme::Theme;
 
@@ -708,6 +709,47 @@ fn rows_that_absorb_the_lead_give_way_alike_at_every_depth() {
             schema.layout(&measure, 4, width - 4).is_shown(Col::Age)
         );
     }
+}
+
+#[test]
+fn a_lead_every_row_shares_is_not_absorbed() {
+    // A list that draws a two-cell gutter before every row lays each row
+    // out as it would with no gutter in a room two cells narrower: the
+    // column that absorbs the lead gives back only a row's own indent, so
+    // the top row's label keeps its floor.
+    let schema = ColumnSchema::new([
+        Column::cap(Col::Name, 28).absorbs_lead().shrinks(2, 8),
+        Column::cap(Col::State, 9),
+        Column::fixed(Col::Age, 4).drops(3),
+    ]);
+    let top = vec![
+        (Col::Name, t("project-main")),
+        (Col::State, t("live")),
+        (Col::Age, t("5m")),
+    ];
+    let nested = vec![
+        (Col::Name, t("nested-entry-a")),
+        (Col::State, t("in use")),
+        (Col::Age, t("1h")),
+    ];
+    let (mut bare, mut guttered) = (Measure::new(), Measure::new());
+    for (lead, cells) in [(0, &top), (4, &nested)] {
+        bare.add(&schema, lead, cells);
+        guttered.add(&schema, GUTTER_WIDTH + lead, cells);
+    }
+    assert_eq!(bare.least_lead(), 0);
+    assert_eq!(guttered.least_lead(), GUTTER_WIDTH);
+    let theme = Theme::default();
+    for room in 12..40 {
+        for (lead, cells) in [(0, &top), (4, &nested)] {
+            let without = Cell::plain(&schema.draw(&bare, lead, room, cells, &theme));
+            let with =
+                Cell::plain(&schema.draw(&guttered, GUTTER_WIDTH + lead, room, cells, &theme));
+            assert_eq!(with, without, "at {room} after a lead of {lead}");
+        }
+    }
+    let narrow = Cell::plain(&schema.draw(&guttered, GUTTER_WIDTH, 14, &top, &theme));
+    assert_eq!(narrow, format!("project{}  live", marks::ELLIPSIS));
 }
 
 #[test]

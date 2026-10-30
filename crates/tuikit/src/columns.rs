@@ -31,7 +31,8 @@
 //! # When a row is too narrow
 //!
 //! A row is laid out in its room, the cells left after anything the list
-//! draws before the schema (a tree's indent):
+//! draws before the schema (its lead: a list's cursor gutter, a tree's
+//! indent):
 //!
 //! 1. A column whose [`drop_below`](Column::drop_below) room is more than
 //!    the row's is left out.
@@ -56,9 +57,10 @@
 //! for the room by the widths measured over the whole list, so every row
 //! drawn in the same room loses the same ones and keeps the rest in one
 //! place. When one of them [absorbs the lead](Column::absorbs_lead), they
-//! give way as a row with no lead would in the whole width, and only that
-//! column is narrower on a deeper row, so rows at every depth lose the
-//! same ones. The hugging column and the columns after it follow each row's
+//! give way as the list's shallowest row would in the whole width, and
+//! only that column is narrower on a deeper row, so rows at every depth
+//! lose the same ones; a lead every row shares, such as a cursor gutter,
+//! is not absorbed. The hugging column and the columns after it follow each row's
 //! own cells and give way row by row. A blank cell of a lined-up column is
 //! padded while a later cell on its row shows; a row ends at its last cell
 //! that is not blank, and draws no gap after it. A row's last cell needs

@@ -151,7 +151,7 @@ row reads alike in both.
 | `.drops(p)`, `.shrinks(p, floor)` | how the column gives way, at priority `p` (lowest first) | a column may narrow at one priority and leave at a later one |
 | `.drop_below(room)` | leave the column out of every row narrower than `room` | whatever else would fit |
 | `.ragged()` | only cells something follows widen the column; a cell that ends its row runs on into the room | a description that spaces a count |
-| `.absorbs_lead()` | measure from the row's start, so the column ends in one place at every depth | a deeper row's cell is narrower by its indent; a cap bounds each cell, so a cell cut to it ends there too |
+| `.absorbs_lead()` | measure from the row's start, so the column ends in one place at every depth | a deeper row's cell is narrower by its indent; a cap bounds each cell, so a cell cut to it ends there too; a lead every row shares is not absorbed |
 | `ColumnSchema::new(columns)` | a row's columns in order | schemas that share a key share that column's width |
 | `Cell::text(text, style)`, `.middle()`, `.clip()`, `.tail(spans)` | text cut at its end (the default), in the middle, or with no mark, with spans kept whole after it | `Cell::secondary` is muted text cut in the middle |
 | `Cell::spans`, `Cell::chip` | spans the host styled, cut at the end as one | a filled chip keeps its fill |
@@ -160,6 +160,7 @@ row reads alike in both.
 | `Cell::snippet(text, highlight, style, matched)`, `.dropping(chars)` | an excerpt cut around its match, the match painted | `text::fit_snippet` and `text::paint` |
 | `Measure::new`, `add(schema, lead, cells)` | measure one row of the list | cells under keys the row's schema lacks are measured too, for a host that draws part of a row itself |
 | `Measure::widest`, `widest_with_lead`, `any` | what the pass found under a key | |
+| `Measure::least_lead` | the least lead a measured row had | the lead every row shares, such as a cursor gutter |
 | `ColumnSchema::layout(measure, lead, room)` | which lined-up columns show at a room, and how wide | the decision every row at that room shares |
 | `ColumnSchema::draw(measure, lead, room, cells, theme)` | one row's spans, never wider than the room | the policy below |
 | `ColumnSchema::draw_split(..., at)` | one row's spans parted where the column under `at` starts (or the next that shows) | for a look on part of a row; joined, the parts are what `draw` returns |
@@ -188,10 +189,12 @@ row reads alike in both.
 
 The columns before the first hugging one line up: they give way by the
 widths measured over the whole list, so every row drawn in one room loses
-the same ones. When one of them absorbs the lead, they give way as a row
-with no lead would in the whole width, and only that column is narrower
-on a deeper row, so rows at every depth lose the same ones (a deeper
-row's cell may then narrow below its floor). The hugging column and those
+the same ones. When one of them absorbs the lead, they give way as the
+list's shallowest row would in the whole width, and only that column is
+narrower on a deeper row, so rows at every depth lose the same ones (a
+deeper row's cell may then narrow below its floor). A lead every row
+shares, such as a cursor gutter (`Measure::least_lead`), is not
+absorbed: the shallowest row keeps its floor. The hugging column and those
 after it give way row by row,
 from each row's own cells. A row's last cell needs only its own text, not
 its column's pad, and a ragged cell that ends its row runs on into the room

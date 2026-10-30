@@ -270,10 +270,13 @@ impl<K> Column<K> {
     /// a row's cell gives back the row's lead, so a deeper row's cell is
     /// that much narrower and the columns after it land where a
     /// shallower row's do; its cap bounds each cell, not the column, so a
-    /// cell cut to the cap ends there too. The lined-up columns of a row
-    /// with a lead then give way as a row with no lead would in the whole
-    /// width, so rows at every depth lose the same ones. Without it a column
-    /// is measured from the end of the row's lead and moves right with it.
+    /// cell cut to the cap ends there too. The lined-up columns of a deeper
+    /// row then give way as the list's shallowest row would in the whole
+    /// width, so rows at every depth lose the same ones. A lead every row
+    /// shares (a list's cursor gutter, the measure's
+    /// [`least_lead`](super::Measure::least_lead)) is not absorbed. Without
+    /// it a column is measured from the end of the row's lead and moves
+    /// right with it.
     #[must_use]
     pub const fn absorbs_lead(mut self) -> Self {
         self.absorbs_lead = true;
