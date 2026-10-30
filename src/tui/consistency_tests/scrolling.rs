@@ -513,17 +513,25 @@ fn inner_text(buf: &Buffer, (x0, y0, x1, y1): (u16, u16, u16, u16)) -> String {
 #[test]
 fn every_modal_shows_its_body_at_40x10() {
     for (name, view, open) in builders() {
-        // Compared with the screen under the modal's whole flow: at 40x10
-        // a step (a dialog) and the menu under it both take the frame's
-        // full size, so the step's frame is the menu's.
+        // Compared with the screen under the modal on top, the status bar
+        // (which names the top modal's keys) left as it is. At 40x10 a
+        // step (a dialog) and the menu under it can both take the frame's
+        // full size, so no corner differs; the step's frame is then the
+        // one around what changed inside it.
         let mut app = app_with(view, open);
         let with = buffer_of(&mut app, 40, 10);
-        app.with_modals(|stack, _| {
-            stack.close_flow();
-        });
-        let without = buffer_of(&mut app, 40, 10);
+        app.pop_top_modal();
+        let mut without = buffer_of(&mut app, 40, 10);
+        let bar = status_row(without.area);
+        for x in 0..without.area.width {
+            without[(x, bar)] = with[(x, bar)].clone();
+        }
         let label = describe(name, (40, 10));
-        let Some(rect) = modal_rect(&with, &without) else {
+        let covering = || {
+            tuikit::testkit::buffer::covering_frame(&with, &without)
+                .map(|rect| (rect.x, rect.y, rect.right() - 1, rect.bottom() - 1))
+        };
+        let Some(rect) = modal_rect(&with, &without).or_else(covering) else {
             panic!("{label}: no frame\n{}", buffer_to_string(&with));
         };
         assert!(

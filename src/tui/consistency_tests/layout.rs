@@ -40,21 +40,13 @@ fn open_pinned(app: &mut App, message: Msg) {
     app.update(message);
 }
 
-/// The facts of a linked worktree with three live sessions in it. The
-/// checks find a modal's frame by the corners that differ from the screen
-/// under it, so the dialogs this opens over the menu are of other sizes
-/// than the menu: a dialog drawn exactly over its menu's frame would
-/// leave no corner to find.
+/// The facts of a linked worktree with a live session in it.
 pub(super) fn worktree_context() -> crate::tui::widgets::worktree_menu::WorktreeMenuContext {
     crate::tui::widgets::worktree_menu::WorktreeMenuContext {
         context: crate::tui::worktree_actions::WorktreeContext::Worktree,
         repo_root: Some("/wt/feature".into()),
         branch: Some("feature".into()),
-        guard_sessions: vec![
-            "session-one".into(),
-            "session-two".into(),
-            "session-three".into(),
-        ],
+        guard_sessions: vec!["session-one".into()],
         can_mutate: true,
         reveal_target: None,
     }
