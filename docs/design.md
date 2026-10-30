@@ -1264,10 +1264,11 @@ retarget candidates, the history items, the titles, and the `Msg` each pick
 commits. Quick select and content search are two palettes (ADR 0175): the
 adapter keeps the ranking, the outcome words, the content kinds, history
 paging, and the `Msg` mapping, and draws the rows itself; a content hit's
-cells are one column plan (`ColumnPlan`: ordered cells with their widths,
-gaps, and the order they give way in), which the Search view's hit rows can
-lay out too. Quick select keeps its cursor's position across an edit while
-it is still a result.
+columns are one declaration laid out by the framework's column schema
+(`hit_columns`, ADR 0185: the cells, their widths, and the order they give
+way in), which the Search view's hit, pane, and pane-hit rows lay out too.
+Quick select keeps its cursor's position across an edit while it is still a
+result.
 
 Settings panels are one control (ADR 0176). The Controls overlay is the
 framework's `SettingsPanel`: titled sections of rows that the host's row
@@ -1344,8 +1345,10 @@ kind of row line up in every view and give way in one order when the pane
 is narrow. A header's label and a Pinned or History row's label end in one
 column at every depth, so nested rows line up with their parents. A group
 header carries its name and what follows it as two cells, not one string.
-The Search view's hit and pane rows still lay out their own cells after
-the prefix.
+The Search view's hit, pane, and pane-hit rows take the contents modal's
+hit columns and cells (ADR 0185), so a search hit reads the same in the
+modal and in the view and gives way in one order; its session rows stay
+the Sessions view's.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

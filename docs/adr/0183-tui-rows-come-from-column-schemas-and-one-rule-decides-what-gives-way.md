@@ -19,7 +19,11 @@ CLI table renderer as it is (decision 7). Amended by
 the PR, Pinned, and History rows are laid out from schemas too, a capped
 column caps each cell, rows that absorb their lead give way as a row with
 no lead would, and a group header's label absorbs the indent instead of
-its path, so nested headers line up.
+its path, so nested headers line up. Amended by
+[ADR 0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md):
+a column can be a share of the row or step by the row, and a fill can
+want its own minimum, so the palette's plan becomes a schema and the
+Search view's hit, pane, and pane-hit rows are laid out from one.
 
 ## Context
 

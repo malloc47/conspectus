@@ -1307,7 +1307,12 @@ matching sessions' transcripts to find the turns, newest matches first and
 at most 100 sessions; the find chip says `reading messages` while it loads
 and `showing N of M messages` if that cap left some out. Per-message
 turns are read again when a search is shown, not kept with it. Selecting a
-hit row shows its turn above the session's detail.
+hit row shows its turn above the session's detail. Hit, pane, and pane
+line rows read as the contents modal's results do, without the `session`
+or `pane` word: the harness chip (a pane's command) and the session's or
+pane's name, then `turn N · kind`, `line N`, or `N hits`, the age, and
+the snippet. A narrow pane lets the chip go first, then the age, then
+narrows the name, so the snippet keeps 20 cells.
 
 The right pane's Preview marks the search too. A session row's transcript
 preview highlights the query and opens at the session's best match; a hit

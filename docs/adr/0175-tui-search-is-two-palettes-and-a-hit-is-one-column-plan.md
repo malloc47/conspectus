@@ -10,7 +10,11 @@ cursor the host can move, and a reserved scrollbar column. The search
 semantics of [ADR 0147](0147-session-content-search.md) and
 [ADR 0149](0149-two-level-search-current-and-wider-context.md) are
 unchanged, including the column order of ADR 0149 item 25, which the plan
-states.
+states. Amended by
+[ADR 0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md):
+the plan is a column schema (`hit_columns`), `palette::ColumnPlan` is
+retired, and the Search view's hit, pane, and pane-hit rows lay the same
+columns out.
 
 ## Context
 

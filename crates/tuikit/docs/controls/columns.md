@@ -132,6 +132,13 @@ let mut buf = Buffer::empty(area);
 TreeView::new(&rows, &state, |row, cx| columns.line(row, cx), &theme).render(area, &mut buf);
 ```
 
+A list that draws something before the schema passes it as the row's
+lead: a tree its indent (`TreeColumns` does), a palette its cursor gutter
+(`selection::GUTTER_WIDTH`; see the palette's page). A share and row steps
+count the lead in the row's width, so one schema drawn in a palette and in
+a tree of the same whole width gives those columns the same cells, and a
+row reads alike in both.
+
 ### The API
 
 | Item | Does | Notes |

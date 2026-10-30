@@ -399,6 +399,17 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   its name and lets its age go, and keeps its name and state word in
   line at every depth. A PR title or a Pinned or History row's content
   needs 7 cells (it showed from 1). Rows that fit look as before.
+- **Search hits read alike in the contents modal and the Search view.**
+  The Search view's hit, pane, and pane line rows take the modal's
+  columns (without its `session` or `pane` word): the harness chip or a
+  pane's command, the name, `turn N · kind`, `line N`, or `N hits`, the
+  age, and a snippet that keeps 20 cells. They give way in the modal's
+  order (the chip, then the age, then the name narrows) instead of being
+  cut at the pane's edge, so a narrow pane shows the snippet it used to
+  lose. A matching turn no longer shows who spoke (`you`, `ai`); a pane
+  row lists its command first and its hit count before its age. In the
+  modal the ages are tinted by how recent they are and the snippets are
+  gray italics, as in the lists.
 - **Nested group headers line up with their parents.** A checkout header
   under its repo (the Sessions view's checkout grouping) starts its path
   in the repo header's column; it was two cells further right for each
