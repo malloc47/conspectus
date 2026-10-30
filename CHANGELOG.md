@@ -430,6 +430,14 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 - **Quick select lists a group header as its row reads it**: its name,
   then its path or members (`repo-a  ~/atelier-demo/repo-a`), where it
   listed the bare path.
+- **The right pane's breadcrumb gives way one hop at a time.** A drill
+  chain too long for the title used to jump straight to its first and
+  last hops (`a › … › e`). It now keeps as many hops as fit: the oldest
+  middle hops go first, then the first, with one `…` for each run that
+  went (`a › … › d › e`). When even the last hop does not fit, it is cut
+  with `…` instead of running into the pane's corner, and ` · depth N`
+  is never clipped. Two hops of different kinds with the same name now
+  carry the `·xxxx` id suffix too.
 
 ### Fixed
 

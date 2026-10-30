@@ -33,6 +33,18 @@ already selected, so the adapter calls `open` there, not `refresh`.
 `Backspace` to a frame whose node is gone still takes a press of its
 own; the framework's `back` rule changes that.
 
+CSP-790 landed decision 6: `tuikit::text::elide` (with `Piece`,
+`MarkAt`, `Elided`, and `Item`), `marks::CRUMB` and
+`marks::SPACED_CRUMB`, and `tuikit::breadcrumb::Breadcrumb` over `Hop`s
+built with `Hop::new(tag).glyph(..).suffix(..)`. `Breadcrumb::new`
+takes the theme and draws in its `inert` unless `.style` replaces it.
+A suffix shows when two hops have the same tag (the tag the title
+draws, so two kinds with one name now carry it too). The right pane's
+title gives the chain the cells its corners and other parts leave (it
+had been handed the pane's whole width, so the corner clipped a full
+title's pad and sometimes the depth's digit), and its trailing pad
+gives way before any hop.
+
 ## Context
 
 The inventory for the framework extraction

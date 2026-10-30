@@ -210,7 +210,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md) | A Search Hit Is One Column Schema In The Modal And The Search View | Accepted |
 | [0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md) | The Tree Marks Its Cursor Row In A Gutter Before Every Row | Accepted |
 | [0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md) | Detail Rows Are A Property Grid, And A Row Reports What It Asks For | Accepted |
-| [0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md) | The Explorer Is A Framework Control Over A Host Source, And The Right Pane's Keys Are One Table | Accepted (design; carried out by CSP-789, CSP-790, CSP-791, CSP-756; CSP-789 landed) |
+| [0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md) | The Explorer Is A Framework Control Over A Host Source, And The Right Pane's Keys Are One Table | Accepted (design; carried out by CSP-789, CSP-790, CSP-791, CSP-756; CSP-789 and CSP-790 landed) |
 
 ## Transcript viewer
 

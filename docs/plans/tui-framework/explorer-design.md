@@ -898,6 +898,24 @@ and `styled_glyph` with a `breadcrumb_hops(&[BreadcrumbHop], &Theme) ->
 Vec<Hop>` adapter and call `Breadcrumb::new(&hops).style(inert).line(room)`
 from `right_panel_title` without `available.max(8)`.
 
+As landed (CSP-790): `elide` is as specified, with `Piece::ranked` and
+`Piece::unranked` constructors, ties going later piece first (the status
+bar's order), and `Elided::items` and `Elided::width` so a caller
+interleaves separators and marks the same way; when the marks go, the
+last unranked piece is cut only if it still does not fit. `Hop` is
+built (`Hop::new(tag).glyph(span).suffix(id)`), not a struct literal,
+and `Breadcrumb::new(&hops, &theme)` takes the theme and defaults to
+its `inert` (`.style` still overrides). The repeat test compares the
+tags drawn, so two kinds with one name now carry suffixes (the host
+compared `kind:tag`). The title was handed the pane's whole width, not
+the cells its corners leave, which is how a full title lost its pad and
+sometimes the depth's digit; it now gets the inner width, measures its
+fixed parts from the spans it draws, and drops its trailing pad before
+any hop. The five generic tests are framework tests with the new rule's
+expectations; the kind color test and a new tag and suffix test are
+adapter tests in `explorer_tests.rs`; a title test in `ui_tests.rs`
+checks the fit at every width and that the corner clips nothing.
+
 **The first step of CSP-756 itself (step 3).** Create
 `crates/tuikit/src/explorer.rs` (types and docs) with
 `explorer/state.rs` (`Explorer`), `explorer/keys.rs` (`ExplorerKey`,

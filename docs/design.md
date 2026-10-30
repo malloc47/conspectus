@@ -1381,7 +1381,13 @@ keeps the drill while the left selection is unchanged (the host does
 this already). The right pane's
 keys will be one table resolved before the global keymap when it has
 focus; the breadcrumb, the tab strip, and the status bar share one rule
-for what gives way on a narrow line.
+for what gives way on a narrow line (`tuikit::text::elide`). The
+breadcrumb already draws through it (`tuikit::breadcrumb`): the last
+hop always shows, the first outlasts the middle, the oldest middle hops
+give way first with one `…` for each run that went, and a last hop that
+cannot fit is cut with `…`; the title gives the chain the room its other
+parts leave. The tab strip and the status bar move onto the rule with
+their own ranks.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
