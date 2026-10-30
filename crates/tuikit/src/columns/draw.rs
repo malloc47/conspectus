@@ -327,7 +327,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         continued: bool,
     ) -> (Vec<Span<'static>>, usize) {
         let (lead, room) = place;
-        let aligned = self.aligned(measure, lead, room);
+        let mut aligned = self.aligned(measure, lead, room);
         let lined_up = total(&self.columns, &aligned, 0);
         let lead_gap = aligned
             .iter()
@@ -340,6 +340,9 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             room.saturating_sub(lined_up),
             if lined_up > 0 { lead_gap } else { 0 },
         );
+        if !continued && !flow.iter().any(|item| item.width.is_some()) {
+            self.keep_ragged_end(&mut aligned, cells, room);
+        }
         let drawn: Vec<(usize, usize)> = aligned
             .iter()
             .chain(flow.iter())
@@ -387,6 +390,38 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             used += gap;
         }
         (spans, used)
+    }
+}
+
+impl<K: Copy + Eq> ColumnSchema<K> {
+    /// Brings back a ragged column that gave way for the columns after it,
+    /// on a row where it is the last cell that shows: nothing after it
+    /// needs it out of the way, so it runs on into the room the row has
+    /// left, when that holds its floor (or its whole text, when shorter).
+    fn keep_ragged_end(&self, aligned: &mut [Item], cells: &[(K, Cell)], room: usize) {
+        let cell_of = |item: &Item| {
+            lookup(cells, self.columns[item.index].key).filter(|cell| !cell.is_empty())
+        };
+        let Some(position) = aligned.iter().rposition(|item| cell_of(item).is_some()) else {
+            return;
+        };
+        let item = aligned[position];
+        let column = &self.columns[item.index];
+        if item.width.is_some() || !column.ragged || column.drop_below > room {
+            return;
+        }
+        let own = cell_of(&item).map_or(0, Cell::width);
+        let before = &aligned[..position];
+        let gap = before
+            .iter()
+            .rev()
+            .find(|item| item.width.is_some())
+            .map_or(0, |item| self.columns[item.index].gap);
+        let left = room.saturating_sub(total(&self.columns, before, 0) + gap);
+        let floor = column.shrink.map_or(1, |(_, floor)| floor).min(own).max(1);
+        if left >= floor {
+            aligned[position].width = Some(0);
+        }
     }
 }
 

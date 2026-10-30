@@ -465,6 +465,39 @@ fn a_ragged_cell_that_ends_its_row_runs_on_into_the_room() {
 }
 
 #[test]
+fn a_ragged_column_that_gave_way_still_ends_a_row_with_nothing_after_it() {
+    let schema = ColumnSchema::new([
+        Column::cap(Col::Name, 30),
+        Column::cap(Col::Note, usize::MAX)
+            .ragged()
+            .shrinks(0, 8)
+            .drops(0),
+        Column::cap(Col::Size, 9),
+    ]);
+    let rows = [
+        vec![
+            (Col::Name, t("first")),
+            (Col::Note, t("a note long enough to give way")),
+            (Col::Size, t("(1)")),
+        ],
+        vec![
+            (Col::Name, t("second")),
+            (Col::Note, t("another long note")),
+        ],
+    ];
+    let measure = measured(&schema, &rows);
+    // Too narrow for the note beside the count: it leaves the row that
+    // has a count, and still ends the row that has none.
+    assert_eq!(draw_text(&schema, &measure, 14, &rows[0]), "first   (1)");
+    assert_eq!(
+        draw_text(&schema, &measure, 20, &rows[1]),
+        "second  another lon…"
+    );
+    // Unless what is left would not hold its floor.
+    assert_eq!(draw_text(&schema, &measure, 14, &rows[1]), "second");
+}
+
+#[test]
 fn a_column_that_absorbs_the_lead_ends_in_one_place_at_every_depth() {
     let schema = ColumnSchema::new([
         Column::cap(Col::Name, 30),

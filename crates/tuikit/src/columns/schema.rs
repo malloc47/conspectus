@@ -149,10 +149,11 @@ impl<K> Column<K> {
 
     /// Makes the column ragged: only the cells that something follows on
     /// their row widen it, and a cell that ends its row runs on into the
-    /// room left instead of stopping at the column's width. For a column
-    /// that spaces the columns after it (a description before a count),
-    /// so a long one on a row with nothing after it pushes no other row's
-    /// count away.
+    /// room left instead of stopping at the column's width, even where the
+    /// column gave way for the columns after it on other rows (when the
+    /// room holds its floor). For a column that spaces the columns after it
+    /// (a description before a count), so a long one on a row with nothing
+    /// after it pushes no other row's count away.
     #[must_use]
     pub const fn ragged(mut self) -> Self {
         self.ragged = true;

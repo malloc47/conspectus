@@ -56,7 +56,9 @@
 //! place. The hugging column and the columns after it follow each row's
 //! own cells and give way row by row. A blank cell of a lined-up column is
 //! padded while a later cell on its row shows; a row ends at its last cell
-//! that is not blank, and draws no gap after it.
+//! that is not blank, and draws no gap after it. A row's last cell needs
+//! only its own text, not its column's pad, and a [ragged](Column::ragged)
+//! cell that ends its row runs on into the room left.
 //!
 //! ```
 //! use ratatui::style::Style;

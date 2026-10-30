@@ -179,8 +179,10 @@ The columns before the first hugging one line up: they give way by the
 widths measured over the whole list, so every row drawn in one room loses
 the same ones. The hugging column and those after it give way row by row,
 from each row's own cells. A row's last cell needs only its own text, not
-its column's pad. A blank lined-up cell is padded while a later cell on its
-row shows; a row ends at its last cell that is not blank.
+its column's pad, and a ragged cell that ends its row runs on into the room
+left, even where its column gave way on other rows (when the room holds its
+floor). A blank lined-up cell is padded while a later cell on its row
+shows; a row ends at its last cell that is not blank.
 
 ## Key table
 
