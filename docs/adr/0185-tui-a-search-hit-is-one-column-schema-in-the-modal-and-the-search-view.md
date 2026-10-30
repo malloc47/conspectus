@@ -112,11 +112,12 @@ Facts established while moving the rows:
   and give way in its order instead of being cut at the pane's edge: at
   130 columns a hit row shows its snippet; at 160 the tag is 14 cells
   (`turn 46 · mes…`) because the rows of a list that overflows the pane
-  are 77 cells, under the 78-cell step; a pane row puts its command first
-  and its hit count before
-  its age, and its command is the first cell to give way. A hit reads as
-  the modal's row at one width once the modal's source word has given way,
-  and the chip, name, tag, and age take the same cells where it has not.
+  are 77 cells, under the 78-cell step (CSP-786 asks whether the tree
+  keeps its row width when it overflows); a pane row puts its command
+  first and its hit count before its age, and its command is the first
+  cell to give way. A hit reads as the modal's row at one width once the
+  modal's source word has given way, and the chip, name, tag, and age take
+  the same cells where it has not.
 - A turn no longer says who spoke; the Preview and the viewer still do.
 - `render_hit_spans`, `render_pane_spans`, `render_pane_hit_spans`,
   `append_content_hit`, `append_snippet`, `age_span`, `FLAT_LABEL_WIDTH`,
