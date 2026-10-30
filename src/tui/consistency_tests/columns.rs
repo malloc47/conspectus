@@ -1,7 +1,8 @@
 //! Columns line up: the rows the left pane lays out from one column
 //! schema put their lined-up cells in one place on every row, at every
 //! width, and a session row lays its cells out alike in every view that
-//! lists it.
+//! lists it. A group header's path and count, and a Pinned or History
+//! row's state word and age, are in one column at every depth.
 //!
 //! The checks read the drawn frame, not the layout code: each row's
 //! whitespace-separated tokens (`tuikit::testkit::buffer::tokens`) give
@@ -15,6 +16,7 @@ use crate::model::{Confidence, GraphLink, LinkEndpoint, LinkState, Provenance, R
 use crate::tui::Grouping;
 use crate::tui::icons::state;
 use crate::tui::rows::RowKind;
+use tuikit::glyphs::marks;
 
 /// The terminal widths the checks draw at: two side by side (110, 160)
 /// and two stacked (60, 80).
@@ -86,6 +88,9 @@ enum Kind {
     Header,
     Session,
     Mux,
+    Pr,
+    /// A Pinned or History row.
+    Mixed,
 }
 
 /// Each showing row's kind and depth beside the text the pane drew for
@@ -102,6 +107,8 @@ fn drawn_rows(app: &mut App, width: u16) -> Vec<(Kind, u8, String)> {
                 RowKind::AgentSession(_) => Some(Kind::Session),
                 RowKind::MuxSession(_) => Some(Kind::Mux),
                 RowKind::Mixed(mixed) if mixed.state.is_some() => Some(Kind::Mux),
+                RowKind::Pr(_) => Some(Kind::Pr),
+                RowKind::Mixed(_) => Some(Kind::Mixed),
                 _ => None,
             };
             (kind, row.depth)
@@ -129,8 +136,36 @@ fn is_state(token: &str) -> bool {
         state::UNLINKED,
         state::UNKNOWN,
         state::STOPPED,
+        state::PR_OPEN,
+        state::PR_DRAFT,
+        state::PR_MERGED,
+        state::PR_CLOSED,
     ]
     .contains(&token)
+}
+
+/// The marks a row starts with: the disclosure, the kind glyphs, and the
+/// pin markers.
+fn is_mark(token: &str) -> bool {
+    ["▶", "▼", "▦", "◆", "◇", "●", "▣", "⇄", "⌥", "⋎", "◉", "◎"].contains(&token)
+}
+
+/// The first of `tokens` after `from` that stands two or more cells from
+/// the one before it: where the next cell starts, past a cell whose text
+/// has single spaces in it (a label, a state word).
+fn next_cell(tokens: &[Token], from: usize) -> Option<usize> {
+    (from + 1..tokens.len()).find(|&at| tokens[at].start >= tokens[at - 1].end + 2)
+}
+
+/// Where a header's path starts: the cell after its label. `None` for a
+/// header with no path, or whose path gave way.
+fn header_path(line: &str) -> Option<usize> {
+    let tokens = tokens(line);
+    let label = tokens.iter().position(|token| !is_mark(&token.text))?;
+    let path = next_cell(&tokens, label)?;
+    let text = tokens[path].text.as_str();
+    let count = text.starts_with('(') && text.ends_with(')');
+    (!count && text != marks::WARNING).then_some(tokens[path].start)
 }
 
 /// Where a row's lined-up cells sit: for a session or a mux, where its age
@@ -146,12 +181,22 @@ fn grid(kind: Kind, line: &str) -> Grid {
                 .map(|token| token.end),
             None,
         ),
-        Kind::Session | Kind::Mux => {
+        Kind::Session | Kind::Mux | Kind::Pr => {
             let age = tokens.iter().position(|token| is_age(&token.text));
             let state = age
                 .and_then(|at| tokens.get(at + 1))
                 .filter(|token| is_state(&token.text));
             (age.map(|at| tokens[at].end), state.map(|token| token.start))
+        }
+        // The age, and the state word before it: the cell after the label.
+        Kind::Mixed => {
+            let age = tokens.iter().position(|token| is_age(&token.text));
+            let label = tokens.iter().position(|token| !is_mark(&token.text));
+            let word = label.and_then(|at| next_cell(&tokens, at));
+            (
+                age.map(|at| tokens[at].end),
+                word.map(|at| tokens[at].start),
+            )
         }
     }
 }
@@ -167,12 +212,19 @@ fn mux_name_column(line: &str) -> Option<usize> {
         .map(|token| token.start)
 }
 
-/// Every app the checks draw: each grouping of the Sessions view, and of
-/// the Mux view with every stopped mux listed.
+/// Every app the checks draw: each grouping of the Sessions view, of the
+/// Mux view with every stopped mux listed, and of the PRs, Pinned, and
+/// History views.
 fn apps() -> Vec<(String, App)> {
     let world = world_with_a_shared_mux();
     let mut apps = Vec::new();
-    for view in [View::Sessions, View::Mux] {
+    for view in [
+        View::Sessions,
+        View::Mux,
+        View::Prs,
+        View::Pinned,
+        View::History,
+    ] {
         for grouping in Grouping::values_for(view) {
             let filter = RowFilter {
                 show_stopped_muxes: view == View::Mux,
@@ -206,16 +258,35 @@ fn the_lined_up_cells_of_every_row_kind_share_their_columns_at_every_width() {
             let mut seen: std::collections::BTreeMap<(Kind, u8), Grid> =
                 std::collections::BTreeMap::new();
             let mut counts: Option<usize> = None;
+            let mut paths: Option<usize> = None;
+            let mut mixed: Option<Grid> = None;
             let mut names: std::collections::BTreeMap<u8, usize> =
                 std::collections::BTreeMap::new();
             for (kind, depth, line) in &drawn {
                 let (end, glyph) = grid(*kind, line);
                 if *kind == Kind::Header {
-                    // A header's count is in one column at every depth.
+                    // A header's count is in one column at every depth,
+                    // and so is its path.
                     if let Some(end) = end {
                         let first = *counts.get_or_insert(end);
                         assert_eq!(first, end, "{name} at {width}: header counts\n{line}");
                     }
+                    if let Some(start) = header_path(line) {
+                        let first = *paths.get_or_insert(start);
+                        assert_eq!(first, start, "{name} at {width}: header paths\n{line}");
+                    }
+                    continue;
+                }
+                if *kind == Kind::Mixed {
+                    // A Pinned or History row's age and state word are in
+                    // one column at every depth.
+                    let first = *mixed.get_or_insert((end, glyph));
+                    assert_eq!(
+                        first,
+                        (end, glyph),
+                        "{name} at {width}: Pinned or History rows put their age and state \
+                         word in different columns\n{line}"
+                    );
                     continue;
                 }
                 let entry = seen.entry((*kind, *depth)).or_insert((end, glyph));
