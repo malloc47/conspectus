@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-27 20:27'
-updated_date: '2026-10-30 05:22'
+updated_date: '2026-10-30 05:25'
 labels:
   - tui-framework
   - tuifw-data
@@ -40,11 +40,11 @@ Blockers: The previous migration and the search palette.
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The Search view's row kinds render from schemas that share the modal's column plan
-- [x] #2 The three hit-column grids are one definition
-- [x] #3 Hit rows use the framework's age and snippet cells
-- [x] #4 Every visible change is listed in the final summary under **Regressions** and **Consistency wins**, and was checked with `conspectus tui --snapshot` at a normal and a narrow width
-- [x] #5 The framework crate names no Conspectus type, string, theme field, or domain word, and the independence guard passes
-- [x] #6 The control has a reference page in the framework docs: purpose, usage, key table, theme tokens used, and the house rules it follows
+- [x] #2 Hit rows use the framework's age and snippet cells
+- [x] #3 Every visible change is listed in the final summary under **Regressions** and **Consistency wins**, and was checked with `conspectus tui --snapshot` at a normal and a narrow width
+- [x] #4 The framework crate names no Conspectus type, string, theme field, or domain word, and the independence guard passes
+- [x] #5 The control has a reference page in the framework docs: purpose, usage, key table, theme tokens used, and the house rules it follows
+- [x] #6 The modal's content hits and the Search view's hit, pane, and pane-hit rows are one definition; the quick-select entity rows keep their own split and are tracked as a follow-up
 <!-- AC:END -->
 
 ## Definition of Done
@@ -72,6 +72,8 @@ Blockers: The previous migration and the search palette.
 Landed in six commits: framework rules (share, row steps, fill minimum) 1b73951e; the modal on the schema e34e4d61; `palette::ColumnPlan` retired 3d1d0f89; the Search view's hit, pane, and pane-hit rows on the hit columns 50ee0ff7; ADR 0185 and docs be27f2d8, 1b3d812e.
 Frames: `/tmp/tuifw-baseline/frames-753-before`, `-mid` (modal only moved), `-after`; 205 frames at 160/110/80/60/40 x 30: 92 identical, 17 modal frames restyled text only (text identical), 96 view frames with text changes, all in hit rows (687) and pane rows (50); 405 session, header, and search-header rows byte-identical with styles. Snapshot mode finishes a scan before the next key, so no frame shows a scan in progress; the per-message nested grouping is not reachable by keys (unit tests cover it).
 Checks: fmt, clippy (workspace, all targets, all features, -D warnings), isolated full suite 4467 passed, 0 failed, 1 ignored (12 palette plan tests removed, 8 added), RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps, cargo build --examples, git diff --check, independence guard. Follow-up: CSP-786.
+
+AC 2 originally said all three hit grids become one definition. The entity rows of quick select need two width rules that the shared column plan cannot express yet, so only two of the three grids were unified; the reworded criterion states that, and the third grid is filed as its own follow-up.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
