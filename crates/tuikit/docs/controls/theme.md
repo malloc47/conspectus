@@ -117,7 +117,7 @@ description of each.
 | Token | Kind | Default | Used for |
 | --- | --- | --- | --- |
 | `accent` | color | cyan | the primary accent: popup borders and titles, the key column of a help page, a chosen chip, scroll markers, completion hints |
-| `panel_focus_accent` | color | cyan | the focused pane's title marker (house rule 9); follows `accent` in a table that does not set it |
+| `panel_focus_accent` | color | cyan | the focused pane's border and title marker (house rule 9); follows `accent` in a table that does not set it |
 | `disclosure` | color | cyan | expand and collapse arrows |
 | `muted` | modifier | `dim` | text that should recede: hints, placeholders, notes, rules, footers |
 | `inert` | color | dark gray | text that must recede even where `dim` draws nothing, and gone or disabled items |

@@ -1408,6 +1408,20 @@ wraps when the zone's scrollbar appears; the `Related` and `Preview`
 rules are `tuikit::frame::SectionRule`s, their chips ending in one
 column, and their words are `conspectus`'s.
 
+The screen is framed by the framework too (ADR 0189). `ui::draw` is
+`tuikit::app_frame::AppFrame`: a header row, the body, and the status
+row, skipped while a full-screen viewer is open, then every modal bottom
+to top, then the toast, with the measured windows handed back as before.
+The body splits through `tuikit::frame::SplitPane` (side by side at or
+above `[tui] narrow_layout_threshold`, stacked below), and `--snapshot-pane`
+and the tests find a pane through the same layout. Each pane draws in a
+`tuikit::frame::PaneFrame`, which carries the focus cue of house rule 9:
+the focused pane's border and the `►` before its title take
+`panel_focus_accent`, the other pane keeps the plain border and a blank
+where the marker goes, and the titles' own text keeps its look. The
+header's words, the titles, and which view fills the body stay
+`conspectus`'s.
+
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
 argv someone types (the forms, `pin edit --set`) is refused when it ends

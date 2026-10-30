@@ -15,7 +15,9 @@ parts) as a flat list of rows in display order, each with a depth; a row's
 children are the deeper rows that follow it. `TreeState<Id>` keeps what the
 user did to it, apart from the rows: the selected row's identity and the
 position it showed at, the expanded rows, and the window the last frame
-drew. `TreeView` draws it in a bordered pane: a title on the border, an
+drew. `TreeView` draws it in a pane frame
+([frame.md](frame.md#paneframe)), whose border and focus marker take the
+focus accent while the tree has focus: a title on the border, an
 optional header line, the showing rows in a window that follows the cursor
 with the shared scrollbar, an optional footer banner, and a placeholder
 when no row shows.
@@ -97,7 +99,7 @@ let mut buf = Buffer::empty(area);
 let window = TreeView::new(&tree, &state, line, &theme)
     .focused(true)
     .states(&states)
-    .title(Line::from(" fruit "))
+    .title(Line::from("fruit"))
     .empty("Nothing here.")
     .render(area, &mut buf);
 state.set_viewport(window.expect("rows show"));
@@ -156,7 +158,7 @@ With no rows showing, nothing is selected.
 
 | Slot | Shown | Drawn |
 | --- | --- | --- |
-| title | always, when set | on the top border, as the host laid it out for the border's width (the pane's less two) |
+| title | always, when set | on the top border after the pane frame's focus marker, as the host laid it out for `PaneFrame::title_width` of the pane's width |
 | footer banner | when the pane has more than four rows inside its border | at its foot: the host's lines wrapped to the width, at most three rows, in the host's style |
 | header line | when what is left has more than three rows | above the rows |
 | rows | when any row shows | the showing rows in the window, one row each, each after the 2-cell cursor gutter, with a 1-column scrollbar gutter carved from the right edge when they overflow |
@@ -198,12 +200,14 @@ conventional binding is:
 | --- | --- |
 | `selection_active` | the cursor row while the tree has focus |
 | `selection_inactive` | the cursor row while it does not |
+| `panel_focus_accent` | the pane's border and focus marker while the tree has focus (the pane frame's) |
 | `inert` | the ghost look's color |
 | `muted` | the pending look, a ghost row's chips, and the placeholder |
 
-The border and the scrollbar use ratatui's default look; the footer banner
-takes the style its host passes (a host draws advice in `warning`). Every
-color in a row is the producer's.
+The border is the pane frame's: in `panel_focus_accent` with focus and
+ratatui's default look without. The scrollbar uses ratatui's default
+look; the footer banner takes the style its host passes (a host draws
+advice in `warning`). Every color in a row is the producer's.
 
 ## House rules followed
 
@@ -211,15 +215,15 @@ color in a row is the producer's.
 | --- | --- | --- |
 | 1 | List cursor and highlight | every row starts with the cursor gutter, the pointer on the cursor row, and the cursor row takes the theme's selection pair, a chip keeping its fill (`selection::row`) |
 | 2 | List ends | the cursor stops at the first and the last showing row |
+| 9 | Focus cue | the pane is a pane frame given the tree's focus: its border and title marker take `panel_focus_accent` while the tree has focus, and stay plain without |
 | 10 | Unfocused cursor | an unfocused tree keeps its pointer and highlights its cursor row in `selection_inactive` |
 | 12 | Paging | a page is the rows the last frame showed; `home` and `end`; the window is clamped inside the showing rows on every frame, so collapsing near the end leaves no blank rows below the content |
 | 13 | Theme | the looks come from the theme; the control names no color |
 | 14 | Width | the producer is told the cells it may take, the cursor gutter and the scrollbar's column already taken off |
 
-Not applicable: 3 to 9, 11, and 15 to 18 govern confirmation, closing,
-forms, errors, footers, the pane border's focus cue, feedback, editing,
-paths, labels, and pagers. The tree handles no key itself and its border is
-plain; the host's title carries its focus marker until the pane frame lands.
+Not applicable: 3 to 8, 11, and 15 to 18 govern confirmation, closing,
+forms, errors, footers, feedback, editing, paths, labels, and pagers. The
+tree handles no key itself.
 
 ## Seams left open
 

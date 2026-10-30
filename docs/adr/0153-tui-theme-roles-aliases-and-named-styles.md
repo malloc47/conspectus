@@ -16,6 +16,10 @@ the host registers `transcript_compaction` (a
 compaction summary's chip in the transcript viewer, magenta), and the
 viewer reads the framework's tokens and that role instead of
 `harness.codex`, `cwd_mark`, and `pr_merged`.
+Amended by
+[ADR 0189](0189-tui-the-screen-is-an-app-frame-and-the-focused-pane-is-framed-in-the-focus-accent.md)
+(decision 4): `panel_focus_accent` colors the focused pane's border as
+well as its marker.
 
 ## Context
 

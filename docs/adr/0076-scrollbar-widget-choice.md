@@ -8,7 +8,10 @@ scrollbar's content length is the row count drawn, not an estimate.
 Amended by [ADR 0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md):
 the gutter is carved out of the body rather than the bar drawn over it,
 one recipe in the framework's `scroll` module draws every bar, and the
-thumb is placed by the window the body scrolls.
+thumb is placed by the window the body scrolls. Amended by
+[ADR 0189](0189-tui-the-screen-is-an-app-frame-and-the-focused-pane-is-framed-in-the-focus-accent.md):
+the focused pane's border takes `panel_focus_accent`, as the placement
+section below says; until then only the title's marker showed focus.
 
 ## Context
 

@@ -1,4 +1,4 @@
-# `ModalFrame` and `SectionRule`
+# `ModalFrame`, `PaneFrame`, `SplitPane`, and `SectionRule`
 
 | | |
 | --- | --- |
@@ -6,7 +6,7 @@
 | Layer | 1 (foundation) |
 | Type parameters | none; a body is any type that implements `ModalBody`, and its `Output` is what drawing it returns |
 | Cargo feature | none |
-| Outcomes | none: the frame handles no keys; drawing returns the body's output (the window a scrolled body showed, or `()`); a section rule is a line |
+| Outcomes | none: the frames handle no keys; drawing a modal frame returns the body's output (the window a scrolled body showed, or `()`), drawing a pane frame returns the area inside its border; a split returns two areas; a section rule is a line |
 
 ## Purpose
 
@@ -40,6 +40,41 @@ echo back the size its caller had just computed, titles padded by the
 caller or by the widget or not at all, and one or two titles in bold
 where the rest are not. The host keeps what is in the modal: its rows,
 its title text, its keys, and which named size suits it.
+
+`PaneFrame` is the box a pane of the screen draws in: a list, a detail
+view, anything that sits beside another pane rather than floating over
+the screen. It shares the modal's title form and adds the focus cue
+(house rule 9):
+
+- **Border.** Plain lines on all four sides, in `panel_focus_accent`
+  while the pane has focus and in the terminal's own look while it does
+  not. A modal's border is always the accent; a pane's only while it is
+  the one with focus, so the focused pane is the one framed in color.
+- **Lead and marker.** The title starts with a space, the focus marker
+  (`marks::POINTER` in `panel_focus_accent` while focused, a blank cell
+  otherwise), and a space: `LEAD`, three cells either way, so the title
+  never moves as focus does.
+- **Title.** The host's title after the lead, in its own looks: the
+  border's color does not reach it, so a title that styles a word (a kind
+  glyph, an active tab) keeps that style and the rest stays plain. Spaces
+  at its ends are dropped, as in a modal title, and the frame closes it
+  with one space when the border has a cell left. A host lays its title
+  out for `PaneFrame::title_width(width)`, the border between its corners
+  less the lead.
+
+`SplitPane` places two panes in one area by one rule: side by side in
+halves while the area is at least its threshold wide, the first above the
+second below it. An odd width (or an odd height when they stack) gives
+its odd cell to the first pane. A host keeps one split and asks it for
+the two areas wherever it needs them, to draw the panes and to find one
+pane's cells again in a dev tool or a check, so the screen is never split
+by a copy of the rule.
+
+The pane frame replaces a bordered block each pane built for itself with
+the focus marker spliced into its title by hand and a border that never
+changed, and the split replaces the same fifty-fifty arithmetic kept in
+the draw, the dev tool that prints a pane, and the checks that read one.
+The host keeps the title's words and which pane has focus.
 
 Inside a pane, a `SectionRule` heads each section: a rule that fills the
 width in the theme's `muted`, the section's label as a chip in `accent`
@@ -117,6 +152,44 @@ let shown = ModalFrame::new(&theme, ModalSize::WIDE)
 assert_eq!(shown.viewport(), 20, "24 rows, less a row clear above and below and the border");
 ```
 
+Two panes split from one screen, each in a pane frame with a title laid
+out for the room its border leaves, the first focused:
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::text::Line;
+use tuikit::frame::{PaneFrame, SplitPane};
+use tuikit::testkit::buffer::rows;
+use tuikit::text;
+use tuikit::theme::Theme;
+
+let theme = Theme::default();
+let area = Rect::new(0, 0, 48, 6);
+let mut buf = Buffer::empty(area);
+let split = SplitPane::new(40);
+let [list, detail] = split.areas(area);
+let focused = 0;
+for (index, (pane, title)) in [(list, "a list of things"), (detail, "the detail")]
+    .into_iter()
+    .enumerate()
+{
+    let title = text::truncate_end(title, PaneFrame::title_width(pane.width));
+    let inner = PaneFrame::new(&theme)
+        .title(Line::from(title))
+        .focused(index == focused)
+        .render(pane, &mut buf);
+    assert_eq!(inner, Rect::new(pane.x + 1, 1, 22, 4));
+}
+let text = rows(&buf);
+assert_eq!(text[0], "┌ ► a list of things ──┐┌   the detail ────────┐");
+assert_eq!(buf[(0, 5)].fg, theme.panel_focus_accent, "the focused border");
+assert_eq!(buf[(24, 5)].fg, ratatui::style::Color::Reset, "the other border");
+
+// Below the threshold the panes stack.
+assert!(split.stacks(Rect::new(0, 0, 39, 6)));
+```
+
 Two sections of one pane, each headed by a rule laid out at the width it
 is drawn in: a list of links with its counts before the chip, and a
 preview with no summary. Their chips end in the same column.
@@ -160,6 +233,13 @@ assert_eq!(chip_end(&preview, "Preview"), width - SectionRule::CLOSING);
 | `ModalSize { width, height, fit }` | a policy | `width(screen)`, `height(screen, wanted)`, `rect(area, wanted)` |
 | `Extent::new(cap, min, margin)`, `share(percent)` | one direction of a policy | `cells(screen, wanted)` applies the rule |
 | `Fit::Content`, `Fit::Fill` | where the height comes from | the body's rows, or all the extent allows |
+| `PaneFrame::new(&theme)` | an unfocused pane frame with no title | |
+| `.title(line)`, `.focused(bool)` | set the title and whether the pane has focus | the title's spans keep their styles; focus tints the border and shows the marker |
+| `PaneFrame::title_width(width)` | the cells a title may take in a pane `width` wide | the border between its corners less `LEAD`; the closing space is not counted |
+| `PaneFrame::LEAD` | the lead's cells | 3: a space, the marker's cell, a space |
+| `.inner(area)`, `.render(area, buf)` | the area inside the border; draw the border and title | `render` returns the inner area |
+| `SplitPane::new(threshold)` | a split that stacks below `threshold` columns | `threshold()` reads it back |
+| `.stacks(area)`, `.areas(area)` | whether the panes stack on `area`; the two panes' areas | first then second, halves, the odd cell to the first |
 | `SectionRule::new(label)` | the rule of the section named `label` | no summary |
 | `.summary(text)`, `.summary_first()` | show a summary beside the chip, after it or before it | an empty summary shows nothing |
 | `.line(width, &theme)` | the rule `width` cells wide | wider only when the chip, the summary, and the closing rule alone are |
@@ -203,6 +283,50 @@ when the screen is short; the body scrolls. A body that scrolls returns
 its window as its `Output`, which the host keeps for the next key and
 frame (see [scroll.md](scroll.md#the-window)).
 
+### `PaneFrame`
+
+The top border of a pane `width` cells wide holds, between its corners:
+
+```text
+┌ ► title ──────────┐   focused: the border and ► in panel_focus_accent
+┌   title ──────────┐   unfocused: the plain border, a blank marker cell
+┌ ► a title that fil┐   a title wider than its room is cut at the corner
+```
+
+- The lead is three cells (`LEAD`): a space, the marker's cell, a space.
+  The blank that stands for the marker while the pane has no focus keeps
+  the marker's style, so the two cells differ only in their symbol as
+  focus moves.
+- The title follows in its own spans. A reset style sits under it, so
+  the border's tint never colors the title's text; only the marker and
+  the border carry the cue.
+- The closing space is drawn only when the lead and the title leave a
+  cell before the corner, so a title laid out for `title_width` exactly
+  ends at the corner and a shorter one ends with a space.
+- With no title text, a focused pane still shows the lead with its
+  marker; an unfocused one draws an unbroken top border.
+- The frame does not clear its area or paint a background: a pane is the
+  screen itself, and what it shows fills its inner area.
+
+A host that keeps several panes passes `focused(true)` to the one that
+has the keys; the others draw plain. The framework's tree pane
+([tree_view.md](tree_view.md)) draws itself in a pane frame and passes
+its own focus.
+
+### `SplitPane`
+
+The split is two halves of one area, by direction:
+
+- At or above the threshold, side by side: the first pane on the left,
+  the second on the right, each half the width and the full height.
+- Below it, stacked: the first on top, the second below, each the full
+  width and half the height.
+- An odd width or height gives its odd cell to the first pane.
+
+`stacks(area)` says which a given area gets, for a host whose layout of
+a pane's insides depends on it. The split draws nothing; the panes are
+the host's, usually each in a `PaneFrame`.
+
 ### `SectionRule`
 
 A section rule is one line, laid out for the width it is drawn in:
@@ -234,52 +358,65 @@ scrollbar leaves (see
 
 ## Key table
 
-None: the frame handles no keys. The modal inside it has its own key
-table, and its footer is part of its body or, for a body with no row to
-spare, the line the modal hands `footer`. A section rule is a line and
-handles no keys either.
+None: the frames handle no keys. The modal inside a modal frame has its
+own key table, and its footer is part of its body or, for a body with no
+row to spare, the line the modal hands `footer`. A pane's keys are its
+host's (which pane has focus, and what moves it, is the host's key
+table); the pane frame only shows the result. A split and a section
+rule handle no keys either.
 
 ## Theme tokens
 
 | Token | Used for |
 | --- | --- |
-| `accent` | the border, and so the title and the footer, which take the border's color; a section rule's chip |
-| `surface` | the background painted over the cleared rect |
+| `accent` | a modal's border, and so its title and footer, which take the border's color; a section rule's chip |
+| `panel_focus_accent` | a focused pane's border and its focus marker |
+| `surface` | the background painted over a modal's cleared rect |
 | `badge` | the modifier that fills a section rule's chip |
 | `muted` | a section rule's leading and closing rules |
 | `inert` | a section rule's summary |
 
 A title's chips (a segmented choice) keep the look their own module gave
-them, from `badge` and `accent`. The body styles itself.
+them, from `badge` and `accent`. The body styles itself. A pane's title
+styles itself too, and an unfocused pane's border uses the terminal's own
+look.
 
 ## House rules followed
 
 | # | Rule | How this control follows it |
 | --- | --- | --- |
 | 8 | Footers and hints | The frame draws no hint of its own; a modal's footer is its body's or the bottom-border line it hands the frame, either way generated from its key table |
-| 13 | Theme | The border and background come from `accent` and `surface`, a section rule's pieces from `muted`, `accent`, `badge`, and `inert`; nothing names a color |
-| 14 | Width | A body is laid out for the inner width the policy gives in cells, so nothing is laid out for one width and drawn at another; a section rule measures its chip and summary in cells and fills the width it is given |
+| 9 | Focus cue | A focused pane's border and title marker take `panel_focus_accent`; an unfocused pane keeps the plain border and a blank where the marker goes, so its title stays in place |
+| 13 | Theme | A modal's border and background come from `accent` and `surface`, a focused pane's border and marker from `panel_focus_accent`, a section rule's pieces from `muted`, `accent`, `badge`, and `inert`; nothing names a color |
+| 14 | Width | A body is laid out for the inner width the policy gives in cells, so nothing is laid out for one width and drawn at another; a pane's title is laid out for `title_width`, in cells; a section rule measures its chip and summary in cells and fills the width it is given |
 
-Not applicable: 1 to 7, 9 to 12, and 15 to 18 govern how lists move, how
-modals confirm, close, edit, and page, and how panes show focus. The
-frame only places and draws the box, and a section rule only draws a
-line; the modals and lists around them follow those rules. Rule 9
-belongs to the pane frame (below).
+Not applicable: 1 to 7, 10 to 12, and 15 to 18 govern how lists move,
+and how modals confirm, close, edit, and page. The frames only place and
+draw boxes, a split only places panes, and a section rule only draws a
+line; the modals, panes, and lists inside them follow those rules.
 
 ## Seams left open
 
-- **The pane frame.** A bordered pane with the focus cue on its border
-  and title joins this module, drawing the same border and title form
-  through the same private helper, with the border in
-  `panel_focus_accent` when focused.
-- **Split panes.** The split pane joins this module with the pane frame.
+- **A split's ratio.** The halves are fixed. A share for the first pane,
+  or one that widens whichever pane has focus, would be a parameter of
+  `SplitPane`; every caller would still get both areas from it.
+- **More than two panes.** A split of three or more, or a split nested in
+  a pane, is a `SplitPane` over one of the areas a split returned today;
+  a list of shares would make it one call.
+- **Focus under an overlay.** The pane frame shows whatever focus its
+  host passes. A host that wants no pane framed in color while a modal
+  has the keys passes `focused(false)` while one is open; the frame needs
+  nothing more.
+- **A pane's background.** A pane does not paint `surface`; a host that
+  wants panes on a colored ground would read a pane token here.
 - **A section rule that gives way.** Below the width of its chip, summary,
   and closing rule a section rule runs past its width. Cutting the summary
   first (with `…`) and then the label, by `text::elide`, would keep it in
   its room.
 - **Mouse hit testing.** `rect(area, rows)` is the rect the frame drew
   for the same rows, which a click on or outside the modal would be
-  tested against.
+  tested against; a split's `areas` are the rects a click picks a pane
+  by.
 - **Border looks.** The border is plain lines; a theme token naming a
   border set (rounded, thick, double) would let a host change every
   frame at once.

@@ -122,6 +122,11 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   from its end (the preview, snippet, or content first, then, in a narrow
   pane, the next cell its order lets go), the mux names keep their widths,
   and a row a view lists twice is marked and highlighted once.
+- **The focused pane is framed in the accent.** The pane with focus draws
+  its border in `[tui.theme] panel_focus_accent` (cyan by default, and it
+  follows `accent`), beside the `►` before its title that was already
+  that color; the other pane keeps the plain border. Nothing else on the
+  screen changes.
 - **The right pane's rows read alike.** A field label of 14 characters or
   more keeps a space before its value (`current_commit e52b2ef`, where it
   read `current_commite52b2ef`), so a long path beside one starts on the

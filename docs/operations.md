@@ -260,7 +260,7 @@ complete list. Set only the keys you want to change.
 [tui.theme]
 # Shared looks, used by every view, menu, form, and viewer.
 accent             = "cyan"            # popup borders and titles, help keys, the active tab, chosen chips, hints
-panel_focus_accent = "cyan"            # the ► marker on the focused pane; follows `accent` unless set
+panel_focus_accent = "cyan"            # the focused pane's border and ► marker; follows `accent` unless set
 disclosure         = "cyan"            # the ▶ / ▼ arrows in the tree and on the right pane's Other header
 muted              = "dim"             # hints, placeholders, notes, rules, footers, the unlinked ∘ (a modifier)
 inert              = "dark_gray"       # short ids, previews, gone or stopped rows (a color)
@@ -357,7 +357,7 @@ the key it was merged into:
 | `secondary_text` | `inert` | |
 | `ghost` | `inert` | gone rows stay italic |
 | `link_id` | `link` | |
-| `panel_focus_accent` | `accent` | still sets the focus marker too |
+| `panel_focus_accent` | `accent` | still sets the focused pane's border and marker too |
 | `harness_claude` | `[tui.theme.harness] claude-code` | |
 | `harness_codex` | `[tui.theme.harness] codex` | |
 | `harness_opencode` | `[tui.theme.harness] opencode` | |

@@ -120,7 +120,7 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `⊗` | a closed pull request | red | PR rows |
 | `▼` | an expanded row | cyan | The disclosure cell |
 | `▶` | a collapsed row | cyan | The disclosure cell |
-| `►` | the focused pane; or the cursor row of a list | cyan in a pane title; the row's look on a cursor row | Left of the tab bar; in the cursor gutter of the left pane's cursor row, and before the cursor row of the right pane, menus, forms, and lists |
+| `►` | the focused pane; or the cursor row of a list | cyan in a pane title, as is the focused pane's border; the row's look on a cursor row | Left of the tab bar; in the cursor gutter of the left pane's cursor row, and before the cursor row of the right pane, menus, forms, and lists |
 | `▲` | at least one session below has an ambiguous mux link | yellow bold | Group headers |
 | `◌` | a pull request with no local branch | dim | PR rows, in the tracking cell |
 | `—` | an age or value that isn't known | dim | Age cells |

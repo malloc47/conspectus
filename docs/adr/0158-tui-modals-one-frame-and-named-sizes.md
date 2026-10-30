@@ -14,6 +14,10 @@ a modal whose body has no row to spare for its keys (the one-line
 prompt). Amended by
 [ADR 0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md):
 the picker is a palette and takes the `PALETTE` size, not `WIDE`.
+Decision 7 carried out by
+[ADR 0189](0189-tui-the-screen-is-an-app-frame-and-the-focused-pane-is-framed-in-the-focus-accent.md):
+the pane frame, which shares the title form and carries the focus cue,
+and the split pane join the `frame` module.
 
 ## Context
 
