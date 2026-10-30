@@ -25,7 +25,12 @@ Amended by
 [ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md):
 the transcript viewer's page is the pager's
 `?` level too, generated from `READER_KEYS` and `TRANSCRIPT_KEYS`, and
-the `viewer_help` adapter is removed.
+the `viewer_help` adapter is removed. Amended by
+[ADR 0192](0192-tui-the-main-screens-keys-are-one-scoped-keymap-and-the-help-page-is-generated-from-it.md)
+(decision 6): the keymap page is generated from the scoped keymap
+(`help::keymap_sections`), its hand-written prose kept only as
+`HelpAnnotation`s anchored to bindings, with the legends as annotation
+sections.
 
 ## Context
 

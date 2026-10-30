@@ -628,7 +628,8 @@ backs the explorer out of its drill; see
 Most terminals send `Shift+Enter` as plain `Enter`; Conspectus does not
 turn on the kitty keyboard protocol, so it sees `Shift+Enter` only from a
 terminal configured to report it. `Alt+Enter` works in every common
-terminal.
+terminal. `Enter` itself means `Enter` with no modifier on either pane,
+so `Ctrl+Enter` does nothing.
 
 ### Searching pane scrollback
 

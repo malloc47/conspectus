@@ -53,7 +53,12 @@ every check but `ctrl_c_first` (a pane leaves `q` and `Ctrl-C` to its
 program), and generates its help section and status hint. Amended by
 [ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md): a bound row carries an optional rank (`KeyRow::rank`), how long
 its hint holds on in a status bar, and a footer segment lists the keys it
-names and its highest rank.
+names and its highest rank. Amended by
+[ADR 0192](0192-tui-the-main-screens-keys-are-one-scoped-keymap-and-the-help-page-is-generated-from-it.md):
+the scoped keymap (`Keymap`, `Bind`, `Scope`, `ActiveScopes`) replaces the
+main view's keymap, as decision 3 foresaw; it keeps the main view's own
+matchers for its letters, and its build refuses any two keys of a scope
+that one key event fires.
 
 ## Context
 

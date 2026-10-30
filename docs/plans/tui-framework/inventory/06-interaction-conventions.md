@@ -1028,3 +1028,39 @@ and with each reachable overlay open, at 160, 100, 60, and 40 columns.
   the scoped keymap (CSP-760) merges the two.
 - **`Msg::Report`'s ` · ! details` (9.3).** The `!` comes from its row of
   `MAIN_VIEW_KEYS`, as the unseen chip's does.
+
+## Verification (CSP-760)
+
+The main screen's keys are one scoped keymap and the `?` page is generated
+from it (ADR 0192). Checked with `conspectus tui --snapshot` on the
+showcase fixture: every page of the help (each `PgDn` to the end, `G`,
+past the end, and back) and the status bar in every view, both focus
+states, on each row kind whose hints differ and with each reachable
+overlay open, at 100x30, 60x20, and 40x10.
+
+- **One mode, `remap_for_focus` (1.1, 1.2).** `KeyMode` and the focus
+  guard are gone: each binding names its scope (the program's, the left
+  pane's row tree, the right pane's explorer table taken in), and a key is
+  looked up in the focused pane's scope, then the program's. `F`, `Enter`,
+  `Backspace`, the moves, and the folds are a binding in each pane's scope
+  of one table.
+- **58 `help_text` strings never drawn (1.1, 1.3).** Every binding's help
+  text is its row on the `?` page; the hand-written rows are gone, and
+  what a binding cannot say is an annotation anchored to its id (the
+  overlays' own keys in four rows' prose, `/ then Tab`, the four legends).
+- **Seven keys outside the table (1.1).** `PgDn`, `PgUp`, `o`, `i`, `Tab`,
+  `J`, and `K` are bindings.
+- **The duplicate check that missed shadowing (1.1, 1.4).** The keymap
+  refuses to build when two keys of one scope can match one key event. It
+  found `g` (any modifier) overlapping `Ctrl-G`, which grouping's earlier
+  row took, and `Enter` (any modifier) overlapping `Shift-Enter` and
+  `Alt-Enter`; both are bound so they cannot overlap (`Ctrl-Enter` no
+  longer runs the default action).
+- **The one-directional drift test (1.4).** Replaced by a two-way test:
+  every binding has one row with all its keys and its help, and every row
+  is a binding's (its keys reach that binding) or an anchored annotation.
+- **`MAIN_VIEW_KEYS` (CSP-759).** Merged: the status bar reads the keymap,
+  in the same groups and order; all 132 captured status bar states are
+  byte-identical.
+- **Section 10 question 2.** Answered: a scoped keymap in this cut, its
+  rows carrying help text that renders.

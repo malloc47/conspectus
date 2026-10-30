@@ -162,6 +162,21 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   <why>` dimmed instead of `attach: <why>`, and an ambiguous row names
   `Tab` once. A narrow bar keeps more hints, since each gives way on its
   own, and a status message too long for the bar ends with `…`.
+- **The help page lists every key the main screen binds, one key per
+  row.** The `?` page is generated from the keys themselves, so it always
+  matches them. Rows that described two keys at once now have a row
+  each: `1`, `2`, `3`, and `4` (one per view), `]` and `[`, `<` and `>`,
+  `↑ / k` and `↓ / j`, `← / h` and `→ / l`, `PgDn` and `PgUp`, `Home / g`
+  and `End / G`, and `J` and `K`. Two keys that were bound but missing get
+  rows: `o` (open the right pane's cursor value, from either pane) and
+  `Backspace` (return from a reveal). The second `Enter` row under
+  Navigation goes (the one under Actions stays), and the content search's
+  keys read `s / Ctrl-/ / Ctrl-_ / Ctrl-7`. Every other row reads as
+  before.
+- **`Enter` with Control no longer runs a row's default action.** On the
+  left pane `Enter` now means `Enter` alone, as on the right pane, so
+  `Shift+Enter` and `Alt+Enter` (reveal) can never be taken for it;
+  `Ctrl+Enter`, where a terminal reports it, does nothing.
 - **The right pane's rows read alike.** A field label of 14 characters or
   more keeps a space before its value (`current_commit e52b2ef`, where it
   read `current_commite52b2ef`), so a long path beside one starts on the

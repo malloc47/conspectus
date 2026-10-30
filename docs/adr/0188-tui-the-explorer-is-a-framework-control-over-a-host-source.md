@@ -89,6 +89,13 @@ assertions (the copy tests read `Effect::Copy`), and 1015 right-pane
 frames were byte-identical after the adoption and before the key
 changes.
 
+[ADR 0192](0192-tui-the-main-screens-keys-are-one-scoped-keymap-and-the-help-page-is-generated-from-it.md)
+carried out decision 5's last step: the right pane's table is the right
+pane's scope of the program's scoped keymap (`KeymapBuilder::table`), the
+left pane's meanings of `F`, `Enter`, and `Backspace` are the left pane's
+scope of the same table, and the focus guard and the right pane's own
+lookup are gone.
+
 CSP-758 landed decision 6's `TabBar` and `PriorityLine`
 ([ADR 0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an-empty-slot-says-so-one-way.md)):
 the tab strip on `text::elide` with the mark at the end, and the header

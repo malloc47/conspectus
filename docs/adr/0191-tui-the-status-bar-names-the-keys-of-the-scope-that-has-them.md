@@ -21,7 +21,11 @@ generated). Amends [ADR 0078](0078-tui-surface-division-of-labor.md)'s
 focus scope: the `[left]`/`[right]` tag shows while a pane has the keys,
 not under an overlay. Completes [ADR 0123](0123-overlay-keymap-tables.md)'s
 consequence that a key's "status hint … follow[s] from that row", which
-four hand-written hints did not.
+four hand-written hints did not. Amended by
+[ADR 0192](0192-tui-the-main-screens-keys-are-one-scoped-keymap-and-the-help-page-is-generated-from-it.md)
+(decisions 5 and 6): `MAIN_VIEW_KEYS` and the test that kept it in step
+with the keymap are gone; the bar names the scoped keymap's bindings
+(`KeyHintBar::keymap`) in the same groups and order.
 
 ## Context
 

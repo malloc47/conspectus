@@ -1435,10 +1435,19 @@ chips, from the last to go; the status bar keeps its old priority order.
 The status bar is a `tuikit::status_bar::StatusBar` (ADR 0191): a message
 in its severity's style, or the settings and the keys of the scope that has
 them, generated from key tables and never written by hand: the left pane's
-and the program's (`MAIN_VIEW_KEYS`, each row worded for the selection by
+and the program's (the keymap's bindings, each worded for the selection by
 an annotation), the right pane's table, or the overlay on top's own keys
 (`Overlay::hints`). A consistency test presses every key it names through
 the loops' routing.
+Every key the main screen takes with no modal open is a binding of one
+scoped keymap (`tuikit::keys::Keymap`, ADR 0192): the program's, the left
+pane's row tree's, and the right pane's explorer table, each with a stable
+id, a verb, help text, and a status rank. A key is looked up in the
+focused pane's scope, then the program's, so a key that means one thing on
+each pane is two bindings of that one table, and the keymap refuses to
+build when two keys of one scope could match one key event. The `?` page
+is generated from it, with the prose a binding cannot carry (other
+overlays' keys, `/ then Tab`, the legends) as annotations.
 Every empty slot says so through `tuikit::empty_state::EmptyState` (a
 message and a hint, wrapped and receding): the left pane's placeholders,
 the right pane's, and a Preview with nothing to show, with their words
