@@ -22,7 +22,9 @@ places.
 - **`render`**: `FrameDriver`, the one-frame driver over the host's draw
   callback, which can press a run of keys with a frame drawn before each.
 - **`buffer`**: reading a frame (text, token columns, the cell and style
-  under a piece of text, matching cells, a modal's frame and the text in
+  under a piece of text, matching cells, a modal's frame (by the corners
+  it changed, or, drawn exactly over another frame, by what changed
+  inside it) and the text in
   it, the rows a selection repainted).
 - **`ansi`**: a frame as ANSI text with its styles; `strip_ansi` (from
   `tuikit::text`) takes them out.
@@ -151,7 +153,16 @@ missing from it. A modal that opens as a step of another (a menu's
 confirmation, a settings panel's editor) is marked `Case::step`: the
 entry under it may draw its cursor row in the inactive selection look
 while the step is open, so outside the step's frame the `Contained` check
-accepts a cell whose only change is the selection modifiers. Run the
+accepts a cell whose only change is the selection modifiers.
+
+The checks find a modal's frame by the border corners that differ between
+the screen with it and without it (`buffer::frame_rect`). A step can sit
+at exactly the rect of the entry under it (as many rows as a menu of the
+same size, or both filling a short screen), where no corner differs; for a
+step the checks then take the smallest frame drawn around every cell that
+changed (`buffer::covering_frame`), which is the step's own. Only a step
+gets that second look: any other modal whose frame cannot be told from the
+screen under it draws no frame of its own. Run the
 checks one per test (`assert_conventions_of` with one `Check`) so they run
 in parallel.
 

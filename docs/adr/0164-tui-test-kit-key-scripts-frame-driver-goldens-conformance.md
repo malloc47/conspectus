@@ -20,7 +20,10 @@ need not start with `Ctrl-C`. Amended by
 [ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md): a rig names its status rows (`Rig::status_rows`), which the
 `Drawn` and `Contained` checks leave out, and the keys its status line
 names (`Rig::hints`), which the new `Hints` check holds to the modal's
-footer.
+footer. Amended by
+[ADR 0194](0194-tui-a-step-drawn-exactly-over-its-entry-is-found-by-what-changed-inside-its-frame.md):
+a step drawn exactly over the entry it is a step of is found by the
+smallest frame around what changed (`buffer::covering_frame`).
 
 ## Context
 

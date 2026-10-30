@@ -273,7 +273,9 @@ rule 4 through `Consumed`).
   entry under the top one would pass each entry whether it is on top.
 - **Rendered areas.** An entry could report the rect it drew, for mouse hit
   testing and for a conformance check that each entry clears exactly its
-  frame.
+  frame. The conformance suite does not need it to find a step drawn
+  exactly over the entry under it: it takes the smallest frame around what
+  changed (see [testkit.md](testkit.md)).
 - **A conformance suite.** The test kit's `assert_conventions` walks a
   host's registry of overlays and checks the close keys above against
   each; a step is checked as a case of its own opened over its flow.
