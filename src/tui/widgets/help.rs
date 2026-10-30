@@ -9,7 +9,7 @@
 //! the viewer), so the three share one frame, one column grid, and one
 //! heading style. This one is generated from the program's keymap: a row
 //! per binding with its help text, under the section the binding names.
-//! What the keymap cannot say is an annotation ([`annotations`]): the keys
+//! What the keymap cannot say is an annotation (`annotations`): the keys
 //! of the overlay a key opens, a key sequence the keymap does not bind as
 //! one key, and the legends of the marks the screens draw.
 
