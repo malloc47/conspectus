@@ -2,7 +2,9 @@
 //! entities, and content search's hits, each laid out for the width the
 //! palette gives it. A hit's columns are one declaration ([`hit_columns`])
 //! and its cells one builder ([`Hit::cells`]), which the Search view's hit,
-//! pane, and pane-hit rows lay out too.
+//! pane, and pane-hit rows lay out too; an entity's are another
+//! ([`entity_columns`], [`EntityGrid`]), laid out by the same column
+//! schema and narrow-width policy.
 
 use std::ops::Range;
 
@@ -50,13 +52,14 @@ impl QuickRow {
         }
     }
 
-    /// The row's cells, `row.width` wide; an entity ends with the word
-    /// `outcomes` says for it.
+    /// The row's cells, `row.width` wide; an entity is laid out from
+    /// `entities` and ends with the word `outcomes` says for it.
     pub(super) fn cells(
         &self,
         row: &RowContext<'_>,
         theme: &Theme,
         outcomes: Option<OutcomeWords<'_>>,
+        entities: &EntityGrid,
     ) -> Vec<Span<'static>> {
         match self {
             Self::Row {
@@ -68,94 +71,151 @@ impl QuickRow {
                 let word = outcomes
                     .map(|words| words(&entity.node))
                     .unwrap_or_default();
-                entity_cells(entity, hit, &word, row.width + GUTTER_WIDTH, theme)
+                entities.cells(entity, hit, &word, row.width, theme)
             }
         }
     }
 }
 
-/// Widths of the columns in an entity result, left to right after the
-/// two-cell cursor mark and two-cell kind glyph.
+/// A column of an entity result in quick select's wider reach.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EntityCol {
+    /// The entity's kind glyph.
+    Glyph,
+    /// Its name, the match picked out.
+    Label,
+    /// Where it is or what it points at.
+    Context,
+    /// What opening it does (`in Sessions view`).
+    Outcome,
+}
+
+/// The widest an outcome word gets (`in Sessions view`), and the share of
+/// the row it takes below that.
+pub(super) const OUTCOME_WIDTH: usize = 16;
+/// The label takes this share of what the glyph and the outcome word
+/// leave, kept between these.
+const LABEL_SHARE: (usize, usize) = (45, 100);
+const ENTITY_LABEL_MIN: usize = 16;
+/// The label stops growing here, so a wide modal gives the room to the
+/// context instead of padding.
+const LABEL_CAP: usize = 48;
+/// A context narrower than this is not worth showing: it leaves, and the
+/// label takes its cells.
+const MIN_CONTEXT: usize = 10;
+
+/// An entity result's columns: the kind glyph; the label, 45% of what the
+/// glyph and the outcome word leave (16 to 48 cells, narrowing last); the
+/// context in the rest, which leaves below 10 cells and gives the label
+/// its room; and the outcome word, a third of the row (at most 16 cells)
+/// at its right edge. A share counts the row's lead, the palette's cursor
+/// gutter.
+pub(crate) fn entity_columns() -> ColumnSchema<EntityCol> {
+    ColumnSchema::new([
+        Column::fixed(EntityCol::Glyph, 2).gap(0),
+        Column::share_of_rest(EntityCol::Label, LABEL_SHARE.0, LABEL_SHARE.1)
+            .within(ENTITY_LABEL_MIN, LABEL_CAP)
+            .shrinks(1, 0),
+        Column::fill(EntityCol::Context)
+            .at_least(MIN_CONTEXT)
+            .drops(0)
+            .gives_to(EntityCol::Label),
+        Column::share(EntityCol::Outcome, 1, 3)
+            .within(0, OUTCOME_WIDTH)
+            .right(),
+    ])
+}
+
+/// Quick select's entity results laid out from [`entity_columns`],
+/// measured once a frame over every entity result.
+pub(super) struct EntityGrid {
+    schema: ColumnSchema<EntityCol>,
+    measure: Measure<EntityCol>,
+}
+
+impl EntityGrid {
+    /// The grid of `rows`' entities. The columns' widths come from the
+    /// row's width; the measure says whether any entity has a context.
+    pub(super) fn new<'r>(rows: impl IntoIterator<Item = &'r QuickRow>) -> Self {
+        let schema = entity_columns();
+        let mut measure = Measure::new();
+        for row in rows {
+            if let QuickRow::Entity { entity, .. } = row {
+                measure.add(
+                    &schema,
+                    GUTTER_WIDTH,
+                    &[(
+                        EntityCol::Context,
+                        Cell::text(&entity.context, Style::default()),
+                    )],
+                );
+            }
+        }
+        Self { schema, measure }
+    }
+
+    /// One entity result's cells, `width` wide after the cursor gutter:
+    /// kind glyph, label, context, and the outcome `word` at the right
+    /// edge.
+    fn cells(
+        &self,
+        entity: &SearchEntity,
+        hit: &EntityMatch,
+        word: &str,
+        width: usize,
+        theme: &Theme,
+    ) -> Vec<Span<'static>> {
+        let dim = Style::default().add_modifier(theme.muted);
+        let label_style = if entity.gone { dim } else { Style::default() };
+        let match_style = theme.match_style();
+        let label = text::paint(
+            &[Span::styled(entity.label.as_str(), label_style)],
+            hit.label_range
+                .clone()
+                .filter(|range| range.end <= entity.label.len()),
+            |_| match_style,
+        );
+        let glyph = search_kind_glyph_span_for(NodeKind::from(&entity.node), theme);
+        let cells = vec![
+            (EntityCol::Glyph, Cell::spans(vec![glyph])),
+            (EntityCol::Label, Cell::spans(label)),
+            (EntityCol::Context, Cell::text(&entity.context, dim)),
+            (EntityCol::Outcome, Cell::text(word, dim)),
+        ];
+        self.schema
+            .draw(&self.measure, GUTTER_WIDTH, width, &cells, theme)
+    }
+}
+
+/// The widths of an entity result's columns in a row `inner` cells wide,
+/// the cursor gutter included, in a list whose entities have a context.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EntityColumns {
     pub label: usize,
+    /// 0 when it left.
     pub context: usize,
     pub outcome: usize,
 }
 
-/// The widest an outcome word gets (`in Sessions view`).
-pub(super) const OUTCOME_WIDTH: usize = 16;
-/// Cursor mark plus kind glyph.
-pub(super) const ROW_LEAD: usize = 4;
-pub(super) const COLUMN_GAP: usize = 2;
-/// The label column stops growing here, so a wide modal gives the room to
-/// the context instead of padding.
-const LABEL_CAP: usize = 48;
-/// A context narrower than this is not worth showing.
-const MIN_CONTEXT: usize = 10;
-
-/// Split a row `inner` cells wide into columns. The outcome word keeps its
-/// width; the label takes up to 45% of the rest (at most [`LABEL_CAP`]) and
-/// the context what is left, dropped when too narrow to read.
-pub(crate) fn entity_columns(inner: usize) -> EntityColumns {
-    let outcome = OUTCOME_WIDTH.min(inner / 3);
-    let body = inner.saturating_sub(ROW_LEAD + outcome + COLUMN_GAP);
-    let label = (body * 45 / 100).clamp(16, LABEL_CAP).min(body);
-    let context = body.saturating_sub(label + COLUMN_GAP);
-    if context < MIN_CONTEXT {
-        EntityColumns {
-            label: body,
-            context: 0,
-            outcome,
-        }
-    } else {
-        EntityColumns {
-            label,
-            context,
-            outcome,
-        }
+/// [`EntityColumns`] as [`entity_columns`] lays them out in a row `inner`
+/// cells wide.
+#[cfg(test)]
+pub(crate) fn entity_widths(inner: usize) -> EntityColumns {
+    let schema = entity_columns();
+    let mut measure = Measure::new();
+    measure.add(
+        &schema,
+        GUTTER_WIDTH,
+        &[(EntityCol::Context, Cell::text("context", Style::default()))],
+    );
+    let layout = schema.layout(&measure, GUTTER_WIDTH, inner.saturating_sub(GUTTER_WIDTH));
+    let width = |col| layout.width(col).unwrap_or(0);
+    EntityColumns {
+        label: width(EntityCol::Label),
+        context: width(EntityCol::Context),
+        outcome: width(EntityCol::Outcome),
     }
-}
-
-/// One entity result's cells in a row `width` cells wide (the cursor
-/// gutter included): kind glyph, label, context, and the outcome `word`
-/// at the right edge.
-fn entity_cells(
-    entity: &SearchEntity,
-    hit: &EntityMatch,
-    word: &str,
-    width: usize,
-    theme: &Theme,
-) -> Vec<Span<'static>> {
-    let columns = entity_columns(width);
-    let dim = Style::default().add_modifier(theme.muted);
-    let label = text::truncate_end(&entity.label, columns.label);
-    let label_width = text::width(&label);
-    let mut spans: Vec<Span<'static>> = vec![search_kind_glyph_span_for(
-        NodeKind::from(&entity.node),
-        theme,
-    )];
-    let label_style = if entity.gone { dim } else { Style::default() };
-    let match_style = theme.match_style();
-    spans.extend(text::paint(
-        &[Span::styled(label.as_str(), label_style)],
-        hit.label_range.clone().filter(|r| r.end <= label.len()),
-        |_| match_style,
-    ));
-    let mut used = ROW_LEAD + label_width;
-    if columns.context > 0 {
-        let pad = columns.label.saturating_sub(label_width) + COLUMN_GAP;
-        let context = text::truncate_end(&entity.context, columns.context);
-        used += pad + text::width(&context);
-        spans.push(Span::raw(" ".repeat(pad)));
-        spans.push(span!(dim; "{context}"));
-    }
-    let word = text::truncate_end(word, columns.outcome);
-    let word_width = text::width(&word);
-    let gap = width.saturating_sub(used + word_width);
-    spans.push(Span::raw(" ".repeat(gap)));
-    spans.push(span!(dim; "{word}"));
-    spans
 }
 
 /// A column of a search hit. Every list that shows hits (the contents

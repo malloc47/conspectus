@@ -38,7 +38,7 @@ use crate::viewer::search::{ContentKinds, Grouping};
 
 mod rows;
 
-use rows::{ContentGrid, QuickRow};
+use rows::{ContentGrid, EntityGrid, QuickRow};
 pub(crate) use rows::{
     Hit, HitChip, HitCol, HitShape, hit_columns, hits_tag, line_tag, snippet_cell, turn_tag,
 };
@@ -826,8 +826,9 @@ impl Widget for SearchOverlayWidget<'_> {
         let kinds = state.kinds;
         match &mut state.palette {
             Palettes::Quick(palette) => {
+                let entities = EntityGrid::new(palette.rows());
                 palette.draw_with(area, buf, theme, |row, cells| {
-                    row.cells(cells, theme, outcomes)
+                    row.cells(cells, theme, outcomes, &entities)
                 });
             }
             Palettes::Content(palette) => {

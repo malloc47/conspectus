@@ -327,23 +327,50 @@ fn the_modal_is_centered_and_fits_every_terminal() {
     }
 }
 
+/// The split the entity rows had before their column schema: the
+/// outcome word a third of the row (at most 16), the label 45% of what the
+/// cursor mark, the glyph, the word, and the gap before it leave (16 to
+/// 48, and no more than that), and the context the rest unless it gets
+/// fewer than 10 cells, when the label takes them.
+fn split_by_hand(inner: usize) -> EntityColumns {
+    let outcome = OUTCOME_WIDTH.min(inner / 3);
+    let body = inner.saturating_sub(4 + outcome + 2);
+    let label = (body * 45 / 100).clamp(16, 48).min(body);
+    let context = body.saturating_sub(label + 2);
+    if context < 10 {
+        EntityColumns {
+            label: body,
+            context: 0,
+            outcome,
+        }
+    } else {
+        EntityColumns {
+            label,
+            context,
+            outcome,
+        }
+    }
+}
+
 #[test]
 fn entity_columns_always_fit_and_drop_the_context_before_the_outcome() {
     for inner in [30_usize, 40, 56, 78, 118, 158, 218] {
-        let columns = entity_columns(inner);
-        let context_gap = if columns.context > 0 { COLUMN_GAP } else { 0 };
-        let used =
-            ROW_LEAD + columns.label + context_gap + columns.context + COLUMN_GAP + columns.outcome;
-        assert!(used <= inner + COLUMN_GAP, "{inner}: {columns:?}");
+        let columns = entity_widths(inner);
+        let context_gap = if columns.context > 0 { 2 } else { 0 };
+        let used = 4 + columns.label + context_gap + columns.context + 2 + columns.outcome;
+        assert!(used <= inner, "{inner}: {columns:?}");
         assert!(columns.outcome > 0, "{inner}: the outcome word stays");
     }
-    assert_eq!(
-        entity_columns(40).context,
-        0,
-        "narrow rows lose the context"
-    );
-    assert!(entity_columns(158).context > 40, "wide rows show it");
-    assert_eq!(entity_columns(158).outcome, OUTCOME_WIDTH);
+    assert_eq!(entity_widths(40).context, 0, "narrow rows lose the context");
+    assert!(entity_widths(158).context > 40, "wide rows show it");
+    assert_eq!(entity_widths(158).outcome, OUTCOME_WIDTH);
+}
+
+#[test]
+fn the_entity_schema_splits_a_row_as_the_hand_split_did_at_every_width() {
+    for inner in 8..=260 {
+        assert_eq!(entity_widths(inner), split_by_hand(inner), "{inner} cells");
+    }
 }
 
 #[test]
