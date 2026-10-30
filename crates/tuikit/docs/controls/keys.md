@@ -141,7 +141,7 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 | `Scope::{Global, Pane, Overlay}`, `ActiveScopes` | where a binding applies; which scopes have the keys now | `ActiveScopes::global()`, `pane(name)`, `.overlay(name)`; `scopes()` in lookup order, `contains` |
 | `bind(id, scope, keys, action)` and `Bind::{verb, help, rank, available_when}` | one keymap binding, as a `const` | the first key is the one a hint names |
 | `Keymap::builder()`, `KeymapBuilder::{rows, table, build}` | a keymap from declarations and controls' tables | `build` returns every `Conflict` (`Conflicts`) or the keymap |
-| `Keymap::{resolve, get, bindings, first_key_reaches, overrides}` | a key's binding in the active scopes; a binding by id; all of them; whether a binding's hint key reaches it; where a scope takes a global key | `resolve` ignores availability |
+| `Keymap::{resolve, get, bindings, first_key_reaches, overrides, loose_characters}` | a key's binding in the active scopes; a binding by id; all of them; whether a binding's hint key reaches it; where a scope takes a global key; the keys that ignore a character's chords, by binding id | `resolve` ignores availability; `loose_characters` is `keys::loose_characters` for a keymap |
 | `Binding::{id, scope, keys, action, verb, section, help, rank, can_act, matches}` | one binding of a built keymap | `can_act(&cx)` is true unless its predicate says otherwise |
 | `Conflict::{DuplicateId, MalformedId, NoKeys, Undescribed, Overlap}` | what keeps a keymap's bindings from working together | each says which binding, and `Overlap` the scope and the key both take |
 
@@ -371,8 +371,10 @@ pager's stepping is the pager's; its keys come from here).
 - **One character rule for a keymap.** A keymap takes any matcher, so a
   program's letters may keep binding their Alt forms
   (`KeyMatcher::AnyModExceptCtrl`) where an overlay binds characters as
-  typed; `loose_characters` over its bindings would show where they
-  differ before a program adopts the overlay rule.
+  typed. `Keymap::loose_characters` lists where its bindings differ from
+  the overlay rule, so a program that adopts the rule holds its keymap to
+  it in a test; the build does not refuse a loose key, so a program with
+  a rule of its own can still build.
 - **Generated help pages.** `rows` and `key_label` are what the `help`
   module's generator reads: `help::sections_for` turns a table and a
   description per action into a help page, and `help::undescribed` finds

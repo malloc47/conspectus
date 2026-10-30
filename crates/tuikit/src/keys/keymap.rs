@@ -541,6 +541,25 @@ impl<A: Copy + PartialEq, Cx> Keymap<A, Cx> {
         }
         found
     }
+
+    /// The keys that bind a character but ignore its Control or Alt
+    /// chords, against the overlay rule for characters (see
+    /// [`KeyMatcher`]), as `(the binding's id, the key)`: the keymap's
+    /// [`loose_characters`](super::loose_characters). Empty when every
+    /// character binds as typed and every chord is spelled out, which a
+    /// host that holds its keymap to the overlays' rule checks in a test.
+    pub fn loose_characters(&self) -> Vec<(&'static str, String)> {
+        self.bindings
+            .iter()
+            .flat_map(|binding| {
+                binding
+                    .keys
+                    .iter()
+                    .filter(|key| key.ignores_chords_of_a_character())
+                    .map(|key| (binding.id, key_label(key)))
+            })
+            .collect()
+    }
 }
 
 /// The bindings of a [`Keymap`] being put together, in order.

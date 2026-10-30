@@ -300,6 +300,31 @@ fn scopes_may_share_a_key_and_the_overrides_of_global_keys_are_listed() {
 }
 
 #[test]
+fn a_key_that_ignores_the_chords_of_its_character_is_listed_by_binding() {
+    const TYPED: &[Bind<Do>] = &[
+        bind("list.top", LIST, &[ch('g')], Do::Top).help("Moving", "Move to the first row"),
+        bind("group", Scope::Global, &[ctrl('g')], Do::Group).help("Program", "Group the rows"),
+        bind(
+            "list.down",
+            LIST,
+            &[KeyMatcher::AnyMod(KeyCode::Down)],
+            Do::Down,
+        )
+        .help("Moving", "Move to the next row"),
+    ];
+    // `list.top` takes `g` with any modifier but Control, so `Alt-g` goes
+    // to the top as well; every other character binds as typed, and the
+    // chords (`Ctrl-C`, `Ctrl-G`) are spelled out.
+    assert_eq!(keymap().loose_characters(), [("list.top", "g".to_string())]);
+    let typed = Keymap::builder().rows(TYPED).build().expect("no clash");
+    assert!(
+        typed.loose_characters().is_empty(),
+        "a key that is no character may take any modifier: {:?}",
+        typed.loose_characters()
+    );
+}
+
+#[test]
 fn a_controls_table_becomes_bindings_in_its_help_order() {
     let keymap = keymap();
     let steps: Vec<&Binding<Do, Model>> = keymap
