@@ -241,7 +241,7 @@ pub(super) fn left_panel_title(app: &App, width: usize) -> Line<'static> {
         }
     }
     if fit.shortened {
-        spans.push(Span::styled(TAB_STRIP_MORE, dim));
+        spans.push(Span::styled(tab_strip_more(), dim));
     }
     spans.push(Span::raw(" "));
     Line::from(spans)
@@ -250,8 +250,10 @@ pub(super) fn left_panel_title(app: &App, width: usize) -> Line<'static> {
 /// Between two tab labels.
 const TAB_SEPARATOR: &str = " · ";
 
-/// Ends a tab strip that leaves views out.
-const TAB_STRIP_MORE: &str = " …";
+/// Ends a tab strip that leaves views out: a space and the ellipsis mark.
+fn tab_strip_more() -> String {
+    format!(" {}", marks::ELLIPSIS)
+}
 
 /// Which tabs a strip of `labels` shows in `room` cells.
 #[derive(Debug, PartialEq, Eq)]
@@ -290,7 +292,7 @@ pub(super) fn tab_strip_fit(labels: &[&str], active: usize, room: usize) -> TabS
     }
     let active = active.min(labels.len().saturating_sub(1));
     // The marker and a pad after it, so the `…` never touches the corner.
-    let budget = room.saturating_sub(text::width(TAB_STRIP_MORE) + 1);
+    let budget = room.saturating_sub(text::width(&tab_strip_more()) + 1);
     let mut shown = vec![active];
     for index in (0..labels.len()).filter(|&index| index != active) {
         let mut wider = shown.clone();

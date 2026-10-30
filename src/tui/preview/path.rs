@@ -8,6 +8,7 @@ use std::path::Path;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use tuikit::glyphs::marks;
 
 use super::PreviewContent;
 
@@ -120,9 +121,12 @@ fn list_directory(path: &Path, muted: Modifier) -> std::io::Result<Vec<Line<'sta
         .collect();
     if total > MAX_LISTED || unread {
         let more = if unread {
-            format!("… more than {MAX_READ} entries; showing {MAX_LISTED}")
+            format!(
+                "{} more than {MAX_READ} entries; showing {MAX_LISTED}",
+                marks::ELLIPSIS
+            )
         } else {
-            format!("… {} more", total - MAX_LISTED)
+            format!("{} {} more", marks::ELLIPSIS, total - MAX_LISTED)
         };
         lines.push(Line::styled(more, dim));
     }
@@ -152,7 +156,8 @@ fn read_file(path: &Path, len: u64, muted: Modifier) -> std::io::Result<Vec<Line
     if len > MAX_FILE_BYTES {
         lines.push(Line::styled(
             format!(
-                "… cut at {} of {}",
+                "{} cut at {} of {}",
+                marks::ELLIPSIS,
                 human_size(MAX_FILE_BYTES),
                 human_size(len)
             ),

@@ -8,6 +8,7 @@ use std::path::Path;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use tuikit::glyphs::marks;
 
 use super::PreviewContent;
 
@@ -35,7 +36,10 @@ pub fn load_process_tree(proc_root: &Path, pid: i64, muted: Modifier) -> Preview
     let mut stack = vec![(pid, 0usize)];
     while let Some((pid, depth)) = stack.pop() {
         if shown == MAX_PROCESSES {
-            lines.push(dim(format!("… more processes past {MAX_PROCESSES}"), muted));
+            lines.push(dim(
+                format!("{} more processes past {MAX_PROCESSES}", marks::ELLIPSIS),
+                muted,
+            ));
             break;
         }
         shown += 1;

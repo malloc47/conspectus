@@ -148,7 +148,10 @@ pub fn render_pr(
         for (name, outcome) in &outcomes {
             match outcome {
                 CheckOutcome::Failed => lines.push(Line::raw(format!("  {} {name}", marks::FAIL))),
-                CheckOutcome::Pending => lines.push(Line::from(dim(format!("  … {name}"), muted))),
+                CheckOutcome::Pending => lines.push(Line::from(dim(
+                    format!("  {} {name}", marks::ELLIPSIS),
+                    muted,
+                ))),
                 CheckOutcome::Passed | CheckOutcome::Other => {}
             }
         }

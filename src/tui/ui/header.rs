@@ -591,7 +591,7 @@ fn fit_status_segments(app: &App, theme: &Theme, room: usize) -> Vec<Span<'stati
         }
     }
     if dropped {
-        spans.push(span!(theme.muted; " …"));
+        spans.push(span!(theme.muted; " {}", marks::ELLIPSIS));
     }
     spans
 }

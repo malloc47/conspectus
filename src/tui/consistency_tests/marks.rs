@@ -43,10 +43,22 @@ fn guarded_marks() -> Vec<&'static str> {
 }
 
 /// Marks that are also prose punctuation. Copy such as "Loading…" or
-/// "not found — try again" may carry them, but a string that is exactly
-/// one of them is the mark.
+/// "not found — try again" may carry them, but a string that is one of
+/// them with nothing but spaces around it (` …`), or that one of them
+/// leads, a space after it (`… 3 more`), is the mark.
 fn bare_marks() -> [&'static str; 2] {
     [marks::NO_VALUE, marks::ELLIPSIS]
+}
+
+/// The bare mark `literal` draws as a mark, if any.
+fn leading_mark(literal: &str) -> Option<&'static str> {
+    let text = literal.trim();
+    bare_marks().into_iter().find(|mark| {
+        text == *mark
+            || text
+                .strip_prefix(mark)
+                .is_some_and(|rest| rest.starts_with(' '))
+    })
 }
 
 /// A reviewed use of a guarded character that is not the mark: the path
@@ -92,10 +104,10 @@ fn typed_marks(root: &Path, trees: &[Tree], exceptions: &[Exception]) -> Vec<Str
             text: literal,
         } in string_literals(&text)
         {
-            if bare_marks().contains(&literal.as_str()) {
+            if let Some(mark) = leading_mark(&literal) {
                 out.push(format!(
-                    "{path}:{line}: the string \"{literal}\" is a mark; use the matching \
-                     constant in `tuikit::glyphs::marks`"
+                    "{path}:{line}: the string \"{literal}\" draws `{mark}` as a mark; use the \
+                     matching constant in `tuikit::glyphs::marks`"
                 ));
             }
         }
@@ -133,13 +145,22 @@ fn the_guard_reads_a_bare_mark_but_not_prose_around_one() {
     std::fs::create_dir_all(path.parent().expect("a parent directory")).expect("create tree");
     std::fs::write(
         &path,
-        "fn f() { let _ = (\"\u{2014}\", \"\u{2026}\", \"a \u{2014} b\", \"Loading\u{2026}\"); }\n",
+        "fn f() { let _ = (\"\u{2014}\", \"\u{2026}\", \"a \u{2014} b\", \"Loading\u{2026}\", \
+         \" \u{2026}\", \"  \u{2026} {n} more\", \"\u{2026}and so on\"); }\n",
     )
     .expect("plant the file");
     let findings = typed_marks(scratch.path(), &[Tree::new("src", 1)], &[]);
-    assert_eq!(findings.len(), 2, "{findings:?}");
+    assert_eq!(findings.len(), 4, "{findings:?}");
     assert!(findings[0].contains("\"\u{2014}\""), "{findings:?}");
     assert!(findings[1].contains("\"\u{2026}\""), "{findings:?}");
+    assert!(
+        findings[2].contains("\" \u{2026}\""),
+        "a mark with spaces around it is the mark: {findings:?}"
+    );
+    assert!(
+        findings[3].contains("\u{2026} {n} more"),
+        "a mark that leads a string is the mark: {findings:?}"
+    );
 }
 
 #[test]

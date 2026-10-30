@@ -8,6 +8,7 @@ use std::process::Stdio;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use tuikit::glyphs::marks;
 
 use super::PreviewContent;
 
@@ -131,7 +132,7 @@ fn status(root: &Path, muted: Modifier) -> Result<Vec<Line<'static>>, GitError> 
     }
     if changes.len() > STATUS_LIMIT {
         lines.push(dim(
-            format!("… {} more", changes.len() - STATUS_LIMIT),
+            format!("{} {} more", marks::ELLIPSIS, changes.len() - STATUS_LIMIT),
             muted,
         ));
     }

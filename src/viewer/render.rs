@@ -13,6 +13,7 @@
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use tuikit::glyphs::marks;
 use tuikit::text;
 use tuikit::theme::Theme;
 
@@ -358,7 +359,11 @@ fn render_tool_body(
             }
         }
         if total > TRUNCATED_TOOL_LINES {
-            let more = format!("… ({} more lines)", total - TRUNCATED_TOOL_LINES);
+            let more = format!(
+                "{} ({} more lines)",
+                marks::ELLIPSIS,
+                total - TRUNCATED_TOOL_LINES
+            );
             wrapped.extend(wrap_plain(
                 &more,
                 content_width,
