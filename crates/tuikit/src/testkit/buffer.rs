@@ -198,6 +198,12 @@ pub fn is_side(symbol: &str) -> bool {
 /// among the cells of `with` (the screen with the modal) that differ from
 /// `without` (the same screen without it). `None` when no corner differs,
 /// so nothing framed was drawn.
+///
+/// A corner the modal draws over an identical corner (a pane's border in
+/// the same color, under a modal that reaches the pane's edges) does not
+/// differ. When the corners that differ are only one side's pair (the top
+/// two, or the bottom two, or the left or right pair), the rectangle is
+/// completed from the corners `with` draws across from them.
 pub fn frame_rect(with: &Buffer, without: &Buffer) -> Option<Rect> {
     let area = with.area;
     let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0, 0);
@@ -217,7 +223,51 @@ pub fn frame_rect(with: &Buffer, without: &Buffer) -> Option<Rect> {
             }
         }
     }
-    found.then(|| Rect::new(x0, y0, x1 - x0 + 1, y1 - y0 + 1))
+    found.then(|| complete_frame(with, Rect::new(x0, y0, x1 - x0 + 1, y1 - y0 + 1)))
+}
+
+/// `rect`, the span of a frame's corners that differed, completed to the
+/// frame `buffer` draws when it is one row or one column: from the pair
+/// of corners in place (the top two, the bottom two, the left two, or the
+/// right two), the nearest row or column across that holds the other
+/// pair. `rect` as it is otherwise, or when no pair across is found.
+fn complete_frame(buffer: &Buffer, rect: Rect) -> Rect {
+    let (left, top) = (rect.x, rect.y);
+    let (right, bottom) = (rect.right() - 1, rect.bottom() - 1);
+    let at = |x: u16, y: u16, pick: fn(&line::Set<'static>) -> &'static str| {
+        let symbol = buffer[(x, y)].symbol();
+        BORDERS.iter().any(|set| pick(set) == symbol)
+    };
+    let top_pair = |y| at(left, y, |set| set.top_left) && at(right, y, |set| set.top_right);
+    let bottom_pair =
+        |y| at(left, y, |set| set.bottom_left) && at(right, y, |set| set.bottom_right);
+    let left_pair = |x| at(x, top, |set| set.top_left) && at(x, bottom, |set| set.bottom_left);
+    let right_pair = |x| at(x, top, |set| set.top_right) && at(x, bottom, |set| set.bottom_right);
+    let area = buffer.area;
+    let rows = |from: u16, to: u16| Rect::new(left, from, right - left + 1, to - from + 1);
+    let columns = |from: u16, to: u16| Rect::new(from, top, to - from + 1, bottom - top + 1);
+    let completed = if top == bottom && top_pair(top) {
+        (top + 1..area.bottom())
+            .find(|&y| bottom_pair(y))
+            .map(|y| rows(top, y))
+    } else if top == bottom && bottom_pair(bottom) {
+        (area.y..bottom)
+            .rev()
+            .find(|&y| top_pair(y))
+            .map(|y| rows(y, bottom))
+    } else if left == right && left_pair(left) {
+        (left + 1..area.right())
+            .find(|&x| right_pair(x))
+            .map(|x| columns(left, x))
+    } else if left == right && right_pair(right) {
+        (area.x..right)
+            .rev()
+            .find(|&x| left_pair(x))
+            .map(|x| columns(x, right))
+    } else {
+        None
+    };
+    completed.unwrap_or(rect)
 }
 
 /// The text of each row inside the frame `rect`, border excluded. A

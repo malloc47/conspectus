@@ -23,18 +23,15 @@ const LAYOUT: StackedMasterDetail = StackedMasterDetail::new().min_detail(MIN_PR
 /// not draw (or a Preview whose content has not loaded).
 pub(super) fn draw_right_panel(
     app: &mut App,
-    frame: &mut Frame<'_>,
+    buf: &mut Buffer,
     area: Rect,
 ) -> (Option<ScrollWindow>, Option<ScrollRegion>) {
-    // The corners take a cell each from the top border.
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(right_panel_title(
-            app,
-            usize::from(area.width.saturating_sub(2)),
-        ));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    // The framework's pane frame puts the focus marker before the title
+    // and tints the border while the pane has focus.
+    let inner = PaneFrame::new(app.theme())
+        .title(right_panel_title(app, PaneFrame::title_width(area.width)))
+        .focused(app.focus() == Focus::Right)
+        .render(area, buf);
 
     // The explorer's lines are laid out at the layout's width, a column
     // short of the pane, so the `Related` rule still fits on one row when
@@ -56,9 +53,9 @@ pub(super) fn draw_right_panel(
     // No explorer means the selection names no node (or nothing has
     // loaded yet): show the placeholder instead of the explorer.
     let Some(mut list) = lines else {
-        let widget = Paragraph::new(empty_right_panel_text(app))
-            .style(Style::default().add_modifier(app.theme().muted));
-        frame.render_widget(widget, inner);
+        Paragraph::new(empty_right_panel_text(app))
+            .style(Style::default().add_modifier(app.theme().muted))
+            .render(inner, buf);
         return (None, None);
     };
     // A selected hit row says which turn it is and shows what matched.
@@ -70,14 +67,14 @@ pub(super) fn draw_right_panel(
     // The zone's window starts where the last frame left it.
     let stacked = LAYOUT.render(
         inner,
-        frame.buffer_mut(),
+        buf,
         list,
         preview_divider_line(usize::from(inner.width), app.theme()),
         app.explorer_window(),
     );
     // A transcript preview leaves a column for its scrollbar.
     app.prepare_preview(stacked.detail.width.saturating_sub(1).max(1));
-    let preview = draw_explorer_preview(app, frame, stacked.detail);
+    let preview = draw_explorer_preview(app, buf, stacked.detail);
     // A Preview still waiting for its content draws a placeholder, not
     // the rows its offset counts, so it keeps the offset until the
     // content has loaded and a frame shows it.
@@ -91,11 +88,14 @@ pub(super) fn draw_right_panel(
 /// tell what they're looking at without re-reading the body.
 /// Falls back to `detail` while no selection is resolved.
 ///
-/// `width` is the cells the pane's top border leaves for the title.
+/// `width` is the cells the pane's top border leaves for the title after
+/// the focus marker the pane frame puts before it
+/// ([`PaneFrame::title_width`]); the frame adds the closing space when
+/// the title leaves a cell for it.
 pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     let label = right_panel_kind_label(app);
     let theme = app.theme();
-    let mut spans = vec![Span::raw(" "), focus_marker_span(app, Focus::Right)];
+    let mut spans = Vec::new();
     // ADR 0073 §3: the right-panel node header is `<glyph> <label>`
     // with the glyph in the node-kind color and the label bold. The
     // glyph is suppressed when there is no resolved selection
@@ -109,10 +109,9 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     // A drilled pane shows the chain that led here between ` ◄ ` and
     // ` · depth N`, so even a chain that gave way says how deep the
     // pane is. The chain takes the cells the rest of the title leaves
-    // and gives way hop by hop to fit. The trailing pad, which keeps the
-    // title off the corner, gives way before any hop: it is drawn only
-    // when the chain leaves a cell for it.
-    let mut pad = true;
+    // and gives way hop by hop to fit. The frame's closing space, which
+    // keeps the title off the corner, gives way before any hop: it is
+    // drawn only when the chain leaves a cell for it.
     if let Some(explorer) = app.explorer()
         && !explorer.frames().is_empty()
     {
@@ -122,14 +121,10 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
         let room = width.saturating_sub(text::spans_width(&spans) + back.width() + depth.width());
         let hops = crate::tui::explorer::breadcrumb_hops(explorer.frames(), theme);
         if let Some(chain) = Breadcrumb::new(&hops, theme).line(room) {
-            pad = chain.width() < room;
             spans.push(back);
             spans.extend(chain.spans);
             spans.push(depth);
         }
-    }
-    if pad {
-        spans.push(Span::raw(" "));
     }
     Line::from(spans)
 }
@@ -165,17 +160,17 @@ pub(super) fn right_panel_kind_label(app: &App) -> &'static str {
 /// node's preview through `draw_detail_preview`.
 /// Draw the Preview for the explorer cursor's row and return its scroll
 /// region as the body drew it.
-pub(super) fn draw_explorer_preview(app: &App, frame: &mut Frame<'_>, area: Rect) -> ScrollRegion {
+pub(super) fn draw_explorer_preview(app: &App, buf: &mut Buffer, area: Rect) -> ScrollRegion {
     use crate::tui::explorer::RowPreview;
     let (Some(explorer), Some(row)) = (app.explorer(), app.explorer_cursor_row()) else {
         // Rows that don't carry a neighbor (node fields land here)
         // show the focused node's own preview body.
-        return draw_detail_preview(app, frame, area);
+        return draw_detail_preview(app, buf, area);
     };
     let Some(preview) = explorer.content().row_preview(&row) else {
         // No neighbor for this row — show the focused node's own
         // preview body (live mux capture, message preview, etc.).
-        return draw_detail_preview(app, frame, area);
+        return draw_detail_preview(app, buf, area);
     };
     let theme = app.theme();
     let receding = Style::default().add_modifier(theme.muted);
@@ -286,7 +281,7 @@ pub(super) fn draw_explorer_preview(app: &App, frame: &mut Frame<'_>, area: Rect
         }
         PreviewView::text(text)
     };
-    draw_preview_view(app, view, frame, area)
+    draw_preview_view(app, view, buf, area)
 }
 
 pub(super) fn empty_right_panel_text(app: &App) -> &'static str {

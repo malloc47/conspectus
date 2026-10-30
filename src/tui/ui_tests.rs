@@ -11,8 +11,13 @@ use crate::tui::explorer::grid::{field_row, kind_chip_span, other_row, validated
 use crate::tui::preview::PreviewSource;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, View};
-use ratatui::layout::{Constraint, Direction, Layout};
 use tuikit::explorer::ExplorerKey;
+
+/// Where the main screen puts its parts on `area` at the default
+/// threshold: the layout the draw uses.
+fn panes(area: Rect) -> ScreenAreas {
+    screen_areas(area, crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD)
+}
 
 /// One explorer row drawn alone, as the pane draws it, with no cursor.
 fn explorer_line(
@@ -530,13 +535,12 @@ fn right_panel_title_names_the_selected_node_kind() {
 
 #[test]
 fn focus_marker_prefixes_only_the_active_pane_title() {
-    // Phase 9 refinement: focus is signaled by a `► ` glyph on
-    // the active pane's title rather than by holistically
-    // styling the panel. The inactive pane gets two-space
-    // padding so titles align column-wise and content colors
-    // stay untouched between focus states. The right-pane label
-    // varies by selection kind (Phase 11) so the assertion is
-    // on the *count* of `►` markers, not on a specific suffix.
+    // The focused pane's title starts with a `► ` marker (its border
+    // takes the focus accent too; `consistency_tests::chrome` checks
+    // the colors). The other pane has a two-cell blank there, so titles
+    // keep their columns between focus states. The right-pane label
+    // varies by selection kind, so the assertion is on the *count* of
+    // `►` markers, not on a specific suffix.
     let area = Rect::new(0, 0, 160, 24);
     let mut app = seeded_app();
     let buffer = render_to_buffer(&mut app, area);
@@ -1605,37 +1609,46 @@ fn a_drilled_title_fits_inside_its_corners_and_cuts_the_chain_last() {
     }
     app.update(Msg::Explorer(ExplorerKey::Activate));
 
-    // The title is as wide as its room allows: the fixed parts and the
-    // pad, with the chain in what they leave, never wider.
+    // The title is as wide as its room allows: the fixed parts, with the
+    // chain in what they leave, never wider.
     let full = right_panel_title(&app, 200);
     let fixed = right_panel_title(&app, 0).width();
-    assert!(full.to_string().ends_with(" · depth 1 "), "{full}");
+    assert!(full.to_string().ends_with(" · depth 1"), "{full}");
     assert!(!full.to_string().contains(marks::ELLIPSIS), "{full}");
     for width in fixed..=full.width() + 2 {
         let title = right_panel_title(&app, width);
         assert!(title.width() <= width, "{width}: {title}");
         assert!(title.to_string().contains(" · depth 1"), "{width}: {title}");
     }
-    // A cell short, the pad gives way before the chain; then the chain
-    // is cut.
-    let padless = right_panel_title(&app, full.width() - 1).to_string();
-    assert!(padless.ends_with(" · depth 1"), "{padless}");
-    assert!(!padless.contains(marks::ELLIPSIS), "{padless}");
-    let cut = right_panel_title(&app, full.width() - 2).to_string();
+    // A cell short, the chain is cut.
+    let cut = right_panel_title(&app, full.width() - 1).to_string();
     assert!(cut.contains(marks::ELLIPSIS), "{cut}");
     assert!(cut.ends_with(" · depth 1"), "{cut}");
 
-    // Drawn in a pane too narrow for the whole title (the panes stack on
-    // a screen this narrow), the chain is cut and the corner clips
-    // nothing of the depth.
-    let screen = u16::try_from(full.width()).expect("a narrow screen");
-    let narrow = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, screen, 24)));
-    let title_row = narrow
-        .lines()
-        .find(|line| line.contains(marks::BACK))
-        .expect("the drilled title");
-    assert!(title_row.ends_with(" · depth 1┐"), "{narrow}");
-    assert!(title_row.contains(marks::ELLIPSIS), "{narrow}");
+    // Drawn in a pane (the panes stack on a screen this narrow) exactly
+    // as wide as the title, the frame's lead, and its corners, the
+    // closing space gives way; a cell wider it is drawn; a cell narrower
+    // the chain is cut, and the corner clips nothing of the depth.
+    let exact = full.width() + PaneFrame::LEAD + 2;
+    let title_row = |app: &mut App, width: usize| {
+        let width = u16::try_from(width).expect("a narrow screen");
+        let text = buffer_to_string(&render_to_buffer(app, Rect::new(0, 0, width, 24)));
+        let row = text
+            .lines()
+            .find(|line| line.contains(marks::BACK))
+            .expect("the drilled title")
+            .to_string();
+        (row, text)
+    };
+    let (row, text) = title_row(&mut app, exact + 1);
+    assert!(row.ends_with(" · depth 1 ┐"), "{text}");
+    assert!(!row.contains(marks::ELLIPSIS), "{text}");
+    let (row, text) = title_row(&mut app, exact);
+    assert!(row.ends_with(" · depth 1┐"), "{text}");
+    assert!(!row.contains(marks::ELLIPSIS), "{text}");
+    let (row, text) = title_row(&mut app, exact - 1);
+    assert!(row.ends_with(" · depth 1┐"), "{text}");
+    assert!(row.contains(marks::ELLIPSIS), "{text}");
 }
 
 #[test]
@@ -2694,7 +2707,7 @@ fn right_focus_keeps_selected_row_highlighted_and_changes_status_scope() {
     // indicator (BOLD without REVERSED) in the left pane while
     // focus is on the right pane.
     let selected_carries_inactive_indicator = (0..buffer.area.height).any(|y| {
-        let left_width = buffer.area.width / 2;
+        let left_width = panes(buffer.area).left.width;
         let any_bold =
             (0..left_width).any(|x| buffer[(x, y)].style().add_modifier.contains(Modifier::BOLD));
         let any_reversed = (0..left_width).any(|x| {
@@ -3527,11 +3540,7 @@ fn left_pane_renders_scrollbar_when_content_exceeds_viewport() {
     // rightmost inner column.
     let area = Rect::new(0, 0, 120, 24);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let left_pane = split[0];
+    let left_pane = panes(area).left;
     let bar_col = rightmost_inner_column(left_pane);
     let column = buffer_column(&buffer, bar_col);
     assert!(
@@ -3550,11 +3559,7 @@ fn left_pane_hides_scrollbar_when_content_fits() {
     let mut app = seeded_app();
     let area = Rect::new(0, 0, 120, 24);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let left_pane = split[0];
+    let left_pane = panes(area).left;
     let bar_col = rightmost_inner_column(left_pane);
     let column = buffer_column(&buffer, bar_col);
     for glyph in SCROLLBAR_GLYPHS {
@@ -3576,11 +3581,7 @@ fn right_pane_explorer_renders_scrollbar_when_related_list_overflows() {
     app.update(Msg::CycleFocus);
     let area = Rect::new(0, 0, 120, 20);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let right_pane = split[1];
+    let right_pane = panes(area).right;
     let bar_col = rightmost_inner_column(right_pane);
     let column = buffer_column(&buffer, bar_col);
     assert!(
@@ -3644,11 +3645,7 @@ fn left_pane_scrollbar_thumb_reaches_bottom_at_max_scroll() {
 
     let area = Rect::new(0, 0, 120, 24);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let left_pane = split[0];
+    let left_pane = panes(area).left;
     let bar_col = rightmost_inner_column(left_pane);
 
     // Find the rows occupied by the thumb glyph (the solid
@@ -3734,11 +3731,7 @@ fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
 
     let area = Rect::new(0, 0, 120, 24);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let left_pane = split[0];
+    let left_pane = panes(area).left;
     let bar_col = rightmost_inner_column(left_pane);
     // Borders use box-drawing characters. Allow them through.
     let border_glyphs = ["─", "│", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼"];
@@ -3855,11 +3848,7 @@ fn right_pane_explorer_hides_scrollbar_when_related_list_fits() {
     let mut app = workspace_app_with_repos(2);
     let area = Rect::new(0, 0, 120, 30);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let right_pane = split[1];
+    let right_pane = panes(area).right;
     let bar_col = rightmost_inner_column(right_pane);
     let column = buffer_column(&buffer, bar_col);
     for glyph in SCROLLBAR_GLYPHS {

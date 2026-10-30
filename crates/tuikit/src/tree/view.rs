@@ -5,10 +5,11 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget};
 
 use super::TreeRow;
 use super::state::TreeState;
+use crate::frame::PaneFrame;
 use crate::scroll::{ScrollGutter, ScrollWindow, WrappedRows};
 use crate::selection::{self, Cursor, GUTTER_WIDTH};
 use crate::text;
@@ -140,6 +141,10 @@ const HEADER_ROOM: u16 = 3;
 /// scrollbar gutter, an optional footer banner, and a placeholder when no
 /// row shows.
 ///
+/// The pane is a [`PaneFrame`], so it carries the focus cue: while the
+/// tree has focus its border and the marker before its title take the
+/// theme's `panel_focus_accent`.
+///
 /// The host lays each row out: the producer `line` takes the row and its
 /// [`RowCtx`] and returns the row's [`Line`], at most `width` cells. The
 /// tree decides which rows show, which of them the window shows, and how
@@ -194,7 +199,8 @@ where
     }
 
     /// Whether the tree has focus: its cursor row takes the active
-    /// highlight with focus and the inactive one without.
+    /// highlight with focus and the inactive one without, and its pane's
+    /// border and focus marker take the focus accent with it.
     #[must_use]
     pub const fn focused(mut self, focused: bool) -> Self {
         self.focused = focused;
@@ -209,8 +215,9 @@ where
         self
     }
 
-    /// The title drawn on the top border, such as a strip of tabs. The
-    /// host lays it out for the border's width, the pane's less two.
+    /// The title drawn on the top border after the focus marker, such as
+    /// a strip of tabs. The host lays it out for
+    /// [`PaneFrame::title_width`] of the pane's width.
     #[must_use]
     pub fn title(mut self, title: Line<'a>) -> Self {
         self.title = Some(title);
@@ -245,12 +252,11 @@ where
     /// Draw the pane in `area` and return the window its rows drew, or
     /// `None` when no row showed.
     pub fn render(mut self, area: Rect, buf: &mut Buffer) -> Option<ScrollWindow> {
-        let mut block = Block::default().borders(Borders::ALL);
+        let mut frame = PaneFrame::new(self.theme).focused(self.focused);
         if let Some(title) = self.title.take() {
-            block = block.title(title);
+            frame = frame.title(title);
         }
-        let mut inner = block.inner(area);
-        block.render(area, buf);
+        let mut inner = frame.render(area, buf);
 
         if let Some((lines, style)) = self.footer.take()
             && inner.height > FOOTER_ROOM

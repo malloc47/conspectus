@@ -31,13 +31,15 @@
 //!   rows: on the same identity when it still shows, else where it was,
 //!   else on a row the host hints at on its first load, else on the first
 //!   row ([`TreeState::begin_rebuild`], [`TreeState::finish_rebuild`]).
-//! - **Drawing.** [`TreeView`] draws the tree in a bordered pane: a title
-//!   on its border (a strip of tabs, say), an optional header line, the
-//!   rows in a window that follows the cursor with the shared scrollbar,
-//!   an optional footer banner, and a placeholder when no row shows. The
-//!   host's producer lays each row out from the row and its [`RowCtx`];
-//!   the tree applies the pending and ghost looks a host's [`RowState`]
-//!   asks for, starts every row with the cursor gutter (the
+//! - **Drawing.** [`TreeView`] draws the tree in a
+//!   [`PaneFrame`](crate::frame::PaneFrame), whose border and focus
+//!   marker take the focus accent while the tree has focus (house rule
+//!   9): a title on its border (a strip of tabs, say), an optional header
+//!   line, the rows in a window that follows the cursor with the shared
+//!   scrollbar, an optional footer banner, and a placeholder when no row
+//!   shows. The host's producer lays each row out from the row and its
+//!   [`RowCtx`]; the tree applies the pending and ghost looks a host's
+//!   [`RowState`] asks for, starts every row with the cursor gutter (the
 //!   [`marks::POINTER`](crate::glyphs::marks::POINTER) mark on the cursor
 //!   row, two blank cells on the others), and highlights the cursor row
 //!   from the theme's selection pair, active with focus and inactive
@@ -92,7 +94,7 @@
 //! let area = Rect::new(0, 0, 24, 5);
 //! let mut buf = Buffer::empty(area);
 //! let window = TreeView::new(&tree, &state, line, &theme)
-//!     .title(Line::from(" fruit "))
+//!     .title(Line::from("fruit"))
 //!     .empty("Nothing here.")
 //!     .render(area, &mut buf);
 //! state.set_viewport(window.expect("rows show"));

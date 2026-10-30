@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
+pub(super) fn draw_header(app: &App, buf: &mut Buffer, area: Rect) {
     // Header shape (ADR 0078):
     //   [updated Ns ago · ] N/M sessions · M mux
     //     [ · <opt-in harness chips>]
@@ -43,8 +43,7 @@ pub(super) fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
         append_ambiguity_chip(&mut spans, counts.mux_ambiguous, theme);
     }
 
-    let widget = Paragraph::new(Line::from(spans));
-    frame.render_widget(widget, area);
+    Paragraph::new(Line::from(spans)).render(area, buf);
 }
 
 /// Per-harness and per-mux-state row aggregates used by the dense
@@ -218,7 +217,7 @@ pub(super) fn header_freshness(app: &App) -> String {
     format!("updated {} · ", Age::between(loaded_at, now).ago())
 }
 
-pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
+pub(super) fn draw_status_bar(app: &App, buf: &mut Buffer, area: Rect) {
     let theme = app.theme();
     if let Some(status) = app.status() {
         let mut spans = Vec::new();
@@ -227,7 +226,7 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
         // In its severity's color: a hint, a confirmation, a refusal,
         // and a failure each look like what they are.
         spans.push(status.span(theme));
-        frame.render_widget(Paragraph::new(Line::from(spans)), area);
+        Paragraph::new(Line::from(spans)).render(area, buf);
         return;
     }
 
@@ -259,8 +258,7 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     spans.extend(fit_status_segments(app, theme, room));
     spans.extend(provider_spans);
 
-    let widget = Paragraph::new(Line::from(spans));
-    frame.render_widget(widget, area);
+    Paragraph::new(Line::from(spans)).render(area, buf);
 }
 
 /// ADR 0105: warnings and errors the operator hasn't opened the

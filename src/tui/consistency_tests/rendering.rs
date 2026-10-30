@@ -153,18 +153,12 @@ fn session_rows_show_the_agent_glyph_in_every_view_that_lists_them() {
     }
 }
 
-/// Cells of one half of the frame drawn REVERSED, header and status rows
-/// left out. Chips are reversed too, so a test compares the count with and
-/// without focus rather than expecting zero.
+/// Cells of one pane drawn REVERSED. Chips are reversed too, so a test
+/// compares the count with and without focus rather than expecting zero.
 fn reversed_cells(buffer: &Buffer, left: bool) -> usize {
-    let half = buffer.area.width / 2;
-    let (from, to) = if left {
-        (0, half)
-    } else {
-        (half, buffer.area.width)
-    };
-    let body = Rect::new(from, 1, to - from, buffer.area.height.saturating_sub(2));
-    count_cells(buffer, body, |cell| {
+    let areas = panes(buffer.area.width, buffer.area.height);
+    let pane = if left { areas.left } else { areas.right };
+    count_cells(buffer, pane, |cell| {
         cell.modifier.contains(Modifier::REVERSED)
     })
 }

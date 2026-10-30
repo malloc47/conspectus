@@ -39,9 +39,9 @@ impl PreviewView {
 
 /// Draw the selected row's Preview and return its scroll region as the
 /// body drew it.
-pub(super) fn draw_detail_preview(app: &App, frame: &mut Frame<'_>, area: Rect) -> ScrollRegion {
+pub(super) fn draw_detail_preview(app: &App, buf: &mut Buffer, area: Rect) -> ScrollRegion {
     let view = preview_view_for_selection(app, area.width, area.height as usize);
-    draw_preview_view(app, view, frame, area)
+    draw_preview_view(app, view, buf, area)
 }
 
 /// Draw a Preview body through the Preview's scroll region (ADR 0181):
@@ -52,16 +52,16 @@ pub(super) fn draw_detail_preview(app: &App, frame: &mut Frame<'_>, area: Rect) 
 pub(super) fn draw_preview_view(
     app: &App,
     view: PreviewView,
-    frame: &mut Frame<'_>,
+    buf: &mut Buffer,
     area: Rect,
 ) -> ScrollRegion {
     match view.region {
         None => app
             .preview_region()
-            .draw_lines(Anchor::Top, area, frame.buffer_mut(), view.text),
+            .draw_lines(Anchor::Top, area, buf, view.text),
         // The thumb tracks the transcript; a failure banner above it
         // stays put.
-        Some(placed) => placed.draw_cut(area, frame.buffer_mut(), view.text),
+        Some(placed) => placed.draw_cut(area, buf, view.text),
     }
 }
 

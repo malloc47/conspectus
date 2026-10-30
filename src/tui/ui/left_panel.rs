@@ -27,22 +27,19 @@ use columns::{Col, LeftColumns, Schemas};
 /// Draw the left pane and return the window its tree drew, or `None`
 /// when the tree is empty, so the window it had is kept for when rows
 /// come back.
-pub(super) fn draw_left_panel(
-    app: &App,
-    frame: &mut Frame<'_>,
-    area: Rect,
-) -> Option<ScrollWindow> {
-    // The corners take a cell each from the top border; the body is as
-    // wide.
+pub(super) fn draw_left_panel(app: &App, buf: &mut Buffer, area: Rect) -> Option<ScrollWindow> {
+    // The body is the pane less its border on each side.
     let inner_width = usize::from(area.width.saturating_sub(2));
     let states = app.tree_row_states();
     let columns = LeftColumns::of(app);
     let rows = LeftRows::of(app, &columns, &states);
     let line = |row: &Row, cx: &RowCtx<'_>| rows.line(row, cx);
+    // The tree draws its pane in the framework's pane frame, which puts
+    // the focus marker before the title and tints the border with focus.
     let mut view = TreeView::new(&app.tree().rows, app.tree_state(), line, app.theme())
         .focused(app.focus() == Focus::Left)
         .states(&states)
-        .title(left_panel_title(app, inner_width));
+        .title(left_panel_title(app, PaneFrame::title_width(area.width)));
     // The Pinned view advertises legacy pins that still need
     // `pin migrate` on the last line of the pane.
     if let Some(banner) = pinned_banner(app) {
@@ -62,7 +59,7 @@ pub(super) fn draw_left_panel(
     if app.tree().rows.is_empty() {
         view = view.empty(empty_left_panel_text(app));
     }
-    view.render(area, frame.buffer_mut())
+    view.render(area, buf)
 }
 
 impl<'a> LeftColumns<'a> {
@@ -205,21 +202,21 @@ pub(super) fn render_left_row(
 /// the available views at a glance instead of having to remember
 /// the `1`–`6` accelerators or open the controls overlay.
 ///
-/// `width` is the cells the pane's top border leaves for the title.
-/// The strip names every view when they fit; otherwise it names fewer
-/// and ends with `…` (see [`tab_strip_fit`]), so a narrow pane never
-/// cuts a label in half.
+/// `width` is the cells the pane's top border leaves for the title after
+/// the focus marker the pane frame puts before it
+/// ([`PaneFrame::title_width`]). The strip names every view when they
+/// fit; otherwise it names fewer and ends with `…` (see
+/// [`tab_strip_fit`]), so a narrow pane never cuts a label in half. The
+/// frame adds the closing space when the strip leaves a cell for it.
 pub(super) fn left_panel_title(app: &App, width: usize) -> Line<'static> {
     let theme = app.theme();
     let active = app.active_view();
-    let lead = vec![Span::raw(" "), focus_marker_span(app, Focus::Left)];
-    let lead_width: usize = lead.iter().map(Span::width).sum();
     let views = crate::tui::widgets::controls::VIEW_OPTIONS;
     let labels: Vec<&str> = views.iter().map(|&view| view_label(view)).collect();
     let active_index = views.iter().position(|&view| view == active).unwrap_or(0);
-    let fit = tab_strip_fit(&labels, active_index, width.saturating_sub(lead_width));
+    let fit = tab_strip_fit(&labels, active_index, width);
     let dim = Style::default().fg(theme.inert);
-    let mut spans = lead;
+    let mut spans = Vec::new();
     for (position, &index) in fit.shown.iter().enumerate() {
         if position > 0 {
             spans.push(Span::styled(TAB_SEPARATOR, dim));
@@ -243,7 +240,6 @@ pub(super) fn left_panel_title(app: &App, width: usize) -> Line<'static> {
     if fit.shortened {
         spans.push(Span::styled(tab_strip_more(), dim));
     }
-    spans.push(Span::raw(" "));
     Line::from(spans)
 }
 

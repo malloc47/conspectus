@@ -1,9 +1,11 @@
 //! The frame around the rows reads right in every view and at every
-//! width: the left pane's tab strip never cuts a view's name, and the
-//! header's session count agrees with what the active view lists.
+//! width: the left pane's tab strip never cuts a view's name, the
+//! header's session count agrees with what the active view lists, and
+//! the focused pane is the one framed in the focus accent.
 //!
-//! Both are checked on the rendered frame, the way the operator reads
-//! them, so they hold whichever control draws the strip or the header.
+//! Each is checked on the rendered frame, the way the operator reads
+//! it, so it holds whichever control draws the strip, the header, or the
+//! panes.
 
 use super::*;
 use crate::filter::{HarnessFilter, PrStateFilter, PrStateKey};
@@ -127,6 +129,83 @@ fn the_tab_strip_names_every_view_when_they_fit() {
     assert_eq!(
         words,
         ["sessions", "mux", "prs", "pinned", "search", "…"].map(String::from)
+    );
+}
+
+/// The cells of a pane's border other than its top row, which carries
+/// the title: the bottom row and the two sides.
+fn border_cells(pane: Rect) -> Vec<(u16, u16)> {
+    let mut cells: Vec<(u16, u16)> = (pane.x..pane.right())
+        .map(|x| (x, pane.bottom() - 1))
+        .collect();
+    for y in pane.y..pane.bottom() - 1 {
+        cells.push((pane.x, y));
+        cells.push((pane.right() - 1, y));
+    }
+    cells
+}
+
+/// The focus cue (house rule 9): the pane with focus draws its border and
+/// the `►` before its title in the theme's focus accent, and the other
+/// keeps the plain border and a blank where the marker goes, in every
+/// view, side by side and stacked, whichever pane has focus. The titles'
+/// own text keeps its look.
+#[test]
+fn only_the_focused_pane_is_framed_in_the_focus_accent() {
+    use ratatui::style::Color;
+
+    let theme = crate::tui::Theme::default();
+    for (width, height) in [(160_u16, 30_u16), (80, 30)] {
+        let areas = panes(width, height);
+        for view in ALL_VIEWS {
+            let mut app = app_in(view);
+            for _ in 0..2 {
+                let buf = buffer_of(&mut app, width, height);
+                let label = format!("{view:?} at {width}x{height}, {:?} focused", app.focus());
+                let (focused, other) = match app.focus() {
+                    crate::tui::app::Focus::Left => (areas.left, areas.right),
+                    crate::tui::app::Focus::Right => (areas.right, areas.left),
+                };
+                for (x, y) in border_cells(focused) {
+                    assert_eq!(
+                        buf[(x, y)].fg,
+                        theme.panel_focus_accent,
+                        "{label}: ({x}, {y})"
+                    );
+                }
+                for (x, y) in border_cells(other) {
+                    assert_eq!(buf[(x, y)].fg, Color::Reset, "{label}: ({x}, {y})");
+                }
+                for (pane, mark) in [(focused, tuikit::glyphs::marks::POINTER), (other, " ")] {
+                    let cell = &buf[(pane.x + 2, pane.y)];
+                    assert_eq!(cell.symbol(), mark, "{label}: the marker");
+                    assert_eq!(cell.fg, theme.panel_focus_accent, "{label}: the marker");
+                    for x in [pane.x, pane.right() - 1] {
+                        let corner = buf[(x, pane.y)].fg;
+                        let tinted = pane == focused;
+                        assert_eq!(corner == theme.panel_focus_accent, tinted, "{label}: ({x})");
+                    }
+                }
+                app.update(Msg::CycleFocus);
+            }
+        }
+    }
+    // The right pane's title names the node's kind in bold, in no color
+    // of the border's.
+    let mut app = app_in(View::Mux);
+    select(&mut app, "conspectus-main");
+    app.update(Msg::CycleFocus);
+    let buf = buffer_of(&mut app, 160, 30);
+    let title = Rect {
+        height: 1,
+        ..panes(160, 30).right
+    };
+    let at = tuikit::testkit::buffer::find_in(&buf, title, "mux").expect("the right title");
+    assert_eq!(buf[(at.x, at.y)].fg, Color::Reset);
+    assert!(
+        buf[(at.x, at.y)]
+            .modifier
+            .contains(ratatui::style::Modifier::BOLD)
     );
 }
 

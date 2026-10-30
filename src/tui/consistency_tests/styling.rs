@@ -8,12 +8,12 @@ use super::*;
 use crate::tui::Effect;
 use crate::tui::effect::StoreOp;
 
-/// Whether the first cell of `label` in the left half of the frame has
-/// the ghost look (the theme's `inert` color, in italics).
+/// Whether the first cell of `label` in the left pane has the ghost look
+/// (the theme's `inert` color, in italics).
 fn label_wears_ghost_style(app: &mut App, label: &str, width: u16) -> bool {
     let buffer = buffer_of(app, width, 40);
     let theme = crate::tui::Theme::default();
-    let left = Rect::new(0, 0, width / 2, buffer.area.height);
+    let left = panes(width, 40).left;
     let at = find_in(&buffer, left, label)
         .unwrap_or_else(|| panic!("no row for {label} in:\n{}", buffer_to_string(&buffer)));
     let cell = &buffer[(at.x, at.y)];

@@ -244,12 +244,29 @@ pub(super) fn frame(app: &mut App, width: u16, height: u16) -> String {
     buffer_to_string(&buffer_of(app, width, height))
 }
 
-/// The text of the left pane's rows only, one string per terminal row.
+/// Where the screen puts its header, panes, and status bar on a
+/// `width` by `height` terminal at the default threshold: the layout the
+/// draw uses.
+pub(super) fn panes(width: u16, height: u16) -> crate::tui::ui::ScreenAreas {
+    crate::tui::ui::screen_areas(
+        Rect::new(0, 0, width, height),
+        crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
+    )
+}
+
+/// The text in the left pane's columns, one string per terminal row (the
+/// header and the status bar included), of a frame `width` cells wide.
 pub(super) fn left_pane_lines(frame: &str, width: u16) -> Vec<String> {
-    let half = usize::from(width) / 2;
+    let height = u16::try_from(frame.lines().count()).unwrap_or(u16::MAX);
+    let left = panes(width, height).left;
     frame
         .lines()
-        .map(|line| line.chars().take(half).collect())
+        .map(|line| {
+            line.chars()
+                .skip(usize::from(left.x))
+                .take(usize::from(left.width))
+                .collect()
+        })
         .collect()
 }
 

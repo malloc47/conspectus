@@ -20,9 +20,9 @@
 //!    (`tuikit::testkit::render`) and write it as ANSI text
 //!    (`tuikit::testkit::ansi`), styles kept.
 //! 4. Optionally slice the buffer to a single pane
-//!    ([`SnapshotPane`]) using the same layout split the renderer
-//!    uses, so agents can target the left tree, the detail pane,
-//!    the header bar, or the status bar without grepping.
+//!    ([`SnapshotPane`]) through the layout the renderer draws with,
+//!    so agents can target the left tree, the detail pane, the header
+//!    bar, or the status bar without grepping.
 //!
 //! The dispatcher handles a deliberate subset of actions, and the
 //! effects the reducer emits run on a snapshot-safe executor: anything
@@ -36,7 +36,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
 use ratatui::crossterm::event::{Event, KeyEvent};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use tuikit::feedback::{Feedback, Severity};
 use tuikit::testkit::render::FrameDriver;
 use tuikit::testkit::{ansi, keys};
@@ -91,8 +91,8 @@ pub struct SnapshotConfig {
 pub const FIXTURE_PATH_ROOT: &str = "/fixture";
 
 /// Targets the `--snapshot-pane` flag can select. `All` returns the
-/// full buffer; the other variants slice using the same layout the
-/// renderer uses.
+/// full buffer; the other variants slice it through the layout the
+/// renderer draws with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotPane {
     All,
@@ -489,42 +489,17 @@ fn action_label(action: &Action) -> &'static str {
     }
 }
 
-/// Compute the rect for a snapshot pane using the same layout the
-/// renderer applies in `ui::draw`. Kept in sync with the constraints
-/// in `ui::draw` and `ui::draw_body` by hand; the `pane_rect` tests
-/// pin the split.
+/// The rect of a snapshot pane: the region of the screen the renderer
+/// draws that part in, from the screen's one layout (`ui::screen_areas`),
+/// so the snapshot cannot drift from the draw.
 fn pane_rect(area: Rect, pane: SnapshotPane, narrow_layout_threshold: u16) -> Rect {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(3),
-            Constraint::Length(1),
-        ])
-        .split(area);
-    let header = layout[0];
-    let body = layout[1];
-    let status = layout[2];
+    let areas = crate::tui::ui::screen_areas(area, narrow_layout_threshold);
     match pane {
         SnapshotPane::All => area,
-        SnapshotPane::Header => header,
-        SnapshotPane::Status => status,
-        SnapshotPane::Left | SnapshotPane::Right => {
-            let direction = if body.width < narrow_layout_threshold {
-                Direction::Vertical
-            } else {
-                Direction::Horizontal
-            };
-            let split = Layout::default()
-                .direction(direction)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(body);
-            if matches!(pane, SnapshotPane::Left) {
-                split[0]
-            } else {
-                split[1]
-            }
-        }
+        SnapshotPane::Header => areas.header,
+        SnapshotPane::Status => areas.status,
+        SnapshotPane::Left => areas.left,
+        SnapshotPane::Right => areas.right,
     }
 }
 

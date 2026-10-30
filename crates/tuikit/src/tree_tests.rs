@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::*;
@@ -341,10 +341,10 @@ fn the_pane_draws_its_title_rows_and_scrollbar() {
     let tree = groups();
     let mut state = open(&[1, 5, 7]);
     state.home(&tree);
-    let view = TreeView::new(&tree, &state, label, &theme).title(Line::from(" tabs "));
+    let view = TreeView::new(&tree, &state, label, &theme).title(Line::from("tabs"));
     let (buf, window) = draw(view, 16, 8);
     let text = rows(&buf);
-    assert_eq!(text[0], "┌ tabs ────────┐");
+    assert_eq!(text[0], "┌ ► tabs ──────┐");
     assert!(
         text[1].starts_with(&format!("│{} - a  ", marks::POINTER)),
         "{text:?}"
@@ -432,6 +432,32 @@ fn no_showing_rows_draw_the_placeholder_and_report_no_window() {
     assert_eq!(text[1], "│Nothing to  │");
     assert_eq!(text[2], "│show here.  │");
     assert!(buf[(1, 1)].modifier.contains(theme.muted));
+}
+
+#[test]
+fn the_pane_shows_the_focus_cue_while_the_tree_has_focus() {
+    let theme = Theme::default();
+    let tree = groups();
+    let state = open(&[]);
+    let view = |focused| {
+        TreeView::new(&tree, &state, label, &theme)
+            .title(Line::from("tabs"))
+            .focused(focused)
+    };
+    let (focused, _) = draw(view(true), 12, 5);
+    let (unfocused, _) = draw(view(false), 12, 5);
+    assert_eq!(rows(&focused)[0], "┌ ► tabs ──┐");
+    assert_eq!(rows(&unfocused)[0], "┌   tabs ──┐");
+    for (x, y) in [(0, 0), (11, 0), (0, 2), (11, 4), (5, 4)] {
+        assert_eq!(focused[(x, y)].fg, theme.panel_focus_accent, "({x}, {y})");
+        assert_eq!(unfocused[(x, y)].fg, Color::Reset, "({x}, {y})");
+    }
+    assert_eq!(focused[(2, 0)].fg, theme.panel_focus_accent, "the marker");
+    assert_eq!(
+        focused[(4, 0)].fg,
+        Color::Reset,
+        "the title keeps its own look"
+    );
 }
 
 #[test]
@@ -554,10 +580,12 @@ fn every_row_starts_with_the_cursor_gutter_and_only_the_cursor_row_is_marked() {
                 assert_eq!(buf[(1, y)].symbol(), " ", "row {y}");
                 assert_eq!(buf[(2, y)].symbol(), " ", "row {y}");
             }
-            // The text after the gutter is where it is on every frame.
+            // The text after the gutter is where it is on every frame. The
+            // top border is left out: it carries the focus marker.
             frames.push(
                 rows(&buf)
                     .iter()
+                    .skip(1)
                     .map(|row| row.chars().skip(3).collect::<String>())
                     .collect::<Vec<_>>(),
             );

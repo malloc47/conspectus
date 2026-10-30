@@ -110,6 +110,36 @@ fn frame_rect_finds_only_a_frame_the_modal_drew() {
 }
 
 #[test]
+fn frame_rect_completes_a_frame_whose_corners_match_a_border_under_it() {
+    // Two panes stacked, the top one's border in a color, and a modal as
+    // wide and as tall as both whose border has that color too: its top
+    // corners are the top pane's, cell for cell, and only its bottom
+    // corners differ. With the colors the other way round, only its top
+    // corners differ.
+    let tinted = Style::new().fg(ratatui::style::Color::Cyan);
+    let screen = |top: Style, bottom: Style| {
+        move |frame: &mut ratatui::Frame<'_>| {
+            frame.render_widget(Block::bordered().border_style(top), Rect::new(0, 0, 12, 4));
+            frame.render_widget(
+                Block::bordered().border_style(bottom),
+                Rect::new(0, 4, 12, 4),
+            );
+        }
+    };
+    for (top, bottom) in [(tinted, Style::new()), (Style::new(), tinted)] {
+        let modal = if top == tinted { top } else { bottom };
+        let bare = render(12, 8, screen(top, bottom));
+        let with = render(12, 8, |frame| {
+            screen(top, bottom)(frame);
+            let area = Rect::new(0, 0, 12, 8);
+            frame.render_widget(ratatui::widgets::Clear, area);
+            frame.render_widget(Block::bordered().border_style(modal).title("m"), area);
+        });
+        assert_eq!(frame_rect(&with, &bare), Some(Rect::new(0, 0, 12, 8)));
+    }
+}
+
+#[test]
 fn inner_rows_read_a_scrollbar_cell_as_a_space() {
     let bar = ratatui::symbols::scrollbar::DOUBLE_VERTICAL;
     let buf = render(8, 4, |frame| {

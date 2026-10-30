@@ -186,15 +186,16 @@ fn the_unfocused_explorer_keeps_its_cursor_row_in_the_inactive_pair() {
     let mut app = app_in(View::Mux);
     select(&mut app, "conspectus-main");
     let (width, height) = (160_u16, 30_u16);
-    let half = width / 2;
+    let right = panes(width, height).right;
     let cursor_row = |buf: &Buffer| {
         (1..height - 1)
-            .find(|&y| buf[(half + 1, y)].symbol() == marks::POINTER)
+            .find(|&y| buf[(right.x + 1, y)].symbol() == marks::POINTER)
             .expect("the explorer marks its cursor row")
     };
 
-    // The value column: past the gutter and the 14-cell label.
-    let value = half + 1 + 2 + 14;
+    // The value column: past the border, the gutter, and the 14-cell
+    // label.
+    let value = right.x + 1 + 2 + 14;
 
     let unfocused = buffer_of(&mut app, width, height);
     let y = cursor_row(&unfocused);

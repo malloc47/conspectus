@@ -25,13 +25,16 @@
 //!   loaded yet.
 
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::macros::{horizontal, span, vertical};
+use ratatui::macros::span;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Paragraph, Widget};
 use tuikit::age::Age;
+use tuikit::app_frame::{AppFrame, Screen};
 use tuikit::chip::{StatusChip, Tone};
+use tuikit::frame::{PaneFrame, SplitPane};
 use tuikit::glyphs::marks;
 use tuikit::scroll::{Anchor, ScrollRegion, ScrollWindow, rows_under};
 use tuikit::text;
@@ -61,11 +64,12 @@ use right_panel::*;
 
 /// Render one frame and report the window each scrolled pane drew.
 ///
-/// The header, the panes, and the status bar draw first, unless an open
-/// modal fills the screen (a full-screen viewer), which hides them. Every
-/// open modal then draws over them, bottom to top (ADR 0161): each clears
-/// what it covers, so a modal opened over another shows the lower one
-/// around its frame. A toast draws last, over everything.
+/// The screen is the framework's [`AppFrame`]: the header, the panes, and
+/// the status bar draw first, unless an open modal fills the screen (a
+/// full-screen viewer), which hides them. Every open modal then draws over
+/// them, bottom to top (ADR 0161): each clears what it covers, so a modal
+/// opened over another shows the lower one around its frame. A toast
+/// draws last, over everything.
 ///
 /// The tree, the explorer, and the Preview each work their window out
 /// from the App (the window kept from the last frame and the cursor) and
@@ -81,22 +85,73 @@ use right_panel::*;
 /// (`App::prepare_preview`), and the modals keep the windows they drew.
 pub fn draw(app: &mut App, frame: &mut Frame<'_>) -> ViewportReport {
     let area = frame.area();
-    let mut report = ViewportReport::default();
-    if !app.modals_fill_screen() {
-        let layout = vertical![==1, >=3, ==1].split(area);
-        draw_header(app, frame, layout[0]);
-        report = draw_body(app, frame, layout[1]);
-        draw_status_bar(app, frame, layout[2]);
-    }
-    app.draw_modals(area, frame.buffer_mut());
-    draw_toast(app, frame, area);
-    report
+    SCREEN.render(area, frame.buffer_mut(), &mut MainScreen(app))
 }
 
-/// The toast on screen, over everything else. An expired one was
-/// retired by `prepare_toast_for_render` before the draw.
-fn draw_toast(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    app.toasts().render(area, frame.buffer_mut(), app.theme());
+/// The main screen's frame: a header row, the panes, and the status bar.
+const SCREEN: AppFrame = AppFrame::new();
+
+/// What the main screen draws in each part of [`SCREEN`], over the App.
+struct MainScreen<'a>(&'a mut App);
+
+impl Screen for MainScreen<'_> {
+    type Report = ViewportReport;
+
+    fn header(&mut self, area: Rect, buf: &mut Buffer) {
+        draw_header(self.0, buf, area);
+    }
+
+    fn body(&mut self, area: Rect, buf: &mut Buffer) -> ViewportReport {
+        draw_body(self.0, buf, area)
+    }
+
+    fn footer(&mut self, area: Rect, buf: &mut Buffer) {
+        draw_status_bar(self.0, buf, area);
+    }
+
+    fn overlays_fill_screen(&self) -> bool {
+        self.0.modals_fill_screen()
+    }
+
+    fn overlays(&mut self, area: Rect, buf: &mut Buffer) {
+        self.0.draw_modals(area, buf);
+    }
+
+    /// The toast on screen, over everything else. An expired one was
+    /// retired by `prepare_toast_for_render` before the draw.
+    fn toasts(&mut self, area: Rect, buf: &mut Buffer) {
+        self.0.toasts().render(area, buf, self.0.theme());
+    }
+}
+
+/// Where the main screen's parts go in `area`: the header row, the two
+/// panes, and the status bar.
+#[cfg(any(test, feature = "snapshot"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScreenAreas {
+    pub header: Rect,
+    /// The tree's pane: on the left, or on top when the panes stack.
+    pub left: Rect,
+    /// The right pane: on the right, or below when the panes stack.
+    pub right: Rect,
+    pub status: Rect,
+}
+
+/// The main screen's layout in `area` with the panes stacking below
+/// `narrow_layout_threshold` columns: [`SCREEN`]'s rows and the body's
+/// [`SplitPane`], as the draw places them. `--snapshot-pane` and the tests
+/// find a pane's cells through this, so nothing keeps a copy of the
+/// layout.
+#[cfg(any(test, feature = "snapshot"))]
+pub(crate) fn screen_areas(area: Rect, narrow_layout_threshold: u16) -> ScreenAreas {
+    let chrome = SCREEN.areas(area);
+    let [left, right] = SplitPane::new(narrow_layout_threshold).areas(chrome.body);
+    ScreenAreas {
+        header: chrome.header,
+        left,
+        right,
+        status: chrome.footer,
+    }
 }
 
 // Render clock: wall time in production, a settable clock in tests.
@@ -135,30 +190,17 @@ pub(crate) mod test_clock {
 // Body: left tree + right detail
 // -----------------------------------------------------------------------------
 
-fn draw_body(app: &mut App, frame: &mut Frame<'_>, area: Rect) -> ViewportReport {
-    let threshold = app.config().narrow_layout_threshold;
-    let split = if area.width < threshold {
-        vertical![==50%, ==50%].split(area)
-    } else {
-        horizontal![==50%, ==50%].split(area)
-    };
-    let tree = draw_left_panel(app, frame, split[0]);
-    let (explorer, preview) = draw_right_panel(app, frame, split[1]);
+/// The two panes, side by side or stacked by the configured threshold,
+/// each in a [`PaneFrame`] that shows whether it has focus.
+fn draw_body(app: &mut App, buf: &mut Buffer, area: Rect) -> ViewportReport {
+    let [left, right] = SplitPane::new(app.config().narrow_layout_threshold).areas(area);
+    let tree = draw_left_panel(app, buf, left);
+    let (explorer, preview) = draw_right_panel(app, buf, right);
     ViewportReport {
         tree,
         explorer,
         preview,
     }
-}
-
-/// `► ` when the given panel has focus, two-space pad otherwise.
-/// Keeps title widths consistent across focus states so the tab
-/// strip and right-pane label sit at the same offset before and
-/// after `Tab`.
-fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
-    let focused = app.focus() == panel;
-    let marker = if focused { marks::POINTER } else { " " };
-    span!(Style::default().fg(app.theme().panel_focus_accent); "{marker} ")
 }
 
 // -----------------------------------------------------------------------------
