@@ -4,6 +4,7 @@ title: Line up the path and count columns of nested group headers with their par
 status: To Do
 assignee: []
 created_date: '2026-10-28 07:24'
+updated_date: '2026-10-30 02:31'
 labels:
   - tui-framework
   - tuifw-cleanup
@@ -32,3 +33,9 @@ Found while reproducing CSP-714. A nested group header (a checkout `◇` under a
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+From CSP-751: group headers are laid out from a column schema now (`src/tui/ui/left_panel/columns.rs`). The header's path column absorbs the row's indent (`Column::absorbs_lead`), so the counts already line up at every depth; the label column does not, so the path still drifts two cells per depth. Adding `.absorbs_lead()` to the `HeaderLabel` column is the fix (then regenerate the frames with `just tui-columns`).
+<!-- SECTION:NOTES:END -->
