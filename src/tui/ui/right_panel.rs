@@ -1,6 +1,8 @@
 //! Right panel: the graph explorer (ADR 0074) and its title.
 
-use tuikit::selection::{self, Cursor};
+use tuikit::property_grid::{GridLines, PropertyGrid, PropertyRow};
+
+use crate::tui::explorer::grid::{self as explorer_grid, field_row};
 
 use super::*;
 
@@ -42,7 +44,7 @@ pub(super) fn draw_right_panel(
     // below it lands one line lower than the row count expects,
     // leaving the cursor visible off the bottom of the viewport.
     let content_width = inner.width.saturating_sub(1).max(1) as usize;
-    let ExplorerRender {
+    let GridLines {
         mut lines,
         mut cursor_line,
     } = {
@@ -199,15 +201,6 @@ pub(super) fn right_panel_kind_label(app: &App) -> &'static str {
     }
 }
 
-/// Output of [`render_explorer_lines`]: the rendered lines plus the
-/// index in `lines` of the cursor's row (when one of the rendered
-/// rows is selected). Used by [`draw_right_panel`] to compute the
-/// post-wrap scroll offset that keeps the cursor in view.
-pub(super) struct ExplorerRender {
-    pub(super) lines: Vec<Line<'static>>,
-    pub(super) cursor_line: Option<usize>,
-}
-
 /// Where a zone divider puts its summary relative to its chip. The line
 /// is a rule, then the chip and summary, then a short closing rule.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -266,11 +259,12 @@ pub(super) fn chip_divider_line(
     Line::from(spans)
 }
 
-/// Render the related-entities layout (ADR 0074). Validated rows
-/// (resolver winners) sit in a flat list under one `Related` chip
-/// divider; alternates, conflicts, and unresolved stubs collapse
-/// under a single `Other` header below the fold. Each row reads as
-/// `<verb-column 22w> <kind-glyph> <neighbor_label>`; direction
+/// Render the related-entities layout (ADR 0074) as a property grid: the
+/// focused node's fields, then, when it has neighbors, the `Related`
+/// rule and one link row per neighbor. Validated rows (resolver winners)
+/// sit flush under the rule; alternates, conflicts, and unresolved stubs
+/// collapse under a single `Other` header below the fold. Each link row
+/// reads as `<verb column> <kind-glyph> <neighbor_label>`; direction
 /// flows from the verb, not from section placement.
 pub(super) fn render_explorer_lines(
     state: &crate::tui::app::ExplorerState,
@@ -278,32 +272,35 @@ pub(super) fn render_explorer_lines(
     theme: &Theme,
     show_edge_meta: bool,
     focused: bool,
-) -> ExplorerRender {
+) -> GridLines {
     use crate::tui::explorer::ExplorerRow;
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    let mut cursor_line: Option<usize> = None;
-    let rows = state.rows();
-    let cursor = state.cursor;
     let view = &state.view;
-
-    for (idx, field) in view.fields(state.full_detail_expanded).iter().enumerate() {
-        let flat_index = rows
-            .iter()
-            .position(|row| matches!(row, ExplorerRow::NodeField { index, .. } if *index == idx));
-        let at_cursor = flat_index == Some(cursor);
-        // An unfocused pane keeps its cursor row marked, in the inactive
-        // look, so it still shows where the cursor is.
-        let mark = Cursor::of(at_cursor, focused);
-        if at_cursor {
-            cursor_line = Some(lines.len());
+    let rows = state.rows();
+    let fields = rows
+        .iter()
+        .take_while(|row| matches!(row, ExplorerRow::NodeField { .. }))
+        .count();
+    let push = |grid: &mut PropertyGrid, rows: &[ExplorerRow]| {
+        for row in rows {
+            grid.push(explorer_grid::grid_row(view, row, theme, show_edge_meta));
         }
-        lines.push(render_node_field_line(field, mark, theme));
+    };
+    let mut grid = explorer_grid::grid(theme);
+    push(&mut grid, &rows[..fields]);
+    if !view.relationships.groups.is_empty() {
+        grid.push_line(related_rule(view, width, theme));
+        push(&mut grid, &rows[fields..]);
     }
+    grid.lines(width, Some(state.cursor), focused, theme)
+}
 
-    if view.relationships.groups.is_empty() {
-        return ExplorerRender { lines, cursor_line };
-    }
-
+/// The `Related` rule over the link rows, its summary counting the
+/// validated rows and what the Other zone holds (ADR 0074 §5).
+fn related_rule(
+    view: &crate::tui::explorer::NodeView,
+    width: usize,
+    theme: &Theme,
+) -> Line<'static> {
     let counts = view.relationship_counts();
     let mut summary = format!("{} validated", counts.validated);
     if counts.other > 0 {
@@ -315,356 +312,7 @@ pub(super) fn render_explorer_lines(
             summary.push_str(&format!(" · {} {}", counts.unresolved, marks::NO_VALUE));
         }
     }
-    lines.push(chip_divider_line(
-        "Related",
-        Some(&summary),
-        width,
-        theme,
-        ChipAnchor::Right,
-    ));
-
-    for (row_index, row) in rows.iter().enumerate() {
-        let at_cursor = row_index == cursor;
-        let mark = Cursor::of(at_cursor, focused);
-        let pushed = match row {
-            ExplorerRow::NodeField { .. } => false,
-            ExplorerRow::ValidatedLink {
-                group_index,
-                link_index,
-            } => {
-                if let Some(group) = view.relationships.groups.get(*group_index)
-                    && let Some(link) = group.links.get(*link_index)
-                {
-                    lines.push(render_validated_link_line(
-                        group,
-                        link,
-                        mark,
-                        theme,
-                        show_edge_meta,
-                        width,
-                    ));
-                    true
-                } else {
-                    false
-                }
-            }
-            ExplorerRow::OtherHeader { expanded } => {
-                lines.push(render_other_header_line(
-                    *expanded,
-                    counts.other,
-                    counts.ambiguous,
-                    counts.unresolved,
-                    mark,
-                    theme,
-                ));
-                true
-            }
-            ExplorerRow::OtherLink {
-                group_index,
-                link_index,
-            } => {
-                if let Some(group) = view.relationships.groups.get(*group_index)
-                    && let Some(link) = group.links.get(*link_index)
-                {
-                    lines.push(render_other_link_line(
-                        group,
-                        link,
-                        mark,
-                        theme,
-                        show_edge_meta,
-                        width,
-                    ));
-                    true
-                } else {
-                    false
-                }
-            }
-            ExplorerRow::OtherUnresolved {
-                group_index,
-                unresolved_index,
-            } => {
-                if let Some(group) = view.relationships.groups.get(*group_index)
-                    && let Some(unresolved) = group.unresolved.get(*unresolved_index)
-                {
-                    lines.push(render_other_unresolved_line(group, unresolved, mark, theme));
-                    true
-                } else {
-                    false
-                }
-            }
-        };
-        if at_cursor && pushed {
-            cursor_line = Some(lines.len() - 1);
-        }
-    }
-    ExplorerRender { lines, cursor_line }
-}
-
-/// One field of the explorer's node: the cursor gutter, the label, an
-/// optional kind chip, and the value. The cursor row is highlighted
-/// whole.
-pub(super) fn render_node_field_line(
-    field: &crate::tui::explorer::CoreField,
-    cursor: Cursor,
-    theme: &Theme,
-) -> Line<'static> {
-    let style = if field.placeholder {
-        Style::default().add_modifier(theme.muted)
-    } else {
-        Style::default()
-    };
-    let label = span!(Modifier::BOLD; "{:<14}", field.label);
-    let mut spans = vec![label];
-    // ADR 0073 §3: render the kind-chip glyph before the value so the
-    // chip stays anchored beside the label even when the value wraps
-    // onto a new line in a narrow pane (otherwise the chip strands at
-    // the wrap tail and reads as a stray symbol).
-    if let Some(kind) = field.kind_chip {
-        spans.push(kind_chip_span(Some(kind), theme));
-        spans.push(Span::raw(" "));
-    }
-    spans.push(span!(style; "{}", field.value.clone()));
-    if field.long_value.is_some() {
-        spans.push(span!(theme.muted; "  (truncated · o)"));
-    }
-    if let Some(annotation) = field.annotation {
-        spans.push(Span::raw(" "));
-        spans.push(span!(
-            Style::default().fg(theme.warning);
-            "{}",
-            annotation
-        ));
-    }
-    selection::row(spans, cursor, theme)
-}
-
-/// Per-kind glyph chip used to surface the graph node kind next to a
-/// value or beside a relationship-explorer neighbor. ADR
-/// 0073 §3 replaces the prior dim `[kind]` text with a 1-cell glyph
-/// in the node-kind color so the chip carries identity at a glance.
-/// A missing kind (the neighbor isn't in the snapshot) falls back to
-/// a dim `?` so the chip slot stays visible without misleading the
-/// operator.
-///
-/// `ForgePr`'s glyph takes the `pr_open` hue here because the
-/// chip-rendering surfaces do not carry PR state down — the row
-/// tree's [`pr_kind_glyph_span`] handles state-aware coloring
-/// directly off the row.
-pub(super) fn kind_chip_span(kind: Option<NodeKind>, theme: &Theme) -> Span<'static> {
-    let Some(node_kind) = kind else {
-        return span!(theme.muted; "?");
-    };
-    let style = node_kind_style(node_kind, theme);
-    span!(Style::default().fg(style.color); "{}", style.glyph)
-}
-
-/// Width of the verb column in row lines (ADR 0074 §3 mockup). The
-/// verb takes the place section labels (`Upstream`, `Downstream`)
-/// used to hold; direction reads off the verb itself.
-pub(super) const VERB_COLUMN_WIDTH: usize = 22;
-
-/// Render a validated zone row: `<verb 22w> <glyph> <neighbor_label>`
-/// (ADR 0074 §3, ADR 0075). The prior `★` resolver-winner marker
-/// is dropped — every validated row is a resolver winner by
-/// construction, so the marker no longer earns its column.
-pub(super) fn render_validated_link_line(
-    group: &crate::tui::explorer::RelationshipGroup,
-    link: &crate::tui::explorer::RelationshipLink,
-    cursor: Cursor,
-    theme: &Theme,
-    show_edge_meta: bool,
-    width: usize,
-) -> Line<'static> {
-    render_related_row(
-        group,
-        link,
-        cursor,
-        theme,
-        show_edge_meta,
-        width,
-        "",
-        None,
-        Style::default().fg(theme.link).add_modifier(Modifier::BOLD),
-    )
-}
-
-/// Render an Other-zone link row (ADR 0075). The row prefix +
-/// label color encode the `EdgeStateLabel` so an operator skimming
-/// the zone can tell at a glance which rows are alternates and
-/// which are conflicts:
-///
-/// - `AltOf(_)` → 4 cells past the cursor gutter, no prefix glyph,
-///   label in `theme.edge_alt_of()`. Quiet — these are candidates the
-///   resolver considered but didn't pick.
-/// - `Conflict` → `▲ ` prefix after the gutter in
-///   `theme.edge_conflict()`, label in
-///   `theme.edge_conflict()` + BOLD. The `▲` is the cross-mode
-///   anchor (survives `NO_COLOR`); it also lines up vocabulary
-///   with the Other header's `K ▲` summary count.
-/// - `Resolves` is unreachable here — Resolves rows live in the
-///   validated zone — but the renderer falls back to AltOf styling
-///   defensively in case a future change routes one through.
-pub(super) fn render_other_link_line(
-    group: &crate::tui::explorer::RelationshipGroup,
-    link: &crate::tui::explorer::RelationshipLink,
-    cursor: Cursor,
-    theme: &Theme,
-    show_edge_meta: bool,
-    width: usize,
-) -> Line<'static> {
-    use crate::tui::explorer::EdgeStateLabel;
-    let (indent, prefix_span, label_style) = match link.edge_state {
-        EdgeStateLabel::Conflict => {
-            let conflict_style = Style::default()
-                .fg(theme.edge_conflict())
-                .add_modifier(Modifier::BOLD);
-            let prefix = span!(conflict_style; "{} ", marks::WARNING);
-            ("  ", Some(prefix), conflict_style)
-        }
-        EdgeStateLabel::AltOf(_) | EdgeStateLabel::Resolves => {
-            ("    ", None, Style::default().fg(theme.edge_alt_of()))
-        }
-    };
-    render_related_row(
-        group,
-        link,
-        cursor,
-        theme,
-        show_edge_meta,
-        width,
-        indent,
-        prefix_span,
-        label_style,
-    )
-}
-
-/// Narrowest label budget worth middle-truncating to; below this the
-/// optional edge-meta suffix gives up its room instead.
-pub(super) const MIN_RELATED_LABEL_WIDTH: usize = 8;
-
-/// Render one related-entities row: the cursor gutter, an optional
-/// prefix, the indent, the verb column, the kind glyph, and the
-/// neighbor label. The label is middle-truncated to the space left
-/// after them: the explorer paragraph word-wraps, so an unbroken path
-/// that overflows would otherwise drop onto the next line and leave
-/// this row visually empty. The cursor row is highlighted whole.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn render_related_row(
-    group: &crate::tui::explorer::RelationshipGroup,
-    link: &crate::tui::explorer::RelationshipLink,
-    cursor: Cursor,
-    theme: &Theme,
-    show_edge_meta: bool,
-    width: usize,
-    indent: &str,
-    prefix: Option<Span<'static>>,
-    label_style: Style,
-) -> Line<'static> {
-    let verb = crate::tui::explorer::directional_verb(&group.relation, group.direction);
-    let verb_text = format!("{indent}{verb:<VERB_COLUMN_WIDTH$} ");
-    let kind_chip = kind_chip_span(link.neighbor_kind, theme);
-    let edge_meta = show_edge_meta.then(|| {
-        format!(
-            "  · {} · {} · {}",
-            link.provenance.snake_case(),
-            link.confidence.snake_case(),
-            link.state.snake_case(),
-        )
-    });
-    let prefix_width = prefix
-        .as_ref()
-        .map_or(0, |p| text::width(p.content.as_ref()));
-    // gutter + verb column + glyph + separating space
-    let fixed = selection::GUTTER_WIDTH + prefix_width + text::width(verb_text.as_str()) + 2;
-    let meta_width = edge_meta.as_deref().map_or(0, text::width);
-    let with_meta = width.saturating_sub(fixed + meta_width);
-    let label_budget = if with_meta >= MIN_RELATED_LABEL_WIDTH {
-        with_meta
-    } else {
-        width.saturating_sub(fixed).max(1)
-    };
-    let label = text::truncate_middle(&link.neighbor_label, label_budget);
-
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    if let Some(prefix) = prefix {
-        spans.push(prefix);
-    }
-    spans.push(Span::raw(verb_text));
-    spans.push(kind_chip);
-    spans.push(Span::raw(" "));
-    spans.push(span!(label_style; "{label}"));
-    if let Some(trailing) = edge_meta {
-        spans.push(span!(label_style; "{trailing}"));
-    }
-    selection::row(spans, cursor, theme)
-}
-
-/// `► Other (N · K ▲ · L —)` / `▼ Other (N · K ▲ · L —)` row that
-/// gates the alternates / conflicts / unresolved zone (ADR 0074 §3).
-pub(super) fn render_other_header_line(
-    expanded: bool,
-    other_count: usize,
-    ambiguous_count: usize,
-    unresolved_count: usize,
-    cursor: Cursor,
-    theme: &Theme,
-) -> Line<'static> {
-    let glyph = if expanded {
-        marks::EXPANDED
-    } else {
-        marks::COLLAPSED
-    };
-    let mut suffix = format!("({other_count}");
-    if ambiguous_count > 0 {
-        suffix.push_str(&format!(" · {ambiguous_count} {}", marks::WARNING));
-    }
-    if unresolved_count > 0 {
-        suffix.push_str(&format!(" · {unresolved_count} {}", marks::NO_VALUE));
-    }
-    suffix.push(')');
-    let text = format!("{glyph} Other  {suffix}");
-    let style = Style::default()
-        .fg(theme.inert)
-        .add_modifier(Modifier::BOLD);
-    selection::row([span!(style; "{text}")], cursor, theme)
-}
-
-/// Render an Other-zone unresolved-evidence row. Shape mirrors
-/// [`render_other_link_line`] but the right side carries the
-/// evidence summary instead of a neighbor id.
-pub(super) fn render_other_unresolved_line(
-    group: &crate::tui::explorer::RelationshipGroup,
-    row: &crate::tui::explorer::UnresolvedRow,
-    cursor: Cursor,
-    theme: &Theme,
-) -> Line<'static> {
-    let verb = crate::tui::explorer::directional_verb(&group.relation, group.direction);
-    let detail = unresolved_evidence_summary(row);
-    let text = format!("    {verb:<VERB_COLUMN_WIDTH$} — {detail}",);
-    let style = Style::default().add_modifier(theme.muted);
-    selection::row([span!(style; "{text}")], cursor, theme)
-}
-
-pub(super) fn unresolved_evidence_summary(row: &crate::tui::explorer::UnresolvedRow) -> String {
-    let mut parts = Vec::new();
-    if let Some(native) = &row.evidence.native_id {
-        parts.push(native.clone());
-    }
-    if let Some(harness) = &row.evidence.harness_key {
-        parts.push(harness.clone());
-    }
-    if let Some(path) = &row.evidence.path {
-        parts.push(path.clone());
-    }
-    if parts.is_empty() {
-        parts.push(row.node_type.clone());
-    }
-    format!(
-        "{}  ·  {} · {}",
-        parts.join(" · "),
-        row.provenance.snake_case(),
-        row.confidence.snake_case(),
-    )
+    chip_divider_line("Related", Some(&summary), width, theme, ChipAnchor::Right)
 }
 
 /// Render the Preview zone body for the currently-selected explorer
@@ -692,7 +340,14 @@ pub(super) fn draw_explorer_preview(
         return draw_detail_preview(app, frame, area);
     };
     let theme = app.theme();
-    let mut lines: Vec<Line<'static>> = Vec::new();
+    let receding = Style::default().add_modifier(theme.muted);
+    // Under a bold heading that names it, the neighbor's fields and its
+    // edge read as the explorer's own fields do: a label column, then
+    // the value.
+    let heading = |what: &str, name: &str| {
+        Line::from(span!(Modifier::BOLD; "  {}{name}", text::pad(what, 12)))
+    };
+    let mut grid = explorer_grid::grid(theme);
     let mut neighbor_source = None;
     let mut neighbor_text = None;
     match preview {
@@ -706,17 +361,14 @@ pub(super) fn draw_explorer_preview(
             edge_state,
             evidence,
         } => {
-            lines.push(Line::from(span!(
-                Modifier::BOLD;
-                "  neighbor    {neighbor_label}"
-            )));
+            grid.push_line(heading("neighbor", neighbor_label));
             neighbor_source = crate::tui::preview::node_source(app, neighbor_id);
             if neighbor_source.is_none() {
                 match sourceless_node_text(app, neighbor_id) {
                     Some(text) => neighbor_text = Some(text),
                     None => {
                         for field in fields {
-                            lines.push(render_node_field_line(field, Cursor::Off, theme));
+                            grid.push(field_row(field, theme));
                         }
                     }
                 }
@@ -728,10 +380,9 @@ pub(super) fn draw_explorer_preview(
                 link_state.snake_case(),
                 edge_state.snake_case(),
             );
-            lines.push(Line::from(vec![
-                span!(Modifier::BOLD; "  {:<14}", "edge"),
-                span!(Style::default().fg(theme.warning); "{edge_value}"),
-            ]));
+            grid.push(
+                PropertyRow::new("edge", edge_value).style(Style::default().fg(theme.warning)),
+            );
             // One line per backing link so agreeing producers are
             // visible without each taking a row in the Related list.
             // The evidence kind names the producer more precisely
@@ -747,10 +398,7 @@ pub(super) fn draw_explorer_preview(
                     .chain([item.provenance.snake_case(), item.confidence.snake_case()])
                     .collect::<Vec<_>>()
                     .join(" · ");
-                lines.push(Line::from(vec![
-                    span!(Modifier::BOLD; "  {label:<14}"),
-                    span!(theme.muted; "{value}"),
-                ]));
+                grid.push(PropertyRow::new(label, value).style(receding));
             }
         }
         RowPreview::Unresolved {
@@ -760,10 +408,7 @@ pub(super) fn draw_explorer_preview(
             confidence,
             state: link_state,
         } => {
-            lines.push(Line::from(span!(
-                Modifier::BOLD;
-                "  unresolved  {node_type}"
-            )));
+            grid.push_line(heading("unresolved", node_type));
             for (label, value) in [
                 ("harness_key", evidence.harness_key.as_deref()),
                 ("native_id", evidence.native_id.as_deref()),
@@ -771,24 +416,26 @@ pub(super) fn draw_explorer_preview(
                 ("path", evidence.path.as_deref()),
             ] {
                 if let Some(value) = value {
-                    lines.push(Line::from(vec![
-                        span!(Modifier::BOLD; "  {label:<14}"),
-                        Span::raw(value.to_string()),
-                    ]));
+                    grid.push(PropertyRow::new(label, value));
                 }
             }
-            lines.push(Line::from(vec![
-                span!(Modifier::BOLD; "  {:<14}", "edge"),
-                span!(
-                    theme.muted;
-                    "{} · {} · {}",
-                    provenance.snake_case(),
-                    confidence.snake_case(),
-                    link_state.snake_case()
-                ),
-            ]));
+            grid.push(
+                PropertyRow::new(
+                    "edge",
+                    format!(
+                        "{} · {} · {}",
+                        provenance.snake_case(),
+                        confidence.snake_case(),
+                        link_state.snake_case()
+                    ),
+                )
+                .style(receding),
+            );
         }
     }
+    let mut lines = grid
+        .lines(usize::from(area.width), None, false, theme)
+        .lines;
     let view = if let Some(source) = neighbor_source {
         lines.push(Line::raw(""));
         let body_height = rows_under(&lines, area.width, area.height as usize);

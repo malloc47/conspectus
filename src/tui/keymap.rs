@@ -20,6 +20,11 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use crate::tui::app::{App, Focus};
 use crate::tui::{Msg, View};
 
+/// The key that opens the explorer cursor row's whole value
+/// ([`Action::OpenValueModal`]). The explorer's cut-value hint names it
+/// from here, so the hint and the binding cannot drift apart.
+pub const INSPECT_KEY: char = 'o';
+
 /// Semantic action the runtime dispatches once a crossterm event
 /// is translated. A key an open modal owns arrives as
 /// [`Action::ModalKey`]; everything flows through
@@ -212,7 +217,7 @@ pub fn translate(event: Event) -> Option<Action> {
             // `o` opens the full-value modal on the cursor
             // row. The reducer no-ops gracefully if the cursor isn't
             // on a row with a truncated value.
-            (m, KeyCode::Char('o')) if !m.contains(KeyModifiers::CONTROL) => {
+            (m, KeyCode::Char(INSPECT_KEY)) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenValueModal)
             }
             // `i` copies the selected agent or mux session's

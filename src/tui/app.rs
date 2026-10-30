@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use tuikit::feedback::{Feedback, Toasts};
+use tuikit::property_grid::Intent;
 use tuikit::scroll::{Anchor, ScrollRegion, ScrollWindow};
 use tuikit::tree::{RowState, TreeState};
 
@@ -649,29 +650,30 @@ impl App {
         }
     }
 
+    /// The explorer cursor's row as the pane draws it, which says what
+    /// Enter and `o` mean on it.
+    fn explorer_cursor_row(&self) -> Option<tuikit::property_grid::Row> {
+        let state = self.explorer.as_ref()?;
+        let row = state.selected_row()?;
+        Some(crate::tui::explorer::grid::grid_row(
+            &state.view,
+            &row,
+            self.theme(),
+            self.edge_meta_visible,
+        ))
+    }
+
     /// Resolve whatever copyable value the explorer cursor points at.
     /// Returns `(label, value)` for the toast caption + clipboard
-    /// payload, or `None` if the row is not a Node-zone field or the
-    /// field has no value (empty or absent), so the toast never
-    /// claims a copy that didn't happen.
+    /// payload, the field's whole value even when the pane shows it cut,
+    /// or `None` if the row is not a Node-zone field or the field has no
+    /// value (empty, or a placeholder), so the toast never claims a copy
+    /// that didn't happen.
     pub fn explorer_copy_target(&self) -> Option<(String, String)> {
-        let ExplorerRow::NodeField {
-            label,
-            value,
-            long_value,
-            ..
-        } = self.explorer.as_ref()?.selected_row()?
-        else {
-            return None;
-        };
-        // Prefer the untruncated form when present so the clipboard
-        // always carries the full value; fall back to the rendered
-        // short form for fields without a separately-tracked long form.
-        let value = long_value.unwrap_or(value);
-        if value.is_empty() {
-            return None;
+        match self.explorer_cursor_row()?.activate()? {
+            Intent::Copy { label, text } => Some((label, text)),
+            Intent::Inspect { .. } | Intent::Toggle | Intent::Follow => None,
         }
-        Some((label.to_string(), value))
     }
 
     /// Resolve the full id of the selected agent or mux session row
@@ -698,30 +700,22 @@ impl App {
     /// long value is reachable from the current cursor.
     pub fn open_value_modal_for_cursor(&mut self) {
         // Skip if nothing's mounted.
-        let Some(state) = self.explorer.as_ref() else {
+        if self.explorer.is_none() {
             self.status_message = Some(Feedback::warning(
                 "explorer: nothing to open here — `o` opens long values on the cursor row",
             ));
             return;
-        };
-        let Some(row) = state.selected_row() else {
+        }
+        let Some(row) = self.explorer_cursor_row() else {
             return;
         };
-        let opened = match row {
-            ExplorerRow::NodeField {
-                label,
-                long_value: Some(value),
-                ..
-            } => Some((label.to_string(), value)),
-            _ => None,
-        };
-        match opened {
-            Some((label, value)) => {
+        match row.inspect() {
+            Some(Intent::Inspect { label, text: value }) => {
                 self.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
                     label, value,
                 ));
             }
-            None => {
+            Some(Intent::Copy { .. } | Intent::Toggle | Intent::Follow) | None => {
                 self.status_message = Some(Feedback::warning(
                     "explorer: row has no truncated value to open",
                 ));

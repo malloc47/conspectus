@@ -1523,6 +1523,11 @@ fn put_cursor_on_field(app: &mut App, label: &str) {
     assert_eq!(app.explorer().expect("state").cursor, position);
 }
 
+/// Whether the pane shows `field` cut short.
+fn is_cut(field: &crate::tui::explorer::CoreField) -> bool {
+    crate::tui::explorer::grid::field_row(field, &crate::tui::Theme::default()).is_cut()
+}
+
 /// Enter on the focused explorer row, with the clipboard write captured.
 fn press_enter_capturing_clipboard(app: &mut App) -> Option<String> {
     let mut clipboard = None;
@@ -1607,17 +1612,16 @@ fn enter_copies_the_field_under_the_cursor_with_the_node_detail_collapsed_and_ex
             .fields(expanded)
             .to_vec();
         assert!(
-            shown.iter().any(|field| field.long_value.is_some()),
+            shown.iter().any(is_cut),
             "test premise: a shown field is cut short (expanded: {expanded})",
         );
         for field in &shown {
             put_cursor_on_field(&mut app, field.label);
-            let wanted = field.long_value.as_deref().unwrap_or(&field.value);
             let clipboard = press_enter_capturing_clipboard(&mut app);
             assert_eq!(
                 clipboard.as_deref(),
-                Some(wanted),
-                "Enter on {} copies it (expanded: {expanded})",
+                Some(field.value.as_str()),
+                "Enter on {} copies it whole, cut or not (expanded: {expanded})",
                 field.label,
             );
             assert_eq!(
@@ -1626,6 +1630,52 @@ fn enter_copies_the_field_under_the_cursor_with_the_node_detail_collapsed_and_ex
             );
         }
     }
+}
+
+#[test]
+fn enter_on_a_field_with_no_value_copies_nothing() {
+    // A session with no working directory shows `cwd — (unknown)`, a
+    // stand-in for a value it does not have: there is nothing to copy,
+    // so no copy toast claims one.
+    let mut snap = GraphSnapshot::empty();
+    snap.nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", "abc"),
+            "claude-code".to_string(),
+        )));
+    let snap = resolve_snapshot(snap);
+    let tree = build_tree(&snap);
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snap),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let row_id = app
+        .visible_rows()
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::AgentSession(_) => Some(row.id.clone()),
+            _ => None,
+        })
+        .expect("session row");
+    app.set_selection(row_id);
+    put_cursor_on_field(&mut app, "cwd");
+    let shown = app.explorer().expect("state").view.fields(false).to_vec();
+    let cwd = shown
+        .iter()
+        .find(|field| field.label == "cwd")
+        .expect("cwd");
+    assert!(cwd.placeholder, "test premise: the cwd is a stand-in");
+
+    assert_eq!(press_enter_capturing_clipboard(&mut app), None);
+    assert!(
+        app.toasts()
+            .iter()
+            .all(|toast| !toast.text.starts_with("copied")),
+        "no toast claims a copy"
+    );
 }
 
 #[test]
@@ -1644,12 +1694,12 @@ fn o_inspects_the_field_under_the_cursor_with_the_node_detail_collapsed_and_expa
         for field in &shown {
             put_cursor_on_field(&mut app, field.label);
             app.open_value_modal_for_cursor();
-            if let Some(full) = &field.long_value {
+            if is_cut(field) {
                 let modal = app
                     .value_modal()
                     .unwrap_or_else(|| panic!("o opens {} (expanded: {expanded})", field.label));
                 assert_eq!(modal.content().label, field.label);
-                assert_eq!(&modal.content().value, full);
+                assert_eq!(modal.content().value, field.value);
                 app.close_value_modal();
             } else {
                 assert!(

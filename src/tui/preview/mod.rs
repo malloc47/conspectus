@@ -339,12 +339,9 @@ pub fn preview_subject(app: &App) -> PreviewSubject {
             }
             Some(RowPreview::Unresolved { .. }) => Some(PreviewSubject::Unresolved),
             None => match row {
-                crate::tui::explorer::ExplorerRow::NodeField { index, .. } => state
-                    .view
-                    .fields(state.full_detail_expanded)
-                    .get(index)
-                    .and_then(|field| field.preview.clone())
-                    .map(PreviewSubject::Field),
+                crate::tui::explorer::ExplorerRow::NodeField { field, .. } => {
+                    field.preview.map(PreviewSubject::Field)
+                }
                 _ => None,
             },
         });

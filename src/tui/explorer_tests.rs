@@ -455,8 +455,17 @@ fn agent_session_title_is_not_labeled_as_alias_in_core_fields() {
         .iter()
         .find(|f| f.label == "title")
         .expect("title field");
-    assert!(title.value.contains('…'));
-    assert_eq!(title.long_value.as_deref(), Some(long_title));
+    assert_eq!(title.value, long_title, "the field keeps the whole title");
+    assert_eq!(title.cut_at, Some(LONG_VALUE_CELLS));
+    let row = grid::field_row(title, &Theme::default());
+    assert!(row.shown().contains('…'), "the pane shows it cut");
+    assert_eq!(
+        row.inspect(),
+        Some(tuikit::property_grid::Intent::Inspect {
+            label: "title".into(),
+            text: long_title.into(),
+        })
+    );
 }
 
 #[test]
@@ -940,8 +949,15 @@ fn long_command_truncates_with_full_value_available() {
         .iter()
         .find(|f| f.label == "command")
         .expect("command field");
-    assert!(command_field.value.contains('…'));
-    assert_eq!(command_field.long_value.as_deref(), Some(long_command));
+    assert_eq!(command_field.value, long_command);
+    let row = grid::field_row(command_field, &Theme::default());
+    assert!(row.shown().contains('…'));
+    assert!(row.is_cut());
+    assert_eq!(
+        row.text(),
+        long_command,
+        "the whole command is kept for `o`"
+    );
 }
 
 #[test]

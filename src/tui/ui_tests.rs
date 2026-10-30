@@ -7,11 +7,24 @@ use crate::model::{
 use crate::resolve::resolve_snapshot;
 use crate::tui::SessionsGrouping;
 use crate::tui::app::Msg;
+use crate::tui::explorer::grid::{field_row, kind_chip_span, other_row, validated_row};
 use crate::tui::preview::PreviewSource;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, View};
 use ratatui::layout::{Constraint, Direction, Layout};
-use tuikit::selection::Cursor;
+
+/// One explorer row drawn alone, as the pane draws it, with no cursor.
+fn explorer_line(
+    row: impl Into<tuikit::property_grid::Row>,
+    width: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    crate::tui::explorer::grid::grid(theme)
+        .row(row)
+        .lines(width, None, false, theme)
+        .lines
+        .remove(0)
+}
 
 fn seeded_app() -> App {
     let mut snapshot = GraphSnapshot::empty();
@@ -943,7 +956,7 @@ fn group_rows_carry_session_count_chip_only_when_no_ambiguity() {
 }
 
 #[test]
-fn render_node_field_line_places_kind_chip_before_value() {
+fn a_field_row_places_its_kind_chip_before_the_value() {
     // ADR 0073 §3 amendment: the cwd kind-chip glyph should sit
     // beside the label so the chip stays attached when the value
     // wraps onto a new terminal row. The pre-fix render emitted
@@ -955,11 +968,11 @@ fn render_node_field_line_places_kind_chip_before_value() {
         value: "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef".to_string(),
         placeholder: false,
         annotation: None,
-        long_value: None,
+        cut_at: None,
         kind_chip: Some(crate::model::NodeKind::Workspace),
         preview: None,
     };
-    let line = render_node_field_line(&field, Cursor::Off, &theme);
+    let line = explorer_line(field_row(&field, &theme), 80, &theme);
     let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     let label_idx = rendered.find("cwd").expect("label present");
     let chip_idx = rendered.find('▦').expect("workspace chip present");
@@ -1304,7 +1317,7 @@ fn other_link_line_dispatches_per_edge_state() {
     // (quiet) from Conflict (loud + `▲`) so an operator
     // skimming the zone reads the resolver state at a glance.
     // Test the three shapes by constructing fake links and
-    // rendering directly through `render_other_link_line` — no
+    // drawing the Other-zone row the explorer builds for each — no
     // App needed.
     use crate::model::{Confidence, NodeId, Provenance, RelationKind};
     use crate::tui::explorer::{
@@ -1336,13 +1349,10 @@ fn other_link_line_dispatches_per_edge_state() {
     };
 
     // Conflict: prefix `▲`, label color = edge_conflict, BOLD.
-    let conflict_line = render_other_link_line(
-        &group,
-        &link(EdgeStateLabel::Conflict),
-        Cursor::Off,
-        &theme,
-        false,
+    let conflict_line = explorer_line(
+        other_row(&group, &link(EdgeStateLabel::Conflict), &theme, false),
         200,
+        &theme,
     );
     let text: String = conflict_line
         .spans
@@ -1364,13 +1374,15 @@ fn other_link_line_dispatches_per_edge_state() {
     assert!(label_span.style.add_modifier.contains(Modifier::BOLD));
 
     // AltOf: no prefix, label color = edge_alt_of, no BOLD.
-    let alt_line = render_other_link_line(
-        &group,
-        &link(EdgeStateLabel::AltOf(RelationKind::LinkedToMux)),
-        Cursor::Off,
-        &theme,
-        false,
+    let alt_line = explorer_line(
+        other_row(
+            &group,
+            &link(EdgeStateLabel::AltOf(RelationKind::LinkedToMux)),
+            &theme,
+            false,
+        ),
         200,
+        &theme,
     );
     let alt_text: String = alt_line
         .spans
@@ -1396,9 +1408,8 @@ fn validated_link_line_drops_the_legacy_winner_star() {
     // ADR 0075: the validated zone never carries `★` — every
     // row there is a resolver winner, so the marker no longer
     // earns its column. The same fact also gets enforced
-    // structurally by `render_related_row`'s removal of the
-    // `resolved_winner` branch, but the buffer-level assertion
-    // pins it from the operator-visible angle.
+    // structurally (no link row reads `resolved_winner`), but the
+    // drawn-row assertion pins it from the operator-visible angle.
     use crate::model::{Confidence, NodeId, Provenance, RelationKind};
     use crate::tui::explorer::{
         CoreField, Direction, EdgeStateLabel, LinkStateLabel, RelationshipGroup, RelationshipLink,
@@ -1427,7 +1438,7 @@ fn validated_link_line_drops_the_legacy_winner_star() {
         preview: Vec::<CoreField>::new(),
         evidence: Vec::new(),
     };
-    let line = render_validated_link_line(&group, &link, Cursor::Off, &theme, true, 200);
+    let line = explorer_line(validated_row(&group, &link, &theme, true), 200, &theme);
     let text: String = line
         .spans
         .iter()
@@ -1475,7 +1486,7 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
         evidence: Vec::new(),
     };
     let width = 56;
-    let line = render_validated_link_line(&group, &link, Cursor::Off, &theme, false, width);
+    let line = explorer_line(validated_row(&group, &link, &theme, false), width, &theme);
     let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
         text::width(&text) <= width,
@@ -1490,7 +1501,7 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
         "truncation keeps the basename: `{text}`"
     );
 
-    let wide = render_validated_link_line(&group, &link, Cursor::Off, &theme, false, 200);
+    let wide = explorer_line(validated_row(&group, &link, &theme, false), 200, &theme);
     let wide_text: String = wide.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(wide_text.ends_with(path), "no truncation when it fits");
 }

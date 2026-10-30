@@ -42,6 +42,8 @@ use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::rows::shorten_home;
 use crate::tui::theme::Theme;
 
+pub(crate) mod grid;
+
 // -----------------------------------------------------------------------------
 // Builder entry points
 // -----------------------------------------------------------------------------
@@ -132,20 +134,27 @@ pub struct NodeView {
     pub relationships: RelationshipExplorer,
 }
 
+/// The most cells the pane shows of a long free-text value (a title, a
+/// message, a command line, a URL). Past them the value is cut with `…`,
+/// the row says so, and `o` opens it whole.
+pub const LONG_VALUE_CELLS: usize = 48;
+
 /// One field row in the Node or Preview zone.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoreField {
     pub label: &'static str,
-    /// Display value, with `~`-shortening already applied.
+    /// The whole value, with `~`-shortening already applied. Enter
+    /// copies it whole, cut or not.
     pub value: String,
     /// `true` when [`Self::value`] is a placeholder (`— (unknown)`,
-    /// etc.). The renderer dims placeholder rows.
+    /// etc.). The renderer dims placeholder rows, and there is nothing
+    /// to copy.
     pub placeholder: bool,
     /// Optional trailing annotation glyph (`▲`, `⟳`, …).
     pub annotation: Option<&'static str>,
-    /// Full untruncated value when [`Self::value`] is a truncated
-    /// preview. `o` opens it in the full-value modal.
-    pub long_value: Option<String>,
+    /// The most cells of [`Self::value`] the pane shows, cut at the end
+    /// past them; `None` shows it all, wrapping in a narrow pane.
+    pub cut_at: Option<usize>,
     /// Optional graph-kind chip rendered next to the value.
     /// Used by the renderer to surface that e.g. a `cwd` path
     /// resolves to a `repo` / `workspace` / `checkout` node, without
@@ -199,7 +208,7 @@ impl CoreField {
             value: value.into(),
             placeholder: false,
             annotation: None,
-            long_value: None,
+            cut_at: None,
             kind_chip: None,
             preview: None,
         }
@@ -211,15 +220,19 @@ impl CoreField {
             value: value.into(),
             placeholder: true,
             annotation: None,
-            long_value: None,
+            cut_at: None,
             kind_chip: None,
             preview: None,
         }
     }
 
-    fn with_long(mut self, full: String) -> Self {
-        self.long_value = Some(full);
-        self
+    /// A field holding long free text, of which the pane shows the first
+    /// [`LONG_VALUE_CELLS`].
+    fn long(label: &'static str, value: impl Into<String>) -> Self {
+        Self {
+            cut_at: Some(LONG_VALUE_CELLS),
+            ..Self::plain(label, value)
+        }
     }
 
     fn with_kind_chip(mut self, kind: NodeKind) -> Self {
@@ -587,17 +600,10 @@ pub struct NeighborRowKey {
 pub enum ExplorerRow {
     /// One of the focused node's field rows. `index` is its place in
     /// the list the pane shows ([`NodeView::fields`] for the current
-    /// Expanded Node Detail state). The row carries the field's own
-    /// text, so Enter and `o` act on what the row shows without
+    /// Expanded Node Detail state). The row carries the field itself,
+    /// so Enter, `o`, and the Preview act on what the row shows without
     /// looking the field up again.
-    NodeField {
-        index: usize,
-        label: &'static str,
-        /// The value as the pane shows it, possibly cut short.
-        value: String,
-        /// The whole value when `value` is cut short.
-        long_value: Option<String>,
-    },
+    NodeField { index: usize, field: CoreField },
     /// A resolver-winner row in the validated zone. `Enter` drills.
     ValidatedLink {
         group_index: usize,
@@ -624,8 +630,8 @@ impl ExplorerRow {
     /// Stable key for cursor persistence across rebuilds.
     pub fn key(&self, view: &NodeView) -> ExplorerRowKey {
         match self {
-            Self::NodeField { label, .. } => ExplorerRowKey::NodeField {
-                label: (*label).to_string(),
+            Self::NodeField { field, .. } => ExplorerRowKey::NodeField {
+                label: field.label.to_string(),
             },
             Self::ValidatedLink {
                 group_index,
@@ -658,15 +664,6 @@ impl ExplorerRow {
         }
     }
 
-    /// Long value attached to this row, when present. Drives the `o`
-    /// open-value modal.
-    pub fn long_value(&self) -> Option<&str> {
-        match self {
-            Self::NodeField { long_value, .. } => long_value.as_deref(),
-            _ => None,
-        }
-    }
-
     /// True for rows that participate in the Other-zone toggle
     /// (header + its children). Used by the reducer to decide which
     /// row identifies the toggle target.
@@ -693,9 +690,7 @@ impl NodeView {
         for (index, field) in self.fields(expanded_detail).iter().enumerate() {
             rows.push(ExplorerRow::NodeField {
                 index,
-                label: field.label,
-                value: field.value.clone(),
-                long_value: field.long_value.clone(),
+                field: field.clone(),
             });
         }
         // Validated zone: every link whose resolver state is
@@ -1399,13 +1394,8 @@ fn agent_session_core(
     if let Some(alias) = &alias {
         fields.push(CoreField::text("alias", alias.clone()));
     } else if let Some(title) = s.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        let truncated = text::truncate_end(title, 48);
-        let mut field = CoreField::plain("title", truncated.clone())
-            .previewing(FieldValue::Text(title.to_string()));
-        if truncated != *title {
-            field = field.with_long(title.to_string());
-        }
-        fields.push(field);
+        fields
+            .push(CoreField::long("title", title).previewing(FieldValue::Text(title.to_string())));
     } else {
         fields.push(CoreField::placeholder("alias", marks::NO_VALUE));
     }
@@ -1452,13 +1442,10 @@ fn agent_session_extras(
         );
     }
     if let Some(preview) = &s.last_message_preview {
-        let truncated = text::truncate_end(preview, 48);
-        let mut field = CoreField::plain("last_message_preview", truncated.clone())
-            .previewing(FieldValue::Text(preview.clone()));
-        if truncated != *preview {
-            field = field.with_long(preview.clone());
-        }
-        fields.push(field);
+        fields.push(
+            CoreField::long("last_message_preview", preview.clone())
+                .previewing(FieldValue::Text(preview.clone())),
+        );
     }
     if let Some(kind) = s.session_kind {
         fields.push(CoreField::glossary(
@@ -1525,13 +1512,10 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         fields.push(CoreField::timestamp("created", epoch, now));
     }
     if let Some(cmd) = &m.active_pane_command {
-        let truncated = text::truncate_end(cmd, 48);
-        let mut field = CoreField::plain("active_pane_command", truncated.clone())
-            .previewing(FieldValue::Command(split_command_line(cmd)));
-        if truncated != *cmd {
-            field = field.with_long(cmd.clone());
-        }
-        fields.push(field);
+        fields.push(
+            CoreField::long("active_pane_command", cmd.clone())
+                .previewing(FieldValue::Command(split_command_line(cmd))),
+        );
     }
     if let Some(pid) = m.active_pane_pid {
         fields.push(
@@ -1543,13 +1527,10 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         fields.push(CoreField::path("active_pane_current_path", path, None));
     }
     if let Some(cmd) = &m.active_pane_start_command {
-        let truncated = text::truncate_end(cmd, 48);
-        let mut field = CoreField::plain("active_pane_start_command", truncated.clone())
-            .previewing(FieldValue::Command(split_command_line(cmd)));
-        if truncated != *cmd {
-            field = field.with_long(cmd.clone());
-        }
-        fields.push(field);
+        fields.push(
+            CoreField::long("active_pane_start_command", cmd.clone())
+                .previewing(FieldValue::Command(split_command_line(cmd))),
+        );
     }
     fields
 }
@@ -1630,20 +1611,13 @@ fn runtime_process_core(
         value: pid_value,
         placeholder: p.pid.is_none(),
         annotation: None,
-        long_value: None,
+        cut_at: None,
         kind_chip: None,
         preview: p.pid.map(FieldValue::Process),
     });
     let command_field = match &p.command {
-        Some(cmd) => {
-            let truncated = text::truncate_end(cmd, 48);
-            let mut field = CoreField::plain("command", truncated.clone())
-                .previewing(FieldValue::Command(split_command_line(cmd)));
-            if truncated != *cmd {
-                field = field.with_long(cmd.clone());
-            }
-            field
-        }
+        Some(cmd) => CoreField::long("command", cmd.clone())
+            .previewing(FieldValue::Command(split_command_line(cmd))),
         None => CoreField::placeholder("command", marks::NO_VALUE),
     };
     fields.push(command_field);
@@ -1804,14 +1778,7 @@ fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
         None => CoreField::placeholder("updated", marks::NO_VALUE),
     });
     fields.push(match &pr.url {
-        Some(url) => {
-            let truncated = text::truncate_end(url, 48);
-            let mut field = CoreField::plain("url", truncated.clone());
-            if truncated != *url {
-                field = field.with_long(url.clone());
-            }
-            field
-        }
+        Some(url) => CoreField::long("url", url.clone()),
         None => CoreField::placeholder("url", marks::NO_VALUE),
     });
     fields
