@@ -11,7 +11,7 @@
 //! ([`crate::tui::search::rank`] over the view's rows,
 //! [`crate::tui::search_entities::EntityIndex::rank`] over every entity),
 //! the outcome words, the content kinds and the history paging, the
-//! column plan of a content hit, and the messages a pick commits.
+//! columns and cells of a content hit, and the messages a pick commits.
 //!
 //! Per ADR 0031 and 0149 the current scope ranks every row of the active
 //! view after filters, collapsed rows included: the host hands the overlay
@@ -38,8 +38,8 @@ use crate::viewer::search::{ContentKinds, Grouping};
 
 mod rows;
 
-pub(crate) use rows::MARKDOWN_TICKS;
-use rows::{QuickRow, content_cells};
+use rows::{ContentGrid, QuickRow};
+pub(crate) use rows::{MARKDOWN_TICKS, line_tag, snippet_cell, turn_tag};
 
 /// How long the query rests before a contents scan starts, so typing a
 /// word does not start a scan per letter.
@@ -148,6 +148,9 @@ pub struct ContentRow {
     pub turn: Option<String>,
     /// How long ago the session was last active, or the pane was read.
     pub age: String,
+    /// How recent that is, which tints the age; `None` leaves it
+    /// receding.
+    pub recency: Option<tuikit::age::Recency>,
     pub snippet: String,
     /// Byte range of the match inside `snippet`.
     pub highlight: Option<std::ops::Range<usize>>,
@@ -824,8 +827,9 @@ impl Widget for SearchOverlayWidget<'_> {
                 let note = content_note(view, palette.query());
                 palette.set_empty_note(note);
                 palette.set_no_match_note(note);
+                let grid = ContentGrid::new(&view.rows, theme);
                 palette.draw_with(area, buf, theme, |row, cells| {
-                    content_cells(row, cells.width, theme)
+                    grid.cells(row, cells.width, theme)
                 });
             }
         }

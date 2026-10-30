@@ -20,6 +20,7 @@ use crate::tui::rows::{EntityState, MixedRow, MixedTone, PinMarker, Row};
 use crate::tui::widgets::badge::{
     command_badge, harness_badge, hits_chip, no_agent_chip, was_in_chip,
 };
+use crate::tui::widgets::search::snippet_cell;
 
 /// The key of a left-pane column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -711,18 +712,4 @@ fn preview_cell(preview: &str, theme: &Theme) -> Cell {
             .fg(theme.inert)
             .add_modifier(Modifier::ITALIC),
     )
-}
-
-/// What a content search found: the best snippet, cut around its match,
-/// the match in the theme's match look.
-fn snippet_cell(snippet: &str, highlight: &std::ops::Range<usize>, theme: &Theme) -> Cell {
-    Cell::snippet(
-        snippet,
-        highlight.clone(),
-        Style::default()
-            .fg(theme.inert)
-            .add_modifier(Modifier::ITALIC),
-        theme.match_style(),
-    )
-    .dropping(crate::tui::widgets::search::MARKDOWN_TICKS)
 }

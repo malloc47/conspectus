@@ -34,6 +34,7 @@ fn row(key: &str, turn: usize) -> ContentRow {
         hits: 3,
         turn: None,
         age: "1h".into(),
+        recency: None,
         snippet: "we chose the quokka design for it".into(),
         highlight: Some(14..20),
     }
@@ -60,6 +61,7 @@ fn pane_row(line: usize) -> ContentRow {
         hits: 2,
         turn: None,
         age: "2m".into(),
+        recency: None,
         snippet: "error: the quokka crashed".into(),
         highlight: Some(11..17),
     }

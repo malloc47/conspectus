@@ -1,13 +1,18 @@
 //! What a search result looks like: quick select's rows of the view and
 //! entities, and content search's hits, each laid out for the width the
-//! palette gives it. A content hit's cells come from one column plan
-//! ([`hit_plan`]), which a list outside the modal can lay out too.
+//! palette gives it. A hit's columns are one declaration ([`hit_columns`])
+//! and its cells one builder ([`Hit::cells`]), which the Search view's hit,
+//! pane, and pane-hit rows lay out too.
+
+use std::ops::Range;
 
 use ratatui::macros::span;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
+use tuikit::age::Recency;
 use tuikit::chip;
-use tuikit::palette::{Column, ColumnLayout, ColumnPlan, RowContext};
+use tuikit::columns::{Cell, Cells, Column, ColumnSchema, Measure};
+use tuikit::palette::RowContext;
 use tuikit::selection::GUTTER_WIDTH;
 use tuikit::text;
 
@@ -17,6 +22,7 @@ use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::rows::RowId;
 use crate::tui::search::SearchMatch;
 use crate::tui::search_entities::{EntityMatch, SearchEntity};
+use crate::tui::widgets::badge::harness_badge;
 
 /// One result of quick select.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,8 +158,240 @@ fn entity_cells(
     spans
 }
 
-/// The widths of a content result's cells, as the hit plan lays them
-/// out.
+/// A column of a search hit. Every list that shows hits (the contents
+/// modal, the Search view's hit, pane, and pane-hit rows) lays them out
+/// from [`hit_columns`], keyed by these.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HitCol {
+    /// `session` or `pane`.
+    Source,
+    /// The harness chip, or the command a pane runs.
+    Chip,
+    /// The session's or the pane's name.
+    Label,
+    /// The hit count, or the turn or line the hit is.
+    Tag,
+    Age,
+    /// The text around the match.
+    Snippet,
+}
+
+/// Which of a hit's columns a list draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HitShape {
+    /// Every column: a list of hits from sessions and panes side by side,
+    /// with nothing else to tell them apart (the contents modal).
+    Sourced,
+    /// The tag, the age, and the snippet: a hit under the row that names
+    /// its session or pane.
+    Nested,
+}
+
+/// The source word's width: the longer of `session` and `pane`.
+const SOURCE_WIDTH: usize = 7;
+/// The label is a fifth of the row, kept between these.
+const LABEL_MIN: usize = 12;
+const LABEL_MAX: usize = 32;
+/// The fewest cells the label narrows to so the snippet keeps its cells.
+const LABEL_FLOOR: usize = 8;
+/// A snippet narrower than this is not worth showing, so cells give way
+/// to it.
+pub(super) const MIN_SNIPPET: usize = 20;
+/// The hit count's or the position's width, by the row's width.
+const TAG_STEPS: &[(usize, usize)] = &[(100, 22), (78, 20), (0, 14)];
+/// Characters a one-line snippet drops: Markdown code ticks only add
+/// noise to a preview.
+pub(crate) const MARKDOWN_TICKS: &[char] = &['`'];
+
+/// A hit's columns, each under `key`'s key for it, with a harness chip
+/// `chip` cells wide (its footprint in the theme): the source word, the
+/// chip or a pane's command, the label (a fifth of the row, 12 to 32
+/// cells), the hit count or position (22, 20, or 14 cells by the row's
+/// width), the age, and the snippet, which keeps [`MIN_SNIPPET`] cells.
+/// The chip gives way first, then the source word, then the age, and the
+/// label narrows last, to 8 cells. Shares and steps count the row's lead
+/// (the modal's cursor gutter, the tree's indent), so a hit is laid out
+/// alike wherever it is listed at one width.
+pub(crate) fn hit_columns<K>(
+    key: impl Fn(HitCol) -> K,
+    chip: usize,
+    shape: HitShape,
+) -> Vec<Column<K>> {
+    let mut columns = Vec::with_capacity(6);
+    if shape == HitShape::Sourced {
+        columns.push(
+            Column::fixed(key(HitCol::Source), SOURCE_WIDTH)
+                .gap(1)
+                .drops(1),
+        );
+    }
+    if shape != HitShape::Nested {
+        columns.push(Column::fixed(key(HitCol::Chip), chip).gap(1).drops(0));
+        columns.push(
+            Column::share(key(HitCol::Label), 1, 5)
+                .within(LABEL_MIN, LABEL_MAX)
+                .shrinks(3, LABEL_FLOOR),
+        );
+    }
+    columns.push(Column::row_steps(key(HitCol::Tag), TAG_STEPS));
+    columns.push(
+        Column::fixed(key(HitCol::Age), tuikit::age::CELL_WIDTH)
+            .gap(1)
+            .right()
+            .drops(2),
+    );
+    columns.push(Column::fill(key(HitCol::Snippet)).at_least(MIN_SNIPPET));
+    columns
+}
+
+/// What a hit's chip column shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HitChip<'a> {
+    /// The harness a session runs, as its chip.
+    Harness(&'a str),
+    /// The command a pane runs, receding.
+    Command(&'a str),
+}
+
+/// One hit, as every list that shows hits draws it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Hit<'a> {
+    /// `session` or `pane`.
+    pub source: &'static str,
+    pub chip: HitChip<'a>,
+    pub label: &'a str,
+    /// The hit count, or the turn or line ([`hits_tag`], [`turn_tag`],
+    /// [`line_tag`]).
+    pub tag: String,
+    /// The age's label, or `None` when no time applies.
+    pub age: Option<&'a str>,
+    /// How recent the age is, which tints it; `None` leaves it receding.
+    pub recency: Option<Recency>,
+    pub snippet: &'a str,
+    /// Byte range of the match inside `snippet`.
+    pub highlight: Range<usize>,
+}
+
+impl Hit<'_> {
+    /// The hit's cells, each under `key`'s key for its column: the source
+    /// word and the tag receding, the chip, the label, the framework's age
+    /// cell, and the snippet cell ([`snippet_cell`]).
+    pub(crate) fn cells<K>(&self, key: impl Fn(HitCol) -> K, theme: &Theme) -> Cells<K> {
+        let muted = Style::default().add_modifier(theme.muted);
+        let chip = match self.chip {
+            HitChip::Harness(harness) => Cell::chip(harness_badge(harness, theme)),
+            HitChip::Command(command) => Cell::text(command, muted),
+        };
+        vec![
+            (key(HitCol::Source), Cell::text(self.source, muted)),
+            (key(HitCol::Chip), chip),
+            (key(HitCol::Label), Cell::text(self.label, Style::default())),
+            (key(HitCol::Tag), Cell::text(&self.tag, muted)),
+            (
+                key(HitCol::Age),
+                Cell::age(self.age.map(str::to_string), self.recency),
+            ),
+            (
+                key(HitCol::Snippet),
+                snippet_cell(self.snippet, &self.highlight, theme),
+            ),
+        ]
+    }
+}
+
+/// What a content search found, wherever it is shown: the text around
+/// the match, cut so the match stays in view, inert in italics with the
+/// match in the theme's match look, Markdown code ticks left out.
+pub(crate) fn snippet_cell(snippet: &str, highlight: &Range<usize>, theme: &Theme) -> Cell {
+    Cell::snippet(
+        snippet,
+        highlight.clone(),
+        Style::default()
+            .fg(theme.inert)
+            .add_modifier(Modifier::ITALIC),
+        theme.match_style(),
+    )
+    .dropping(MARKDOWN_TICKS)
+}
+
+/// A session's or pane's hit count as a tag: `1 hit`, `3 hits`.
+pub(crate) fn hits_tag(count: usize) -> String {
+    format!("{count} {}", if count == 1 { "hit" } else { "hits" })
+}
+
+/// A matching turn as a tag, counting from 1: `turn 4 · message`.
+pub(crate) fn turn_tag(turn_index: usize, kind: &str) -> String {
+    format!("turn {} · {kind}", turn_index + 1)
+}
+
+/// A matching scrollback line as a tag: `line 17`.
+pub(crate) fn line_tag(line: usize) -> String {
+    format!("line {line}")
+}
+
+impl ContentRow {
+    /// The result as a hit.
+    fn hit(&self) -> Hit<'_> {
+        Hit {
+            source: self.target.source_word(),
+            chip: match self.target {
+                ContentTarget::Session { .. } => HitChip::Harness(&self.chip),
+                ContentTarget::Pane { .. } => HitChip::Command(&self.chip),
+            },
+            label: &self.label,
+            tag: self.turn.clone().unwrap_or_else(|| hits_tag(self.hits)),
+            age: Some(&self.age),
+            recency: self.recency,
+            snippet: &self.snippet,
+            highlight: self.highlight.clone().unwrap_or(0..0),
+        }
+    }
+}
+
+/// The contents modal's results laid out from the hit's columns, measured
+/// once a frame over every result.
+pub(super) struct ContentGrid {
+    schema: ColumnSchema<HitCol>,
+    measure: Measure<HitCol>,
+}
+
+impl ContentGrid {
+    /// The grid of `rows` in `theme`, whose chip width it takes.
+    pub(super) fn new(rows: &[ContentRow], theme: &Theme) -> Self {
+        let schema = content_schema(chip::width(theme));
+        let mut measure = Measure::new();
+        for row in rows {
+            measure.add(&schema, GUTTER_WIDTH, &row.hit().cells(same, theme));
+        }
+        Self { schema, measure }
+    }
+
+    /// One result's cells, `width` wide after the cursor gutter.
+    pub(super) fn cells(
+        &self,
+        row: &ContentRow,
+        width: usize,
+        theme: &Theme,
+    ) -> Vec<Span<'static>> {
+        let cells = row.hit().cells(same, theme);
+        self.schema
+            .draw(&self.measure, GUTTER_WIDTH, width, &cells, theme)
+    }
+}
+
+/// The modal's hit schema: every column, with a chip `chip` cells wide.
+fn content_schema(chip: usize) -> ColumnSchema<HitCol> {
+    ColumnSchema::new(hit_columns(same, chip, HitShape::Sourced))
+}
+
+/// The modal keys its cells by the hit's own columns.
+const fn same(col: HitCol) -> HitCol {
+    col
+}
+
+/// The widths of a content result's cells, as the hit's columns lay them
+/// out in a row `inner` cells wide, the cursor gutter included.
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ContentColumns {
     /// The row's width, the cursor gutter included.
@@ -167,124 +405,40 @@ pub(crate) struct ContentColumns {
     pub tag: usize,
     /// The age; 0 when dropped.
     pub age: usize,
-    layout: ColumnLayout,
+    snippet: usize,
 }
 
-/// The source word's width: the longer of `session` and `pane`.
-const SOURCE_WIDTH: usize = 7;
-/// The age's width: `999d` at most.
-const AGE_WIDTH: usize = 4;
-/// A snippet narrower than this is not worth showing, so cells give way
-/// to it.
-pub(super) const MIN_SNIPPET: usize = 20;
-/// The hit count's or the position's width, by the row's width.
-const TAG_STEPS: &[(usize, usize)] = &[(100, 22), (78, 20), (0, 14)];
-/// Characters a one-line snippet drops: Markdown code ticks only add
-/// noise to a preview.
-pub(crate) const MARKDOWN_TICKS: &[char] = &['`'];
-
-/// Where each cell of a content result sits in [`hit_plan`].
-const SOURCE: usize = 0;
-const CHIP: usize = 1;
-const LABEL: usize = 2;
-const TAG: usize = 3;
-const AGE: usize = 4;
-
+#[cfg(test)]
 impl ContentColumns {
     /// Cells the snippet gets: what is left after the other cells, their
     /// two-cell cursor mark, and the gaps between them.
     pub(super) fn snippet(&self) -> usize {
-        self.layout.fill()
+        self.snippet
     }
 }
 
-/// The column plan of a content result, shared out over the row with its
-/// cursor gutter: where it was found, the harness chip or pane command
-/// (`chip` cells, a harness chip's footprint from the theme), the label
-/// (a fifth of the row, 12 to 32 cells), the hit count or position (by
-/// the row's width), the age, and the snippet, which keeps
-/// [`MIN_SNIPPET`] cells: the chip gives way first, then the source word,
-/// then the age, and the label narrows last, to 8 cells.
-pub(crate) fn hit_plan(chip: usize) -> ColumnPlan {
-    ColumnPlan::new([
-        Column::fixed(SOURCE_WIDTH).gap(1).drops(1),
-        Column::fixed(chip).gap(1).drops(0),
-        Column::share(1, 5).within(12, 32).gap(2).shrinks(3, 8),
-        Column::steps(TAG_STEPS).gap(2),
-        Column::fixed(AGE_WIDTH).gap(1).drops(2).end(),
-        Column::fill(MIN_SNIPPET),
-    ])
-    .lead(GUTTER_WIDTH)
-}
-
-/// The content result's cells in a row `inner` cells wide, the cursor
-/// gutter included, with a chip `chip` cells wide: [`hit_plan`] laid out.
+/// A content result's columns in a row `inner` cells wide, the cursor
+/// gutter included, with a chip `chip` cells wide.
+#[cfg(test)]
 pub(crate) fn content_columns(inner: usize, chip: usize) -> ContentColumns {
-    let layout = hit_plan(chip).layout(inner);
+    let schema = content_schema(chip);
+    let mut measure = Measure::new();
+    measure.add(
+        &schema,
+        GUTTER_WIDTH,
+        &[(HitCol::Snippet, Cell::text("snippet", Style::default()))],
+    );
+    let layout = schema.layout(&measure, GUTTER_WIDTH, inner.saturating_sub(GUTTER_WIDTH));
+    let width = |col| layout.width(col).unwrap_or(0);
     ContentColumns {
         inner,
-        source: layout.width(SOURCE),
-        chip: layout.width(CHIP),
-        label: layout.width(LABEL),
-        tag: layout.width(TAG),
-        age: layout.width(AGE),
-        layout,
+        source: width(HitCol::Source),
+        chip: width(HitCol::Chip),
+        label: width(HitCol::Label),
+        tag: width(HitCol::Tag),
+        age: width(HitCol::Age),
+        snippet: width(HitCol::Snippet),
     }
-}
-
-/// One contents result's cells, `width` wide after the cursor gutter:
-/// where it was found, harness chip or pane command, label, hit count or
-/// position, age, and the snippet with the match marked.
-pub(super) fn content_cells(row: &ContentRow, width: usize, theme: &Theme) -> Vec<Span<'static>> {
-    use crate::tui::widgets::badge::harness_badge;
-
-    let columns = content_columns(width + GUTTER_WIDTH, chip::width(theme));
-    let layout = &columns.layout;
-    let dim = Style::default().add_modifier(theme.muted);
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    if let Some(cell) = layout.fit(SOURCE, row.target.source_word()) {
-        spans.push(Span::styled(cell, dim));
-    }
-    if layout.is_shown(CHIP) {
-        match row.target {
-            ContentTarget::Session { .. } => {
-                spans.push(harness_badge(&row.chip, theme));
-                spans.push(Span::raw(" ".repeat(layout.gap(CHIP))));
-            }
-            ContentTarget::Pane { .. } => {
-                if let Some(cell) = layout.fit(CHIP, &row.chip) {
-                    spans.push(Span::styled(cell, dim));
-                }
-            }
-        }
-    }
-    spans.push(Span::raw(layout.fit(LABEL, &row.label).unwrap_or_default()));
-    let tag = match &row.turn {
-        Some(turn) => turn.clone(),
-        None => format!(
-            "{} {}",
-            row.hits,
-            if row.hits == 1 { "hit" } else { "hits" }
-        ),
-    };
-    spans.push(Span::styled(layout.fit(TAG, &tag).unwrap_or_default(), dim));
-    if let Some(cell) = layout.fit(AGE, &row.age) {
-        spans.push(Span::styled(cell, dim));
-    }
-    let budget = columns.snippet().max(8);
-    let snippet = text::fit_snippet(
-        &row.snippet,
-        row.highlight.clone().unwrap_or(0..0),
-        budget,
-        MARKDOWN_TICKS,
-    );
-    let match_style = theme.match_style();
-    spans.extend(text::paint(
-        &[Span::styled(snippet.text, dim)],
-        snippet.highlight,
-        |_| match_style,
-    ));
-    spans
 }
 
 /// A match row's cells, `width` wide after the cursor gutter: the kind

@@ -1560,15 +1560,18 @@ impl App {
         };
         let snapshot = handle.snapshot();
         let now = Some(crate::tui::rows::tree_current_unix_epoch());
+        // An age's label and its tint, read off one clock.
         let age = |time: Option<i64>| {
-            Age::of(time, now)
-                .map_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string(), Age::label)
+            let age = Age::of(time, now);
+            (
+                age.map_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string(), Age::label),
+                age.map(Age::recency),
+            )
         };
         let turn_tag = |hit: &Hit| {
-            format!(
-                "turn {} · {}",
-                hit.turn_index + 1,
-                crate::tui::rows::search::kind_word(hit.kind)
+            crate::tui::widgets::search::turn_tag(
+                hit.turn_index,
+                crate::tui::rows::search::kind_word(hit.kind),
             )
         };
 
@@ -1596,18 +1599,22 @@ impl App {
             let label = session_label(snapshot, &session);
             let chip = crate::tui::rows::harness_label(&session.harness_key);
             let latest = hits.latest.map(|time| time.timestamp());
-            let row_for = |hit: &Hit, turn: Option<String>| ContentRow {
-                target: ContentTarget::Session {
-                    session: session.clone(),
-                    turn_index: hit.turn_index,
-                },
-                label: label.clone(),
-                chip: chip.clone(),
-                hits: hits.count,
-                turn,
-                age: age(hit.timestamp.map(|time| time.timestamp()).or(latest)),
-                snippet: hit.snippet.clone(),
-                highlight: Some(hit.highlight.clone()),
+            let row_for = |hit: &Hit, turn: Option<String>| {
+                let (age, recency) = age(hit.timestamp.map(|time| time.timestamp()).or(latest));
+                ContentRow {
+                    target: ContentTarget::Session {
+                        session: session.clone(),
+                        turn_index: hit.turn_index,
+                    },
+                    label: label.clone(),
+                    chip: chip.clone(),
+                    hits: hits.count,
+                    turn,
+                    age,
+                    recency,
+                    snippet: hit.snippet.clone(),
+                    highlight: Some(hit.highlight.clone()),
+                }
             };
             let details = (content.group.lists_messages())
                 .then(|| {
@@ -1653,6 +1660,7 @@ impl App {
             );
             let chip = pane.pane.command.clone().unwrap_or_default();
             let captured = Some(pane.captured_at);
+            let (pane_age, pane_recency) = age(captured);
             let row_for = |hit: &crate::content_search::PaneHit, tag: Option<String>| ContentRow {
                 target: ContentTarget::Pane {
                     pane: pane.pane.clone(),
@@ -1662,7 +1670,8 @@ impl App {
                 chip: chip.clone(),
                 hits: pane.count,
                 turn: tag,
-                age: age(captured),
+                age: pane_age.clone(),
+                recency: pane_recency,
                 snippet: hit.snippet.clone(),
                 highlight: Some(hit.highlight.clone()),
             };
@@ -1673,7 +1682,7 @@ impl App {
                         captured,
                         (pane.pane.mux.native_id(), pane.pane.pane_id.clone()),
                         usize::MAX - hit.line,
-                        row_for(hit, Some(format!("line {}", hit.line))),
+                        row_for(hit, Some(crate::tui::widgets::search::line_tag(hit.line))),
                     ));
                 }
                 continue;
@@ -1682,7 +1691,7 @@ impl App {
                 pane.hits
                     .iter()
                     .rev()
-                    .map(|hit| row_for(hit, Some(format!("line {}", hit.line))))
+                    .map(|hit| row_for(hit, Some(crate::tui::widgets::search::line_tag(hit.line))))
                     .collect()
             } else {
                 newest.map(|hit| row_for(hit, None)).into_iter().collect()
