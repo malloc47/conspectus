@@ -5,10 +5,11 @@ use std::ops::Range;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Clear, Padding, Paragraph, Widget};
 
 use super::size::ModalSize;
+use super::title::framed;
 use crate::scroll::ScrollWindow;
 use crate::theme::Theme;
 
@@ -175,7 +176,7 @@ impl<'a> ModalFrame<'a> {
             self.title,
         )
         .padding(self.padding);
-        if let Some(footer) = framed_title(self.footer) {
+        if let Some(footer) = framed(self.footer) {
             block = block.title_bottom(footer);
         }
         let inner = block.inner(rect);
@@ -191,62 +192,9 @@ fn bordered<'a>(theme: &Theme, border: Style, title: Line<'a>) -> Block<'a> {
     let block = Block::bordered()
         .border_style(border)
         .style(Style::default().bg(theme.surface));
-    match framed_title(title) {
+    match framed(title) {
         Some(title) => block.title(title),
         None => block,
-    }
-}
-
-/// `title` (or a footer, which takes the same form) with one space on
-/// each side and the spaces it had at its ends dropped; `None` when it
-/// has no text.
-fn framed_title(title: Line<'_>) -> Option<Line<'_>> {
-    let Line {
-        style,
-        alignment,
-        spans,
-    } = title;
-    let mut spans: Vec<Span<'_>> = spans
-        .into_iter()
-        .filter(|span| !span.content.is_empty())
-        .collect();
-    trim_ends(&mut spans);
-    if spans.is_empty() {
-        return None;
-    }
-    spans.insert(0, Span::raw(" "));
-    spans.push(Span::raw(" "));
-    Some(Line {
-        style,
-        alignment,
-        spans,
-    })
-}
-
-/// Drops the spaces at the start of the first spans and at the end of the
-/// last ones, removing spans that become empty.
-fn trim_ends(spans: &mut Vec<Span<'_>>) {
-    while let Some(first) = spans.first_mut() {
-        let trimmed = first.content.trim_start();
-        if trimmed.is_empty() {
-            spans.remove(0);
-            continue;
-        }
-        if trimmed.len() != first.content.len() {
-            first.content = trimmed.to_string().into();
-        }
-        break;
-    }
-    while let Some(last) = spans.last_mut() {
-        let trimmed = last.content.trim_end();
-        if trimmed.is_empty() {
-            spans.pop();
-            continue;
-        }
-        if trimmed.len() != last.content.len() {
-            last.content = trimmed.to_string().into();
-        }
-        break;
     }
 }
 

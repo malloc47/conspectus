@@ -1,5 +1,7 @@
-//! Frames: the bordered box a modal draws in, how large it is, and the
-//! rule that heads a section of a pane.
+//! Frames: the bordered box a modal draws in and how large it is, the
+//! bordered box a pane of the screen draws in with its focus cue, the
+//! split that places two panes, and the rule that heads a section of a
+//! pane.
 //!
 //! This is a layer 1 foundation. A modal (a prompt, a checklist, a
 //! menu, a form, a reader, a search palette) floats over the screen in
@@ -31,6 +33,16 @@
 //!   frame leaves; the frame places itself from those rows, once.
 //!   [`Lines`] is the body for lines laid out ahead and scrolled to keep
 //!   a cursor in view.
+//! - **Pane frames.** A pane of the screen (a list, a detail view) draws
+//!   in a [`PaneFrame`]: plain lines on all four sides and the title on
+//!   the top border, in the modal title's form after a lead that holds
+//!   the focus marker. The focused pane's border and marker take the
+//!   theme's `panel_focus_accent`; an unfocused pane keeps the plain
+//!   border and a blank marker, so its title stays in place.
+//! - **Split panes.** A [`SplitPane`] puts two panes side by side in
+//!   halves while the area is at least its threshold wide, and one above
+//!   the other below it. A host asks it for both areas wherever it needs
+//!   them, so the screen is split by one rule.
 //! - **Section rules.** Inside a pane, a [`SectionRule`] heads each
 //!   section: a rule in the theme's `muted`, the section's label as a
 //!   chip in `accent` under `badge`, an optional summary in `inert`
@@ -60,20 +72,39 @@
 //! assert_eq!(buf[(10, 10)].symbol(), "A");
 //! ```
 //!
-//! # What joins this module
+//! Two panes split from one area, the first focused:
 //!
-//! The pane frame (a bordered pane with the focus cue on its border and
-//! title) and the split pane belong here too. They will share the border
-//! and title rule [`ModalFrame`] draws with, so a pane's title reads like
-//! a modal's.
+//! ```
+//! use ratatui::buffer::Buffer;
+//! use ratatui::layout::Rect;
+//! use ratatui::text::Line;
+//! use tuikit::frame::{PaneFrame, SplitPane};
+//! use tuikit::testkit::buffer::rows;
+//! use tuikit::theme::Theme;
+//!
+//! let theme = Theme::default();
+//! let area = Rect::new(0, 0, 40, 4);
+//! let mut buf = Buffer::empty(area);
+//! let [left, right] = SplitPane::new(30).areas(area);
+//! PaneFrame::new(&theme).title(Line::from("list")).focused(true).render(left, &mut buf);
+//! PaneFrame::new(&theme).title(Line::from("detail")).render(right, &mut buf);
+//! assert_eq!(rows(&buf)[0], "┌ ► list ──────────┐┌   detail ────────┐");
+//! assert_eq!(buf[(0, 0)].fg, theme.panel_focus_accent);
+//! assert_ne!(buf[(20, 0)].fg, theme.panel_focus_accent);
+//! ```
 
 mod modal;
+mod pane;
 mod rule;
 mod size;
+mod split;
+mod title;
 
 pub use modal::{Lines, ModalBody, ModalFrame};
+pub use pane::PaneFrame;
 pub use rule::SectionRule;
 pub use size::{Extent, Fit, ModalSize};
+pub use split::SplitPane;
 
 #[cfg(test)]
 #[path = "frame_tests.rs"]
