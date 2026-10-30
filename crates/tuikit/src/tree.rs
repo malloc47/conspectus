@@ -119,10 +119,12 @@
 //! assert_eq!(state.visible(&tree).len(), 2);
 //! ```
 
+mod columns;
 mod row;
 mod state;
 mod view;
 
+pub use columns::{INDENT, RowColumns, TreeColumns, disclosure};
 pub use row::{Row, TreeRow};
 pub use state::{Rebuild, TreeState};
 pub use view::{RowCtx, RowMark, RowState, TreeView};

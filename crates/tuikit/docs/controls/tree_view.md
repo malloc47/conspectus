@@ -134,6 +134,8 @@ assert_eq!(state.selected().map(String::as_str), Some("fruit/plum"));
 | `TreeView::render(area, buf)` | draw the pane | returns the window it drew, or `None` when no row shows |
 | `RowCtx` (`selected`, `focused`, `expanded`, `ghost`, `pending`, `mark`, `width`, `theme`), `cursor()`, `apply_looks(spans)` | what the producer is told about a row | `apply_looks` gives spans the looks the tree gives every row |
 | `RowState` (`ghost`, `pending`, `mark`), `RowMark` (`None`, `On`, `Off`) | what the host knows about a row, index for index with the rows | worked out before the frame |
+| `RowColumns<R>` (`schema`, `cells`), `TreeColumns::new(columns, rows, state, states, theme)`, `line`, `line_then` | a producer that lays each row out from the column schema the host names for it, after the row's indent (`INDENT` cells a level), every row of the tree measured once | the cells do not depend on the row's width or cursor; see [columns.md](columns.md) |
+| `disclosure(expandable, expanded, theme)` | the disclosure arrow as a column cell | blank for a row without children |
 
 ### Rebuilding
 
@@ -218,13 +220,14 @@ plain; the host's title carries its focus marker until the pane frame lands.
 
 - **The cursor gutter.** House rule 1's pointer marker in a 2-cell gutter
   is not drawn yet: a tree's rows start with columns (disclosure, kind
-  glyph) that the host documents, and the gutter moves them. It comes with
-  the column schema, which lays a row's cells out from a declaration
-  instead of a producer; `selection::row` draws it.
-- **A column schema.** The producer is the stepping stone: the host lays
-  out cells and aligns columns itself. A declared schema (fixed, capped,
-  and filling cells, measured over the whole tree, with one rule for what
-  gives way when narrow) replaces it one row kind at a time.
+  glyph) that the host documents, and the gutter moves them. It comes as a
+  column of the schema once every kind of row a host draws is on one;
+  `selection::row` draws it.
+- **Rows on a schema.** `RowColumns` and `TreeColumns` lay rows out from
+  column schemas ([columns.md](columns.md)): one measure pass over the
+  whole tree and one narrow-width policy. A host moves one kind of row at
+  a time and keeps a producer of its own, or `TreeColumns::line_then`,
+  for the rest.
 - **A key table.** A `TREE_KEYS` table over a tree action enum would let a
   host resolve the keys above and generate its help from them, with the
   program-wide keymap.
