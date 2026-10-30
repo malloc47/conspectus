@@ -31,7 +31,10 @@ absorbs the lead does not absorb a lead every row shares. Amended by
 [ADR 0195](0195-tui-a-tree-row-keeps-its-layout-when-its-list-overflows.md):
 a row's room (`columns::Room`) can count cells beside the row that its
 cells do not fit in, the width rules counting the whole and the policy
-fitting the cells.
+fitting the cells. Amended by
+[ADR 0196](0196-tui-quick-selects-entity-rows-come-from-a-column-schema.md):
+a column can take a share of what the other columns leave, and a fill that
+does not show can hand its cells to a column it names.
 
 ## Context
 

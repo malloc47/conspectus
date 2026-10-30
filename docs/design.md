@@ -1298,7 +1298,10 @@ adapter keeps the ranking, the outcome words, the content kinds, history
 paging, and the `Msg` mapping, and draws the rows itself; a content hit's
 columns are one declaration laid out by the framework's column schema
 (`hit_columns`, ADR 0185: the cells, their widths, and the order they give
-way in), which the Search view's hit, pane, and pane-hit rows lay out too.
+way in), which the Search view's hit, pane, and pane-hit rows lay out too,
+and an entity found in the wider reach is another (`entity_columns`, ADR
+0196: the label a share of what the glyph and the outcome word leave, the
+context a fill that hands the label its cells when it leaves).
 Quick select keeps its cursor's position across an edit while it is still a
 result.
 

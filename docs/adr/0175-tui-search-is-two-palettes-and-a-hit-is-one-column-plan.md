@@ -14,7 +14,10 @@ states. Amended by
 [ADR 0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md):
 the plan is a column schema (`hit_columns`), `palette::ColumnPlan` is
 retired, and the Search view's hit, pane, and pane-hit rows lay the same
-columns out.
+columns out. Amended by
+[ADR 0196](0196-tui-quick-selects-entity-rows-come-from-a-column-schema.md):
+the entity rows the alternatives below left on their own split come from
+a column schema too.
 
 ## Context
 

@@ -155,9 +155,10 @@ frame; a `usize` room is a `Room` of that many cells.
 
 | Item | Does | Notes |
 | --- | --- | --- |
-| `Column::fixed`, `cap`, `steps`, `row_steps`, `share`, `hug`, `fill` | a column by its width rule (`Width`) | `Fixed(n)` always; `Cap(n)` the widest cell in the list, each counting at most `n` and cut to it (a column whose cells are all blank takes nothing); `Steps` by the room left for it; `RowSteps` by the whole row's width, its lead included, whatever the columns before it take; `Share` a part of the whole row, its lead included, rounded down; `Hug(n)` its own cell, unpadded, after which the row flows; `Fill` the rest |
-| `.within(min, max)` | bound a share | other rules ignore it |
+| `Column::fixed`, `cap`, `steps`, `row_steps`, `share`, `share_of_rest`, `hug`, `fill` | a column by its width rule (`Width`) | `Fixed(n)` always; `Cap(n)` the widest cell in the list, each counting at most `n` and cut to it (a column whose cells are all blank takes nothing); `Steps` by the room left for it; `RowSteps` by the whole row's width, its lead included, whatever the columns before it take; `Share` a part of the whole row, its lead included, rounded down; `ShareOfRest` a part of what the other columns leave (below); `Hug(n)` its own cell, unpadded, after which the row flows; `Fill` the rest |
+| `.within(min, max)` | bound a share or a share of what is left | other rules ignore it |
 | `.at_least(n)` | the cells a fill wants before the others stop giving way | `MIN_FILL` (7) unless told |
+| `.gives_to(key)` | a fill that does not show on a row (it left below its minimum, or no row has a cell for it) hands the cells it would have taken to the column under `key` | past that column's own rule; a context that leaves so the label takes the row |
 | `.gap(n)` | blank cells after the column | `GAP` (2) unless told; never drawn after a row's last cell |
 | `.right()` | keep cells to the column's end | counts, numbers |
 | `.drops(p)`, `.shrinks(p, floor)` | how the column gives way, at priority `p` (lowest first) | a column may narrow at one priority and leave at a later one |
@@ -187,9 +188,13 @@ frame; a `usize` room is a `Room` of that many cells.
 2. Every other column takes its width: fixed, capped at its widest cell
    (less the row's lead when it absorbs it), stepped by the room or by the
    whole row, a share of the whole row, hugging its cell, or a fill at its
-   minimum (`MIN_FILL`, 7 cells, unless told). In a `Room` with cells
-   beside the row, steps 1 and 2 count its whole width and steps 3 to 5
-   fit its cells.
+   minimum (`MIN_FILL`, 7 cells, unless told). Then a share of what is
+   left takes its part of the room less the columns that are neither such
+   a share nor a fill and the gaps beside them (so the shares and the fill
+   split the rest, the gaps between them included; a stepped column
+   counted the room left before it). In a `Room` with cells beside the
+   row, steps 1 and 2 count its whole width and steps 3 to 5 fit its
+   cells.
 3. While the row is wider than its room, columns give way in ascending
    priority (the later of two at one priority first, a narrowing before a
    leaving): a shrinking column narrows no more than needed and not below
@@ -199,6 +204,8 @@ frame; a `usize` room is a `Room` of that many cells.
 4. The fill, if it still shows, takes what is left, cut with `…`. A fill
    that drops shows only with its minimum or its whole text. A fill with
    no rule of its own gives way last of all, narrowing until it is gone.
+   A fill that does not show and `gives_to` a column that does hands that
+   column what is left.
 5. A row still too wide once nothing more gives way is cut at its edge
    with `…`.
 
@@ -247,11 +254,6 @@ the tree draws them around the producer's line), 2, 3 to 9, 11, 12, and
 
 ## Seams left open
 
-- **Shares of what is left.** A share is of the whole row. A grid whose
-  column takes a share of what the fixed columns leave, or whose fill
-  drops below its minimum and hands its room to a neighbor instead of to
-  nothing (a context that leaves so the label can take the row), lays
-  itself out by hand; both would be width rules.
 - **Columns across depths.** `absorbs_lead` on one column lines up its
   end, and every column after it, at every depth. A second column that
   absorbs it gives the indent back again, so the columns after that one

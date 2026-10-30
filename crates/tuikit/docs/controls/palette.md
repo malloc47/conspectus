@@ -404,11 +404,6 @@ copy), and 18 (pagers).
   results out in one place, so a split of the list's area would go there,
   and `PaletteRow` would gain a method with a default that says what to
   show. Not built.
-- **More width rules.** A grid that needs a share of what the fixed
-  columns leave, or a fill that drops out below its minimum and hands its
-  room to a neighbor (quick select's entity rows: a context dropped so the
-  label can take the row), still lays itself out by hand; the column
-  schema's page lists them.
 - **Match highlights.** A row gets the query and paints what matched
   itself (`text::paint` with the theme's `match_style`); a ranker that
   answers ranges with its indices would save the second search.
