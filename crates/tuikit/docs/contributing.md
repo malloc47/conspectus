@@ -140,6 +140,11 @@ matches nothing. A control that seems to need a raw color needs a token or a
 named style instead; add the token to the table in `src/theme.rs` and to the
 theme's page.
 
+A host holds its own drawing code to the same rule with a scan of its own,
+since a raw color there ignores the theme just the same. That scan lives in
+the host's tests and keeps its own exception list: the file where the host
+writes the defaults of the named styles it registers.
+
 ## The glyph guard
 
 A glyph the terminal's font lacks is drawn from a fallback font and spills
