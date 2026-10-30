@@ -1460,8 +1460,10 @@ is generated from it, with the prose a binding cannot carry (other
 overlays' keys, `/ then Tab`, the legends) as annotations.
 Every empty slot says so through `tuikit::empty_state::EmptyState` (a
 message and a hint, wrapped and receding): the left pane's placeholders,
-the right pane's, and a Preview with nothing to show, with their words
-`conspectus`'s; a Preview that failed says why in the body's look. There
+the right pane's, a Preview with nothing to show, and the framework's
+log list, palettes, and pagers (the Messages log, the pickers' and
+searches' notes, an empty scrollback), with their words `conspectus`'s; a
+Preview that failed says why in the body's look. There
 is no minimum-size screen yet (CSP-319, CSP-190).
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,

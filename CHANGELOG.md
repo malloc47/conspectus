@@ -498,6 +498,10 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   row lists its command first and its hit count before its age. In the
   modal the ages are tinted by how recent they are and the snippets are
   gray italics, as in the lists.
+- **Empty lists say so one way.** The Messages log with nothing in it
+  shows its note in the receding look every other empty slot has (it was
+  drawn like an entry), and an empty search or picker wraps its note
+  instead of cutting it with `…` when the window is narrow.
 - **The `Related` rule stays on one row.** On a narrow right pane (40
   columns) the rule over the related rows cuts its counts with `…`
   (`2 validated · 2 other ·…  Related ──`) instead of folding onto a

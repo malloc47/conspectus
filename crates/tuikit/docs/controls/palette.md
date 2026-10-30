@@ -217,7 +217,10 @@ switches it to its next choice, wrapping. A palette may have more strips
 `set_status` puts a row under the query (how far a scan has got),
 receding and cut with `…`. An empty list says `empty_note` while nothing
 is typed (`(nothing to pick)` unless set) and `no_match_note` when the
-query matches nothing (`(no matches)` unless set), receding; a host can
+query matches nothing (`(no matches)` unless set). Each is an
+`EmptyState` ([empty_state.md](empty_state.md)), a message and an
+optional hint (a string is a message), wrapped at the list's width rather
+than cut, in the `muted` look; the list counts its rows. A host can
 change either while the palette is open (`(searching…)` while a provider
 works).
 
@@ -358,7 +361,7 @@ Space toggle · Esc back`.
 | `surface` | the background the frame paints |
 | `field_cursor` | the query's caret, while the results have the keys (`TextField`) |
 | `selection_active` | the cursor's row, gutter to the end of its cells (`selection::row`); an option's row in the pane |
-| `muted` | the status row, the empty list's note, the footer, and an `Item`'s detail |
+| `muted` | the status row, the empty list's state, the footer, and an `Item`'s detail |
 | `badge` (with `accent`) | the chosen choice of a scope strip (`SegmentedTitle`) |
 
 A host's row takes whatever tokens its cells use. The scrollbar is the

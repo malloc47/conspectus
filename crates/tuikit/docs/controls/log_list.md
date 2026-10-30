@@ -100,7 +100,7 @@ The same example is the doctest on the `log_list` module, so it compiles.
 | `.keys(table)` | resolve keys with a host table that includes `LOG_LIST_KEYS` and adds its own rows; the footer is generated from it |
 | `.detail(f)` | how an entry's detail reads (`Fn(&Entry<R>) -> String`); the summary with its repeat count until set |
 | `.copy(f)` | the copy hook (`Fn(&Entry<R>) -> Option<M>`), asked for the selected entry by a key bound to `LogListKey::Copy` |
-| `.empty(note)` | what the list says while the log is empty; `nothing logged yet` until set |
+| `.empty(state)` | what the list says while the log is empty: an `EmptyState` (a message and an optional hint) or a string; `nothing logged yet` until set |
 | `.mark_seen(&mut log)` | the unseen-count hook: marks the log seen as the list opens over it, so a count the host shows elsewhere (a status chip) clears |
 | `selected()`, `selected_entry(&log)` | the selection, newest first (0 is the newest) |
 | `window()`, `detail_window()` | the list's and the detail's scroll windows at the last draw |
@@ -138,9 +138,10 @@ The frame is titled with the title and the count of entries (`Events ·
   blank row, and scroll with it, by the one fit every framed control
   shares, so no key is lost.
 
-An empty log shows the host's note, each line wrapped at the frame's width,
-over the footer and its blank row; the note keeps a row on the shortest
-frames.
+An empty log shows the host's empty state ([empty_state.md](empty_state.md)):
+its message and hint wrapped at the frame's width (a line break ending a
+row) in the `muted` look, over the footer and its blank row; the state
+keeps a row on the shortest frames.
 
 ## Key table
 
@@ -195,7 +196,7 @@ unstyled: the host's words.
 | 11 | Feedback severity | each entry's mark and its color come from its severity and the theme |
 | 12 | Paging | the detail pages by the rows it shows and its window is clamped on every draw; `g`/`G` and `Home`/`End` go to the ends of the list |
 | 13 | Theme | every style is a theme token; no raw color |
-| 14 | Width | rows are cut in cells with `…`; the detail and the empty note wrap by the `text` rules |
+| 14 | Width | rows are cut in cells with `…`; the detail and the empty state wrap by the `text` rules |
 | 18 | Pagers | the detail is the framework's pager in its embedded mode, with the shared scrollbar |
 
 Not applicable: 3 (nothing to confirm), 6 and 7 (no form), 9 (the focus

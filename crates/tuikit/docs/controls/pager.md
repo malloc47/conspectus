@@ -123,7 +123,7 @@ The same example is the doctest on the `pager` module, so it compiles.
 | `paint(rows, first, find, theme)` | pick out the active find's matches on the rows drawn | nothing |
 | `find_detail(query)` | more the find chip says when nothing shown matches | none |
 | `describe(key)` | the content's words for what a pager key does, on the help page (`Jump to the oldest line`) | the pager's words |
-| `empty()` | what the body says with no rows | `nothing to show` |
+| `empty()` | what the body says with no rows: an `EmptyState` (a message and an optional hint; a string converts), wrapped and muted ([empty_state.md](empty_state.md)) | `nothing to show` |
 | `apply(action)` | act on a content key; returns a `PagerEffect` | (required) |
 | `copy()` | the copy hook: the message that copies what the content holds | none |
 
@@ -271,7 +271,7 @@ prompt's footer, after the field, is `Enter find · Esc cancel`.
 | Token | Used for |
 | --- | --- |
 | `inert` with `muted` | the rules, the separators, and the keys in a full-screen footer (`Tone::Inert`) |
-| `muted` | a framed footer, and the empty note |
+| `muted` | a framed footer, and the empty state |
 | `success` | the find chip with matches |
 | `warning` | the find chip with no match, and a warning note |
 | `info`, `error` | a note of those severities |

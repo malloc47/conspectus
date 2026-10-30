@@ -61,9 +61,19 @@ let lines = EmptyState::new("no preview for this item").lines(40, &theme);
 assert_eq!(lines.len(), 1);
 ```
 
-A tree's pane takes one for when no row shows:
-`TreeView::new(..).empty(EmptyState::new(..).hint(..))`, or a string, which
-becomes a message with no hint (see [tree_view.md](tree_view.md)).
+The framework's controls take one wherever their list or body can be
+empty, and draw it in its look; a string becomes a message with no hint:
+
+| Control | Where it is set | What it says unless set |
+| --- | --- | --- |
+| `TreeView` | `.empty(state)`, when no row shows ([tree_view.md](tree_view.md)) | nothing |
+| `LogList` | `.empty(state)`, while the log is empty ([log_list.md](log_list.md)) | `nothing logged yet` |
+| `Palette` | `.empty_note(state)` while nothing is typed and `.no_match_note(state)` when the query matches nothing, or `set_empty_note` and `set_no_match_note` while it is open ([palette.md](palette.md)) | `(nothing to pick)`, `(no matches)` |
+| `Pager` | `PagerContent::empty()`, when the content has no rows ([pager.md](pager.md)) | `nothing to show` |
+
+Each lays the state's rows out at its slot's width with `lines`, under or
+before what else the slot draws (a palette's spilled footer rows, a
+pager's tail), so the rows a slot too short cannot hold are not drawn.
 
 ### The API
 

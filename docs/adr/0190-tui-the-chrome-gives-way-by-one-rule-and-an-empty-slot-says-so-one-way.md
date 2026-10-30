@@ -16,6 +16,11 @@ which had no fit. Keeps the header's content and order of
 [ADR 0078](0078-tui-surface-division-of-labor.md) and gives it a narrow-width
 order. Decision 6's hints, still hand-written here, are generated from the
 key tables by [ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md).
+Decision 7 extended by CSP-795: `LogList`'s empty note, `Palette`'s empty
+and no-match notes, and `PagerContent::empty` are `EmptyState`s too, so a
+host can give each a hint and all three wrap and recede in its one look
+(a palette's note wraps where it was cut with `…`, and the log list's
+recedes where it was drawn plain); their copy is unchanged.
 
 ## Context
 
