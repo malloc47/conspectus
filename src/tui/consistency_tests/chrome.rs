@@ -1,7 +1,8 @@
 //! The frame around the rows reads right in every view and at every
-//! width: the left pane's tab strip never cuts a view's name, the
-//! header's session count agrees with what the active view lists, and
-//! the focused pane is the one framed in the focus accent.
+//! width: the left pane's tab strip never cuts a view's name, the header
+//! never cuts one of its parts and its session count agrees with what the
+//! active view lists, and the focused pane is the one framed in the focus
+//! accent.
 //!
 //! Each is checked on the rendered frame, the way the operator reads
 //! it, so it holds whichever control draws the strip, the header, or the
@@ -130,6 +131,113 @@ fn the_tab_strip_names_every_view_when_they_fit() {
         words,
         ["sessions", "mux", "prs", "pinned", "search", "…"].map(String::from)
     );
+}
+
+/// The header row of `app` drawn `width` columns wide, without the
+/// blanks after it.
+fn header_row(app: &mut App, width: u16) -> String {
+    let shown = frame(app, width, 12);
+    shown
+        .lines()
+        .next()
+        .expect("the header line")
+        .trim_end()
+        .to_string()
+}
+
+/// Between two parts of the header's counts, and before a chip section.
+const COUNT_GAP: &str = " · ";
+const SECTION_GAP: &str = "  ·  ";
+
+/// The parts of a header that shows them all, each with what goes before
+/// it when something precedes it: the counts joined by ` · `, a chip
+/// section set apart by `  ·  `.
+fn header_parts(full: &str) -> Vec<(&'static str, String)> {
+    let mut parts = Vec::new();
+    for (section, text) in full.split(SECTION_GAP).enumerate() {
+        for (index, part) in text.split(COUNT_GAP).enumerate() {
+            let gap = if section > 0 && index == 0 {
+                SECTION_GAP
+            } else {
+                COUNT_GAP
+            };
+            parts.push((gap, part.to_string()));
+        }
+    }
+    parts
+}
+
+/// Every width from 40 to 120 columns, both layouts, every view: the
+/// header shows whole parts of the header a wide screen shows, in order,
+/// always the session count, and ends with `…` exactly when it leaves a
+/// part out. It never runs past the screen for the edge to cut.
+#[test]
+fn the_header_never_cuts_a_part_at_any_width() {
+    for view in ALL_VIEWS {
+        let mut app = app_in(view);
+        let full = header_row(&mut app, 300);
+        let parts = header_parts(&full);
+        assert!(parts.len() >= 3, "{view:?}: {full}");
+        for width in 40..=120 {
+            let shown = header_row(&mut app, width);
+            let context = format!("{view:?} at {width} columns: {shown:?} (whole: {full:?})");
+            assert!(
+                tuikit::text::width(&shown) <= usize::from(width),
+                "{context}"
+            );
+            let (body, shortened) = match shown.strip_suffix(tuikit::glyphs::marks::MORE) {
+                Some(body) => (body, true),
+                None => (shown.as_str(), false),
+            };
+            let mut rest = body;
+            let mut kept = Vec::new();
+            for (gap, part) in &parts {
+                let drawn = if kept.is_empty() {
+                    part.clone()
+                } else {
+                    format!("{gap}{part}")
+                };
+                if let Some(after) = rest.strip_prefix(drawn.as_str()) {
+                    rest = after;
+                    kept.push(part.as_str());
+                }
+            }
+            assert!(rest.is_empty(), "a part is cut: {context}");
+            assert!(
+                kept.iter().any(|part| part.ends_with(" sessions")),
+                "the session count is missing: {context}"
+            );
+            assert_eq!(
+                shortened,
+                kept.len() < parts.len(),
+                "the header ends with `…` exactly when it leaves a part out: {context}"
+            );
+        }
+    }
+}
+
+/// The header gives way by importance, not from its end: at 40 columns
+/// the freshness, the session count, and the mux count stay, and what
+/// follows them goes.
+#[test]
+fn the_header_keeps_its_most_important_parts_when_narrow() {
+    let mut app = app_in(View::Sessions);
+    let full = header_row(&mut app, 300);
+    assert!(full.starts_with("updated "), "{full}");
+    assert!(
+        tuikit::text::width(&full) > 40,
+        "the fixture's header is wider: {full}"
+    );
+    let narrow = header_row(&mut app, 40);
+    let kept: Vec<&str> = narrow
+        .trim_end_matches(tuikit::glyphs::marks::MORE)
+        .split(COUNT_GAP)
+        .collect();
+    assert_eq!(kept.len(), 3, "{narrow}");
+    assert!(kept[0].starts_with("updated "), "{narrow}");
+    assert!(kept[1].ends_with(" sessions"), "{narrow}");
+    assert!(kept[2].ends_with(" mux"), "{narrow}");
+    assert!(narrow.ends_with(tuikit::glyphs::marks::MORE), "{narrow}");
 }
 
 /// The cells of a pane's border other than its top row, which carries

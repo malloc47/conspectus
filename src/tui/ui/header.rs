@@ -1,49 +1,75 @@
 //! Header line and status bar: counts, chips, and contextual hints (ADR 0078).
 
+use tuikit::priority_line::{PriorityLine, Segment};
+
 use super::*;
 
+/// How long each part of the header holds on as the screen narrows, the
+/// highest longest; the session count has no rank and never gives way.
+/// Freshness and the load-bearing counts outlast the triage chip, which
+/// outlasts the stopped count, and the opt-in harness chips go first,
+/// from the end (ADR 0078's order of what the header carries).
+mod header_rank {
+    pub(super) const FRESHNESS: u32 = 5;
+    pub(super) const MUX: u32 = 4;
+    pub(super) const AMBIGUITY: u32 = 3;
+    pub(super) const STOPPED: u32 = 2;
+    pub(super) const HARNESS_CHIPS: u32 = 1;
+}
+
 pub(super) fn draw_header(app: &App, buf: &mut Buffer, area: Rect) {
-    // Header shape (ADR 0078):
-    //   [updated Ns ago · ] N/M sessions · M mux
-    //     [ · <opt-in harness chips>]
-    //     [ · ▲ N when ambiguous > 0]
-    //
-    // The `Conspectus` brand and `sessions` view-label words moved
-    // out — the brand was self-evident inside the TUI and the active
-    // view was already in the left-panel title strip with stronger
-    // visual weight. The mux-state chip section collapsed to a
-    // single `▲ N` because ADR 0072 made the per-row chip binary and
-    // every group row already owns the ambiguity glyph. Per-harness
-    // chips became opt-in via `[tui] show_harness_chips`. Freshness
-    // promoted to the lead position.
+    let room = usize::from(area.width);
+    Paragraph::new(header_line(app).line(room)).render(area, buf);
+}
+
+/// The header as the framework's [`PriorityLine`], so a narrow screen
+/// drops its least important parts whole and says so with `…` instead of
+/// cutting one mid-word.
+///
+/// Header shape (ADR 0078):
+///
+/// ```text
+/// [updated Ns ago · ] N/M sessions · M mux[ · K stopped]
+///   [  ·  <opt-in harness chips>]
+///   [  ·  ▲ N when ambiguous > 0]
+/// ```
+///
+/// The `Conspectus` brand and `sessions` view-label words moved out: the
+/// brand was self-evident inside the TUI and the active view was already
+/// in the left-panel title strip with stronger visual weight. The
+/// mux-state chip section collapsed to a single `▲ N` because ADR 0072
+/// made the per-row chip binary and every group row already owns the
+/// ambiguity glyph. Per-harness chips became opt-in via
+/// `[tui] show_harness_chips`. Freshness promoted to the lead position.
+pub(super) fn header_line(app: &App) -> PriorityLine {
     let theme = app.theme();
     let (agents_total, mux_total) = snapshot_counts(app.snapshot_handle());
     let visible_sessions = visible_agent_session_count(app, agents_total);
-    let freshness = header_freshness(app);
     let session_cell = format_count_with_filtered(visible_sessions, agents_total);
 
-    // Identity prefix renders bold; chips after it carry their own
-    // colors and stay independent of the prefix style.
+    // The counts render bold, separators included; chips after them
+    // carry their own colors.
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let mut line = PriorityLine::new(theme).separator(Span::styled(marks::SPACED_SEPARATOR, bold));
+    if let Some(freshness) = header_freshness(app) {
+        line.push(Segment::new(Span::styled(freshness, bold)).rank(header_rank::FRESHNESS));
+    }
+    line.push(Segment::new(span!(bold; "{session_cell} sessions")));
+    line.push(Segment::new(span!(bold; "{mux_total} mux")).rank(header_rank::MUX));
     let gone = gone_mux_count(app.snapshot_handle());
-    let gone_cell = if gone > 0 {
-        format!(" · {gone} stopped")
-    } else {
-        String::new()
-    };
-    let prefix = format!("{freshness}{session_cell} sessions · {mux_total} mux{gone_cell}");
-    let mut spans: Vec<Span<'static>> = vec![span!(Modifier::BOLD; "{prefix}")];
+    if gone > 0 {
+        line.push(Segment::new(span!(bold; "{gone} stopped")).rank(header_rank::STOPPED));
+    }
 
     // Counts walk the visible row tree, matching the count rule.
     let counts = HeaderCounts::from_app(app);
-
     if app.config().show_harness_chips {
-        append_harness_chips(&mut spans, &counts, theme);
+        push_harness_chips(&mut line, &counts, theme);
     }
     if counts.mux_ambiguous > 0 {
-        append_ambiguity_chip(&mut spans, counts.mux_ambiguous, theme);
+        push_ambiguity_chip(&mut line, counts.mux_ambiguous, theme);
     }
-
-    Paragraph::new(Line::from(spans)).render(area, buf);
+    line
 }
 
 /// Per-harness and per-mux-state row aggregates used by the dense
@@ -79,55 +105,48 @@ impl HeaderCounts {
     }
 }
 
-/// Separators between the chip sections. `SECTION_SEPARATOR`
-/// joins the prefix to the optional opt-in / triage chips; the per-chip
-/// `CHIP_SEPARATOR` joins individual harness chips within the opt-in
-/// section.
+/// The gaps before the header's chip sections. `SECTION_SEPARATOR` sets
+/// the optional opt-in and triage chips apart from the counts; the
+/// per-chip `CHIP_SEPARATOR` joins individual harness chips within the
+/// opt-in section.
 pub(super) const CHIP_SEPARATOR: &str = "  ";
 
 pub(super) const SECTION_SEPARATOR: &str = "  ·  ";
 
-/// Render the opt-in per-harness chip block (ADR 0078).
-/// Drops out cleanly when the row tree is empty so a freshly-launched
-/// dashboard with no rows yet doesn't get a hanging trailing
-/// separator.
-pub(super) fn append_harness_chips(
-    spans: &mut Vec<Span<'static>>,
-    counts: &HeaderCounts,
-    theme: &Theme,
-) {
+/// Add the opt-in per-harness chips (ADR 0078), one segment each: the
+/// first set apart from the counts, the rest a chip's gap from each
+/// other. They share a rank, so on a narrow screen they go from the end
+/// and the first stays longest. Nothing when the row tree is empty, so a
+/// freshly launched dashboard has no hanging separator.
+pub(super) fn push_harness_chips(line: &mut PriorityLine, counts: &HeaderCounts, theme: &Theme) {
     use crate::tui::widgets::badge::harness_badge;
-    if counts.by_harness.is_empty() {
-        return;
-    }
-    spans.push(Span::raw(SECTION_SEPARATOR));
-    let mut first = true;
-    for (label, count) in &counts.by_harness {
-        if !first {
-            spans.push(Span::raw(CHIP_SEPARATOR));
-        }
-        first = false;
-        spans.push(harness_badge(label, theme));
-        spans.push(span!(" {count}"));
+    for (index, (label, count)) in counts.by_harness.iter().enumerate() {
+        let gap = if index == 0 {
+            SECTION_SEPARATOR
+        } else {
+            CHIP_SEPARATOR
+        };
+        line.push(
+            Segment::new(vec![harness_badge(label, theme), span!(" {count}")])
+                .rank(header_rank::HARNESS_CHIPS)
+                .gap(gap),
+        );
     }
 }
 
-/// Render the ambiguity triage chip (`▲ N`) — only called when N > 0.
-/// Uses ADR 0072's `▲` vocabulary so
-/// the header signal aligns with the per-group glyph the row tree
-/// already shows.
-pub(super) fn append_ambiguity_chip(
-    spans: &mut Vec<Span<'static>>,
-    ambiguous: usize,
-    theme: &Theme,
-) {
-    spans.push(Span::raw(SECTION_SEPARATOR));
-    spans.push(
-        StatusChip::new(marks::WARNING, Tone::Warning)
-            .bold()
-            .span(theme),
+/// Add the ambiguity triage chip (`▲ N`), only called when N > 0, set
+/// apart from what precedes it. Uses ADR 0072's `▲` vocabulary so the
+/// header signal aligns with the per-group glyph the row tree already
+/// shows.
+pub(super) fn push_ambiguity_chip(line: &mut PriorityLine, ambiguous: usize, theme: &Theme) {
+    let chip = StatusChip::new(marks::WARNING, Tone::Warning)
+        .bold()
+        .span(theme);
+    line.push(
+        Segment::new(vec![chip, span!(" {ambiguous}")])
+            .rank(header_rank::AMBIGUITY)
+            .gap(SECTION_SEPARATOR),
     );
-    spans.push(span!(" {ambiguous}"));
 }
 
 /// Render the header's session count. When a filter is active and
@@ -205,16 +224,12 @@ fn filter_narrows_view(app: &App) -> bool {
             && (filter.pr_state.is_some() || filter.pr_branch.is_some())
 }
 
-/// Build the `updated Ns ago · ` slice of the header, or an empty
-/// string when no snapshot has loaded yet. The trailing separator
-/// is part of the returned slice so callers don't have to special-
-/// case the empty form.
-pub(super) fn header_freshness(app: &App) -> String {
-    let Some(loaded_at) = app.loaded_at_epoch() else {
-        return String::new();
-    };
+/// The header's `updated Ns ago`, or `None` before a snapshot has
+/// loaded.
+pub(super) fn header_freshness(app: &App) -> Option<String> {
+    let loaded_at = app.loaded_at_epoch()?;
     let now = current_unix_epoch_for_render();
-    format!("updated {} · ", Age::between(loaded_at, now).ago())
+    Some(format!("updated {}", Age::between(loaded_at, now).ago()))
 }
 
 pub(super) fn draw_status_bar(app: &App, buf: &mut Buffer, area: Rect) {
@@ -255,7 +270,7 @@ pub(super) fn draw_status_bar(app: &App, buf: &mut Buffer, area: Rect) {
     push_provider_chips(app, theme, &mut provider_spans);
     let reserved = text::spans_width(&spans) + text::spans_width(&provider_spans);
     let room = usize::from(area.width).saturating_sub(reserved);
-    spans.extend(fit_status_segments(app, theme, room));
+    spans.extend(status_segments(app, theme).spans(room));
     spans.extend(provider_spans);
 
     Paragraph::new(Line::from(spans)).render(area, buf);
@@ -331,11 +346,31 @@ pub(super) fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span
     }
 }
 
+/// How long each piece of the status bar holds on as the bar narrows, the
+/// highest longest. No two share a rank, so the bar packs what fits in
+/// this order: what a narrowed view is narrowed by, the way back, and the
+/// way out first; the refresh hint last.
+mod status_rank {
+    pub(super) const FIND: u32 = 11;
+    pub(super) const BACK: u32 = 10;
+    pub(super) const QUIT: u32 = 9;
+    pub(super) const FILTER: u32 = 8;
+    /// The right pane's keys, with the right pane focused: they matter
+    /// more than the action hint, which describes the left pane's row.
+    pub(super) const RIGHT_PANE_KEYS: u32 = 7;
+    pub(super) const DEFAULT_ACTION: u32 = 6;
+    pub(super) const GROUP: u32 = 5;
+    pub(super) const SORT: u32 = 4;
+    pub(super) const LEFT_PANE_KEYS: u32 = 3;
+    pub(super) const FOCUS: u32 = 2;
+    pub(super) const REFRESH: u32 = 1;
+}
+
 /// The active view state in a compact, always-visible form so grouping,
 /// filtering, and sorting are discoverable without opening the controls
-/// overlay, as separately droppable pieces, each with the priority it
-/// keeps when the bar is too narrow for all of them (1 stays longest).
-fn view_state_segments(app: &App) -> Vec<(u8, String)> {
+/// overlay, as separately droppable pieces, each with the rank it keeps
+/// when the bar is too narrow for all of them.
+fn view_state_segments(app: &App) -> Vec<(u32, String)> {
     let filter = render_filter_chips(app.filter());
     let filter = if filter.is_empty() {
         "all".to_string()
@@ -343,12 +378,18 @@ fn view_state_segments(app: &App) -> Vec<(u8, String)> {
         filter
     };
     let mut segments = vec![
-        (5, format!("group:{}", app.grouping().as_str())),
-        (3, format!("filter:{filter}")),
-        (6, format!("sort:{}", sort_chip_label(app.sort()))),
+        (
+            status_rank::GROUP,
+            format!("group:{}", app.grouping().as_str()),
+        ),
+        (status_rank::FILTER, format!("filter:{filter}")),
+        (
+            status_rank::SORT,
+            format!("sort:{}", sort_chip_label(app.sort())),
+        ),
     ];
     if let Some(find) = render_find_chip(app) {
-        segments.push((1, find));
+        segments.push((status_rank::FIND, find));
     }
     segments
 }
@@ -490,15 +531,18 @@ pub(super) fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize)
     (agents, mux)
 }
 
-/// The key hints as separately droppable pieces with the priority each
-/// keeps on a narrow bar.
-fn contextual_status_segments(app: &App) -> Vec<(u8, String)> {
-    let focus_hint = match app.focus() {
-        Focus::Left => "j/k move · h/l fold · Enter default".to_string(),
+/// The key hints as separately droppable pieces with the rank each keeps
+/// on a narrow bar.
+fn contextual_status_segments(app: &App) -> Vec<(u32, String)> {
+    let (focus_rank, focus_hint) = match app.focus() {
+        Focus::Left => (
+            status_rank::LEFT_PANE_KEYS,
+            "j/k move · h/l fold · Enter default".to_string(),
+        ),
         // With the right pane focused, its own table's hint: moving,
         // Enter with what it does on the cursor's row (copy a field,
         // follow a link, fold the Other zone), folding, and going back.
-        Focus::Right => right_pane_hint(app),
+        Focus::Right => (status_rank::RIGHT_PANE_KEYS, right_pane_hint(app)),
     };
     let refresh_hint = if app.active_view() == crate::tui::View::Prs {
         "r refresh · ^R forges"
@@ -506,16 +550,14 @@ fn contextual_status_segments(app: &App) -> Vec<(u8, String)> {
         "r refresh"
     };
     let mut segments = vec![
-        (4, default_action_status_hint(app)),
-        // With the right pane focused its own keys matter more than the
-        // action hint, which describes the left pane's row.
-        (if app.focus() == Focus::Right { 3 } else { 7 }, focus_hint),
-        (8, "Tab focus".to_string()),
-        (9, refresh_hint.to_string()),
-        (2, "q quit".to_string()),
+        (status_rank::DEFAULT_ACTION, default_action_status_hint(app)),
+        (focus_rank, focus_hint),
+        (status_rank::FOCUS, "Tab focus".to_string()),
+        (status_rank::REFRESH, refresh_hint.to_string()),
+        (status_rank::QUIT, "q quit".to_string()),
     ];
     if app.focus() == Focus::Left && app.can_nav_back() {
-        segments.push((1, "Backspace back".to_string()));
+        segments.push((status_rank::BACK, "Backspace back".to_string()));
     }
     segments
 }
@@ -531,74 +573,23 @@ fn right_pane_hint(app: &App) -> String {
     }
 }
 
-/// The status bar's settings chips and key hints, fitted to `room`
-/// cells: pieces drop in order of priority (the least important first),
-/// a `…` marks that some were dropped, and nothing is cut mid-word.
-fn fit_status_segments(app: &App, theme: &Theme, room: usize) -> Vec<Span<'static>> {
-    #[derive(Clone)]
-    struct Piece {
-        order: usize,
-        priority: u8,
-        text: String,
-        settings: bool,
+/// The status bar's settings chips and key hints as the framework's
+/// [`PriorityLine`]: in the room the bar's fixed parts leave, pieces drop
+/// by rank (the least important first), the room is filled back with
+/// whatever still fits, a `…` marks that some were dropped, and nothing
+/// is cut mid-word. The settings take the `cwd_mark` color, the hints
+/// recede.
+fn status_segments(app: &App, theme: &Theme) -> PriorityLine {
+    let settings = Style::default().fg(theme.cwd_mark());
+    let hints = Style::default().add_modifier(theme.muted);
+    let mut line = PriorityLine::new(theme);
+    for (rank, text) in view_state_segments(app) {
+        line.push(Segment::new(Span::styled(text, settings)).rank(rank));
     }
-    let mut pieces: Vec<Piece> = Vec::new();
-    for (priority, text) in view_state_segments(app) {
-        pieces.push(Piece {
-            order: pieces.len(),
-            priority,
-            text,
-            settings: true,
-        });
+    for (rank, text) in contextual_status_segments(app) {
+        line.push(Segment::new(Span::styled(text, hints)).rank(rank));
     }
-    for (priority, text) in contextual_status_segments(app) {
-        pieces.push(Piece {
-            order: pieces.len(),
-            priority,
-            text,
-            settings: false,
-        });
-    }
-    let width = |kept: &[&Piece]| -> usize {
-        kept.iter()
-            .map(|piece| text::width(piece.text.as_str()))
-            .sum::<usize>()
-            + 3 * kept.len().saturating_sub(1)
-    };
-    let choose = |room: usize| -> Vec<Piece> {
-        let mut by_priority: Vec<&Piece> = pieces.iter().collect();
-        by_priority.sort_by_key(|piece| (piece.priority, piece.order));
-        let mut kept: Vec<&Piece> = Vec::new();
-        for piece in by_priority {
-            let mut trial = kept.clone();
-            trial.push(piece);
-            if width(&trial) <= room {
-                kept = trial;
-            }
-        }
-        kept.sort_by_key(|piece| piece.order);
-        kept.into_iter().cloned().collect()
-    };
-    let mut kept = choose(room);
-    let dropped = kept.len() < pieces.len();
-    if dropped {
-        kept = choose(room.saturating_sub(2));
-    }
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    for (index, piece) in kept.iter().enumerate() {
-        if index > 0 {
-            spans.push(span!(theme.muted; " · "));
-        }
-        if piece.settings {
-            spans.push(span!(Style::default().fg(theme.cwd_mark()); "{}", piece.text));
-        } else {
-            spans.push(span!(theme.muted; "{}", piece.text));
-        }
-    }
-    if dropped {
-        spans.push(span!(theme.muted; " {}", marks::ELLIPSIS));
-    }
-    spans
+    line
 }
 
 /// Status-bar action hint that advertises `Enter` as the primary

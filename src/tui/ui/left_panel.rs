@@ -16,6 +16,7 @@
 mod columns;
 
 use tuikit::selection;
+use tuikit::tab_bar::TabBar;
 use tuikit::tree::{RowCtx, RowState, TreeColumns, TreeView};
 
 use super::*;
@@ -204,107 +205,20 @@ pub(super) fn render_left_row(
 ///
 /// `width` is the cells the pane's top border leaves for the title after
 /// the focus marker the pane frame puts before it
-/// ([`PaneFrame::title_width`]). The strip names every view when they
-/// fit; otherwise it names fewer and ends with `…` (see
-/// [`tab_strip_fit`]), so a narrow pane never cuts a label in half. The
-/// frame adds the closing space when the strip leaves a cell for it.
+/// ([`PaneFrame::title_width`]). The strip is the framework's
+/// [`TabBar`]: it names every view when they fit; otherwise the inactive
+/// names give way from the end of the strip, the active one stays, and
+/// the strip ends with `…` and a free cell, so a narrow pane never cuts a
+/// label in half. The frame adds the closing space when the strip leaves
+/// a cell for it.
 pub(super) fn left_panel_title(app: &App, width: usize) -> Line<'static> {
-    let theme = app.theme();
-    let active = app.active_view();
     let views = crate::tui::widgets::controls::VIEW_OPTIONS;
     let labels: Vec<&str> = views.iter().map(|&view| view_label(view)).collect();
-    let active_index = views.iter().position(|&view| view == active).unwrap_or(0);
-    let fit = tab_strip_fit(&labels, active_index, width);
-    let dim = Style::default().fg(theme.inert);
-    let mut spans = Vec::new();
-    for (position, &index) in fit.shown.iter().enumerate() {
-        if position > 0 {
-            spans.push(Span::styled(TAB_SEPARATOR, dim));
-        }
-        let label = fit
-            .active_label
-            .as_deref()
-            .filter(|_| index == active_index);
-        let label = label.unwrap_or(labels[index]).to_string();
-        if index == active_index {
-            spans.push(Span::styled(
-                label,
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            spans.push(Span::styled(label, dim));
-        }
-    }
-    if fit.shortened {
-        spans.push(Span::styled(tab_strip_more(), dim));
-    }
-    Line::from(spans)
-}
-
-/// Between two tab labels.
-const TAB_SEPARATOR: &str = " · ";
-
-/// Ends a tab strip that leaves views out: a space and the ellipsis mark.
-fn tab_strip_more() -> String {
-    format!(" {}", marks::ELLIPSIS)
-}
-
-/// Which tabs a strip of `labels` shows in `room` cells.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) struct TabStripFit {
-    /// Indexes into the labels, in strip order.
-    pub(super) shown: Vec<usize>,
-    /// Some views are left out, so the strip ends with `…`.
-    pub(super) shortened: bool,
-    /// The active label cut to fit, when not even it fits whole.
-    pub(super) active_label: Option<String>,
-}
-
-/// Fit a tab strip into `room` cells, the trailing pad not counted.
-///
-/// Every label shows when they all fit. Otherwise the active label
-/// stays, the inactive ones give way from the end of the strip, and the
-/// strip ends with ` …` and a pad so the operator can tell it is
-/// shortened. Only when the active label alone is too wide is it cut,
-/// with its own `…`. A label is never cut in the middle by the border.
-pub(super) fn tab_strip_fit(labels: &[&str], active: usize, room: usize) -> TabStripFit {
-    let separator = text::width(TAB_SEPARATOR);
-    let span_of = |shown: &[usize]| -> usize {
-        shown
-            .iter()
-            .map(|&index| text::width(labels[index]))
-            .sum::<usize>()
-            + separator * shown.len().saturating_sub(1)
-    };
-    let every: Vec<usize> = (0..labels.len()).collect();
-    if span_of(&every) <= room {
-        return TabStripFit {
-            shown: every,
-            shortened: false,
-            active_label: None,
-        };
-    }
-    let active = active.min(labels.len().saturating_sub(1));
-    // The marker and a pad after it, so the `…` never touches the corner.
-    let budget = room.saturating_sub(text::width(&tab_strip_more()) + 1);
-    let mut shown = vec![active];
-    for index in (0..labels.len()).filter(|&index| index != active) {
-        let mut wider = shown.clone();
-        wider.push(index);
-        wider.sort_unstable();
-        if span_of(&wider) > budget {
-            break;
-        }
-        shown = wider;
-    }
-    let active_label = (span_of(&shown) > budget).then(|| text::truncate_end(labels[active], room));
-    TabStripFit {
-        shortened: active_label.is_none(),
-        shown,
-        active_label,
-    }
+    let active = views
+        .iter()
+        .position(|&view| view == app.active_view())
+        .unwrap_or(0);
+    TabBar::new(&labels, active, app.theme()).line(width)
 }
 
 /// The one-line notice under the Pinned view's rows when legacy pins

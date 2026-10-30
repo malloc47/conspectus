@@ -422,6 +422,37 @@ fn header_shows_harness_chips_when_opt_in_is_set() {
     );
 }
 
+/// On a narrow screen the opt-in harness chips are the first to go, each
+/// whole: the header never shows part of a chip, and ends with `…` once
+/// a chip is left out.
+#[test]
+fn header_drops_harness_chips_whole_when_narrow() {
+    let mut app = seeded_app_with_harness_chips();
+    let header = |app: &mut App, width: u16| -> String {
+        let text = buffer_to_string(&render_to_buffer(app, Rect::new(0, 0, width, 24)));
+        text.lines()
+            .next()
+            .expect("header line")
+            .trim_end()
+            .to_string()
+    };
+    let full = header(&mut app, 200);
+    assert!(full.contains("  ·  ") && full.contains("codex"), "{full}");
+    for width in 20..=80 {
+        let shown = header(&mut app, width);
+        assert!(tuikit::text::width(&shown) <= usize::from(width), "{shown}");
+        if shown == full {
+            continue;
+        }
+        assert!(
+            shown.ends_with(marks::MORE),
+            "a header that leaves the chip out says so at {width}: {shown}"
+        );
+        assert!(!shown.contains("codex"), "a cut chip at {width}: {shown}");
+        assert!(shown.contains(" sessions"), "{shown}");
+    }
+}
+
 /// Seed a test App with `[tui] show_harness_chips = true`.
 fn seeded_app_with_harness_chips() -> App {
     // Reproduce the seeded_app data path but flip the opt-in.
