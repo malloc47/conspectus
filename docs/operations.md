@@ -1505,6 +1505,12 @@ A key that cannot act on the selection is named dimmed, with why
 the hints give way one by one, least important first, and the bar ends
 with `…`; a status message too long for the bar ends with `…` too.
 
+On a workspace, repo, or checkout row, `a` attaches to the one mux its
+sessions are ambiguous about. With several it says how many and to
+select a session to see its candidates: an ambiguous session's right
+pane lists the muxes it could be in under `Other` (its hint is `Tab
+inspect candidates`), and `a` there attaches to the one the cursor is on.
+
 ## Keys in dialogs
 
 Every dialog uses the same three keys the same way:

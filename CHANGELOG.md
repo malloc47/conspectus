@@ -614,6 +614,12 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   nothing: `Enter` did not copy them, and `o` said the row had no
   truncated value even beside a `(truncated · o)` hint. Both now act on
   the field under the cursor, expanded or not.
+- **`a` on a group with several ambiguous muxes says where they are.**
+  On a workspace, repo, or checkout row whose sessions are ambiguous
+  about two or more muxes, `a` said to pick one in the detail pane,
+  which no longer lists them. It now says `N ambiguous muxes here —
+  select a session to see its candidates`: each such session's right
+  pane lists its candidate muxes under `Other`.
 - **`Enter` on unresolved evidence says where the evidence is.** On a
   right-pane row under `Other` whose evidence names no node, `Enter`
   said "`o` opens detail", but `o` there only said the row had no

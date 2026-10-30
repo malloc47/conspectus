@@ -538,3 +538,157 @@ fn attach_refuses_a_mux_that_is_only_in_history() {
         "attach: `editor` isn't running · `conspectus rebuild editor` brings it back"
     );
 }
+
+/// A workspace with a session ambiguous about two muxes, and a repo
+/// with two checkouts, the first with a session ambiguous about two
+/// other muxes, as the Sessions view groups them: the workspace, the
+/// repo, and each checkout get a group row.
+fn ambiguous_groups_app() -> (App, [NodeId; 3]) {
+    use crate::model::{WorkspaceId, WorkspaceNode};
+    let repo_id = RepoId::new("/p/proj/.git");
+    let workspace = NodeId::Workspace(WorkspaceId::new("/w/ws"));
+    let repo = NodeId::Repo(repo_id.clone());
+    let checkout = NodeId::Checkout(CheckoutId::new(repo_id.clone(), "/p/proj"));
+    let other_checkout = NodeId::Checkout(CheckoutId::new(repo_id.clone(), "/p/proj-wt"));
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+        id: WorkspaceId::new("/w/ws"),
+        root: "/w/ws".to_string(),
+        provider: None,
+        name: None,
+    }));
+    snapshot
+        .nodes
+        .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+    for root in ["/p/proj", "/p/proj-wt"] {
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(repo_id.clone(), root.to_string()),
+            root: root.to_string(),
+            git_dir: None,
+            current_branch: None,
+            worktree: None,
+            head_commit: None,
+        }));
+    }
+    let session = |key: &str| NodeId::AgentSession(AgentSessionId::new("codex", "/state", key));
+    let associated = |id: &str, from: &NodeId, to: &NodeId| GraphLink {
+        id: id.to_string(),
+        source: from.clone(),
+        target: LinkEndpoint::Node { id: to.clone() },
+        relation: RelationKind::AssociatedWith,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::Medium,
+        freshness: crate::model::Freshness::Fresh,
+        source_metadata: crate::model::SourceMetadata::default(),
+        state: LinkState::Active,
+    };
+    for (key, cwd, group, muxes) in [
+        ("owned", "/w/ws", &workspace, &["build", "deploy"][..]),
+        ("loose", "/p/proj", &checkout, &["editor", "scratch"][..]),
+        ("quiet", "/p/proj-wt", &other_checkout, &[][..]),
+    ] {
+        snapshot
+            .nodes
+            .push(session_node("codex", "/state", key, cwd));
+        snapshot
+            .candidate_links
+            .push(associated(&format!("assoc-{key}"), &session(key), group));
+        for mux in muxes {
+            snapshot.nodes.push(mux_node("tmux", mux));
+            snapshot.candidate_links.push(linked_to_mux(
+                &session(key),
+                &mux_node_id("tmux", mux),
+                Provenance::Discovered,
+                &format!("{key}-{mux}"),
+            ));
+        }
+    }
+    (build_app(snapshot), [workspace, repo, checkout])
+}
+
+#[test]
+fn a_on_a_group_with_several_ambiguous_muxes_sends_the_operator_to_its_sessions() {
+    let (mut app, groups) = ambiguous_groups_app();
+    for group in groups {
+        let snapshot = app.snapshot_handle().expect("data").snapshot().clone();
+        let muxes = crate::tui::rows::ambiguous_muxes_for_group(&snapshot, &group);
+        assert_eq!(muxes.len(), 2, "{group:?}: {muxes:?}");
+        let rows = app.tree().rows.clone();
+        let at = rows
+            .iter()
+            .position(|row| row.id == RowId::Group(group.clone()))
+            .unwrap_or_else(|| panic!("the Sessions view lists {group:?}"));
+        app.set_selection(rows[at].id.clone());
+
+        // `a` cannot pick one, and says where they are.
+        let said = app
+            .update(Msg::AttachSelected)
+            .into_iter()
+            .find_map(|effect| match effect {
+                crate::tui::Effect::Toast(feedback) => Some(feedback.text),
+                _ => None,
+            });
+        assert_eq!(
+            said.as_deref(),
+            Some("attach: 2 ambiguous muxes here — select a session to see its candidates"),
+            "{group:?}"
+        );
+
+        // The group's sessions, the rows under it, list every one of
+        // them in the right pane, and `a` there attaches the one the
+        // cursor is on.
+        let mut listed = Vec::new();
+        for row in rows[at + 1..]
+            .iter()
+            .take_while(|row| row.depth > rows[at].depth)
+            .filter(|row| matches!(row.kind, crate::tui::rows::RowKind::AgentSession(_)))
+        {
+            app.set_selection(row.id.clone());
+            listed.extend(candidates_attached_from_the_right_pane(&mut app, &muxes));
+        }
+        for mux in &muxes {
+            assert!(listed.contains(mux), "{group:?}: {mux:?} not in {listed:?}");
+        }
+    }
+}
+
+/// With the selected row's right pane focused and its `Other` zone open,
+/// the rows that lead to one of `muxes`, each checked to be what `a`
+/// attaches with the cursor on it. Gives the left pane its focus back.
+fn candidates_attached_from_the_right_pane(app: &mut App, muxes: &[NodeId]) -> Vec<NodeId> {
+    use crate::tui::app::Focus;
+    use crate::tui::explorer::ExplorerRow;
+    use tuikit::explorer::ExplorerKey;
+    let put_cursor_on = |app: &mut App, index: usize| {
+        app.update(Msg::Explorer(ExplorerKey::First));
+        for _ in 0..index {
+            app.update(Msg::Explorer(ExplorerKey::Down));
+        }
+    };
+    app.update(Msg::CycleFocus);
+    assert_eq!(app.focus(), Focus::Right);
+    if let Some(header) = app
+        .explorer_rows()
+        .iter()
+        .position(|row| matches!(row, ExplorerRow::OtherHeader { expanded: false }))
+    {
+        put_cursor_on(app, header);
+        app.update(Msg::Explorer(ExplorerKey::Activate));
+    }
+    let mut attached = Vec::new();
+    for (index, row) in app.explorer_rows().iter().enumerate() {
+        let target = app
+            .explorer()
+            .and_then(|explorer| explorer.content().drill_target(row));
+        let Some(target) = target.filter(|target| muxes.contains(target)) else {
+            continue;
+        };
+        put_cursor_on(app, index);
+        let attach = resolve_attach_target(app).expect("a attaches the candidate");
+        assert_eq!(NodeId::MuxSession(attach.mux), target);
+        attached.push(target);
+    }
+    app.update(Msg::CycleFocus);
+    assert_eq!(app.focus(), Focus::Left);
+    attached
+}

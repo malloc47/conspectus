@@ -1049,7 +1049,9 @@ pub fn attach_disabled_why(reason: &AttachDisabled) -> String {
             format!("refusing to attach current tmux session `{name}`")
         }
         AttachDisabled::AmbiguousGroupMuxes(n) => {
-            format!("{n} ambiguous muxes here — pick one in the detail pane")
+            // Each ambiguous session lists its candidate muxes in its
+            // right pane, the place the group's set comes from.
+            format!("{n} ambiguous muxes here — select a session to see its candidates")
         }
         AttachDisabled::MuxGone(name) => {
             format!(

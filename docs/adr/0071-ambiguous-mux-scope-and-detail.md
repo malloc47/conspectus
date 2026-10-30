@@ -6,7 +6,11 @@ Accepted. Decision 2 (an `Ambiguous muxes` section on the group's
 detail pane) is superseded by [ADR 0074](0074-detail-pane-related-entities-flatten.md):
 the explorer has no such section, and the sectioned detail model that
 emitted it is deleted. Decisions 1 and 3 stand; `a` on a group row
-still attaches to the single ambiguous mux scoped to that group.
+still attaches to the single ambiguous mux scoped to that group. With
+several, `a` points at the group's sessions instead of the section
+(CSP-768): each ambiguous session's right pane lists its candidate
+muxes under `Other`, where the links that make it ambiguous are, so
+the explorer keeps listing only a node's own links (ADR 0074).
 
 ## Context
 
