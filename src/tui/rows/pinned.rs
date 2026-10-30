@@ -95,11 +95,7 @@ pub fn build_pinned_tree(inputs: PinnedBuildInputs<'_>) -> RowTree {
                     id: RowId::Bucket(label.clone()),
                     depth: 0,
                     expandable: true,
-                    kind: RowKind::Group(GroupRow {
-                        display_path: label,
-                        primary_node: None,
-                        is_launch_context: false,
-                    }),
+                    kind: RowKind::Group(GroupRow::at_path(&label, None)),
                 });
                 for entry in members {
                     push_slot(&mut tree, snapshot, entry.pin, 1, home, now);

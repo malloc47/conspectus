@@ -427,3 +427,41 @@ fn ambiguous_muxes_for_group_scopes_checkout_and_repo_to_unworkspaced_sessions()
         "only workspace, checkout, and repo groups scope sessions"
     );
 }
+
+#[test]
+fn a_header_at_a_path_is_named_by_its_last_part() {
+    let header = GroupRow::at_path("~/src/conspectus", None);
+    assert_eq!(header.label, "conspectus");
+    assert_eq!(header.detail, "~/src/conspectus");
+    assert_eq!(header.text(), "conspectus  ~/src/conspectus");
+    // A name with no path says nothing more.
+    let bucket = GroupRow::at_path("Ungrouped", None);
+    assert_eq!(
+        (bucket.label.as_str(), bucket.detail.as_str()),
+        ("Ungrouped", "")
+    );
+    assert_eq!(bucket.text(), "Ungrouped");
+    assert_eq!(GroupRow::at_path("~", None).text(), "~");
+    assert_eq!(path_label("/srv/data/"), "data");
+}
+
+#[test]
+fn a_workspace_header_says_its_members_and_provider_after_its_name() {
+    // The name is its own cell, drawn bold; the members and the provider
+    // follow it, dim, two cells apart.
+    let members = [
+        "config".to_string(),
+        "personal".into(),
+        "work-config".into(),
+    ];
+    assert_eq!(
+        workspace_header_detail(&members, Some("agent-deck")),
+        "config+personal+work-config  (agent-deck)"
+    );
+    assert_eq!(
+        workspace_header_detail(&[], Some("agent-deck")),
+        "(agent-deck)"
+    );
+    assert_eq!(workspace_header_detail(&members[..1], None), "config");
+    assert_eq!(workspace_header_detail(&[], None), "");
+}

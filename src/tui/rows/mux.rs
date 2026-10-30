@@ -359,11 +359,7 @@ fn push_ungrouped(
         id: RowId::Synthetic("ungrouped"),
         depth: 0,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: "Ungrouped".to_string(),
-            primary_node: None,
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::named("Ungrouped", None)),
     });
     push_bucket_members(tree, ungrouped, inputs, short_ids, now);
 }
@@ -431,21 +427,19 @@ fn emit_workspace_grouped(
     for (_, header, groups) in headers {
         match header {
             GroupHeader::Workspace(id) => {
-                let display_path = crate::tui::rows::workspace_header_label(
-                    inputs.snapshot,
-                    &id.root,
-                    inputs.home,
-                );
+                let root = id.root.clone();
                 let node_id = NodeId::Workspace(id);
+                let header = crate::tui::rows::workspace_header(
+                    inputs.snapshot,
+                    &root,
+                    inputs.home,
+                    node_id.clone(),
+                );
                 tree.rows.push(Row {
-                    id: RowId::Group(node_id.clone()),
+                    id: RowId::Group(node_id),
                     depth: 0,
                     expandable: true,
-                    kind: RowKind::Group(GroupRow {
-                        display_path,
-                        primary_node: Some(node_id),
-                        is_launch_context: false,
-                    }),
+                    kind: RowKind::Group(header),
                 });
             }
             GroupHeader::Repo(key) => {
@@ -555,11 +549,10 @@ fn push_repo_header(
         id: RowId::Group(node_id.clone()),
         depth,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: shorten_home(display_path, home),
-            primary_node: Some(node_id),
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::at_path(
+            &shorten_home(display_path, home),
+            Some(node_id),
+        )),
     });
 }
 

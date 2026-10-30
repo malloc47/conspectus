@@ -251,16 +251,12 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
         ..RowTree::default()
     };
     for (bucket, rows) in buckets {
-        let mut group = group_row(&bucket, launch_root.as_deref(), inputs.home);
-        // A group that names its forge repo leads with it; a remote group
-        // is already named for it.
-        if let Some(slug) = named(&bucket)
-            && !matches!(bucket, Bucket::Remote(_))
-            && let RowKind::Group(group) = &mut group.kind
-        {
-            group.display_path = format!("{slug}  {}", group.display_path);
-        }
-        tree.rows.push(group);
+        tree.rows.push(group_row(
+            &bucket,
+            launch_root.as_deref(),
+            inputs.home,
+            named(&bucket),
+        ));
         tree.rows.extend(rows);
     }
     tree
@@ -296,50 +292,52 @@ fn launch_checkout_root<'b>(
         .max_by_key(String::len)
 }
 
-fn group_row(bucket: &Bucket, launch_root: Option<&str>, home: Option<&Path>) -> Row {
-    let (id, display_path, primary_node, is_launch_context) = match bucket {
+/// A group's header row. A group whose PRs all come from the forge repo
+/// `named` leads with it, its path after (ADR 0131); a remote group is
+/// already named for its forge repo.
+fn group_row(
+    bucket: &Bucket,
+    launch_root: Option<&str>,
+    home: Option<&Path>,
+    named: Option<&str>,
+) -> Row {
+    // The header of a group at `path`, with a note after the path.
+    let local = |path: String, note: Option<&str>, node: NodeId| match (named, note) {
+        (Some(slug), _) => {
+            let detail = note.map_or_else(|| path.clone(), |note| format!("{path}  {note}"));
+            GroupRow::named(slug, Some(node)).with_detail(detail)
+        }
+        (None, Some(note)) => GroupRow::named(path, Some(node)).with_detail(note),
+        (None, None) => GroupRow::at_path(&path, Some(node)),
+    };
+    let (id, header) = match bucket {
         Bucket::Checkout { root, id } => {
             let node = NodeId::Checkout(id.clone());
-            (
-                RowId::Group(node.clone()),
-                shorten_home(root, home),
-                Some(node),
-                launch_root == Some(root.as_str()),
-            )
+            let mut header = local(shorten_home(root, home), None, node.clone());
+            header.is_launch_context = launch_root == Some(root.as_str());
+            (RowId::Group(node), header)
         }
         Bucket::Repo { path, id } => {
             let node = NodeId::Repo(id.clone());
-            (
-                RowId::Group(node.clone()),
-                shorten_home(path, home),
-                Some(node),
-                false,
-            )
+            let header = local(shorten_home(path, home), None, node.clone());
+            (RowId::Group(node), header)
         }
         Bucket::Unchecked { path, id } => {
             let node = NodeId::Repo(id.clone());
-            (
-                RowId::Group(node.clone()),
-                format!("{}  no checkout", shorten_home(path, home)),
-                Some(node),
-                false,
-            )
+            let header = local(shorten_home(path, home), Some("no checkout"), node.clone());
+            (RowId::Group(node), header)
         }
-        Bucket::Remote(slug) => (RowId::Remote(slug.clone()), slug.clone(), None, false),
+        Bucket::Remote(slug) => (RowId::Remote(slug.clone()), GroupRow::at_path(slug, None)),
         Bucket::State(status) => {
             let (id, label) = state_group(*status);
-            (RowId::Synthetic(id), label.to_string(), None, false)
+            (RowId::Synthetic(id), GroupRow::named(label, None))
         }
     };
     Row {
         id,
         depth: 0,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path,
-            primary_node,
-            is_launch_context,
-        }),
+        kind: RowKind::Group(header),
     }
 }
 

@@ -166,11 +166,7 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
                     id: RowId::Bucket(label.clone()),
                     depth: 0,
                     expandable: true,
-                    kind: RowKind::Group(GroupRow {
-                        display_path: label,
-                        primary_node: None,
-                        is_launch_context: false,
-                    }),
+                    kind: RowKind::Group(GroupRow::at_path(&label, None)),
                 });
                 for item in members {
                     push_item(&mut tree, item, 1);
@@ -256,11 +252,7 @@ fn build_flat(
                 id: RowId::Bucket(label.clone()),
                 depth: 0,
                 expandable: true,
-                kind: RowKind::Group(GroupRow {
-                    display_path: label,
-                    primary_node: None,
-                    is_launch_context: false,
-                }),
+                kind: RowKind::Group(GroupRow::at_path(&label, None)),
             });
             1
         };

@@ -209,11 +209,7 @@ fn match_line_skips_snippet_when_label_equals_haystack() {
         id: RowId::Synthetic("g"),
         depth: 0,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: "puffin/dir".to_string(),
-            primary_node: None,
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::at_path("puffin/dir", None)),
     };
     let items = items_from_rows(std::slice::from_ref(&row));
     let mut state = SearchOverlayState::new();

@@ -403,11 +403,19 @@ pub enum EntityState {
     Unknown,
 }
 
-/// A workspace / repo / worktree label row.
+/// A group header: a workspace, repo, checkout, or bucket that the rows
+/// beneath it belong to. It says two things, drawn as two cells: its
+/// name, and what more there is to say about it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupRow {
-    /// Human-friendly path with `$HOME` shortened to `~`.
-    pub display_path: String,
+    /// The header's name, drawn bold: the last part of the group's path, a
+    /// workspace's name, the forge repo a PR group's PRs come from, or a
+    /// bucket's label.
+    pub label: String,
+    /// What the header says after its name, dim: the group's whole path
+    /// with `$HOME` shortened to `~`, a workspace's members and provider,
+    /// a forge repo, `no checkout`. Empty when there is nothing more.
+    pub detail: String,
     /// Underlying node id when the group corresponds to a single
     /// node, `None` for synthetic buckets.
     pub primary_node: Option<NodeId>,
@@ -417,6 +425,70 @@ pub struct GroupRow {
     /// can tell where they launched from; the runtime also uses it
     /// to pick the initial selection and pre-expand ancestors.
     pub is_launch_context: bool,
+}
+
+impl GroupRow {
+    /// The header of the group at `path` (`~`-shortened), for the node
+    /// `primary_node` when it stands for one: named by the path's last
+    /// part, with the whole path after it when the two differ.
+    pub fn at_path(path: &str, primary_node: Option<NodeId>) -> Self {
+        let label = path_label(path);
+        let detail = if label == path {
+            String::new()
+        } else {
+            path.to_string()
+        };
+        Self {
+            label,
+            detail,
+            primary_node,
+            is_launch_context: false,
+        }
+    }
+
+    /// A header named `label` with nothing after it: Ungrouped, a kind or
+    /// state bucket.
+    pub fn named(label: impl Into<String>, primary_node: Option<NodeId>) -> Self {
+        Self {
+            label: label.into(),
+            detail: String::new(),
+            primary_node,
+            is_launch_context: false,
+        }
+    }
+
+    /// The header with `detail` after its name.
+    #[must_use]
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = detail.into();
+        self
+    }
+
+    /// The header's words as its row reads them: the name, then what
+    /// follows it, two cells apart.
+    pub fn text(&self) -> String {
+        if self.detail.is_empty() {
+            self.label.clone()
+        } else {
+            format!("{}  {}", self.label, self.detail)
+        }
+    }
+}
+
+/// The last part of a path, which names a header for it: `project` for
+/// `~/src/project`, `~` for the home directory itself. A trailing `/` is
+/// ignored; text with no `/` is its own last part.
+pub fn path_label(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    if trimmed == "~" {
+        return trimmed.to_string();
+    }
+    trimmed
+        .rsplit('/')
+        .next()
+        .filter(|part| !part.is_empty())
+        .unwrap_or(trimmed)
+        .to_string()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -671,31 +743,20 @@ pub fn shorten_home(path: &str, home: Option<&Path>) -> String {
     path.to_string()
 }
 
-/// Assemble the canonical workspace top-row display string used by
-/// the Workspaces view (ADR 0062) and by the
-/// hybrid Sessions/Graph workspace headers (ADR 0064):
-/// `<name>  <repo-a+repo-b+...>  (<provider>)`. The member list and
-/// provider segment are each prefixed with two spaces so the eye
-/// can pick out the three slots without a glyph budget. Sections
-/// are omitted cleanly when their data is missing — a workspace
-/// with no members drops the join segment, with no provider drops
-/// the parens, and with neither degrades to its bare label.
-pub fn format_workspace_display(
-    workspace_label: &str,
-    member_display_names: &[String],
-    provider: Option<&str>,
-) -> String {
-    let mut out = workspace_label.to_string();
+/// What a workspace header says after its name (ADR 0062, 0064): its
+/// members joined with `+`, then its provider in parentheses, two cells
+/// apart so the eye picks out the two without a glyph budget
+/// (`repo-a+repo-b  (agent-deck)`). Either is left out when missing, and
+/// a workspace with neither says nothing more.
+pub fn workspace_header_detail(member_display_names: &[String], provider: Option<&str>) -> String {
+    let mut parts = Vec::with_capacity(2);
     if !member_display_names.is_empty() {
-        out.push_str("  ");
-        out.push_str(&member_display_names.join("+"));
+        parts.push(member_display_names.join("+"));
     }
     if let Some(provider) = provider {
-        out.push_str("  (");
-        out.push_str(provider);
-        out.push(')');
+        parts.push(format!("({provider})"));
     }
-    out
+    parts.join("  ")
 }
 
 /// Operator-facing path for a repo (ADR 0034). A non-bare repo's
@@ -722,19 +783,21 @@ pub fn repo_display_path(
     .unwrap_or_else(|| repo.common_dir.clone())
 }
 
-/// Header text for a workspace group, shared by the sessions and mux
-/// views so both read identically: the workspace node's `name`, else
-/// the root's last component, else the `~`-shortened root, followed by
-/// its members and provider per [`format_workspace_display`].
-pub fn workspace_header_label(
+/// The header of a workspace group, shared by the sessions and mux views
+/// so both read identically: the workspace node's `name`, else the root's
+/// last component, else the `~`-shortened root, then its members and
+/// provider ([`workspace_header_detail`]).
+pub fn workspace_header(
     snapshot: &crate::model::GraphSnapshot,
     workspace_root: &str,
     home: Option<&Path>,
-) -> String {
+    primary_node: NodeId,
+) -> GroupRow {
     let label = workspace_display_name(snapshot, workspace_root, home);
     let provider = workspace_node(snapshot, workspace_root).and_then(|w| w.provider.as_deref());
     let members = workspace_member_names(snapshot, workspace_root);
-    format_workspace_display(&label, &members, provider)
+    GroupRow::named(label, Some(primary_node))
+        .with_detail(workspace_header_detail(&members, provider))
 }
 
 /// The name a workspace header leads with (its bold label): the

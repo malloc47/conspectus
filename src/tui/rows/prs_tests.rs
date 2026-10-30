@@ -117,13 +117,13 @@ fn build(snapshot: &GraphSnapshot, grouping: PrsGrouping, cwd: Option<&Path>) ->
     })
 }
 
-/// Each row as `depth label`: groups by display path, PRs by number.
+/// Each row as `depth label`: groups by their text, PRs by number.
 fn outline(tree: &RowTree) -> Vec<String> {
     tree.rows
         .iter()
         .map(|row| {
             let label = match &row.kind {
-                RowKind::Group(group) => group.display_path.clone(),
+                RowKind::Group(group) => group.text(),
                 RowKind::Pr(pr) => format!("#{}", pr.pr_number),
                 other => format!("{other:?}"),
             };
@@ -171,7 +171,7 @@ fn checkout_grouping_files_unchecked_prs_under_their_repo_node() {
 fn checkout_grouping_falls_back_to_the_forge_repo_when_the_graph_is_sparse() {
     let snapshot = resolve_snapshot(sparse_world());
     let tree = build(&snapshot, PrsGrouping::Checkout, None);
-    assert_eq!(outline(&tree), ["0 o/r  /r", "1 #1", "0 o/r", "1 #2"]);
+    assert_eq!(outline(&tree), ["0 o/r  /r", "1 #1", "0 r  o/r", "1 #2"]);
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn repo_grouping_files_every_pr_under_its_local_repo() {
 fn repo_grouping_falls_back_to_the_forge_repo_when_the_graph_is_sparse() {
     let snapshot = resolve_snapshot(sparse_world());
     let tree = build(&snapshot, PrsGrouping::Repo, None);
-    assert_eq!(outline(&tree), ["0 o/r  /r", "1 #1", "0 o/r", "1 #2"]);
+    assert_eq!(outline(&tree), ["0 o/r  /r", "1 #1", "0 r  o/r", "1 #2"]);
     assert_eq!(tree.rows[2].id, RowId::Remote("o/r".to_string()));
 }
 
@@ -273,7 +273,7 @@ fn a_filter_that_leaves_a_group_empty_drops_its_header() {
         ..RowFilter::default()
     };
     let tree = build_with(&snapshot, filter);
-    assert_eq!(outline(&tree), ["0 o/r", "1 #2"]);
+    assert_eq!(outline(&tree), ["0 r  o/r", "1 #2"]);
 }
 
 #[test]
@@ -371,10 +371,13 @@ fn a_group_with_several_forge_repos_keeps_owner_and_repo_on_its_rows() {
     let tree = build(&snapshot, PrsGrouping::Repo, None);
 
     let group = match &tree.rows[0].kind {
-        RowKind::Group(group) => group.display_path.clone(),
+        RowKind::Group(group) => group.text(),
         other => panic!("expected a group, got {other:?}"),
     };
-    assert_eq!(group, "/r", "no single forge repo to name the group after");
+    assert_eq!(
+        group, "r  /r",
+        "no single forge repo to name the group after"
+    );
     let mixed: Vec<String> = tree.rows[1..]
         .iter()
         .take_while(|row| !matches!(row.kind, RowKind::Group(_)))
@@ -497,7 +500,7 @@ fn the_state_grouping_files_a_draft_under_draft_only_while_it_is_open() {
     let mut filed = HashMap::new();
     for row in &tree.rows {
         match &row.kind {
-            RowKind::Group(header) => group.clone_from(&header.display_path),
+            RowKind::Group(header) => group = header.text(),
             RowKind::Pr(pr) => {
                 filed.insert(pr.pr_number, group.clone());
             }

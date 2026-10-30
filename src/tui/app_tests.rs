@@ -356,11 +356,7 @@ fn nav_down_past_duplicate_row_id_advances_to_the_following_row() {
         id: RowId::Group(id.clone()),
         depth: 0,
         expandable: false,
-        kind: RowKind::Group(GroupRow {
-            display_path: label.to_string(),
-            primary_node: Some(id),
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::named(label, Some(id))),
     };
     let workspace = |key: &str| NodeId::Workspace(WorkspaceId::new(key));
     let dup_id = workspace("dup");
@@ -412,11 +408,7 @@ fn a_rebuild_keeps_the_cursor_on_the_copy_of_a_duplicated_row_it_was_on() {
         id: RowId::Group(id.clone()),
         depth: 0,
         expandable: false,
-        kind: RowKind::Group(GroupRow {
-            display_path: label.to_string(),
-            primary_node: Some(id),
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::named(label, Some(id))),
     };
     let tree = crate::tui::rows::RowTree {
         view: crate::tui::rows::ViewLabel::Mux,

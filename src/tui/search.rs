@@ -83,8 +83,8 @@ pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<Searc
             },
             RowKind::Group(group) => SearchItem {
                 id: row.id.clone(),
-                label: Cow::Owned(group.display_path.clone()),
-                haystack: Cow::Owned(group.display_path.clone()),
+                label: Cow::Owned(group.text()),
+                haystack: Cow::Owned(group.text()),
             },
             RowKind::MuxSession(mux) => SearchItem {
                 id: row.id.clone(),

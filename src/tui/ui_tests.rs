@@ -789,7 +789,7 @@ fn group_columns_hold_still_when_another_group_folds() {
         .iter()
         .find(|row| {
             matches!(&row.kind, RowKind::Group(group)
-                if row.depth == 0 && group.display_path.ends_with("/y"))
+                if row.depth == 0 && group.detail.ends_with("/y"))
         })
         .map(|row| row.id.clone())
         .expect("a header for y");
@@ -952,11 +952,7 @@ fn group_header(path: &str) -> crate::tui::rows::Row {
         id: RowId::Bucket(path.to_string()),
         depth: 0,
         expandable: true,
-        kind: RowKind::Group(crate::tui::rows::GroupRow {
-            display_path: path.to_string(),
-            primary_node: None,
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(crate::tui::rows::GroupRow::at_path(path, None)),
     }
 }
 
@@ -2003,11 +1999,10 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
 
     // Group rows derive their kind from `primary_node`; synthetic
     // group buckets without a backing node skip the glyph.
-    let workspace_group = RowKind::Group(GroupRow {
-        display_path: "/ws".into(),
-        primary_node: Some(NodeId::Workspace(crate::model::WorkspaceId::new("/ws"))),
-        is_launch_context: false,
-    });
+    let workspace_group = RowKind::Group(GroupRow::at_path(
+        "/ws",
+        Some(NodeId::Workspace(crate::model::WorkspaceId::new("/ws"))),
+    ));
     assert_eq!(
         row_kind_glyph_span(&workspace_group, &theme)
             .map(|s| s.content.to_string())
@@ -2015,11 +2010,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         Some("▦ "),
     );
 
-    let synthetic_group = RowKind::Group(GroupRow {
-        display_path: "(ungrouped)".into(),
-        primary_node: None,
-        is_launch_context: false,
-    });
+    let synthetic_group = RowKind::Group(GroupRow::named("(ungrouped)", None));
     assert!(
         row_kind_glyph_span(&synthetic_group, &theme).is_none(),
         "synthetic group buckets have no NodeKind",
@@ -3005,41 +2996,6 @@ fn mux_preview_renders_compact_header_and_bottom_cropped_capture() {
         text.contains("line 7"),
         "latest capture line should remain visible: {text}"
     );
-}
-
-#[test]
-fn compact_path_helpers_keep_primary_label_short() {
-    assert_eq!(compact_path_label("~/src/conspectus"), "conspectus");
-    assert_eq!(
-        compact_path_secondary("~/src/conspectus"),
-        "~/src/conspectus"
-    );
-    assert_eq!(compact_path_label("Ungrouped"), "Ungrouped");
-    assert_eq!(compact_path_secondary("Ungrouped"), "");
-}
-
-#[test]
-fn compact_path_helpers_split_workspace_display_at_double_space() {
-    // `format_workspace_display` joins label, members, and
-    // provider with `  ` separators. The renderer bolds the
-    // label and renders the rest with `theme.muted`, so
-    // the helpers must split there to keep the member list and
-    // provider chip out of the bold span — parallel to how a
-    // repo header bolds the basename and leaves the CWD path
-    // non-bold.
-    let display = "nix-config  config+personal+work-config  (agent-deck)";
-    assert_eq!(compact_path_label(display), "nix-config");
-    assert_eq!(
-        compact_path_secondary(display),
-        "config+personal+work-config  (agent-deck)"
-    );
-
-    // Workspace with no members still splits cleanly because
-    // `format_workspace_display` keeps the `  (<provider>)`
-    // separator.
-    let display = "nix-config  (agent-deck)";
-    assert_eq!(compact_path_label(display), "nix-config");
-    assert_eq!(compact_path_secondary(display), "(agent-deck)");
 }
 
 #[test]
@@ -7285,11 +7241,7 @@ fn the_tree_window_follows_the_copy_of_a_duplicated_row_the_cursor_is_on() {
         id: RowId::Group(id.clone()),
         depth: 0,
         expandable: false,
-        kind: RowKind::Group(GroupRow {
-            display_path: label.to_string(),
-            primary_node: Some(id),
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::named(label, Some(id))),
     };
     let mut rows = vec![group_row(workspace("dup"), "dup-first")];
     rows.extend((0..30).map(|n| group_row(workspace(&format!("w{n}")), &format!("w{n}"))));

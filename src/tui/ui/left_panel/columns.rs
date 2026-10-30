@@ -343,23 +343,21 @@ impl LeftColumns<'_> {
     /// ambiguous mux link.
     fn header_cells(&self, group: &GroupRow, summary: GroupSummary) -> Cells<Col> {
         let theme = self.theme;
-        let label = compact_path_label(&group.display_path);
-        let secondary = compact_path_secondary(&group.display_path);
         let cwd_style = Style::default()
             .fg(theme.cwd_mark())
             .add_modifier(theme.muted);
-        let detail = match (secondary.is_empty(), group.is_launch_context) {
+        let detail = match (group.detail.is_empty(), group.is_launch_context) {
             (true, true) => Cell::text("(cwd)", cwd_style),
             (true, false) => Cell::empty(),
             (false, true) => {
-                Cell::secondary(secondary, theme).tail(vec![Span::styled("  (cwd)", cwd_style)])
+                Cell::secondary(&group.detail, theme).tail(vec![Span::styled("  (cwd)", cwd_style)])
             }
-            (false, false) => Cell::secondary(secondary, theme),
+            (false, false) => Cell::secondary(&group.detail, theme),
         };
         let mut cells = vec![
             (
                 Col::HeaderLabel,
-                Cell::text(label, Style::default().add_modifier(Modifier::BOLD)),
+                Cell::text(&group.label, Style::default().add_modifier(Modifier::BOLD)),
             ),
             (Col::Detail, detail),
         ];

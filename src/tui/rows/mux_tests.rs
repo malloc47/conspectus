@@ -651,7 +651,7 @@ fn repo_grouping_buckets_muxes_under_repo_headers() {
         .map(|row| {
             let label = match &row.kind {
                 RowKind::MuxSession(mux) => mux.native_id.clone(),
-                RowKind::Group(g) => g.display_path.clone(),
+                RowKind::Group(g) => g.text(),
                 other => format!("{other:?}"),
             };
             (row.depth, label)
@@ -667,9 +667,9 @@ fn repo_grouping_buckets_muxes_under_repo_headers() {
     //     depth 1: foo-b
     //   depth 0: Ungrouped
     //     depth 1: orphan
-    assert_eq!(row_summary[0], (0, "/p/bar".to_string()));
+    assert_eq!(row_summary[0], (0, "bar  /p/bar".to_string()));
     assert_eq!(row_summary[1], (1, "bar-a".to_string()));
-    assert_eq!(row_summary[2], (0, "/p/foo".to_string()));
+    assert_eq!(row_summary[2], (0, "foo  /p/foo".to_string()));
     assert_eq!(row_summary[3], (1, "foo-a".to_string()));
     assert_eq!(row_summary[4], (1, "foo-b".to_string()));
     assert_eq!(row_summary[5], (0, "Ungrouped".to_string()));
@@ -813,7 +813,7 @@ fn mux_view_lists_no_pins_group_under_repo_grouping() {
         .map(|row| {
             let label = match &row.kind {
                 RowKind::MuxSession(mux) => format!("mux:{}", mux.native_id),
-                RowKind::Group(g) => g.display_path.clone(),
+                RowKind::Group(g) => g.text(),
                 other => format!("{other:?}"),
             };
             (row.depth, label)
@@ -823,7 +823,7 @@ fn mux_view_lists_no_pins_group_under_repo_grouping() {
     // live mux, and there is no Pins group.
     assert_eq!(
         row_summary,
-        vec![(0, "/p/foo".to_string()), (1, "mux:foo-a".to_string())]
+        vec![(0, "foo  /p/foo".to_string()), (1, "mux:foo-a".to_string())]
     );
 }
 
@@ -1185,7 +1185,7 @@ fn row_labels(tree: &RowTree) -> Vec<(u8, String)> {
         .map(|row| {
             let label = match &row.kind {
                 RowKind::MuxSession(mux) => mux.native_id.clone(),
-                RowKind::Group(g) => g.display_path.clone(),
+                RowKind::Group(g) => g.text(),
                 other => format!("{other:?}"),
             };
             (row.depth, label)
@@ -1240,7 +1240,7 @@ fn workspace_grouping_gathers_a_workspaces_muxes_and_keeps_repo_buckets_for_the_
     assert_eq!(
         row_labels(&tree),
         vec![
-            (0, "/src/config".to_string()),
+            (0, "config  /src/config".to_string()),
             (1, "canonical".to_string()),
             (0, "sysadmin  config+work-config  (atelier)".to_string()),
             (1, "sys-config".to_string()),
@@ -1275,7 +1275,7 @@ fn workspace_grouping_without_workspaces_matches_repo_grouping() {
     assert_eq!(
         row_labels(&workspace),
         vec![
-            (0, "/p/foo".to_string()),
+            (0, "foo  /p/foo".to_string()),
             (1, "foo".to_string()),
             (0, "Ungrouped".to_string()),
             (1, "orphan".to_string()),
@@ -1325,7 +1325,7 @@ fn workspace_and_repo_headers_interleave_by_name_and_nest_innermost() {
             (1, "in-alpha".to_string()),
             (0, "beta  repo  (atelier)".to_string()),
             (1, "in-beta".to_string()),
-            (0, "/0/first".to_string()),
+            (0, "first  /0/first".to_string()),
             (1, "in-repo".to_string()),
             (0, "inner  repo  (atelier)".to_string()),
             (1, "in-inner".to_string()),
@@ -1369,9 +1369,9 @@ fn workspace_grouping_header_order_ignores_case_and_breaks_name_ties_by_path() {
     assert_eq!(
         headers,
         vec![
-            "/r/alpha".to_string(),
-            "/r/Delta".to_string(),
-            "/other/docs".to_string(),
+            "alpha  /r/alpha".to_string(),
+            "Delta  /r/Delta".to_string(),
+            "docs  /other/docs".to_string(),
             "docs  repo  (atelier)".to_string(),
             "Zeta  repo  (atelier)".to_string(),
         ]
@@ -1439,9 +1439,9 @@ fn repo_buckets_do_not_depend_on_which_checkout_was_probed_first() {
     };
 
     let expected = vec![
-        (0, "/src/drw/developer".to_string()),
+        (0, "developer  /src/drw/developer".to_string()),
         (1, "dev".to_string()),
-        (0, "/src/oss/conspectus".to_string()),
+        (0, "conspectus  /src/oss/conspectus".to_string()),
         (1, "csp".to_string()),
     ];
     assert_eq!(rows_for(true), expected);

@@ -146,7 +146,7 @@ fn labels(tree: &RowTree) -> Vec<String> {
         .iter()
         .map(|row| match &row.kind {
             RowKind::Mixed(m) => m.label.clone(),
-            RowKind::Group(g) => format!("[{}]", g.display_path),
+            RowKind::Group(g) => format!("[{}]", g.text()),
             _ => unreachable!(),
         })
         .collect()
@@ -247,11 +247,11 @@ fn project_grouping_puts_stray_records_in_other() {
     assert_eq!(
         labels(&tree),
         [
-            "[~/src/app]",
+            "[app  ~/src/app]",
             "new-agent",
             "app-feature",
             "old-agent",
-            "[~/src/lost]",
+            "[lost  ~/src/lost]",
             "lost",
             "[Other]",
             "stray",

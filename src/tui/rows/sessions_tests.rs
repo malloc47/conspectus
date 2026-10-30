@@ -191,7 +191,10 @@ fn single_session_with_one_worktree_collapses_worktree_level() {
     let RowKind::Group(group) = &tree.rows[0].kind else {
         unreachable!()
     };
-    assert_eq!(group.display_path, "~/src/proj");
+    assert_eq!(
+        (group.label.as_str(), group.detail.as_str()),
+        ("proj", "~/src/proj")
+    );
     assert_eq!(tree.rows[0].depth, 0);
 
     assert!(matches!(tree.rows[1].kind, RowKind::AgentSession(_)));
@@ -291,7 +294,10 @@ fn repo_group_prefers_source_path_over_git_common_dir() {
     let RowKind::Group(group) = &tree.rows[0].kind else {
         unreachable!()
     };
-    assert_eq!(group.display_path, "~/src/proj");
+    assert_eq!(
+        (group.label.as_str(), group.detail.as_str()),
+        ("proj", "~/src/proj")
+    );
     assert!(group.is_launch_context);
 }
 
@@ -323,7 +329,10 @@ fn repo_group_strips_git_suffix_when_source_path_is_missing() {
     let RowKind::Group(group) = &tree.rows[0].kind else {
         unreachable!()
     };
-    assert_eq!(group.display_path, "~/src/proj");
+    assert_eq!(
+        (group.label.as_str(), group.detail.as_str()),
+        ("proj", "~/src/proj")
+    );
     assert!(group.is_launch_context);
 }
 
@@ -382,7 +391,10 @@ fn repo_group_prefers_canonical_over_non_canonical_source_path() {
     let RowKind::Group(group) = &repo_row.kind else {
         unreachable!()
     };
-    assert_eq!(group.display_path, "~/src/proj");
+    assert_eq!(
+        (group.label.as_str(), group.detail.as_str()),
+        ("proj", "~/src/proj")
+    );
 }
 
 #[test]
@@ -417,7 +429,10 @@ fn session_nested_inside_checkout_groups_under_checkout() {
     let RowKind::Group(group) = &tree.rows[0].kind else {
         unreachable!()
     };
-    assert_eq!(group.display_path, "~/src/proj");
+    assert_eq!(
+        (group.label.as_str(), group.detail.as_str()),
+        ("proj", "~/src/proj")
+    );
     assert!(matches!(tree.rows[1].kind, RowKind::AgentSession(_)));
 }
 
@@ -597,10 +612,9 @@ fn workspace_rooted_session_nests_directly_under_workspace() {
     let RowKind::Group(ws_group) = &tree.rows[0].kind else {
         panic!("expected workspace group row at index 0:\n{:#?}", tree.rows)
     };
-    assert!(
-        ws_group.display_path.contains("atelier-ws"),
-        "workspace header should include the workspace name `atelier-ws`, got `{}`",
-        ws_group.display_path,
+    assert_eq!(
+        ws_group.label, "atelier-ws",
+        "the workspace header is named for the workspace: {ws_group:?}"
     );
 }
 
@@ -1111,8 +1125,8 @@ fn workspace_grouping_drops_b_class_session_into_ungrouped() {
     let ungrouped_header = tree.rows.iter().find(|r| {
         matches!(
             &r.kind,
-            RowKind::Group(GroupRow { display_path, primary_node: None, .. })
-            if display_path == "Ungrouped"
+            RowKind::Group(GroupRow { label, primary_node: None, .. })
+            if label == "Ungrouped"
         )
     });
     assert!(
@@ -1581,7 +1595,7 @@ fn orphan_session_lands_in_ungrouped_bucket() {
 
     assert_eq!(tree.rows.len(), 2);
     match &tree.rows[0].kind {
-        RowKind::Group(g) => assert_eq!(g.display_path, "Ungrouped"),
+        RowKind::Group(g) => assert_eq!(g.text(), "Ungrouped"),
         _ => panic!("first row should be the Ungrouped group"),
     }
     assert!(matches!(tree.rows[1].kind, RowKind::AgentSession(_)));
@@ -2737,7 +2751,7 @@ fn repo_groups_do_not_depend_on_which_checkout_was_probed_first() {
                     row.depth,
                     row.id.clone(),
                     match &row.kind {
-                        RowKind::Group(g) => Some(g.display_path.clone()),
+                        RowKind::Group(g) => Some(g.detail.clone()),
                         _ => None,
                     },
                 )
