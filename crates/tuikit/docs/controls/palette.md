@@ -28,7 +28,7 @@ instances. Its parts:
 - **An options pane** of named on/off settings, opened over the results.
 - **A debounce** for a slow provider, and **progress** in words for the
   status row.
-- **A plan of columns** for rows of several cells.
+- **Rows of several cells** laid out with the column schema.
 
 It replaces what grows palette by palette: one query line with no caret
 and one with, a picker whose cursor stays at its position as the list
@@ -130,45 +130,53 @@ on screen are laid out. Rows drawn only this way need not implement
 `PaletteRow`; the host routes their keys with `handle_key(key)`, which
 is what the palette's overlay `handle` does.
 
-### A plan of columns
+### Rows of several cells
 
 A row of several cells (a kind, a label, a count, an age, a snippet)
-lays itself out from a `ColumnPlan`, so every row of the list, and any
-other list drawn from the same plan, lines up. The plan is the row's
-columns in the order they are drawn, each a `Column`:
-
-- its width: `Column::fixed(cells)`; `Column::share(per, of)` (a share
-  of the row's width, rounded down), bounded with `.within(min, max)`;
-  `Column::steps(&[(row_width, cells), ...])` (the first step, widest
-  first, whose row width the row reaches); or `Column::fill(min)`, the
-  one column that takes what the others leave and wants at least `min`;
-- `.gap(cells)`, the blank cells after it while it shows;
-- how it gives way while the fill is short of its minimum: `.drops(order)`
-  (it leaves the row, its gap with it) or `.shrinks(order, to)` (it
-  narrows one cell at a time, down to `to`), lowest order first, stopping
-  as soon as the fill has its minimum;
-- `.end()` for text that keeps to the end of its cells (an age, a count).
-
-`ColumnPlan::layout(width)` gives the `ColumnLayout` for one width:
-`width(column)` (0 for a column that dropped out), `gap(column)`,
-`is_shown(column)`, `fill()`, and `fit(column, text)`, the text cut with
-`…` and padded to the column's cells at the edge it keeps away from,
-then its gap. `lead(cells)` counts cells before the first column that
-the row does not draw (the cursor gutter) in the width the plan shares
-out, so a row's shares and steps can match a grid that counts it. A row
-in a palette lays its plan out for the width `RowContext` gives it; a
-list outside a palette lays the same plan out for its own rows.
+lays its columns out with the framework's column schema
+(`tuikit::columns`, [its page](columns.md)): keyed columns with a width
+rule, a gap, and how each gives way, typed cells, one measure pass over
+the results, and one narrow-width policy. The row draws its schema with
+the cursor gutter (`selection::GUTTER_WIDTH`) as its lead and the width
+`RowContext` gives it as its room, so a column that is a share of the row
+(`Column::share`) or steps with it (`Column::row_steps`) counts the
+gutter, and any other list drawn from the same schema at the same whole
+width (a tree, whose lead is its indent) lines up with the palette's
+rows. Measure the results once a frame, before `draw_with`, so a column
+of the widest cell holds still while the cursor moves.
 
 ```rust
-use tuikit::palette::{Column, ColumnPlan};
+use ratatui::style::Style;
+use tuikit::columns::{Cell, Column, ColumnSchema, Measure};
+use tuikit::selection::GUTTER_WIDTH;
+use tuikit::theme::Theme;
 
-let plan = ColumnPlan::new([
-    Column::fixed(6).gap(1).drops(0),
-    Column::share(1, 4).within(8, 20).gap(2).shrinks(1, 4),
-    Column::fill(12),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Col {
+    Kind,
+    Name,
+    Note,
+}
+
+// A kind word, a name that grows with the row, and a note that takes
+// the rest. The kind gives way first, then the name narrows.
+let schema = ColumnSchema::new([
+    Column::fixed(Col::Kind, 6).gap(1).drops(0),
+    Column::share(Col::Name, 1, 4).within(8, 20).shrinks(1, 4),
+    Column::fill(Col::Note).at_least(12),
 ]);
-let narrow = plan.layout(24);
-assert_eq!((narrow.width(0), narrow.width(1), narrow.fill()), (0, 8, 14));
+let cells = vec![
+    (Col::Kind, Cell::text("file", Style::default())),
+    (Col::Name, Cell::text("alphabet", Style::default())),
+    (Col::Note, Cell::text("the first draft", Style::default())),
+];
+let mut measure = Measure::new();
+measure.add(&schema, GUTTER_WIDTH, &cells);
+let narrow = schema.layout(&measure, GUTTER_WIDTH, 22);
+assert_eq!(narrow.width(Col::Kind), None);
+assert_eq!(narrow.width(Col::Name), Some(8));
+let row = schema.draw(&measure, GUTTER_WIDTH, 22, &cells, &Theme::default());
+assert_eq!(Cell::plain(&row), "alphabet  the first d…");
 ```
 
 ### Ranking
@@ -385,11 +393,11 @@ copy), and 18 (pagers).
   results out in one place, so a split of the list's area would go there,
   and `PaletteRow` would gain a method with a default that says what to
   show. Not built.
-- **More width rules.** A column's share is of the whole row; a share of
-  what the fixed columns leave, or a fill that drops out below its
-  minimum and hands its room to a neighbor (a context dropped so a label
-  can take the row), is not a rule yet, so a grid that needs either lays
-  itself out by hand. Both would be `Column` constructors.
+- **More width rules.** A grid that needs a share of what the fixed
+  columns leave, or a fill that drops out below its minimum and hands its
+  room to a neighbor (quick select's entity rows: a context dropped so the
+  label can take the row), still lays itself out by hand; the column
+  schema's page lists them.
 - **Match highlights.** A row gets the query and paints what matched
   itself (`text::paint` with the theme's `match_style`); a ranker that
   answers ranges with its indices would save the second search.

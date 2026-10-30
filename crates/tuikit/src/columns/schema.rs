@@ -131,6 +131,42 @@ impl<K> Column<K> {
     /// A column that takes `per` of every `of` cells of the whole row, its
     /// lead included, rounded down ([`Width::Share`]). Bound it with
     /// [`within`](Self::within).
+    ///
+    /// ```
+    /// use ratatui::style::Style;
+    /// use tuikit::columns::{Cell, Column, ColumnSchema, Measure};
+    /// use tuikit::theme::Theme;
+    ///
+    /// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    /// enum Col {
+    ///     Kind,
+    ///     Name,
+    ///     Note,
+    /// }
+    ///
+    /// // A kind word, a name that grows with the row, and a note that
+    /// // takes the rest. The kind gives way first, then the name narrows.
+    /// let schema = ColumnSchema::new([
+    ///     Column::fixed(Col::Kind, 6).gap(1).drops(0),
+    ///     Column::share(Col::Name, 1, 4).within(8, 20).shrinks(1, 4),
+    ///     Column::fill(Col::Note).at_least(12),
+    /// ]);
+    /// let cells = vec![
+    ///     (Col::Kind, Cell::text("file", Style::default())),
+    ///     (Col::Name, Cell::text("alphabet", Style::default())),
+    ///     (Col::Note, Cell::text("the first draft", Style::default())),
+    /// ];
+    /// let mut measure = Measure::new();
+    /// // Laid out after a two-cell cursor gutter, its lead.
+    /// measure.add(&schema, 2, &cells);
+    /// let wide = schema.layout(&measure, 2, 78);
+    /// assert_eq!(wide.width(Col::Name), Some(20), "a quarter of 80, at most 20");
+    /// let narrow = schema.layout(&measure, 2, 22);
+    /// assert_eq!(narrow.width(Col::Kind), None);
+    /// assert_eq!(narrow.width(Col::Name), Some(8));
+    /// let row = schema.draw(&measure, 2, 22, &cells, &Theme::default());
+    /// assert_eq!(Cell::plain(&row), "alphabet  the first d…");
+    /// ```
     pub const fn share(key: K, per: usize, of: usize) -> Self {
         Self::of(
             key,

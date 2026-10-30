@@ -39,9 +39,10 @@
 //! - **A debounce** ([`Debounce`]) for a slow provider: the palette marks
 //!   every edit and the host polls when a search is due; [`Progress`]
 //!   puts how far the provider has got in words for the status row.
-//! - **A plan of columns** ([`ColumnPlan`]) for rows of several cells:
-//!   the columns' widths, gaps, and the order they give way in, laid out
-//!   once per width so every row lines up.
+//! - **Rows of several cells** lay their columns out with the framework's
+//!   column schema ([`crate::columns`]), counting the cursor gutter as the
+//!   row's lead, so every row lines up and a list outside the palette
+//!   drawn from the same schema lines up with it.
 //! - **The outcome.** `Enter` asks the host's `on_pick` about the row
 //!   under the cursor and reports its answer (a commit of the host's
 //!   message); `Enter` with nothing listed closes. `Esc` closes and
@@ -114,13 +115,11 @@
 //!   there, and [`PaletteRow`] would gain a method that says what to show.
 
 mod body;
-mod columns;
 mod debounce;
 mod options;
 mod progress;
 mod row;
 
-pub use columns::{Column, ColumnLayout, ColumnPlan};
 pub use debounce::Debounce;
 pub use options::Options;
 pub use progress::Progress;

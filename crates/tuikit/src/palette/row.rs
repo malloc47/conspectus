@@ -16,9 +16,10 @@ use crate::theme::Theme;
 /// The palette draws the cursor gutter and the highlight itself
 /// ([`selection::row`](crate::selection::row)), so a row only lays out
 /// its own cells; a row of several cells lays a
-/// [`ColumnPlan`](super::ColumnPlan) out for the width. More may be told
-/// later, which is why the struct is built with [`RowContext::new`]
-/// outside the crate.
+/// [`ColumnSchema`](crate::columns::ColumnSchema) out for the width, with
+/// the gutter ([`GUTTER_WIDTH`](crate::selection::GUTTER_WIDTH)) as its
+/// lead. More may be told later, which is why the struct is built with
+/// [`RowContext::new`] outside the crate.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct RowContext<'a> {

@@ -225,10 +225,11 @@ no overlay, no editing).
 - **The cursor gutter.** House rule 1's pointer marker in a two-cell
   gutter is not yet drawn before a tree's rows; a column of the schema
   is where it goes, once every kind of row a host draws is on one.
-- **Shares of the row.** The palette's `ColumnPlan` has a width rule that
-  takes a share of the row; a schema has none yet. A search result list
-  that lays its hits out like the palette needs one, or the plan moves
-  onto the schema.
+- **Shares of what is left.** A share is of the whole row. A grid whose
+  column takes a share of what the fixed columns leave, or whose fill
+  drops below its minimum and hands its room to a neighbor instead of to
+  nothing (a context that leaves so the label can take the row), lays
+  itself out by hand; both would be width rules.
 - **Columns across depths.** `absorbs_lead` on one column lines up its
   end, and every column after it, at every depth. A second column that
   absorbs it gives the indent back again, so the columns after that one
