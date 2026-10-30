@@ -261,7 +261,7 @@ complete list. Set only the keys you want to change.
 # Shared looks, used by every view, menu, form, and viewer.
 accent             = "cyan"            # popup borders and titles, help keys, the active tab, chosen chips, hints
 panel_focus_accent = "cyan"            # the ► marker on the focused pane; follows `accent` unless set
-disclosure         = "cyan"            # the ▶ / ▼ tree arrows
+disclosure         = "cyan"            # the ▶ / ▼ arrows in the tree and on the right pane's Other header
 muted              = "dim"             # hints, placeholders, notes, rules, footers, the unlinked ∘ (a modifier)
 inert              = "dark_gray"       # short ids, previews, gone or stopped rows (a color)
 selection_active   = "reversed,bold"   # the cursor row of the list that has focus: a pane, menu, form, or picker

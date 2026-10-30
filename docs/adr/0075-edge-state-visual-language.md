@@ -4,7 +4,13 @@
 
 Accepted. Narrowed 2026-10-02 by [ADR 0107](0107-related-view-neighbor-granularity.md):
 `Conflict` now means a different-target competitor or a no-winner
-slot, never same-target corroborating evidence.
+slot, never same-target corroborating evidence. Amended by
+[ADR 0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md):
+the three treatments are the property grid's quiet, alert, and inert
+link tones (the alert tone leads with the framework's warning mark,
+`▲`, the glyph the conflict rows already drew); an
+unresolved row is one line, its evidence cut in the middle, and its
+provenance and confidence are edge meta shown with `E`.
 
 ## Context
 

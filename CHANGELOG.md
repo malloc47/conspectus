@@ -122,6 +122,15 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   from its end (the preview, snippet, or content first, then, in a narrow
   pane, the next cell its order lets go), the mux names keep their widths,
   and a row a view lists twice is marked and highlighted once.
+- **The right pane's rows read alike.** A field label of 14 characters or
+  more keeps a space before its value (`current_commit e52b2ef`, where it
+  read `current_commite52b2ef`), so a long path beside one starts on the
+  next row. An unresolved row under `Other` stays on one line, its
+  evidence cut in the middle, and shows its provenance and confidence
+  with `E` like the other related rows (it wrapped them onto two or three
+  rows). The `Other` header's arrow takes `[tui.theme] disclosure` like
+  the left pane's arrows. `Enter` on a field with no value (`—`,
+  `— (unknown)`) no longer copies the dash and says "copied".
 - **A letter in a dialog means the letter, not its chords.** Inside
   menus, prompts, forms, Controls, search, Messages, the help page, the
   value viewer, and the transcript and pane viewers, a letter key fires

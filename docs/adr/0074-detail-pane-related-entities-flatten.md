@@ -7,7 +7,10 @@ Accepted. Supersedes the sectioned detail pane of
 section of [ADR 0071](0071-ambiguous-mux-scope-and-detail.md). Narrowed 2026-10-02 by [ADR 0107](0107-related-view-neighbor-granularity.md):
 rows are one per neighbor rather than one per candidate link, the
 Other zone holds only neighbors the resolver did not pick, and row
-keys identify neighbors.
+keys identify neighbors. Amended by
+[ADR 0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md):
+the rows are the framework's property grid rows, and the Other
+header's arrow takes the `disclosure` color the tree's arrows take.
 
 ## Context
 

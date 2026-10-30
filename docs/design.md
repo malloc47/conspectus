@@ -1025,7 +1025,8 @@ inline. With the right pane focused:
   `Other` header, then its children when expanded.
 - `Enter` is the universal "do the obvious thing" key: on the `Other`
   header it toggles expansion; on a neighbor row it drills into the
-  neighbor and pushes a breadcrumb hop.
+  neighbor and pushes a breadcrumb hop; on a field row it copies the
+  field's whole value (nothing for a placeholder such as `—`).
 - `e` is the explicit expand/collapse accelerator for the `Other`
   header.
 - `Backspace` reads as a general "go back" gesture: it pops the
@@ -1041,8 +1042,12 @@ inline. With the right pane focused:
   modal — used for `cwd`, `command`, `url`, `last_message_preview`,
   and other rows that carry `(truncated · o)` hints.
 
-Unresolved-evidence stubs render as placeholder rows whose `Enter` is
-inert in v1 (see follow-up `CSP-318`).
+Unresolved-evidence stubs render as one-line inert rows (their evidence
+cut in the middle, their provenance shown with `E` as every related
+row's is) whose `Enter` is inert in v1 (see follow-up `CSP-318`). The
+fields, related rows, and the `Other` header are the framework's
+property grid rows (ADR 0187): each row says what `Enter` and `o` ask
+for, and the pane does it.
 
 This supersedes the recursive inline linked-detail expansion (`e` =
 expand-in-place) the pane used to carry. Inline expansion made

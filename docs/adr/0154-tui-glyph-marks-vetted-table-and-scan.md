@@ -15,6 +15,11 @@ the module names `TIMES`, the failure mark's character read as the
 multiplication sign in a repeat count (`(×3)`), not a mark of its own.
 Amended by [ADR 0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md): a rendered table's border glyphs are in the
 framework's vetted table, and the host no longer registers them.
+Amended by
+[ADR 0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md):
+`marks::disclosure(open)` picks the folding arrow for every control, and
+the host's guard also refuses a string that a bare mark leads
+(`… 3 more`) or that is one with only spaces around it (` …`).
 
 ## Context
 
