@@ -80,6 +80,7 @@ each names its module path.
 | Data display | `Explorer` | planned |
 | Feedback | `Toasts` (in the `feedback` convention module, below) | landed |
 | Chrome | `Breadcrumb` and `Hop` (module `breadcrumb`): the steps that led to what a pane shows, as one line in the room a title leaves; each hop a glyph in the host's style, a tag, and a suffix shown only when two hops have one tag, joined by the crumb mark; it gives way by the text module's one rule, the oldest middle hops first, then the first, one `…` for each run that gave way, and the last hop cut with `…` only when it alone does not fit, never wider than its room. Page: [controls/breadcrumb.md](controls/breadcrumb.md) | landed |
+| Chrome | `StackedMasterDetail` and `Stacked` (module `master_detail`): a list zone over a one-row divider over a detail area in one pane; the list as tall as its rows wrap to, within a minimum and the room a minimum detail area leaves (the detail's minimum giving way first on a short pane), wrapped at the full width while it fits and one column narrower when it scrolls, drawn in a window the host keeps that follows every row of the cursor's line, with the shared scrollbar; a layout width one column narrower than the pane so a rule cannot wrap when the bar appears; the window and the three areas returned, the detail left for the host. Page: [controls/master_detail.md](controls/master_detail.md) | landed |
 | Chrome | `AppFrame`; `TabBar`; `StatusBar`; `EmptyState`; the pane frame with its focus cue | planned |
 
 ### Conventions (layer 2)

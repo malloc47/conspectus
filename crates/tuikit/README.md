@@ -40,6 +40,8 @@ table, and the source scanner), the `text` module (measuring, cutting,
 wrapping, snippets, match painting, and the one rule for pieces of a line
 that give way, in terminal cells), the `breadcrumb` module (the chain of
 steps that led to what a pane shows, which gives way hop by hop), the
+`master_detail` module (a list zone sized to its rows over a divider over
+a detail area, the list scrolled in a window its host keeps), the
 `text_edit` module (the line editor every text field edits with and the
 text field that draws it), the `text_prompt` module (the one-line prompt
 that commits, refuses with a reason, or stays), the `path_field` module

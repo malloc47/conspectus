@@ -229,7 +229,8 @@ Nothing else gives way: at a width below the chip, the summary, and the
 closing rule, the line is wider than asked, and a paragraph clips it at
 its area's edge or a wrap folds it onto a second row. Lay a rule out at
 the width it is drawn in; in a list that may scroll, that is the width the
-scrollbar leaves.
+scrollbar leaves (see
+[master_detail.md](master_detail.md#laying-the-list-out)).
 
 ## Key table
 
