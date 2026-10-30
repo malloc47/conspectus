@@ -43,7 +43,12 @@ steps that led to what a pane shows, which gives way hop by hop), the
 `master_detail` module (a list zone sized to its rows over a divider over
 a detail area, the list scrolled in a window its host keeps), the
 `app_frame` module (the layers a screen is drawn in: a header, the body,
-and a footer, then the overlays, then the toasts), the
+and a footer, then the overlays, then the toasts), the `tab_bar` module
+(the names of a pane's views, the active one kept, which give way tab by
+tab), the `priority_line` module (a line of ranked segments that drop
+lowest first to fit and fill the room back), the `empty_state` module
+(what a slot says when it has nothing to show, one look for every such
+message), the
 `text_edit` module (the line editor every text field edits with and the
 text field that draws it), the `text_prompt` module (the one-line prompt
 that commits, refuses with a reason, or stays), the `path_field` module

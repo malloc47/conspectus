@@ -23,6 +23,7 @@ pub mod checklist;
 pub mod chip;
 pub mod columns;
 pub mod dialog;
+pub mod empty_state;
 pub mod explorer;
 pub mod feedback;
 pub mod form;

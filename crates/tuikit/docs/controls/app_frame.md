@@ -221,7 +221,9 @@ the frame only places them and orders their draws.
 
 - **A minimum screen.** Below `MIN_BODY` plus the header and footer, the
   parts get what is left. A "the screen is too small" body the frame draws
-  itself under a size the host names would be a parameter here.
+  itself under a size the host names would be a parameter here: one
+  centered `EmptyState` ([empty_state.md](empty_state.md)) over the whole
+  area, saying how much room the screen needs, in place of every layer.
 - **More chrome rows.** A tab bar or a second status row is a header or
   footer of more rows today; named rows (a tab strip, a hint bar) would be
   further parts of `Screen`, each with its area in `AppAreas`.

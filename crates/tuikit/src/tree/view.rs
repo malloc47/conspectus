@@ -9,10 +9,10 @@ use ratatui::widgets::{Paragraph, Widget};
 
 use super::TreeRow;
 use super::state::TreeState;
+use crate::empty_state::EmptyState;
 use crate::frame::PaneFrame;
 use crate::scroll::{ScrollGutter, ScrollWindow, WrappedRows};
 use crate::selection::{self, Cursor, GUTTER_WIDTH};
-use crate::text;
 use crate::theme::Theme;
 
 /// A mark the host puts on some of its rows, such as a bookmark: on while
@@ -167,7 +167,7 @@ pub struct TreeView<'a, R: TreeRow, F> {
     title: Option<Line<'a>>,
     header: Option<Line<'a>>,
     footer: Option<(Vec<Line<'a>>, Style)>,
-    empty: Option<String>,
+    empty: Option<EmptyState>,
 }
 
 impl<'a, R, F> TreeView<'a, R, F>
@@ -241,11 +241,12 @@ where
         self
     }
 
-    /// What the pane says when no row shows, wrapped to its width in the
-    /// muted look.
+    /// What the pane says when no row shows: an [`EmptyState`] (or a
+    /// message, which becomes one), drawn in the body wrapped to its width
+    /// in the muted look.
     #[must_use]
-    pub fn empty(mut self, text: impl Into<String>) -> Self {
-        self.empty = Some(text.into());
+    pub fn empty(mut self, empty: impl Into<EmptyState>) -> Self {
+        self.empty = Some(empty.into());
         self
     }
 
@@ -285,13 +286,7 @@ where
         let shown = self.state.visible_indices(self.rows);
         if shown.is_empty() {
             if let Some(empty) = self.empty.take() {
-                let lines: Vec<Line<'static>> = text::wrap(&empty, usize::from(inner.width))
-                    .into_iter()
-                    .map(Line::from)
-                    .collect();
-                Paragraph::new(lines)
-                    .style(Style::default().add_modifier(self.theme.muted))
-                    .render(inner, buf);
+                empty.render(inner, buf, self.theme);
             }
             return None;
         }

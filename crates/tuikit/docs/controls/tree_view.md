@@ -162,7 +162,7 @@ With no rows showing, nothing is selected.
 | footer banner | when the pane has more than four rows inside its border | at its foot: the host's lines wrapped to the width, at most three rows, in the host's style |
 | header line | when what is left has more than three rows | above the rows |
 | rows | when any row shows | the showing rows in the window, one row each, each after the 2-cell cursor gutter, with a 1-column scrollbar gutter carved from the right edge when they overflow |
-| placeholder | when no row shows | the host's text wrapped to the width, in the `muted` look |
+| placeholder | when no row shows | the host's `EmptyState` (or a string, its message): its message and hint wrapped to the width, in the `muted` look ([empty_state.md](empty_state.md)) |
 
 The producer is called for the rows the window shows only, at the width
 left after the cursor gutter and beside the scrollbar's gutter. The tree
