@@ -23,7 +23,9 @@
 //! - **Accelerators act on what the operator is looking at**: the right
 //!   pane's entity when it has focus (`focus`).
 //! - **Rows look alike wherever they appear**: columns, chips, glyphs,
-//!   dimming, focus highlight, and scroll (`rendering`).
+//!   dimming, focus highlight, and scroll (`rendering`), and a kind of
+//!   row's lined-up cells in one place at every width and in every view
+//!   (`columns`).
 //! - **User-visible text speaks the operator's language**: no developer
 //!   artifacts, and one word for one thing (`text`).
 //! - **The chrome fits and agrees with the view**: the tab strip never

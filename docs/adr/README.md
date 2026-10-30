@@ -204,7 +204,8 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted |
 | [0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) | The Transcript Viewer Is A Pager Content, And The Viewer Boundary Keeps Only The Transcript | Accepted |
 | [0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md) | Rich Text Is A Framework Feature, And The Preview Scrolls In A Region Counted From An Anchor | Accepted |
-| [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted |
+| [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted (amended by 0183) |
+| [0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md) | Rows Come From Column Schemas, And One Rule Decides What Gives Way | Accepted |
 
 ## Transcript viewer
 

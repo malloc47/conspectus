@@ -1139,8 +1139,8 @@ it does not, so the unfocused pane still shows its cursor. Chips and field
 fills keep their look inside the highlight. Short choice lists (menus, the
 picker, checklists, Controls, the search lists, a form's fields) wrap at
 their ends; the tree, the explorer, and the Messages log stop. The left
-pane's tree draws the highlight without the gutter until its column schema
-lands.
+pane's tree draws the highlight without the gutter until every kind of row
+is on a column schema (backlog `CSP-775`).
 
 Keys are the first convention (ADR 0160). Every overlay resolves its keys
 through a table in the framework's `keys` module and generates its footer
@@ -1334,8 +1334,14 @@ title, the Search header, the Pinned banner, the placeholder, the
 scrollbar) and each row's pending, ghost, and selection looks over the
 cells `conspectus` lays out; the App works out each row's ghost, pending,
 and pin-marker state before the frame, so laying a row out looks nothing
-up. `RowKind`, `RowId`, the row builders, and the columns stay in
-`conspectus` until the column schema.
+up. `RowKind`, `RowId`, and the row builders stay in `conspectus`. Group
+headers, session rows, and mux rows, running and stopped, are laid out from
+the framework's column schemas (ADR 0183): `conspectus` declares each kind
+of row's columns and gives its cells, and the framework measures every row
+of the tree once a frame and lays each out by one narrow-width policy, so
+the columns of a kind of row line up in every view and give way in one
+order when the pane is narrow. The PR, Pinned, History, and Search hit and
+pane rows still lay out their own cells after the prefix.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

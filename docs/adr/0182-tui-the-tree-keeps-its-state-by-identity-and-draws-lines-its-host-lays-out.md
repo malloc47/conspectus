@@ -14,7 +14,11 @@ per-view expanded set, selection, and left-panel scroll are one
 position its selection showed at. Amends
 [ADR 0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md)
 decision 7: the tree's window is kept in its `TreeState`, the tree's draw
-returns it, and page keys move by it without carrying a height.
+returns it, and page keys move by it without carrying a height. Amended by
+[ADR 0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md):
+the producer can be `TreeColumns`, which lays each row out from a column
+schema the host names for it; group headers, session rows, and mux rows
+are laid out that way.
 
 ## Context
 

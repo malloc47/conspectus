@@ -968,13 +968,9 @@ pub(super) fn group_node_kind(group: &GroupRow) -> Option<NodeKind> {
     group.primary_node.as_ref().map(NodeKind::from)
 }
 
-/// Compute the per-row node-kind glyph span for any [`RowKind`], or
-/// `None` when the row already carries an identity signal (the
-/// colored harness pill on `AgentSession`) or when no graph node
-/// kind backs it (synthetic group buckets).
-/// Folds the per-row dispatch the `render_left_row` body and the
-/// `group_row_body_width` pre-pass both rely on through a single
-/// helper so the two paths agree on row widths.
+/// The node-kind glyph span for any [`RowKind`], or `None` when no graph
+/// node kind backs the row (a synthetic group bucket, a matching turn or
+/// pane line), so every row kind's glyph cell comes from one place.
 pub(super) fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<'static>> {
     let node_kind = match kind {
         RowKind::Group(group) => group_node_kind(group)?,
