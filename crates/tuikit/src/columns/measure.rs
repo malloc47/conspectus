@@ -1,7 +1,7 @@
 //! The measure pass: how wide each column's cells are over a whole list.
 
 use super::cell::Cell;
-use super::schema::ColumnSchema;
+use super::schema::{ColumnSchema, Width};
 
 /// What the measure pass found under one key.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -22,7 +22,9 @@ struct Found {
 /// schema's keys, and any other keyed cells it gives, which a host that
 /// still draws part of a row itself reads back with
 /// [`widest`](Self::widest). A [`ragged`](super::Column::ragged) column
-/// is widened only by the cells that something follows on their row.
+/// is widened only by the cells that something follows on their row, and
+/// a capped column ([`Width::Cap`](super::Width::Cap)) counts each cell
+/// at most its cap.
 ///
 /// ```
 /// use ratatui::style::Style;
@@ -33,7 +35,8 @@ struct Found {
 /// for name in ["alpha", "a much longer name"] {
 ///     measure.add(&schema, 0, &[("name", Cell::text(name, Style::default()))]);
 /// }
-/// assert_eq!(measure.widest("name"), 18);
+/// // The longer name counts as the column's cap.
+/// assert_eq!(measure.widest("name"), 12);
 /// assert!(measure.any("name"));
 /// assert!(!measure.any("size"));
 /// ```
@@ -67,10 +70,17 @@ impl<K: Copy + Eq> Measure<K> {
                 continue;
             };
             let followed = filled[index + 1..].iter().any(|filled| *filled);
+            // A capped column counts each cell at most its cap, so a
+            // column that absorbs the lead ends where its capped cells
+            // do, at every depth.
+            let cap = match column.width {
+                Width::Cap(max) => max,
+                _ => usize::MAX,
+            };
             let width = if column.ragged && !followed {
                 None
             } else {
-                Some(cell.width())
+                Some(cell.width().min(cap))
             };
             self.record(column.key, lead, width);
         }

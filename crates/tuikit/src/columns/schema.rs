@@ -10,7 +10,8 @@ pub enum Width {
     Fixed(usize),
     /// As wide as the widest cell under the column's key over every row
     /// measured ([`Measure`](super::Measure)), at most this many cells
-    /// (`usize::MAX` for no bound). A column whose cells are all blank
+    /// (`usize::MAX` for no bound); a wider cell counts as this many and
+    /// is cut to them. A column whose cells are all blank
     /// takes no cells and no gap, so a mark only some trees have is
     /// reserved on every row of a tree that has one, and nowhere else.
     Cap(usize),
@@ -164,8 +165,9 @@ impl<K> Column<K> {
     /// tree row's indent): it is measured from the start of each row, and
     /// a row's cell gives back the row's lead, so a deeper row's cell is
     /// that much narrower and the columns after it land where a
-    /// shallower row's do. Without it a column is measured from the end of
-    /// the row's lead and moves right with it.
+    /// shallower row's do; its cap bounds each cell, not the column, so a
+    /// cell cut to the cap ends there too. Without it a column is measured
+    /// from the end of the row's lead and moves right with it.
     #[must_use]
     pub const fn absorbs_lead(mut self) -> Self {
         self.absorbs_lead = true;

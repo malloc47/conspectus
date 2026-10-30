@@ -533,6 +533,85 @@ fn a_column_that_absorbs_the_lead_ends_in_one_place_at_every_depth() {
 }
 
 #[test]
+fn a_capped_column_that_absorbs_the_lead_ends_in_one_place_past_its_cap() {
+    // The cap bounds each cell: a long top-level name is cut to 8 cells,
+    // and the deeper row's column still ends where the top row's does.
+    let schema = ColumnSchema::new([
+        Column::cap(Col::Name, 8).absorbs_lead(),
+        Column::cap(Col::Size, 9),
+    ]);
+    let top = vec![(Col::Name, t("a-long-top-name")), (Col::Size, t("(1)"))];
+    let nested = vec![(Col::Name, t("deep")), (Col::Size, t("(2)"))];
+    let deepest = vec![(Col::Name, t("deeper-name")), (Col::Size, t("(3)"))];
+    let mut measure = Measure::new();
+    measure.add(&schema, 0, &top);
+    measure.add(&schema, 2, &nested);
+    measure.add(&schema, 4, &deepest);
+    assert_eq!(measure.widest(Col::Name), 8, "each cell counts at most 8");
+    assert_eq!(measure.widest_with_lead(Col::Name), 12);
+    let indent = |lead: usize, cells: &Cells<Col>| {
+        format!(
+            "{}{}",
+            " ".repeat(lead),
+            Cell::plain(&schema.draw(&measure, lead, 40 - lead, cells, &Theme::default()))
+        )
+    };
+    let rows = [indent(0, &top), indent(2, &nested), indent(4, &deepest)];
+    assert_eq!(rows[0], format!("a-long-{}      (1)", marks::ELLIPSIS));
+    assert_eq!(rows[1].find("(2)"), Some(14), "{rows:#?}");
+    assert_eq!(rows[2], format!("    deeper-{}  (3)", marks::ELLIPSIS));
+}
+
+#[test]
+fn draw_split_parts_a_row_where_a_column_starts() {
+    let schema = ColumnSchema::new([
+        Column::fixed(Col::Mark, 2).gap(0),
+        Column::cap(Col::Name, 12),
+        Column::fixed(Col::Size, 4).right().drops(1),
+        Column::fill(Col::Note).drops(0),
+    ]);
+    let rows = [
+        vec![
+            (Col::Mark, t("*")),
+            (Col::Name, t("alpha")),
+            (Col::Size, t("12k")),
+            (Col::Note, t("a note")),
+        ],
+        vec![(Col::Mark, t("*")), (Col::Name, t("beta"))],
+    ];
+    let measure = measured(&schema, &rows);
+    let theme = Theme::default();
+    let split = |row: usize, room: usize, at: Col| {
+        let (head, rest) = schema.draw_split(&measure, 0, room, &rows[row], &theme, at);
+        (Cell::plain(&head), Cell::plain(&rest))
+    };
+    assert_eq!(
+        split(0, 40, Col::Name),
+        ("* ".into(), "alpha   12k  a note".into())
+    );
+    // The gap before the column stays with the part before it.
+    assert_eq!(
+        split(0, 40, Col::Size),
+        ("* alpha  ".into(), " 12k  a note".into())
+    );
+    // A column that gave way: the part starts at the next that shows.
+    assert_eq!(
+        split(0, 15, Col::Note),
+        ("* alpha   12k".into(), String::new())
+    );
+    assert_eq!(split(0, 12, Col::Size), ("* alpha".into(), String::new()));
+    // A blank cell starts nothing; a row with nothing after it has an
+    // empty second part.
+    assert_eq!(split(1, 40, Col::Size), ("* beta ".into(), String::new()));
+    // Joined, the parts are the row.
+    for room in [0, 5, 9, 15, 40] {
+        let (mut head, rest) = schema.draw_split(&measure, 0, room, &rows[0], &theme, Col::Name);
+        head.extend(rest);
+        assert_eq!(head, schema.draw(&measure, 0, room, &rows[0], &theme));
+    }
+}
+
+#[test]
 fn a_hugging_cell_takes_its_own_width_and_the_cells_after_it_flow() {
     let schema = ColumnSchema::new([
         Column::fixed(Col::State, 1),
@@ -755,6 +834,7 @@ fn no_row_is_ever_wider_than_its_room() {
         let schema = random_schema(&mut rng);
         let rows: Vec<Cells<Col>> = (0..6).map(|_| random_cells(&mut rng, &schema)).collect();
         let measure = measured(&schema, &rows);
+        let keys: Vec<Col> = schema.columns().iter().map(Column::key).collect();
         for room in 0..60 {
             for cells in &rows {
                 let spans = schema.draw(&measure, 0, room, cells, &theme);
@@ -763,6 +843,12 @@ fn no_row_is_ever_wider_than_its_room() {
                     "seed {seed}, room {room}: {:?}\n{schema:?}",
                     Cell::plain(&spans)
                 );
+                // Parted anywhere, the row is the same row.
+                if let Some(&at) = keys.get(rng.below(keys.len().max(1))) {
+                    let (mut head, rest) = schema.draw_split(&measure, 0, room, cells, &theme, at);
+                    head.extend(rest);
+                    assert_eq!(head, spans, "seed {seed}, room {room}, parted at {at:?}");
+                }
             }
         }
     }

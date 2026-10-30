@@ -185,13 +185,15 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             } else {
                 match column.width {
                     Width::Fixed(cells) => Some(cells),
+                    // The measure counts each cell at most its cap, so a
+                    // column that absorbs the lead is as wide as it takes
+                    // to end where the deepest capped cell does.
                     Width::Cap(max) => measure.any(column.key).then(|| {
-                        let widest = if column.absorbs_lead {
+                        if column.absorbs_lead {
                             measure.widest_with_lead(column.key).saturating_sub(lead)
                         } else {
-                            measure.widest(column.key)
-                        };
-                        widest.min(max)
+                            measure.widest(column.key).min(max)
+                        }
                     }),
                     Width::Steps(steps) => step(steps, left),
                     Width::Fill => measure.any(column.key).then_some(MIN_FILL),
@@ -290,12 +292,47 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         cells: &[(K, Cell)],
         theme: &Theme,
     ) -> Vec<Span<'static>> {
-        let (spans, used) = self.draw_row(measure, (lead, room), cells, theme, false);
+        let (spans, used, _) =
+            self.draw_row(measure, (lead, room), cells, theme, Ends::AtLastCell(None));
         if used > room {
             text::fit_spans(spans, room)
         } else {
             spans
         }
+    }
+
+    /// [`draw`](Self::draw) parted where the column under `at` starts:
+    /// the spans of the columns before it (their gaps included), and the
+    /// spans from it to the row's end, for a host that gives part of a row
+    /// a look of its own, such as a dimmed body after marks that keep
+    /// their colors. When `at`'s cell does not show on the row (it is
+    /// blank or gave way), the second part starts at the next column that
+    /// shows, and it is empty when none does. The two parts joined are
+    /// what `draw` returns.
+    pub fn draw_split(
+        &self,
+        measure: &Measure<K>,
+        lead: usize,
+        room: usize,
+        cells: &[(K, Cell)],
+        theme: &Theme,
+        at: K,
+    ) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+        let from = self.index_of(at).unwrap_or(self.columns.len());
+        let (spans, used, split) = self.draw_row(
+            measure,
+            (lead, room),
+            cells,
+            theme,
+            Ends::AtLastCell(Some(from)),
+        );
+        let mut spans = if used > room {
+            text::fit_spans(spans, room)
+        } else {
+            spans
+        };
+        let rest = spans.split_off(split.min(spans.len()));
+        (spans, rest)
     }
 
     /// [`draw`](Self::draw) for a row that the host goes on to draw
@@ -312,21 +349,26 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         cells: &[(K, Cell)],
         theme: &Theme,
     ) -> (Vec<Span<'static>>, usize) {
-        let (spans, used) = self.draw_row(measure, (lead, room), cells, theme, true);
+        let (spans, used, _) = self.draw_row(measure, (lead, room), cells, theme, Ends::Continued);
         (spans, room.saturating_sub(used))
     }
 
-    /// The row's spans and the cells they take, after its lead and in its
-    /// room (`place`).
+    /// The row's spans, the cells they take, and the index of the first
+    /// span of the part `ends` asks for (the spans' count when none), after
+    /// its lead and in its room (`place`).
     fn draw_row(
         &self,
         measure: &Measure<K>,
         place: (usize, usize),
         cells: &[(K, Cell)],
         theme: &Theme,
-        continued: bool,
-    ) -> (Vec<Span<'static>>, usize) {
+        ends: Ends,
+    ) -> (Vec<Span<'static>>, usize, usize) {
         let (lead, room) = place;
+        let (continued, from) = match ends {
+            Ends::Continued => (true, None),
+            Ends::AtLastCell(from) => (false, from),
+        };
         let mut aligned = self.aligned(measure, lead, room);
         let lined_up = total(&self.columns, &aligned, 0);
         let lead_gap = aligned
@@ -363,19 +405,29 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         let mut spans: Vec<Span<'static>> = Vec::new();
         let mut used = 0;
         let mut gap: Option<usize> = None;
+        let mut split = None;
         for (position, &(index, width)) in drawn[..last].iter().enumerate() {
             if let Some(gap) = gap.filter(|gap| *gap > 0) {
                 spans.push(Span::raw(" ".repeat(gap)));
                 used += gap;
             }
+            if split.is_none() && from.is_some_and(|from| index >= from) {
+                split = Some(spans.len());
+            }
             let column = &self.columns[index];
             let cell = lookup(cells, column.key).unwrap_or(&empty);
             let ends = !continued && position + 1 == last;
+            // A capped cell is cut to its cap, and padded to its column's
+            // width (wider than the cap where the column absorbs a lead).
+            let cap = match column.width {
+                Width::Cap(max) => max,
+                _ => usize::MAX,
+            };
             let (cut_to, padded) = match column.width {
                 Width::Hug(_) => (width, false),
                 Width::Fill => (width, !ends),
-                _ if column.ragged && ends => (room.saturating_sub(used), false),
-                _ => (width, true),
+                _ if column.ragged && ends => (room.saturating_sub(used).min(cap), false),
+                _ => (width.min(cap), true),
             };
             let mut body = cell.render(cut_to, theme);
             if padded {
@@ -389,8 +441,20 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             spans.push(Span::raw(" ".repeat(gap)));
             used += gap;
         }
-        (spans, used)
+        let split = split.unwrap_or(spans.len());
+        (spans, used, split)
     }
+}
+
+/// How a drawn row ends.
+#[derive(Clone, Copy, Debug)]
+enum Ends {
+    /// At its last cell that is not blank, with no gap after it; parted
+    /// where the column at the schema index starts, when there is one.
+    AtLastCell(Option<usize>),
+    /// The host draws on after it: every column that shows is drawn and
+    /// the gap after the last.
+    Continued,
 }
 
 impl<K: Copy + Eq> ColumnSchema<K> {

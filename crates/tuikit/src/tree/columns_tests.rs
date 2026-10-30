@@ -185,3 +185,57 @@ fn the_disclosure_cell_is_an_arrow_for_a_row_with_children() {
     let closed = disclosure(true, false, &theme).render(2, &theme);
     assert_eq!(closed[0].style.fg, Some(theme.disclosure));
 }
+
+#[test]
+fn a_look_on_part_of_a_row_leaves_the_cells_before_it_alone() {
+    let theme = Theme::default();
+    let names = Names::new();
+    let rows = tree();
+    let states = [RowState {
+        mark: RowMark::Off,
+        ..RowState::default()
+    }];
+    let columns = TreeColumns::new(&names, &rows, &TreeState::new(), &states, &theme);
+    let cx = RowCtx {
+        mark: RowMark::Off,
+        ..cx(&theme, 60)
+    };
+    let plain = columns.line(&rows[0], &cx);
+    let looked = columns.line_with_look(&rows[0], &cx, Col::Name, |spans| {
+        crate::selection::ghost(spans, &theme);
+    });
+    assert_eq!(text(&looked), text(&plain), "a look changes no text");
+    let arrow = &looked.spans[0];
+    assert_eq!(
+        arrow.style.fg,
+        Some(theme.disclosure),
+        "the disclosure keeps its color"
+    );
+    let at = |line: &Line<'_>, needle: &str| {
+        line.spans
+            .iter()
+            .find(|span| span.content.contains(needle))
+            .map(|span| span.style)
+    };
+    assert_eq!(
+        at(&looked, "- "),
+        at(&plain, "- "),
+        "the mark keeps its look"
+    );
+    let ghost = crate::selection::ghost_style(&theme);
+    assert_eq!(at(&looked, "group").and_then(|style| style.fg), ghost.fg);
+    assert_eq!(at(&looked, "a note").and_then(|style| style.fg), ghost.fg);
+    // Every span from the name on wears it, the gaps between them too.
+    let from = looked
+        .spans
+        .iter()
+        .position(|span| span.content.contains("group"))
+        .expect("the name");
+    assert!(
+        looked.spans[from..]
+            .iter()
+            .all(|span| span.style.fg == ghost.fg),
+        "{:?}",
+        looked.spans
+    );
+}

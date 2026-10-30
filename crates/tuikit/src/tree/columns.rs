@@ -178,6 +178,32 @@ where
         Line::from(spans)
     }
 
+    /// [`line`](Self::line) with `look` applied to the row's spans from the
+    /// column under `from` on (see [`ColumnSchema::draw_split`]), for a row
+    /// that wears a look on part of itself: a gone entity whose marks keep
+    /// their colors while the rest of its row recedes. The tree applies the
+    /// row's own looks after, over the whole line.
+    pub fn line_with_look(
+        &self,
+        row: &R,
+        cx: &RowCtx<'_>,
+        from: P::Key,
+        look: impl FnOnce(&mut [Span<'static>]),
+    ) -> Line<'static> {
+        let lead = self.lead(row);
+        let room = cx.width.saturating_sub(lead);
+        let cells = self.columns.cells(row, cx);
+        let (head, mut rest) =
+            self.columns
+                .schema(row)
+                .draw_split(&self.measure, lead, room, &cells, cx.theme, from);
+        look(&mut rest);
+        let mut spans = indent(lead);
+        spans.extend(head);
+        spans.extend(rest);
+        Line::from(spans)
+    }
+
     /// `row`'s indent and its schema's cells, every one that shows drawn,
     /// then what `rest` lays out in the cells left (see
     /// [`ColumnSchema::draw_then`]): a row whose last part the host still
