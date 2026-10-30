@@ -280,12 +280,10 @@ pub fn disclosure(expandable: bool, expanded: bool, theme: &Theme) -> Cell {
     if !expandable {
         return Cell::empty();
     }
-    let mark = if expanded {
-        marks::EXPANDED
-    } else {
-        marks::COLLAPSED
-    };
-    Cell::text(mark, Style::default().fg(theme.disclosure))
+    Cell::text(
+        marks::disclosure(expanded),
+        Style::default().fg(theme.disclosure),
+    )
 }
 
 #[cfg(test)]

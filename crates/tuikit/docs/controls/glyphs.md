@@ -82,8 +82,11 @@ for drawn in vetted.unvetted(source) {
 | `ARROW_UP`, `ARROW_DOWN`, `ARROW_LEFT`, `ARROW_RIGHT` | `↑ ↓ ← →` | the arrow keys, as key labels name them (see [keys.md](keys.md)) |
 | `SPINNER` | `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧` | the frames of a busy spinner (an operator-preference exception, below) |
 
-`marks::ALL` lists every mark once, spinner frames included, and a test keeps
-the list and the module's source in step. `marks::SPACED_SEPARATOR` is
+`marks::disclosure(open)` picks `EXPANDED` or `COLLAPSED`: the tree's
+folding rows and a property grid's section headers both take their arrow
+from it, so the two cannot disagree. `marks::ALL` lists every mark once,
+spinner frames included, and a test keeps the list and the module's source
+in step. `marks::SPACED_SEPARATOR` is
 `SEPARATOR` with a space on each side (` · `), what joins the hints of a
 footer; it is three cells, so it is not one of the marks. `marks::TIMES`
 is `FAIL`'s character read as the multiplication sign in a count of

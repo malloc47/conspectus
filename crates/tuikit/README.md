@@ -66,7 +66,11 @@ whole list, and given way by one narrow-width policy), the `tree` module
 (the tree: a state kept apart from its host's rows, with the selection
 kept by identity across rebuilds, folds, and paging by the rows shown, and
 the pane that draws the rows from lines its host lays out or from column
-schemas), the `richtext` module
+schemas), the `property_grid` module (the rows a detail pane lists about
+one thing: properties in a label column with values cut in cells, links
+in a verb column in one of four tones, and section headers that fold,
+each reporting what `Enter` and an inspect key ask its host to do), the
+`richtext` module
 behind its feature (ANSI text, captured terminal output fitted in a wrap
 mode, and Markdown with its tables and highlighted code), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age

@@ -29,6 +29,22 @@ pub const EXPANDED: &str = "▼";
 /// back mark are the look-alike U+25BA and U+25C4, which are not
 /// emoji-capable; do not substitute one for the other.
 pub const COLLAPSED: &str = "▶";
+
+/// The disclosure mark for a row or group that is `open` ([`EXPANDED`])
+/// or closed ([`COLLAPSED`]). Every control that folds rows picks its
+/// arrow here, so a tree's group and a property grid's section read
+/// alike.
+///
+/// ```
+/// use tuikit::glyphs::marks;
+///
+/// assert_eq!(marks::disclosure(true), marks::EXPANDED);
+/// assert_eq!(marks::disclosure(false), marks::COLLAPSED);
+/// ```
+pub const fn disclosure(open: bool) -> &'static str {
+    if open { EXPANDED } else { COLLAPSED }
+}
+
 /// A check that passed, or a value that checked out.
 pub const OK: &str = "√";
 /// A check that failed, or a value that did not.
