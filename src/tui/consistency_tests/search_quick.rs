@@ -10,6 +10,7 @@ use crate::model::{
 };
 use crate::tui::app::{Focus, OpenPlan};
 use crate::tui::explorer::ExplorerRow;
+use tuikit::explorer::ExplorerKey;
 
 fn link(id: &str, source: &NodeId, target: &NodeId, relation: RelationKind) -> GraphLink {
     let mut link = GraphLink::new(
@@ -166,11 +167,15 @@ fn a_neighbor_opens_in_the_right_pane_with_the_cursor_on_its_row() {
     assert_eq!(app.focus(), Focus::Right);
     assert_eq!(app.active_view(), View::Sessions, "the left pane stays put");
     let state = app.explorer().expect("an explorer");
-    assert_eq!(state.view.focused, session_id(), "no drill for one hop");
-    assert!(state.breadcrumb.is_empty());
-    let row = state.selected_row().expect("a cursor row");
+    assert_eq!(
+        state.content().focused,
+        session_id(),
+        "no drill for one hop"
+    );
+    assert!(state.frames().is_empty());
+    let row = app.explorer_cursor_row().expect("a cursor row");
     assert!(matches!(row, ExplorerRow::ValidatedLink { .. }), "{row:?}");
-    assert_eq!(state.view.drill_target(&row), Some(mux_id()));
+    assert_eq!(state.content().drill_target(&row), Some(mux_id()));
 }
 
 #[test]
@@ -182,19 +187,23 @@ fn a_farther_entity_drills_along_the_path_and_backspace_retraces_it() {
     assert_eq!(app.focus(), Focus::Right);
     let state = app.explorer().expect("an explorer");
     assert_eq!(
-        state.view.focused,
+        state.content().focused,
         pr_id(7),
         "the last hop before the target"
     );
-    assert_eq!(state.breadcrumb.len(), 2, "one hop per drill");
-    let row = state.selected_row().expect("a cursor row");
-    assert_eq!(state.view.drill_target(&row), Some(pr_id(8)));
+    assert_eq!(state.frames().len(), 2, "one hop per drill");
+    let row = app.explorer_cursor_row().expect("a cursor row");
+    assert_eq!(state.content().drill_target(&row), Some(pr_id(8)));
 
-    app.update(Msg::ExplorerBack);
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
+    app.update(Msg::Explorer(ExplorerKey::Back));
     let state = app.explorer().expect("an explorer");
-    assert_eq!(state.view.focused, session_id(), "back where it started");
-    assert!(state.breadcrumb.is_empty());
+    assert_eq!(
+        state.content().focused,
+        session_id(),
+        "back where it started"
+    );
+    assert!(state.frames().is_empty());
 }
 
 #[test]

@@ -165,7 +165,11 @@ fn key_prelude_routes_navigation_to_the_focused_right_pane() {
     drive(&mut app, &config, "j");
     let selection = app.selection().cloned();
     assert!(selection.is_some(), "left tree should have a selection");
-    let cursor_before = app.explorer().expect("explorer").cursor;
+    let cursor_before = app
+        .explorer()
+        .expect("explorer")
+        .cursor()
+        .expect("a cursor");
 
     drive(&mut app, &config, "<Tab>jj");
 
@@ -175,7 +179,13 @@ fn key_prelude_routes_navigation_to_the_focused_right_pane() {
         selection,
         "j after <Tab> must not move the left tree"
     );
-    assert_eq!(app.explorer().expect("explorer").cursor, cursor_before + 2);
+    assert_eq!(
+        app.explorer()
+            .expect("explorer")
+            .cursor()
+            .expect("a cursor"),
+        cursor_before + 2
+    );
 }
 
 #[test]
@@ -184,9 +194,7 @@ fn key_prelude_enter_on_a_related_row_drills_and_backspace_returns() {
     let (mut app, config) = session_mux_app();
     drive(&mut app, &config, "j<Tab>");
     let link_row = app
-        .explorer()
-        .expect("explorer")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
         .expect("related row");
@@ -194,14 +202,14 @@ fn key_prelude_enter_on_a_related_row_drills_and_backspace_returns() {
     drive(&mut app, &config, &"j".repeat(link_row));
     drive(&mut app, &config, "<Enter>");
     let explorer = app.explorer().expect("explorer");
-    assert_eq!(explorer.breadcrumb.len(), 1, "Enter should drill one hop");
+    assert_eq!(explorer.frames().len(), 1, "Enter should drill one hop");
     assert!(matches!(
-        explorer.view.focused,
+        explorer.content().focused,
         crate::model::NodeId::MuxSession(_)
     ));
 
     drive(&mut app, &config, "<Backspace>");
-    assert!(app.explorer().expect("explorer").breadcrumb.is_empty());
+    assert!(app.explorer().expect("explorer").frames().is_empty());
 }
 
 const LONG_MESSAGE: &str = "this message runs far past the width the Node zone shows for it";
@@ -230,13 +238,13 @@ fn key_prelude_o_and_enter_reach_a_truncated_field_past_the_core_rows() {
     drive(&mut app, &config, "j<Tab>F");
     let state = app.explorer().expect("explorer");
     let row = state
-        .view
+        .content()
         .fields(true)
         .iter()
         .position(|field| field.label == "last_message_preview")
         .expect("expanded detail shows the last message");
-    assert!(row >= state.view.core_fields.len());
-    let cursor = state.cursor;
+    assert!(row >= state.content().core_fields.len());
+    let cursor = state.cursor().expect("a cursor");
 
     drive(&mut app, &config, &"j".repeat(row - cursor));
     drive(&mut app, &config, "o");
@@ -361,11 +369,10 @@ fn every_effect_runs_or_is_skipped_with_a_note_naming_it() {
         .iter()
         .map(|toast| toast.text.as_str())
         .collect();
-    assert_eq!(
-        toasts,
-        ["shown"],
-        "the pure effects ran; nothing was refused"
-    );
+    // The pure effects ran and nothing was refused; the skipped copy still
+    // says what it copied, as the live executor's does, and its toast
+    // replaces the one before it.
+    assert_eq!(toasts, ["copied: id"]);
 }
 
 #[test]

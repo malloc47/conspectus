@@ -60,7 +60,9 @@ fn a_long_field_is_cut_where_it_says_and_its_hint_names_the_key_that_opens_it() 
             KeyCode::Char(INSPECT_KEY),
             KeyModifiers::NONE
         ))),
-        Some(Action::OpenValueModal),
+        Some(Action::Msg(Box::new(crate::tui::Msg::Explorer(
+            tuikit::explorer::ExplorerKey::Inspect
+        )))),
         "the key the hint names opens the value"
     );
     let row = field_row(&long, &theme);
@@ -244,7 +246,15 @@ fn every_explorer_row_converts_and_a_vanished_link_stays_a_row() {
             }],
         },
     };
-    let rows = view.flat_rows(true, false);
+    let mut frame = tuikit::explorer::FrameView::default();
+    frame
+        .open
+        .push(crate::tui::explorer::ExplorerRowKey::OtherHeader);
+    let rows: Vec<ExplorerRow> = crate::tui::explorer::source::zones(&view, &frame, &theme, false)
+        .into_iter()
+        .flat_map(|zone| zone.entries)
+        .map(|entry| entry.host)
+        .collect();
     let converted: Vec<Row> = rows
         .iter()
         .map(|row| grid_row(&view, row, &theme, false))

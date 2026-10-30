@@ -13,14 +13,11 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use tuikit::feedback::{Feedback, Toasts};
-use tuikit::property_grid::Intent;
-use tuikit::scroll::{Anchor, ScrollRegion, ScrollWindow};
+use tuikit::scroll::{Anchor, ScrollRegion};
 use tuikit::tree::{RowState, TreeState};
 
 use crate::model::{AgentSessionId, GraphSnapshot, MuxSessionId, NodeId, PinId};
-use crate::tui::explorer::{
-    BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
-};
+use crate::tui::explorer::{ExplorerRow, GraphExplorer, GraphSource};
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewSource, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::{RunConfig, View};
@@ -132,15 +129,17 @@ pub struct App {
     /// the window in a [`ViewportReport`], which [`App::keep_viewports`]
     /// stores. Saved per view in [`ViewStateSlot`].
     tree_state: TreeState<RowId>,
-    /// Right-panel graph explorer state. Carries
-    /// the focused node view, the navigation cursor, group expansion,
-    /// and the breadcrumb stack for drilldown. Recomputed whenever
-    /// selection or snapshot changes; a drill survives the recompute
-    /// while the selection is still [`Self::explorer_reflects`]. `None`
-    /// until the reducer has resolved a selection into a node view, and
-    /// again whenever the selection names no node; the right pane shows
-    /// its placeholder then.
-    explorer: Option<ExplorerState>,
+    /// The right panel's graph explorer (`tuikit::explorer` over
+    /// [`crate::tui::explorer::Graph`]): the focused node's view, the
+    /// cursor, the `Other` fold, Expanded Node Detail, the drill frames,
+    /// the armed `Backspace`, and the window its zone drew. Recomputed
+    /// whenever selection or snapshot changes; a drill survives the
+    /// recompute while the selection is still [`Self::explorer_reflects`].
+    /// `None` until the reducer has resolved a selection into a node
+    /// view, and again whenever the selection names no node; the right
+    /// pane shows its placeholder then. Reducer code lends it out with a
+    /// source over the rest of the app ([`Self::with_explorer`]).
+    explorer: Option<GraphExplorer>,
     /// The left-pane selection the right pane reflects: the row it was
     /// last opened or reloaded for, the row the left pane moved to
     /// after a drill, or the row a `Backspace` put back. While the
@@ -155,12 +154,6 @@ pub struct App {
     /// Initialized from `RunConfig::show_edge_meta`; flipped at
     /// runtime by `Msg::ToggleEdgeMeta`.
     edge_meta_visible: bool,
-    /// `true` after a Backspace press on the right pane with an
-    /// empty breadcrumb stack: the press surfaced a hint instead of
-    /// shifting focus, and a follow-up Backspace will perform the
-    /// focus shift. Cleared by any other message so the arming only
-    /// survives across consecutive Backspace presses.
-    explorer_back_armed: bool,
     /// The right-panel Preview's scroll region (ADR 0181): the rows it
     /// has been scrolled from its anchor (the top, a transcript's newest
     /// rows, or the search match it opened on), as the last frame drew
@@ -240,13 +233,6 @@ pub struct App {
     /// transcripts (ADR 0112 §5). The renderer reads this for the
     /// right-panel Preview zone.
     preview_store: PreviewStore,
-    /// The window the explorer zone of the right pane drew in the last
-    /// frame, over its wrapped rows, kept the same way. It keeps the
-    /// explorer cursor visible when the Related list grows past the
-    /// zone's height (the Preview below reserves a minimum), and does
-    /// not move [`Self::preview_scroll`], which scrolls the Preview
-    /// body.
-    explorer_window: ScrollWindow,
     /// Open overlays as a stack (ADR 0085 contract 3, ADR 0161). Keys
     /// go to the top entry, every entry is drawn bottom to top, and a
     /// close or a commit closes the top. See [`crate::tui::modal`].
@@ -402,109 +388,6 @@ pub struct PendingHandoff {
 /// the row still awaits the refresh after a hand-off (ADR 0132).
 pub const HANDOFF_PENDING_HINT: &str = "refreshing after tmux · wait for the row to update";
 
-/// Right-pane graph explorer state. Owns the focused node's view
-/// model, the cursor position within the flat row list, the set of
-/// expanded multi-link groups, and the breadcrumb stack used by
-/// drilldown.
-#[derive(Debug, Clone)]
-pub struct ExplorerState {
-    /// View model for the currently-focused node.
-    pub view: NodeView,
-    /// Index into [`NodeView::flat_rows`] when materialized with the
-    /// current `other_expanded` flag. Clamped on every update so the
-    /// renderer can read it unchecked.
-    pub cursor: usize,
-    /// Whether the `Other` zone (alternates, conflicts, unresolved
-    /// stubs) is currently expanded (ADR 0074 §3). Replaces the
-    /// per-`GroupKey` expansion set from the prior layout.
-    pub other_expanded: bool,
-    /// Drill history. Empty when the focused node is the same one
-    /// the left tree points at.
-    pub breadcrumb: Vec<BreadcrumbHop>,
-    /// Whether the Node zone is rendering its full per-kind field
-    /// set instead of the top-5 Core summary. Per-focused-
-    /// node: resets to `false` when drilling into a neighbor and is
-    /// restored along with the prior focus by Backspace.
-    pub full_detail_expanded: bool,
-}
-
-impl ExplorerState {
-    /// Build a fresh state for `view`, starting with the cursor on
-    /// the first row. We default to the first row (a Node field)
-    /// rather than the first relationship so the Preview zone falls
-    /// back to the legacy live preview body — operators expect to
-    /// see the tmux pane capture, transcript tail, etc. without
-    /// having to scroll down into relationships first. Pressing
-    /// `j` walks into relationship rows, at which point the Preview
-    /// switches to neighbor + edge content.
-    pub fn new(view: NodeView) -> Self {
-        Self {
-            view,
-            cursor: 0,
-            other_expanded: false,
-            breadcrumb: Vec::new(),
-            full_detail_expanded: false,
-        }
-    }
-
-    /// The flat list of selectable rows for the current view +
-    /// expansion state. Computed each call rather than cached so the
-    /// view model stays the source of truth.
-    pub fn rows(&self) -> Vec<ExplorerRow> {
-        self.view
-            .flat_rows(self.other_expanded, self.full_detail_expanded)
-    }
-
-    /// Selected row, if any.
-    pub fn selected_row(&self) -> Option<ExplorerRow> {
-        self.rows().into_iter().nth(self.cursor)
-    }
-
-    /// Preserve cursor identity across a rebuild by row key. Used
-    /// when the underlying view model changes (refresh, group
-    /// expand) so the cursor sticks to the same logical row.
-    fn reseat_cursor(&mut self, previous_key: Option<ExplorerRowKey>) {
-        let rows = self.rows();
-        if rows.is_empty() {
-            self.cursor = 0;
-            return;
-        }
-        let target =
-            previous_key.and_then(|key| rows.iter().position(|row| row.key(&self.view) == key));
-        self.cursor = target.unwrap_or_else(|| {
-            // Fall back to the first actionable row — a validated
-            // link, then the Other header, then any Other link
-            // (when expanded) — so the cursor never sits on the
-            // node-field zone after a rebuild that previously had
-            // it on a relationship row.
-            rows.iter()
-                .position(|row| {
-                    matches!(
-                        row,
-                        ExplorerRow::ValidatedLink { .. }
-                            | ExplorerRow::OtherHeader { .. }
-                            | ExplorerRow::OtherLink { .. }
-                    )
-                })
-                .unwrap_or(0)
-        });
-    }
-
-    /// Show `view`, a rebuild of the node this state already shows,
-    /// keeping the breadcrumb, the Expanded Node Detail toggle, the
-    /// `Other` fold while the zone still has rows (ADR 0074 §6: the
-    /// zone is open or closed, with no per-group state to invalidate),
-    /// and the cursor on the same row by key.
-    fn reload(&mut self, view: NodeView) {
-        let previous_key = self.selected_row().map(|row| row.key(&self.view));
-        self.view = view;
-        if !self.view.has_other_rows() {
-            self.other_expanded = false;
-        }
-        self.reseat_cursor(previous_key);
-    }
-}
-
 impl App {
     /// Build a fresh app at the start of the run.
     pub fn new(config: RunConfig) -> Self {
@@ -553,7 +436,6 @@ impl App {
             explorer_reflects: None,
             focus: Focus::Left,
             edge_meta_visible,
-            explorer_back_armed: false,
             preview: ScrollRegion::default(),
             loaded_at_epoch: None,
             status_message: None,
@@ -580,7 +462,6 @@ impl App {
             pending_restore_focus: None,
             undo: crate::tui::undo::UndoStack::default(),
             preview_store: PreviewStore::new(),
-            explorer_window: ScrollWindow::default(),
             modal_stack: crate::tui::modal::ModalStack::new(),
             rename_node: None,
             toasts: Toasts::new(),
@@ -673,32 +554,6 @@ impl App {
         }
     }
 
-    /// The explorer cursor's row as the pane draws it, which says what
-    /// Enter and `o` mean on it.
-    fn explorer_cursor_row(&self) -> Option<tuikit::property_grid::Row> {
-        let state = self.explorer.as_ref()?;
-        let row = state.selected_row()?;
-        Some(crate::tui::explorer::grid::grid_row(
-            &state.view,
-            &row,
-            self.theme(),
-            self.edge_meta_visible,
-        ))
-    }
-
-    /// Resolve whatever copyable value the explorer cursor points at.
-    /// Returns `(label, value)` for the toast caption + clipboard
-    /// payload, the field's whole value even when the pane shows it cut,
-    /// or `None` if the row is not a Node-zone field or the field has no
-    /// value (empty, or a placeholder), so the toast never claims a copy
-    /// that didn't happen.
-    pub fn explorer_copy_target(&self) -> Option<(String, String)> {
-        match self.explorer_cursor_row()?.activate()? {
-            Intent::Copy { label, text } => Some((label, text)),
-            Intent::Inspect { .. } | Intent::Toggle | Intent::Follow => None,
-        }
-    }
-
     /// Resolve the full id of the selected agent or mux session row
     /// for the `i` keybinding. Returns `(label, id)` where `label` is
     /// the toast caption ("copied: agent_session id" /
@@ -713,36 +568,6 @@ impl App {
             }
             node @ NodeId::MuxSession(_) => Some(("copied: mux id".to_string(), node.to_string())),
             _ => None,
-        }
-    }
-
-    /// Open the full-value modal for whatever value the active
-    /// surface points at. The explorer cursor row is the v1
-    /// candidate: long node-field values truncate with a `(truncated
-    /// · o)` hint and `o` opens the full text here. No-op when no
-    /// long value is reachable from the current cursor.
-    pub fn open_value_modal_for_cursor(&mut self) {
-        // Skip if nothing's mounted.
-        if self.explorer.is_none() {
-            self.status_message = Some(Feedback::warning(
-                "explorer: nothing to open here — `o` opens long values on the cursor row",
-            ));
-            return;
-        }
-        let Some(row) = self.explorer_cursor_row() else {
-            return;
-        };
-        match row.inspect() {
-            Some(Intent::Inspect { label, text: value }) => {
-                self.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
-                    label, value,
-                ));
-            }
-            Some(Intent::Copy { .. } | Intent::Toggle | Intent::Follow) | None => {
-                self.status_message = Some(Feedback::warning(
-                    "explorer: row has no truncated value to open",
-                ));
-            }
         }
     }
 
@@ -977,10 +802,43 @@ impl App {
         &self.tree_state
     }
 
-    /// Right-pane graph explorer state for the current focused
-    /// node. `None` until the reducer has resolved a selection.
-    pub fn explorer(&self) -> Option<&ExplorerState> {
+    /// The right pane's explorer on the current focused node. `None`
+    /// until the reducer has resolved a selection.
+    pub fn explorer(&self) -> Option<&GraphExplorer> {
         self.explorer.as_ref()
+    }
+
+    /// The app's data as the explorer reads it: the snapshot, the theme,
+    /// whether link rows show their edge meta, and the left pane's
+    /// selection. `None` before the first snapshot.
+    pub fn graph_source(&self) -> Option<GraphSource<'_>> {
+        Some(GraphSource {
+            snapshot: self.handle.as_ref()?.snapshot(),
+            home: home_for_config(&self.config),
+            theme: self.theme(),
+            edge_meta: self.edge_meta_visible,
+            left: self.tree_state.selected(),
+        })
+    }
+
+    /// The rows the explorer lists, top to bottom: what its cursor's
+    /// index counts. Empty with no explorer.
+    pub fn explorer_rows(&self) -> Vec<ExplorerRow> {
+        let (Some(explorer), Some(source)) = (self.explorer.as_ref(), self.graph_source()) else {
+            return Vec::new();
+        };
+        explorer
+            .entries(&source)
+            .into_iter()
+            .map(|entry| entry.host)
+            .collect()
+    }
+
+    /// The explorer cursor's row, which the Preview, the actions, and the
+    /// status hint read.
+    pub fn explorer_cursor_row(&self) -> Option<ExplorerRow> {
+        let explorer = self.explorer.as_ref()?;
+        Some(explorer.cursor_entry(&self.graph_source()?)?.host)
     }
 
     /// Which panel currently has focus.
@@ -1218,12 +1076,12 @@ impl App {
     /// What the Preview zone is pointed at: the left selection and the
     /// explorer's focused node and cursor. A change resets the
     /// Preview's scroll.
-    fn preview_focus(&self) -> (Option<RowId>, Option<(NodeId, usize)>) {
+    fn preview_focus(&self) -> (Option<RowId>, Option<(NodeId, Option<usize>)>) {
         (
             self.tree_state.selected().cloned(),
             self.explorer
                 .as_ref()
-                .map(|state| (state.view.focused.clone(), state.cursor)),
+                .map(|explorer| (explorer.id().clone(), explorer.cursor())),
         )
     }
 
@@ -1255,8 +1113,10 @@ impl App {
         // re-surfaces the hint instead of jumping straight to the focus
         // shift. A drawn frame is not a message, so the frames between
         // the two presses leave the arm alone.
-        if !matches!(msg, Msg::ExplorerBack) {
-            self.explorer_back_armed = false;
+        if !matches!(msg, Msg::Explorer(tuikit::explorer::ExplorerKey::Back))
+            && let Some(explorer) = self.explorer.as_mut()
+        {
+            explorer.disarm();
         }
         let mut effects: Vec<Effect> = Vec::new();
         match msg {
@@ -1301,21 +1161,15 @@ impl App {
             Msg::CollapseRow => {
                 self.tree_state.collapse(&self.tree.rows);
             }
-            Msg::ExplorerNavDown => self.explorer_move_cursor(1),
-            Msg::ExplorerNavUp => self.explorer_move_cursor(-1),
-            Msg::ExplorerHome => self.explorer_jump_cursor_to(0),
-            Msg::ExplorerEnd => self.explorer_jump_cursor_to(usize::MAX),
-            Msg::ExplorerActivate => self.explorer_activate(),
-            Msg::ExplorerToggleGroup => self.explorer_toggle_group(),
-            Msg::ExplorerToggleFullDetail => self.explorer_toggle_full_detail(),
+            Msg::Explorer(key) => effects.extend(self.explorer_key(key)),
             Msg::ToggleEdgeMeta => self.toggle_edge_meta(),
-            Msg::ExplorerBack if self.focus == Focus::Left && self.can_nav_back() => {
+            Msg::NavBack if self.can_nav_back() => {
                 if let Some(why) = self.nav_pop() {
                     effects.push(Effect::Toast(Feedback::warning(why)));
                 }
                 effects.push(Effect::Persist);
             }
-            Msg::ExplorerBack => self.explorer_back(),
+            Msg::NavBack => effects.extend(self.left_back()),
             Msg::CycleFocus => {
                 self.focus = match self.focus {
                     Focus::Left => Focus::Right,

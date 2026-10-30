@@ -8,6 +8,26 @@ use crate::model::{
 use crate::resolve::resolve_snapshot;
 use std::path::PathBuf;
 use tuikit::breadcrumb::Breadcrumb;
+use tuikit::explorer::{FrameView, Zone};
+
+/// The adapter's zones for `view`, its `Other` zone open or closed, the
+/// summary of fields shown, and no edge meta.
+fn zones_of(view: &NodeView, other_open: bool) -> Vec<Zone<Graph>> {
+    let mut frame = FrameView::default();
+    if other_open {
+        frame.open.push(ExplorerRowKey::OtherHeader);
+    }
+    source::zones(view, &frame, &Theme::default(), false)
+}
+
+/// The rows the explorer lists for `view`, zone by zone.
+fn listed(view: &NodeView, other_open: bool) -> Vec<ExplorerRow> {
+    zones_of(view, other_open)
+        .into_iter()
+        .flat_map(|zone| zone.entries)
+        .map(|entry| entry.host)
+        .collect()
+}
 
 #[test]
 fn directional_verb_catalog_is_exhaustive_and_disambiguates_inverses() {
@@ -49,7 +69,7 @@ fn directional_verb_catalog_is_exhaustive_and_disambiguates_inverses() {
 }
 
 #[test]
-fn flat_rows_splits_validated_and_other_zones() {
+fn zones_split_validated_and_other_rows() {
     // ADR 0074 §3: the validated zone holds every `Resolves` row
     // in a flat list; alternates, conflicts, and unresolved
     // stubs sit under one collapsible `Other` header below.
@@ -90,9 +110,47 @@ fn flat_rows_splits_validated_and_other_zones() {
         "non-winning candidate should land in the Other zone: {counts:?}"
     );
 
+    // The fields are a zone of their own, where a lost cursor does not
+    // land; the relationships sit under the `Related` rule, where it does.
+    let zones = zones_of(&view, false);
+    assert_eq!(zones.len(), 2);
+    assert!(zones[0].heading.is_none() && !zones[0].lands);
+    assert!(
+        zones[0]
+            .entries
+            .iter()
+            .all(|entry| matches!(entry.host, ExplorerRow::NodeField { .. }))
+    );
+    assert!(zones[1].heading.is_some() && zones[1].lands);
+    assert!(
+        zones[1]
+            .entries
+            .iter()
+            .all(|entry| !matches!(entry.host, ExplorerRow::NodeField { .. }))
+    );
+    // Every Other child sits under the header, which the fold keys
+    // close from inside.
+    for entry in zones_of(&view, true)
+        .into_iter()
+        .flat_map(|zone| zone.entries)
+    {
+        let child = matches!(
+            entry.host,
+            ExplorerRow::OtherLink { .. } | ExplorerRow::OtherUnresolved { .. }
+        );
+        assert_eq!(
+            entry.under.is_some(),
+            child,
+            "{:?} under {:?}",
+            entry.host,
+            entry.under
+        );
+        assert_eq!(entry.key, entry.host.key(&view));
+    }
+
     // Collapsed Other: only the validated rows + the header
     // appear; expanding adds the Other children.
-    let collapsed = view.flat_rows(false, false);
+    let collapsed = listed(&view, false);
     let validated_in_collapsed = collapsed
         .iter()
         .filter(|r| matches!(r, ExplorerRow::ValidatedLink { .. }))
@@ -117,7 +175,7 @@ fn flat_rows_splits_validated_and_other_zones() {
         "Other children should not appear while the zone is collapsed"
     );
 
-    let expanded = view.flat_rows(true, false);
+    let expanded = listed(&view, true);
     let other_children_in_expanded = expanded
         .iter()
         .filter(|r| {
@@ -1211,14 +1269,15 @@ fn breadcrumb_hops_tag_a_frame_by_its_short_label_and_suffix_it_by_its_id() {
     assert_ne!(tail(&first), tail(&last));
 }
 
-fn breadcrumb_hop(short_label: &str, focused: NodeId) -> BreadcrumbHop {
-    BreadcrumbHop {
-        focused,
-        short_label: short_label.to_string(),
-        cursor_key: None,
-        other_expanded: false,
-        full_detail_expanded: false,
-        left_pane_selection: None,
+/// A drill frame of the explorer, kept when it drilled away from
+/// `focused`, tagged `short_label`.
+fn breadcrumb_hop(short_label: &str, focused: NodeId) -> Frame<Graph> {
+    Frame {
+        id: focused,
+        tag: short_label.to_string(),
+        view: FrameView::default(),
+        cursor: None,
+        saved: None,
     }
 }
 
@@ -1387,10 +1446,9 @@ fn agreeing_producers_for_one_mux_render_one_validated_row_from_both_ends() {
             "agreeing evidence is not Other: {counts:?}"
         );
         assert!(
-            !view
-                .flat_rows(true, false)
+            !listed(&view, true)
                 .iter()
-                .any(ExplorerRow::is_other_header),
+                .any(|row| matches!(row, ExplorerRow::OtherHeader { .. })),
             "no Other header when every neighbor was picked"
         );
         let group = view
@@ -1489,8 +1547,7 @@ fn neighbor_row_key_survives_a_change_of_representative_link() {
     let key_and_link = |links: &[(&str, &str, Provenance, &str, Option<&str>)]| {
         let (snapshot, session_id) = session_mux_snapshot(links);
         let view = build(&snapshot, &session_id, Some(home().as_path()));
-        let row = view
-            .flat_rows(false, false)
+        let row = listed(&view, false)
             .into_iter()
             .find(|r| matches!(r, ExplorerRow::ValidatedLink { .. }))
             .expect("validated row");

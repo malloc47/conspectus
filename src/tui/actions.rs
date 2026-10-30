@@ -104,11 +104,10 @@ pub fn action_subject(app: &App) -> Subject {
 /// The entity the right pane shows: the link the cursor is on, else the
 /// node the pane is focused on.
 fn right_pane_node(app: &App) -> Option<NodeId> {
-    let state = app.explorer()?;
-    state
-        .selected_row()
-        .and_then(|row| state.view.drill_target(&row))
-        .or_else(|| Some(state.view.focused.clone()))
+    let explorer = app.explorer()?;
+    app.explorer_cursor_row()
+        .and_then(|row| explorer.content().drill_target(&row))
+        .or_else(|| Some(explorer.id().clone()))
 }
 
 fn pin_named<'a>(snapshot: &'a GraphSnapshot, name: &str) -> Option<&'a crate::model::PinNode> {

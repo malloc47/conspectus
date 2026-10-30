@@ -59,7 +59,7 @@ impl App {
     fn search_start(&self) -> Option<NodeId> {
         self.explorer
             .as_ref()
-            .map(|state| state.view.focused.clone())
+            .map(|explorer| explorer.id().clone())
             .or_else(|| {
                 self.tree_state
                     .selected()
@@ -157,8 +157,14 @@ impl App {
         let mut made = 0;
         let mut ok = true;
         for hop in hops {
-            self.explorer_drill_into(hop.clone());
-            if self.explorer.as_ref().map(|state| &state.view.focused) != Some(hop) {
+            let Some(outcome) =
+                self.with_explorer(|explorer, source| explorer.drill_to(hop.clone(), source))
+            else {
+                ok = false;
+                break;
+            };
+            self.explorer_outcome(outcome);
+            if self.explorer.as_ref().map(GraphExplorer::id) != Some(hop) {
                 ok = false;
                 break;
             }
@@ -169,44 +175,31 @@ impl App {
         }
         if !ok {
             for _ in 0..made {
-                self.explorer_back();
+                if let Some(outcome) = self.with_explorer(|explorer, source| explorer.back(source))
+                {
+                    self.explorer_outcome(outcome);
+                }
             }
             self.focus = was_focus;
             return false;
         }
         self.focus = Focus::Right;
-        self.explorer_back_armed = false;
+        if let Some(explorer) = self.explorer.as_mut() {
+            explorer.disarm();
+        }
         self.status_message = None;
         true
     }
 
-    /// Put the explorer cursor on the row relating to `target`.
+    /// Put the explorer cursor on the row relating to `target`, opening
+    /// the `Other` zone when the row sits there: a winner can sit among
+    /// the alternates.
     fn put_cursor_on_neighbor(&mut self, target: &NodeId) -> bool {
-        let Some(state) = self.explorer.as_mut() else {
-            return false;
-        };
-        let find = |state: &ExplorerState| {
-            state
-                .rows()
-                .iter()
-                .position(|row| state.view.drill_target(row).as_ref() == Some(target))
-        };
-        let index = find(state).or_else(|| {
-            // A winner can sit among the alternates when the zone is closed.
-            let was = state.other_expanded;
-            state.other_expanded = true;
-            let found = find(state);
-            if found.is_none() {
-                state.other_expanded = was;
-            }
-            found
-        });
-        match index {
-            Some(index) => {
-                state.cursor = index;
-                true
-            }
-            None => false,
-        }
+        self.with_explorer(|explorer, source| {
+            explorer.seek(source, |view, entry| {
+                view.drill_target(&entry.host).as_ref() == Some(target)
+            })
+        })
+        .unwrap_or(false)
     }
 }

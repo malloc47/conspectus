@@ -12,6 +12,7 @@ use crate::tui::preview::PreviewSource;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, View};
 use ratatui::layout::{Constraint, Direction, Layout};
+use tuikit::explorer::ExplorerKey;
 
 /// One explorer row drawn alone, as the pane draws it, with no cursor.
 fn explorer_line(
@@ -1549,9 +1550,7 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
     app.update(Msg::CycleFocus);
     // Walk the cursor onto the link row, then activate.
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1561,9 +1560,9 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     let drilled = buffer_to_string(&render_to_buffer(&mut app, area));
     assert!(
         drilled.contains("backend") && drilled.contains("tmux"),
@@ -1597,16 +1596,14 @@ fn a_drilled_title_fits_inside_its_corners_and_cuts_the_chain_last() {
     let mut app = muxed_app("editor", None);
     app.update(Msg::CycleFocus);
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
 
     // The title is as wide as its room allows: the fixed parts and the
     // pad, with the chain in what they leave, never wider.
@@ -1684,14 +1681,12 @@ fn agreeing_mux_evidence_renders_as_one_row_with_preview_evidence_list() {
 
     app.update(Msg::CycleFocus);
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
         .expect("validated row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     let focused = buffer_to_string(&render_to_buffer(&mut app, area));
     assert!(
@@ -1902,9 +1897,7 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
     // Walk the cursor onto the upstream `linked_to_mux` row,
     // then activate to drill into the linked session.
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1914,9 +1907,9 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
 
     let area = Rect::new(0, 0, 120, 40);
     let drilled = buffer_to_string(&render_to_buffer(&mut app, area));
@@ -3348,7 +3341,7 @@ fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
     // Walk down a few rows from the top of the explorer. The
     // top validated rows should remain in view.
     for _ in 0..3 {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     let initial = buffer_to_string(&render_to_buffer(&mut app, area));
     assert!(
@@ -3357,9 +3350,7 @@ fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
     );
 
     let last_link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .enumerate()
         .filter_map(|(idx, row)| match row {
@@ -3368,9 +3359,9 @@ fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
         })
         .next_back()
         .expect("at least one validated link row");
-    let current = app.explorer().expect("state").cursor;
+    let current = app.explorer().expect("state").cursor().expect("a cursor");
     for _ in current..last_link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
 
     let buffer = render_to_buffer(&mut app, area);
@@ -3787,7 +3778,7 @@ fn an_explorer_that_shrinks_leaves_no_blank_rows_below_it() {
     if !app.edge_meta_visible() {
         app.update(Msg::ToggleEdgeMeta);
     }
-    app.update(Msg::ExplorerEnd);
+    app.update(Msg::Explorer(ExplorerKey::Last));
     let area = Rect::new(0, 0, 100, 20);
     render_to_buffer(&mut app, area);
     let tall = app.explorer_window();
@@ -4593,7 +4584,7 @@ fn the_right_panel_draws_a_transcript_inside_its_gutter() {
 /// other than the selection, and return that node.
 fn walk_to_related_row(app: &mut App) -> NodeId {
     for _ in 0..12 {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
         if let crate::tui::preview::PreviewSubject::Node(node) =
             crate::tui::preview::preview_subject(app)
         {
@@ -4640,7 +4631,7 @@ fn drilling_into_a_neighbor_previews_that_node() {
         crate::tui::SessionPreview::Transcript,
     );
     walk_to_related_row(&mut app);
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     let mux = NodeId::MuxSession(MuxSessionId::new("editor"));
     assert_eq!(
         crate::tui::preview::preview_subject(&app),
@@ -4685,7 +4676,7 @@ fn walk_to_field_value(
     wanted: impl Fn(&crate::tui::explorer::FieldValue) -> bool,
 ) -> crate::tui::explorer::FieldValue {
     for _ in 0..12 {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
         if let crate::tui::preview::PreviewSubject::Field(value) =
             crate::tui::preview::preview_subject(app)
             && wanted(&value)
@@ -6700,7 +6691,7 @@ fn backspace_on_the_left_pane_returns_to_where_a_reveal_started() {
     assert_eq!(app.active_view(), View::Mux);
     assert!(app.can_nav_back());
 
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::NavBack);
     assert_eq!(app.active_view(), View::Pinned);
     assert_eq!(app.selection().cloned(), before);
     assert!(!app.can_nav_back());
@@ -6716,7 +6707,7 @@ fn backspace_on_the_right_pane_leaves_the_back_stack_alone() {
     app.update(Msg::RevealSelected);
 
     app.update(Msg::CycleFocus);
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
 
     assert_eq!(app.active_view(), View::Mux);
     assert!(app.can_nav_back());
@@ -6733,7 +6724,7 @@ fn the_back_stack_keeps_only_the_newest_twenty_jumps() {
     }
     let mut popped = 0;
     while app.can_nav_back() {
-        app.update(Msg::ExplorerBack);
+        app.update(Msg::NavBack);
         popped += 1;
     }
     assert_eq!(popped, 20);
@@ -6749,7 +6740,7 @@ fn going_back_to_a_row_that_vanished_says_so() {
             pin_id: "no-longer-there".into(),
         }),
     });
-    let effects = app.update(Msg::ExplorerBack);
+    let effects = app.update(Msg::NavBack);
     assert!(
         effects
             .iter()

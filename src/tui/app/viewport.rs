@@ -35,8 +35,8 @@ impl App {
         if let Some(window) = report.tree {
             self.tree_state.set_viewport(window);
         }
-        if let Some(window) = report.explorer {
-            self.explorer_window = window;
+        if let (Some(window), Some(explorer)) = (report.explorer, self.explorer.as_mut()) {
+            explorer.keep_window(window);
         }
         if let Some(region) = report.preview {
             // The Preview counts its offset from its anchor (the top, a
@@ -64,13 +64,19 @@ impl App {
     }
 
     /// The window the explorer zone drew in the last frame, over its
-    /// wrapped rows. It scrolls apart from the Preview below it.
+    /// wrapped rows, which the explorer keeps. It keeps the explorer
+    /// cursor visible when the Related list grows past the zone's height
+    /// (the Preview below reserves a minimum), and scrolls apart from the
+    /// Preview below it. Empty with no explorer.
     pub fn explorer_window(&self) -> ScrollWindow {
-        self.explorer_window
+        self.explorer.as_ref().map_or_else(
+            ScrollWindow::default,
+            crate::tui::explorer::GraphExplorer::window,
+        )
     }
 
     /// The first explorer row the last frame showed.
     pub fn explorer_scroll(&self) -> usize {
-        self.explorer_window.offset()
+        self.explorer_window().offset()
     }
 }

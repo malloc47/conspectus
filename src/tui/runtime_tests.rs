@@ -1,6 +1,7 @@
 use super::*;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use tuikit::explorer::ExplorerKey;
 use tuikit::testkit::keys::chord;
 
 fn msg(action: Option<Action>) -> Option<Msg> {
@@ -111,7 +112,7 @@ fn translate_e_toggles_the_explorer_other_zone_on_the_right_pane_only() {
         .expect("`e` is bound in the keymap");
     assert_eq!(
         key,
-        Action::Msg(Box::new(Msg::ExplorerToggleGroup)),
+        Action::Msg(Box::new(Msg::Explorer(ExplorerKey::ToggleSection))),
         "`e` has one meaning: the explorer's Other zone"
     );
     assert_eq!(
@@ -297,8 +298,8 @@ fn translate_maps_navigation_keys() {
     );
     // Enter no longer maps to a Msg directly. It is
     // resolved against the selected row's kind by the dispatcher
-    // at the call site (and remapped to ExplorerActivate when
-    // the right pane has focus).
+    // at the call site (and remapped to the explorer's `Activate`
+    // when the right pane has focus).
     assert_eq!(
         translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Enter))),
         Some(Action::DefaultAction)
@@ -402,19 +403,19 @@ fn remap_for_focus_right_routes_nav_keys_into_the_explorer() {
     // standalone bindings in `translate`.
     assert_eq!(
         remap_for_focus(Action::Msg(Box::new(Msg::NavDown)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerNavDown)))
+        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Down))))
     );
     assert_eq!(
         remap_for_focus(Action::Msg(Box::new(Msg::NavUp)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerNavUp)))
+        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Up))))
     );
     assert_eq!(
         remap_for_focus(Action::Msg(Box::new(Msg::PageDown)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerNavDown)))
+        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Down))))
     );
     assert_eq!(
         remap_for_focus(Action::Msg(Box::new(Msg::PageUp)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerNavUp)))
+        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Up))))
     );
 }
 
@@ -426,14 +427,12 @@ fn remap_for_focus_right_routes_enter_and_e_to_the_explorer() {
         Some(Action::Msg(Box::new(Msg::CycleFocus)))
     );
     // Locked decision 8: Enter is the universal "do the obvious
-    // thing" key on the explorer cursor. The dispatch is
-    // App-aware (Node-zone fields copy; other rows drill/expand),
-    // so the remap produces [`Action::ExplorerEnter`], which the
-    // main loop
-    // resolves against [`App::explorer_copy_target`].
+    // thing" key on the explorer cursor. The explorer reads the row
+    // (Node-zone fields copy; other rows drill/expand), so the remap
+    // produces its `Activate`, and the outcome says which.
     assert_eq!(
         remap_for_focus(Action::DefaultAction, Focus::Right),
-        Some(Action::ExplorerEnter)
+        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Activate))))
     );
     // Left-pane DefaultAction is left untouched here so the main
     // loop can resolve it against the selected row.
@@ -446,13 +445,18 @@ fn remap_for_focus_right_routes_enter_and_e_to_the_explorer() {
     // pane ignores the key.
     assert_eq!(
         remap_for_focus(
-            Action::Msg(Box::new(Msg::ExplorerToggleGroup)),
+            Action::Msg(Box::new(Msg::Explorer(ExplorerKey::ToggleSection))),
             Focus::Right
         ),
-        Some(Action::Msg(Box::new(Msg::ExplorerToggleGroup)))
+        Some(Action::Msg(Box::new(Msg::Explorer(
+            ExplorerKey::ToggleSection
+        ))))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::ExplorerToggleGroup)), Focus::Left),
+        remap_for_focus(
+            Action::Msg(Box::new(Msg::Explorer(ExplorerKey::ToggleSection))),
+            Focus::Left
+        ),
         None
     );
     assert_eq!(
@@ -471,7 +475,9 @@ fn remap_for_focus_right_routes_enter_and_e_to_the_explorer() {
     );
     assert_eq!(
         remap_for_focus(Action::ClearFilters, Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerToggleFullDetail)))
+        Some(Action::Msg(Box::new(Msg::Explorer(
+            ExplorerKey::ToggleFull
+        ))))
     );
 }
 
@@ -513,11 +519,11 @@ fn remap_for_focus_right_routes_home_and_end_into_the_explorer() {
     use crate::tui::app::Focus;
     assert_eq!(
         remap_for_focus(Action::Msg(Box::new(Msg::Home)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerHome))),
+        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::First)))),
     );
     assert_eq!(
         remap_for_focus(Action::Msg(Box::new(Msg::End)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerEnd))),
+        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Last)))),
     );
     // Left focus still drives the left tree.
     assert_eq!(

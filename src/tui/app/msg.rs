@@ -64,48 +64,24 @@ pub enum Msg {
     /// Left panel: collapse the selected row when it is expanded.
     /// No-op on already-collapsed or leaf rows. Bound to `←` / `h`.
     CollapseRow,
-    /// Right panel (graph explorer): move the cursor down one row
-    /// in the flat row list.
-    ExplorerNavDown,
-    /// Right panel (graph explorer): move the cursor up one row.
-    ExplorerNavUp,
-    /// Right panel (graph explorer): snap the cursor to the first
-    /// row in the flat list. Bound to `g` / `Home` on right-pane
-    /// focus, matching the left tree.
-    ExplorerHome,
-    /// Right panel (graph explorer): snap the cursor to the last
-    /// row in the flat list. Bound to `G` / `End` on right-pane
-    /// focus.
-    ExplorerEnd,
-    /// Right panel (graph explorer): activate the highlighted row.
-    /// On a group header this toggles the group's expansion; on a
-    /// link row it drills into the neighbor and pushes a breadcrumb
-    /// hop. No-op on unresolved-evidence rows in v1.
-    ExplorerActivate,
-    /// Right panel (graph explorer): expand or collapse the `Other`
-    /// zone when the cursor is on its header; a status hint
-    /// otherwise. Bound to `e`, which the left pane ignores.
-    ExplorerToggleGroup,
+    /// Right panel (graph explorer): a key for the explorer, which does
+    /// its part (moves, folds, drills, goes back) and answers with an
+    /// outcome the reducer carries out: a copy, the value modal, the
+    /// left pane's mirror or restore, a focus shift, or a status hint.
+    /// With no explorer, `Inspect` says there is nothing to open and
+    /// every other key does nothing.
+    Explorer(tuikit::explorer::ExplorerKey),
     /// Right panel (graph explorer): toggle the visibility of the
     /// link rows' trailing `provenance · confidence · state` meta
     /// line. The default is hidden; the `★` resolver-winner
     /// marker and `▲` group-level conflict aggregate stay visible
     /// regardless.
     ToggleEdgeMeta,
-    /// Right panel (graph explorer): toggle the Expanded Node Detail
-    /// view. Swaps the Node zone's top-5 render for the
-    /// full per-kind field set. Per-focused-node: resets when
-    /// drilling into a neighbor and is restored along with the
-    /// prior focus on Backspace. No-op for node kinds whose
-    /// `all_fields` matches `core_fields`.
-    ExplorerToggleFullDetail,
-    /// Right panel (graph explorer): back out of the most recent
-    /// drilldown hop, restoring the previous focused node and the
-    /// cursor / expansion state saved with it. When the breadcrumb
-    /// stack is empty and the right pane has focus, shifts focus to
-    /// the left pane so Backspace reads as a general "go back"
-    /// gesture. No-op on left focus with an empty stack.
-    ExplorerBack,
+    /// Left panel: `Backspace`. Returns to where the last reveal
+    /// started; with no reveal to undo, backs the right pane out of its
+    /// most recent drill, and with neither says there is nothing to go
+    /// back to.
+    NavBack,
     /// Move keyboard focus to the next panel.
     CycleFocus,
     /// Right panel: scroll preview by `delta` rows. Positive

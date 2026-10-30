@@ -16,13 +16,14 @@
 //! `overlay_key_from_event` in `runtime.rs`).
 
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use tuikit::explorer::ExplorerKey;
 
 use crate::tui::app::{App, Focus};
 use crate::tui::{Msg, View};
 
 /// The key that opens the explorer cursor row's whole value
-/// ([`Action::OpenValueModal`]). The explorer's cut-value hint names it
-/// from here, so the hint and the binding cannot drift apart.
+/// (`ExplorerKey::Inspect`). The explorer's cut-value hint names it from
+/// here, so the hint and the binding cannot drift apart.
 pub const INSPECT_KEY: char = 'o';
 
 /// Semantic action the runtime dispatches once a crossterm event
@@ -79,9 +80,6 @@ pub enum Action {
     OpenHelp,
     /// Open the `!` Messages overlay (ADR 0105).
     OpenMessages,
-    /// Open the `o` full-value modal on the active explorer
-    /// cursor row, when the row has a truncated value.
-    OpenValueModal,
     /// Resume the selected un-muxed agent session in a new terminal
     /// (launches the harness binary in the background).
     Resume,
@@ -95,16 +93,9 @@ pub enum Action {
     /// `Enter` on the left pane. The dispatcher resolves
     /// the selected row's default action: attach a mux row, view an
     /// un-muxed session, or expand/collapse a group row. Right-pane
-    /// focus is remapped to [`Action::ExplorerEnter`] before this
+    /// focus is remapped to the explorer's `Activate` before this
     /// variant ever reaches the dispatcher.
     DefaultAction,
-    /// `Enter` on the right pane. When the
-    /// explorer cursor is on a Node-zone field row with a copyable
-    /// value, the runtime writes the value to the clipboard via OSC
-    /// 52 (ADR 0056) and posts a toast. Otherwise the dispatcher
-    /// falls through to [`Msg::ExplorerActivate`] (group expand,
-    /// link drill).
-    ExplorerEnter,
     /// `i` on any row. When the selected row is an agent
     /// session or mux session, copies the full id to the clipboard
     /// (ADR 0056) and posts a toast. No-op with a status hint
@@ -123,11 +114,11 @@ pub fn cycle_view(view: View, delta: i32) -> View {
 /// Re-map an action based on which pane currently has focus. Used
 /// so that j/k drive whichever pane the operator is looking at —
 /// left pane focus keeps them on the row tree; right pane focus
-/// routes them into the explorer. Also handles the
-/// Enter → ExplorerEnter remap and F →
-/// ExplorerToggleFullDetail. Only key-derived actions
-/// touch this pass; overlay-owned keys never reach here — the
-/// modal stack routes them before the fallback keymap.
+/// routes them into the explorer as [`Msg::Explorer`] keys, `Enter`
+/// as its `Activate`, `F` as its `ToggleFull`, and `Backspace` as its
+/// `Back`. Only key-derived actions touch this pass; overlay-owned keys
+/// never reach here — the modal stack routes them before the fallback
+/// keymap.
 ///
 /// Uppercase J/K continue to scroll the preview regardless of focus,
 /// so operators with the left panel focused can still poke the
@@ -137,19 +128,20 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
         // `e` toggles the explorer's Other zone, which only the right
         // pane shows; the left tree has nothing for it to act on.
         return match action {
-            Action::Msg(boxed) if matches!(*boxed, Msg::ExplorerToggleGroup) => None,
+            Action::Msg(boxed) if matches!(*boxed, Msg::Explorer(ExplorerKey::ToggleSection)) => {
+                None
+            }
             other => Some(other),
         };
     }
+    let explorer = |key| Some(Action::Msg(Box::new(Msg::Explorer(key))));
     match action {
         Action::Msg(boxed) => match *boxed {
             // J/k drive the explorer cursor when the right
             // pane has focus, replacing the prior raw preview-scroll
             // remap. Uppercase J/K still scroll the preview.
-            Msg::NavDown => Some(Action::Msg(Box::new(Msg::ExplorerNavDown))),
-            Msg::NavUp => Some(Action::Msg(Box::new(Msg::ExplorerNavUp))),
-            Msg::PageDown => Some(Action::Msg(Box::new(Msg::ExplorerNavDown))),
-            Msg::PageUp => Some(Action::Msg(Box::new(Msg::ExplorerNavUp))),
+            Msg::NavDown | Msg::PageDown => explorer(ExplorerKey::Down),
+            Msg::NavUp | Msg::PageUp => explorer(ExplorerKey::Up),
             // `h`/`l`/`←`/`→` are left-tree expand/collapse keys.
             // When the right pane has focus, drop them so they
             // don't reach across panes and mutate the tree the
@@ -164,23 +156,23 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
             // `Msg::CycleFocus` is intentionally left alone — that
             // key is the focus toggle itself and stays useful
             // regardless of which pane currently has focus.
-            Msg::Home => Some(Action::Msg(Box::new(Msg::ExplorerHome))),
-            Msg::End => Some(Action::Msg(Box::new(Msg::ExplorerEnd))),
+            Msg::Home => explorer(ExplorerKey::First),
+            Msg::End => explorer(ExplorerKey::Last),
+            // Backspace backs the explorer out of its drill, and with no
+            // drill arms, then leaves the pane.
+            Msg::NavBack => explorer(ExplorerKey::Back),
             other => Some(Action::Msg(Box::new(other))),
         },
-        // Enter on the explorer cursor either
-        // copies a Node-zone field value or expands a
-        // group header / drills into a link row. The
-        // dispatcher inspects the cursor row at action time, so
-        // remap to [`Action::ExplorerEnter`] and let the main
-        // loop branch with App state in hand. Left-pane Enter
-        // (DefaultAction) is dispatched against the selected
-        // row's kind separately.
-        Action::DefaultAction => Some(Action::ExplorerEnter),
+        // Enter on the explorer cursor copies a Node-zone field
+        // value, folds the Other header, or drills into a link row:
+        // the explorer reads the row and says which. Left-pane Enter
+        // (DefaultAction) is dispatched against the selected row's
+        // kind separately.
+        Action::DefaultAction => explorer(ExplorerKey::Activate),
         // `F` toggles the Expanded Node Detail view when the
         // right pane is focused. The same key still clears filters
         // when the left tree has focus (ADR 0031).
-        Action::ClearFilters => Some(Action::Msg(Box::new(Msg::ExplorerToggleFullDetail))),
+        Action::ClearFilters => explorer(ExplorerKey::ToggleFull),
         other => Some(other),
     }
 }
@@ -214,11 +206,11 @@ pub fn translate(event: Event) -> Option<Action> {
             //   state kept from the last frame.
             (_, KeyCode::PageDown) => Some(Action::Msg(Box::new(Msg::PageDown))),
             (_, KeyCode::PageUp) => Some(Action::Msg(Box::new(Msg::PageUp))),
-            // `o` opens the full-value modal on the cursor
-            // row. The reducer no-ops gracefully if the cursor isn't
-            // on a row with a truncated value.
+            // `o` opens the full-value modal on the explorer cursor's
+            // row, whichever pane has focus. The explorer says so when
+            // the row has no truncated value.
             (m, KeyCode::Char(INSPECT_KEY)) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::OpenValueModal)
+                Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Inspect))))
             }
             // `i` copies the selected agent or mux session's
             // full id to the clipboard via OSC 52 (ADR 0056) and

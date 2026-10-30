@@ -16,9 +16,10 @@
 //!   `edge` row that summarizes provenance, confidence, state, and
 //!   the resolver verdict.
 //!
-//! Drilldown and breadcrumbs are tracked by the reducer; the
-//! view model exposes the data each frame needs, not the navigation
-//! state itself.
+//! The cursor, the fold, the drill frames, and the armed `Backspace`
+//! are the framework explorer's (`tuikit::explorer`); `source` adapts
+//! this view model to it, and the view model exposes the data each
+//! frame needs, not the navigation state itself.
 //!
 //! [Node Core-Summary Fields Reference]: ../docs/tui-detail-mockup.md
 
@@ -29,6 +30,7 @@ use ratatui::style::Style;
 use ratatui::text::Span;
 use tuikit::age::Age;
 use tuikit::breadcrumb::Hop;
+use tuikit::explorer::Frame;
 use tuikit::glyphs::marks;
 use tuikit::text;
 
@@ -44,6 +46,9 @@ use crate::tui::rows::shorten_home;
 use crate::tui::theme::Theme;
 
 pub(crate) mod grid;
+mod source;
+
+pub use source::{Graph, GraphExplorer, GraphSource};
 
 // -----------------------------------------------------------------------------
 // Builder entry points
@@ -116,10 +121,9 @@ pub struct NodeView {
     pub kind: NodeKind,
     /// Compact identity line shown in the title.
     pub title_line: String,
-    /// Compact `kind:short_tag` label for this node. Used
-    /// by [`BreadcrumbHop::short_label`] when this view is the
-    /// before-drill focused node, and by the right-pane title to
-    /// render the full drilldown chain.
+    /// Compact `kind:short_tag` label for this node: the tag a drill
+    /// frame keeps when the explorer drills away from it, which the
+    /// right-pane title's chain draws through [`breadcrumb_hops`].
     pub short_label: String,
     /// FNV-1a 64-bit short id.
     pub short_id: String,
@@ -555,12 +559,12 @@ impl LinkStateLabel {
 }
 
 // -----------------------------------------------------------------------------
-// Navigation cursor + breadcrumb
+// Row identity and the rows the explorer lists
 // -----------------------------------------------------------------------------
 
 /// Stable identity for a flat selectable row in the explorer (ADR
-/// 0074 §6). Used by the reducer to preserve cursor position across
-/// rebuilds (snapshot refresh, drilldown). Link rows are keyed by
+/// 0074 §6): the key the framework explorer keeps its cursor by across
+/// rebuilds (snapshot refresh, a fold, `Backspace`). Link rows are keyed by
 /// neighbor rather than by link id (ADR 0107) so a change of
 /// representative link — a pin authored, a hook record going stale —
 /// keeps the cursor on the same row.
@@ -592,11 +596,11 @@ pub struct NeighborRowKey {
     pub neighbor: NodeId,
 }
 
-/// Flat selectable row in the explorer. The reducer builds this
-/// list from the [`NodeView`] plus the per-frame
-/// `other_expanded` flag. The order matches what the renderer
-/// draws top-to-bottom so cursor index and rendered row index
-/// agree.
+/// Flat selectable row in the explorer: the host's row of each entry
+/// the explorer source lists for the [`NodeView`] and its frame's view
+/// (whether the `Other` zone is open, whether every field shows). The
+/// order matches what the renderer draws top-to-bottom so cursor index
+/// and rendered row index agree.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExplorerRow {
     /// One of the focused node's field rows. `index` is its place in
@@ -664,81 +668,9 @@ impl ExplorerRow {
             }
         }
     }
-
-    /// True for rows that participate in the Other-zone toggle
-    /// (header + its children). Used by the reducer to decide which
-    /// row identifies the toggle target.
-    pub fn is_other_header(&self) -> bool {
-        matches!(self, Self::OtherHeader { .. })
-    }
 }
 
 impl NodeView {
-    /// Build the ordered list of selectable rows the cursor steps
-    /// through. `expanded` is the set of multi-link group headers
-    /// whose children are visible.
-    ///
-    /// Single-link groups always render as one composite row regardless
-    /// of `expanded`. Per locked decision 5 there is no header form for
-    /// a count-of-one group.
-    ///
-    /// `expanded_detail` swaps the Node zone's top-5 render
-    /// for the full per-kind field set when the operator has toggled
-    /// the Expanded Node Detail view on. The relationship rows are
-    /// unaffected.
-    pub fn flat_rows(&self, other_expanded: bool, expanded_detail: bool) -> Vec<ExplorerRow> {
-        let mut rows = Vec::new();
-        for (index, field) in self.fields(expanded_detail).iter().enumerate() {
-            rows.push(ExplorerRow::NodeField {
-                index,
-                field: field.clone(),
-            });
-        }
-        // Validated zone: every link whose resolver state is
-        // `Resolves` becomes a flat selectable row. The groups are
-        // pre-sorted (ADR 0074 §4) so the rows inherit a stable
-        // kind → verb → label scan order.
-        for (group_index, group) in self.relationships.groups.iter().enumerate() {
-            for (link_index, link) in group.links.iter().enumerate() {
-                if matches!(link.edge_state, EdgeStateLabel::Resolves) {
-                    rows.push(ExplorerRow::ValidatedLink {
-                        group_index,
-                        link_index,
-                    });
-                }
-            }
-        }
-        // Other zone: alts, conflicts, and unresolved stubs under a
-        // single collapsible header. Skip the header entirely when
-        // the zone is empty so a fully-validated node doesn't carry
-        // a dangling control row.
-        let has_other = self.has_other_rows();
-        if has_other {
-            rows.push(ExplorerRow::OtherHeader {
-                expanded: other_expanded,
-            });
-            if other_expanded {
-                for (group_index, group) in self.relationships.groups.iter().enumerate() {
-                    for (link_index, link) in group.links.iter().enumerate() {
-                        if !matches!(link.edge_state, EdgeStateLabel::Resolves) {
-                            rows.push(ExplorerRow::OtherLink {
-                                group_index,
-                                link_index,
-                            });
-                        }
-                    }
-                    for (unresolved_index, _) in group.unresolved.iter().enumerate() {
-                        rows.push(ExplorerRow::OtherUnresolved {
-                            group_index,
-                            unresolved_index,
-                        });
-                    }
-                }
-            }
-        }
-        rows
-    }
-
     /// Neighbor identity for the link row at
     /// `(group_index, link_index)`.
     fn neighbor_row_key(&self, group_index: usize, link_index: usize) -> Option<NeighborRowKey> {
@@ -806,51 +738,11 @@ pub struct RelationshipCounts {
     pub unresolved: usize,
 }
 
-/// One frame of drill history. The reducer pushes a hop when the
-/// operator presses `Enter` on a link row; Backspace pops the
-/// most-recent hop and restores the saved cursor + expansion state.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BreadcrumbHop {
-    /// The node the cursor was focused on *before* the drill that
-    /// produced this hop.
-    pub focused: NodeId,
-    /// Compact `kind:short_tag` identity label for the hop,
-    /// rendered as one segment of the breadcrumb chain through
-    /// [`breadcrumb_hops`], which drops the `kind:` and gives the
-    /// hop the last four characters of the focused node's id to
-    /// tell two hops with one tag apart.
-    pub short_label: String,
-    /// Cursor row identity at the time of the drill, so Backspace
-    /// can re-find it.
-    pub cursor_key: Option<ExplorerRowKey>,
-    /// Whether the `Other` zone was expanded at the time of the
-    /// drill, so Backspace can restore it (ADR 0074 §6 — replaces
-    /// the prior per-group expansion set).
-    pub other_expanded: bool,
-    /// Whether the Node zone had its Expanded Detail toggle on at
-    /// the time of the drill, so Backspace can restore it.
-    pub full_detail_expanded: bool,
-    /// Left-pane row selection at the time of the drill
-    /// (`[tui.detail].left_pane_sync = "mirror"`), so Backspace can
-    /// restore both panes together. `None` when no row was selected
-    /// (the empty-tree case at boot).
-    pub left_pane_selection: Option<crate::tui::rows::RowId>,
-}
-
-/// Identity for one slot in the [`NodeView`]'s neighbor list — used
-/// by the reducer to pick which link to drill into.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LinkRef {
-    pub direction: Direction,
-    pub group_index: usize,
-    pub link_index: usize,
-}
-
 impl NodeView {
-    /// Lookup helper for the reducer: resolve the currently-selected
-    /// flat row into the neighbor `NodeId` to drill into. Returns
-    /// `None` for non-drillable rows (node fields, group headers,
-    /// unresolved evidence).
+    /// Where a row leads: the neighbor `NodeId` a link row drills into,
+    /// which the explorer source answers `follow` with. Returns `None`
+    /// for non-drillable rows (node fields, group headers, unresolved
+    /// evidence).
     pub fn drill_target(&self, row: &ExplorerRow) -> Option<NodeId> {
         let (group_index, link_index) = match row {
             ExplorerRow::ValidatedLink {
@@ -920,17 +812,18 @@ impl NodeView {
 /// the frame's `kind:tag` short label with the `kind:` dropped (the
 /// glyph carries the kind), and the last four characters of the node's
 /// id, which the breadcrumb shows only when two hops have one tag.
-pub fn breadcrumb_hops(hops: &[BreadcrumbHop], theme: &Theme) -> Vec<Hop> {
-    hops.iter()
-        .map(|hop| {
-            let kind = node_kind_style(NodeKind::from(&hop.focused), theme);
-            let tag = hop
-                .short_label
+pub fn breadcrumb_hops(frames: &[Frame<Graph>], theme: &Theme) -> Vec<Hop> {
+    frames
+        .iter()
+        .map(|frame| {
+            let kind = node_kind_style(NodeKind::from(&frame.id), theme);
+            let tag = frame
+                .tag
                 .split_once(':')
-                .map_or(hop.short_label.as_str(), |(_, tag)| tag);
+                .map_or(frame.tag.as_str(), |(_, tag)| tag);
             Hop::new(tag)
                 .glyph(Span::styled(kind.glyph, Style::default().fg(kind.color)))
-                .suffix(text::clip_start(&hop.focused.to_string(), 4))
+                .suffix(text::clip_start(&frame.id.to_string(), 4))
         })
         .collect()
 }

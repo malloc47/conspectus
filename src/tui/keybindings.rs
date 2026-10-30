@@ -388,7 +388,11 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     KeyBinding {
         mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('e'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::ExplorerToggleGroup)),
+        action: || {
+            Action::Msg(Box::new(crate::tui::Msg::Explorer(
+                tuikit::explorer::ExplorerKey::ToggleSection,
+            )))
+        },
         help_text: "Toggle the explorer's Other zone (right pane)",
     },
     // Arrow / nav keys — any modifier is fine.
@@ -451,7 +455,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     KeyBinding {
         mode: KeyMode::Global,
         key: KeyMatcher::AnyMod(KeyCode::Backspace),
-        action: || Action::Msg(Box::new(crate::tui::Msg::ExplorerBack)),
+        action: || Action::Msg(Box::new(crate::tui::Msg::NavBack)),
         help_text: "Pop one drilldown hop in the explorer",
     },
     KeyBinding {

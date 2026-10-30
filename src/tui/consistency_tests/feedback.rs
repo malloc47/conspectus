@@ -121,7 +121,7 @@ fn a_refused_gesture_never_reports_like_a_success() {
     }
     assert!(toasts >= 6, "the refusals were said: {toasts}");
 
-    app.open_value_modal_for_cursor();
+    app.update(Msg::Explorer(tuikit::explorer::ExplorerKey::Inspect));
     let status = app.status().expect("`o` with nothing to open says so");
     assert_eq!(status.severity, Severity::Warning, "{}", status.text);
 }

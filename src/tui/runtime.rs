@@ -568,8 +568,6 @@ impl LoopMode for LiveMode {
                 app.open_help_overlay();
             }
             Some(Action::OpenMessages) => app.open_messages_overlay(),
-            Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
-            Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
         }
@@ -633,7 +631,6 @@ impl StaticMode {
             Some(Action::ModalKey(key)) => modal_key(app, key, &mut dispatch),
             Some(Action::OpenHelp) => app.open_help_overlay(),
             Some(Action::OpenMessages) => app.open_messages_overlay(),
-            Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
             Some(Action::OpenSearch) => {
                 let hint = app.open_search_entry();
                 app.update(Msg::SetStatus(Some(hint)));
@@ -742,7 +739,6 @@ impl StaticMode {
                     "scenario TUI keeps mutating actions disabled",
                 ))));
             }
-            Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
         }
@@ -2233,30 +2229,6 @@ fn default_action(
     }
 }
 
-/// Right-pane Enter. When the explorer cursor is on
-/// a Node-zone field row with a copyable value, write it to the
-/// clipboard via OSC 52 (ADR 0056) and post a toast. Otherwise
-/// dispatch the normal `Msg::ExplorerActivate` so group expansion and
-/// link drill still work.
-fn explorer_enter_action(app: &mut App) {
-    explorer_enter(app, crate::tui::clipboard::copy_to_clipboard);
-}
-
-/// [`explorer_enter_action`] with the clipboard write supplied by the
-/// caller, so the snapshot driver can run the same branch without
-/// emitting OSC 52 into its frame output.
-pub(super) fn explorer_enter(
-    app: &mut App,
-    write_clipboard: impl FnOnce(&str) -> std::io::Result<()>,
-) {
-    if let Some((label, value)) = app.explorer_copy_target() {
-        let written = write_clipboard(&value);
-        post_copy_toast(app, written, format!("copied: {label}"));
-        return;
-    }
-    app.update(Msg::ExplorerActivate);
-}
-
 /// `i` keybinding. Copies the selected agent or mux session's
 /// full id to the clipboard, posting a toast. Surfaces a status hint
 /// when the selection is something else (a group row, a PR, …).
@@ -2280,13 +2252,19 @@ fn copy_and_toast(app: &mut App, label: String, value: String) {
     post_copy_toast(app, written, label);
 }
 
-/// `done` as a success toast when the clipboard write went out, or an
-/// error toast saying why it did not, as the executor's copy does.
+/// Post [`copy_feedback`] for a clipboard write.
 fn post_copy_toast(app: &mut App, written: std::io::Result<()>, done: String) {
-    app.post_toast(match written {
+    app.post_toast(copy_feedback(written, done));
+}
+
+/// What a copy says: `done` as a success when the clipboard write went
+/// out, or an error saying why it did not. The executor's copy and the
+/// `i` key's share it.
+pub(in crate::tui) fn copy_feedback(written: std::io::Result<()>, done: String) -> Feedback {
+    match written {
         Ok(()) => Feedback::success(done),
         Err(err) => Feedback::error(format!("copy failed: {err}")),
-    });
+    }
 }
 
 pub(super) use crate::tui::keymap::{remap_for_focus, translate};

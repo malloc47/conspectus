@@ -11,6 +11,7 @@ use crate::tui::actions::{
 };
 use crate::tui::app::Focus;
 use crate::tui::effect::ExecSpec;
+use tuikit::explorer::ExplorerKey;
 
 fn mux(name: &str) -> NodeId {
     NodeId::MuxSession(MuxSessionId::new(format!("tmux:{name}")))
@@ -87,7 +88,7 @@ fn the_right_pane_subject_is_the_entity_the_cursor_is_on() {
         if matches!(action_subject(&app).node, Some(NodeId::AgentSession(_))) {
             break;
         }
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     assert!(matches!(
         action_subject(&app).node,
@@ -110,7 +111,7 @@ fn v_and_attach_follow_the_right_pane_too() {
         if matches!(action_subject(&app).node, Some(NodeId::AgentSession(_))) {
             break;
         }
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     let NodeId::AgentSession(session) = action_subject(&app).node.expect("a session") else {
         panic!("a session");
@@ -506,7 +507,7 @@ fn the_menu_is_the_same_wherever_a_pinned_entity_is_opened_from_the_right_pane()
         if action_subject(&right).node == Some(mux("conspectus-main")) {
             break;
         }
-        right.update(Msg::ExplorerNavDown);
+        right.update(Msg::Explorer(ExplorerKey::Down));
     }
     assert_eq!(action_subject(&right).node, Some(mux("conspectus-main")));
     // Reveal is offered only away from the entity's own view.

@@ -317,6 +317,10 @@ fn run_effects_opening_viewers(
 ) {
     use crate::tui::effect::{Effect, ExecSpec};
     for effect in effects {
+        if let Effect::Copy { done, .. } = effect {
+            skip_copy(app, done, notes);
+            continue;
+        }
         if let Some(what) = reaches_outside(&effect) {
             notes.push(format!("snapshot mode skipped {what}"));
             continue;
@@ -344,6 +348,25 @@ fn run_effects_opening_viewers(
             None => notes.push("snapshot mode found no transcript to view".to_string()),
         }
     }
+}
+
+/// `msg` through the reducer, its effects run on the pure executor as the
+/// live loop runs a key's, except a copy, which [`skip_copy`] skips.
+fn dispatch_msg(app: &mut App, msg: Msg, notes: &mut Notes) {
+    for effect in app.update(msg) {
+        match effect {
+            crate::tui::effect::Effect::Copy { done, .. } => skip_copy(app, done, notes),
+            other => runtime::execute_effects(app, vec![other]),
+        }
+    }
+}
+
+/// Skip a copy, whose OSC 52 escape would land in the frame, with a note,
+/// and still show the toast that says what it copied, as the live
+/// executor does after a write that went out.
+fn skip_copy(app: &mut App, done: String, notes: &mut Notes) {
+    notes.push("snapshot mode skipped a copy".to_string());
+    app.post_toast(Feedback::success(done));
 }
 
 /// What `effect` would do outside the snapshot, if it would: a copy (its
@@ -383,7 +406,7 @@ fn apply_action(
     notes: &mut Notes,
 ) {
     match action {
-        Action::Msg(msg) => dispatch(app, *msg),
+        Action::Msg(msg) => dispatch_msg(app, *msg, notes),
         Action::ModalKey(key) => modal_key(app, key, rebase, notes),
         Action::SwitchView(view) => dispatch(app, Msg::SwitchView(view)),
         Action::CycleView(delta) => {
@@ -413,7 +436,6 @@ fn apply_action(
         Action::OpenWorktreeMenu => runtime::open_worktree_menu_action(app),
         Action::OpenWorktreeCloseDown => runtime::open_worktree_close_down_action(app),
         Action::OpenMuxMenu => runtime::open_mux_menu_action(app),
-        Action::OpenValueModal => app.open_value_modal_for_cursor(),
         // The forms and the rename prompt open as in the live loop.
         Action::OpenNewMuxForm => runtime::open_new_mux_form_action(app),
         Action::OpenRename => runtime::open_rename_overlay(app),
@@ -424,9 +446,6 @@ fn apply_action(
             app.config().discovery_caches.clear_forge();
             runtime::refresh(app, config);
         }
-        // The clipboard write is skipped: OSC 52 would land in the
-        // frame output. The toast still renders.
-        Action::ExplorerEnter => runtime::explorer_enter(app, |_| Ok(())),
         other => notes.push(format!(
             "snapshot mode skipped unsupported action: {}",
             action_label(&other)
@@ -466,7 +485,6 @@ fn action_label(action: &Action) -> &'static str {
         Action::Attach => "Attach",
         Action::Resume => "Resume",
         Action::DefaultAction => "DefaultAction",
-        Action::OpenValueModal => "OpenValueModal",
         _ => "<other>",
     }
 }

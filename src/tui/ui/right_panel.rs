@@ -1,9 +1,8 @@
 //! Right panel: the graph explorer (ADR 0074) and its title.
 
 use tuikit::breadcrumb::Breadcrumb;
-use tuikit::frame::SectionRule;
 use tuikit::master_detail::StackedMasterDetail;
-use tuikit::property_grid::{GridLines, PropertyGrid, PropertyRow};
+use tuikit::property_grid::PropertyRow;
 
 use crate::tui::explorer::grid::{self as explorer_grid, field_row};
 
@@ -37,27 +36,30 @@ pub(super) fn draw_right_panel(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // The explorer's lines are laid out at the layout's width, a column
+    // short of the pane, so the `Related` rule still fits on one row when
+    // the scrollbar takes that column. Validated rows (resolver winners)
+    // sit flush under the `Related` rule; alternates, conflicts, and
+    // unresolved stubs collapse under a single `Other` header below them
+    // (ADR 0074).
+    let lines = app
+        .explorer()
+        .zip(app.graph_source())
+        .map(|(explorer, source)| {
+            explorer.lines(
+                &source,
+                StackedMasterDetail::layout_width(inner),
+                app.focus() == Focus::Right,
+                app.theme(),
+            )
+        });
     // No explorer means the selection names no node (or nothing has
     // loaded yet): show the placeholder instead of the explorer.
-    if app.explorer().is_none() {
+    let Some(mut list) = lines else {
         let widget = Paragraph::new(empty_right_panel_text(app))
             .style(Style::default().add_modifier(app.theme().muted));
         frame.render_widget(widget, inner);
         return (None, None);
-    }
-
-    // The explorer's lines are laid out at the layout's width, a column
-    // short of the pane, so the `Related` rule still fits on one row when
-    // the scrollbar takes that column.
-    let mut list = {
-        let state = app.explorer().expect("checked above");
-        render_explorer_lines(
-            state,
-            StackedMasterDetail::layout_width(inner),
-            app.theme(),
-            app.edge_meta_visible(),
-            app.focus() == Focus::Right,
-        )
     };
     // A selected hit row says which turn it is and shows what matched.
     let hit_lines = selected_hit_lines(app);
@@ -75,8 +77,7 @@ pub(super) fn draw_right_panel(
     );
     // A transcript preview leaves a column for its scrollbar.
     app.prepare_preview(stacked.detail.width.saturating_sub(1).max(1));
-    let state = app.explorer().expect("checked above");
-    let preview = draw_explorer_preview(app, state, frame, stacked.detail);
+    let preview = draw_explorer_preview(app, frame, stacked.detail);
     // A Preview still waiting for its content draws a placeholder, not
     // the rows its offset counts, so it keeps the offset until the
     // content has loaded and a frame shows it.
@@ -112,14 +113,14 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     // title off the corner, gives way before any hop: it is drawn only
     // when the chain leaves a cell for it.
     let mut pad = true;
-    if let Some(state) = app.explorer()
-        && !state.breadcrumb.is_empty()
+    if let Some(explorer) = app.explorer()
+        && !explorer.frames().is_empty()
     {
         let inert = Style::default().fg(theme.inert);
         let back = span!(inert; " {} ", marks::BACK);
-        let depth = span!(inert; " · depth {}", state.breadcrumb.len());
+        let depth = span!(inert; " · depth {}", explorer.frames().len());
         let room = width.saturating_sub(text::spans_width(&spans) + back.width() + depth.width());
-        let hops = crate::tui::explorer::breadcrumb_hops(&state.breadcrumb, theme);
+        let hops = crate::tui::explorer::breadcrumb_hops(explorer.frames(), theme);
         if let Some(chain) = Breadcrumb::new(&hops, theme).line(room) {
             pad = chain.width() < room;
             spans.push(back);
@@ -136,7 +137,7 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
 /// The kind of node the explorer is focused on, `None` while no
 /// selection resolves to a node.
 fn right_panel_node_kind(app: &App) -> Option<NodeKind> {
-    app.explorer().map(|state| state.view.kind)
+    app.explorer().map(|explorer| explorer.content().kind)
 }
 
 pub(super) fn right_panel_kind_label(app: &App) -> &'static str {
@@ -157,67 +158,6 @@ pub(super) fn right_panel_kind_label(app: &App) -> &'static str {
     }
 }
 
-/// Render the related-entities layout (ADR 0074) as a property grid: the
-/// focused node's fields, then, when it has neighbors, the `Related`
-/// rule and one link row per neighbor. Validated rows (resolver winners)
-/// sit flush under the rule; alternates, conflicts, and unresolved stubs
-/// collapse under a single `Other` header below the fold. Each link row
-/// reads as `<verb column> <kind-glyph> <neighbor_label>`; direction
-/// flows from the verb, not from section placement.
-pub(super) fn render_explorer_lines(
-    state: &crate::tui::app::ExplorerState,
-    width: usize,
-    theme: &Theme,
-    show_edge_meta: bool,
-    focused: bool,
-) -> GridLines {
-    use crate::tui::explorer::ExplorerRow;
-    let view = &state.view;
-    let rows = state.rows();
-    let fields = rows
-        .iter()
-        .take_while(|row| matches!(row, ExplorerRow::NodeField { .. }))
-        .count();
-    let push = |grid: &mut PropertyGrid, rows: &[ExplorerRow]| {
-        for row in rows {
-            grid.push(explorer_grid::grid_row(view, row, theme, show_edge_meta));
-        }
-    };
-    let mut grid = explorer_grid::grid(theme);
-    push(&mut grid, &rows[..fields]);
-    if !view.relationships.groups.is_empty() {
-        grid.push_line(related_rule(view, width, theme));
-        push(&mut grid, &rows[fields..]);
-    }
-    grid.lines(width, Some(state.cursor), focused, theme)
-}
-
-/// The `Related` rule over the link rows, its summary counting the
-/// validated rows and what the Other zone holds (ADR 0074 §5). The
-/// summary comes first, so the chip stays in the `Preview` chip's column
-/// however long the counts grow.
-fn related_rule(
-    view: &crate::tui::explorer::NodeView,
-    width: usize,
-    theme: &Theme,
-) -> Line<'static> {
-    let counts = view.relationship_counts();
-    let mut summary = format!("{} validated", counts.validated);
-    if counts.other > 0 {
-        summary.push_str(&format!(" · {} other", counts.other));
-        if counts.ambiguous > 0 {
-            summary.push_str(&format!(" · {} {}", counts.ambiguous, marks::WARNING));
-        }
-        if counts.unresolved > 0 {
-            summary.push_str(&format!(" · {} {}", counts.unresolved, marks::NO_VALUE));
-        }
-    }
-    SectionRule::new("Related")
-        .summary(summary)
-        .summary_first()
-        .line(width, theme)
-}
-
 /// Render the Preview zone body for the currently-selected explorer
 /// row. A Related row leads with its neighbor, `edge`, and `evidence`
 /// lines (ADR 0107), then the neighbor's own preview (ADR 0112 §3), or
@@ -225,19 +165,14 @@ fn related_rule(
 /// node's preview through `draw_detail_preview`.
 /// Draw the Preview for the explorer cursor's row and return its scroll
 /// region as the body drew it.
-pub(super) fn draw_explorer_preview(
-    app: &App,
-    state: &crate::tui::app::ExplorerState,
-    frame: &mut Frame<'_>,
-    area: Rect,
-) -> ScrollRegion {
+pub(super) fn draw_explorer_preview(app: &App, frame: &mut Frame<'_>, area: Rect) -> ScrollRegion {
     use crate::tui::explorer::RowPreview;
-    let Some(row) = state.selected_row() else {
+    let (Some(explorer), Some(row)) = (app.explorer(), app.explorer_cursor_row()) else {
         // Rows that don't carry a neighbor (node fields land here)
         // show the focused node's own preview body.
         return draw_detail_preview(app, frame, area);
     };
-    let Some(preview) = state.view.row_preview(&row) else {
+    let Some(preview) = explorer.content().row_preview(&row) else {
         // No neighbor for this row — show the focused node's own
         // preview body (live mux capture, message preview, etc.).
         return draw_detail_preview(app, frame, area);

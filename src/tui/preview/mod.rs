@@ -328,28 +328,28 @@ pub enum PreviewSubject {
 /// selection until the explorer drills.
 pub fn preview_subject(app: &App) -> PreviewSubject {
     use crate::tui::explorer::RowPreview;
-    let Some(state) = app.explorer() else {
+    let Some(explorer) = app.explorer() else {
         return PreviewSubject::Selection;
     };
-    let row_preview = state
-        .selected_row()
-        .and_then(|row| match state.view.row_preview(&row) {
-            Some(RowPreview::Link { neighbor_id, .. }) => {
-                Some(PreviewSubject::Node(neighbor_id.clone()))
-            }
-            Some(RowPreview::Unresolved { .. }) => Some(PreviewSubject::Unresolved),
-            None => match row {
-                crate::tui::explorer::ExplorerRow::NodeField { field, .. } => {
-                    field.preview.map(PreviewSubject::Field)
+    let row_preview =
+        app.explorer_cursor_row()
+            .and_then(|row| match explorer.content().row_preview(&row) {
+                Some(RowPreview::Link { neighbor_id, .. }) => {
+                    Some(PreviewSubject::Node(neighbor_id.clone()))
                 }
-                _ => None,
-            },
-        });
+                Some(RowPreview::Unresolved { .. }) => Some(PreviewSubject::Unresolved),
+                None => match row {
+                    crate::tui::explorer::ExplorerRow::NodeField { field, .. } => {
+                        field.preview.map(PreviewSubject::Field)
+                    }
+                    _ => None,
+                },
+            });
     row_preview.unwrap_or_else(|| {
-        if state.breadcrumb.is_empty() {
+        if explorer.frames().is_empty() {
             PreviewSubject::Selection
         } else {
-            PreviewSubject::Node(state.view.focused.clone())
+            PreviewSubject::Node(explorer.id().clone())
         }
     })
 }
@@ -527,7 +527,7 @@ fn selection_source(app: &App) -> Option<PreviewSource> {
         // Any other row previews the node the right pane shows for it.
         _ => app
             .explorer()
-            .and_then(|state| node_source(app, &state.view.focused)),
+            .and_then(|explorer| node_source(app, explorer.id())),
     }
 }
 

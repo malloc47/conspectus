@@ -4,6 +4,7 @@
 use super::*;
 use crate::tui::actions::{PinSubject, pin_subject};
 use crate::tui::app::Focus;
+use tuikit::explorer::ExplorerKey;
 
 /// Focus the right pane and walk its cursor onto the first link that
 /// leads to an agent session, returning that session.
@@ -12,8 +13,8 @@ fn focus_right_on_a_linked_session(app: &mut App) -> AgentSessionId {
     assert_eq!(app.focus(), Focus::Right);
     for _ in 0..40 {
         let target = app.explorer().and_then(|state| {
-            let row = state.selected_row()?;
-            match state.view.drill_target(&row)? {
+            let row = app.explorer_cursor_row()?;
+            match state.content().drill_target(&row)? {
                 NodeId::AgentSession(session) => Some(session),
                 _ => None,
             }
@@ -21,7 +22,7 @@ fn focus_right_on_a_linked_session(app: &mut App) -> AgentSessionId {
         if let Some(session) = target {
             return session;
         }
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     panic!("the mux's detail links to a session");
 }
