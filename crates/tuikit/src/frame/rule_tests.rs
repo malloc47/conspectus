@@ -107,13 +107,100 @@ fn the_leading_rule_drops_out_when_the_chip_and_summary_leave_no_room() {
         pieces(&rule_line.line(19, &theme)),
         [rule(1), " Links ".into(), " 3 shown ".into(), rule(2)]
     );
-    let narrow = rule_line.line(10, &theme);
+}
+
+#[test]
+fn a_summary_that_does_not_fit_is_cut_before_the_label() {
+    let theme = Theme::default();
+    let rule_line = SectionRule::new("Links").summary("3 shown · 1 more");
+    // The chip (7 cells), the summary (18), and the closing rule (2).
+    assert_eq!(rule_line.line(27, &theme).width(), 27);
     assert_eq!(
-        pieces(&narrow),
-        [" Links ".to_string(), " 3 shown ".into(), rule(2)],
-        "nothing else gives way"
+        pieces(&rule_line.line(26, &theme)),
+        [" Links ".to_string(), " 3 shown · 1 mo… ".into(), rule(2)],
+        "the summary gives the cells, the label stays whole"
     );
-    assert_eq!(narrow.width(), 18, "wider than asked below that");
+    let first = rule_line.clone().summary_first();
+    assert_eq!(
+        pieces(&first.line(14, &theme)),
+        [rule(1), " 3… ".into(), " Links ".into(), rule(2)],
+        "a cut that ends at a space drops it, and the leading rule takes it"
+    );
+    assert_eq!(
+        pieces(&first.line(13, &theme)),
+        [" 3… ".to_string(), " Links ".into(), rule(2)],
+        "one character and the mark is the least a cut summary shows"
+    );
+    // Below that the summary leaves with its spaces, and the leading rule
+    // takes what it gave.
+    assert_eq!(
+        pieces(&rule_line.line(12, &theme)),
+        [rule(3), " Links ".into(), rule(2)]
+    );
+    assert_eq!(
+        pieces(&rule_line.line(9, &theme)),
+        [" Links ".to_string(), rule(2)]
+    );
+}
+
+#[test]
+fn a_label_that_does_not_fit_is_cut_and_then_leaves_a_plain_rule() {
+    let theme = Theme::default();
+    let rule_line = SectionRule::new("Related").summary("2 validated");
+    // The chip alone is 9 cells; with the closing rule, 11.
+    assert_eq!(
+        pieces(&rule_line.line(10, &theme)),
+        [" Relat… ".to_string(), rule(2)],
+        "the summary went first; the label is cut"
+    );
+    assert_eq!(
+        pieces(&rule_line.line(6, &theme)),
+        [" R… ".to_string(), rule(2)]
+    );
+    // Too narrow for a character before the mark: the chip leaves, and
+    // the line is a rule of its width, never wider.
+    assert_eq!(pieces(&rule_line.line(5, &theme)), [rule(5)]);
+    assert_eq!(
+        rule_line.line(5, &theme).spans[0].style.add_modifier,
+        Modifier::DIM
+    );
+    // A two-cell character that cannot show before the mark leaves too.
+    assert_eq!(pieces(&SectionRule::new("要約").line(6, &theme)), [rule(6)]);
+    assert_eq!(
+        pieces(&SectionRule::new("要約").line(8, &theme)),
+        [" 要約 ".to_string(), rule(2)]
+    );
+}
+
+#[test]
+fn below_the_closing_rule_the_line_is_the_rule_it_has_room_for() {
+    let theme = Theme::default();
+    let rule_line = SectionRule::new("Related")
+        .summary("2 validated")
+        .summary_first();
+    assert_eq!(pieces(&rule_line.line(2, &theme)), [rule(2)]);
+    assert_eq!(pieces(&rule_line.line(1, &theme)), [rule(1)]);
+    assert_eq!(rule_line.line(0, &theme), Line::default());
+}
+
+#[test]
+fn a_line_is_never_wider_than_its_width() {
+    let theme = Theme::default();
+    let rules = [
+        SectionRule::new("Related")
+            .summary("12 validated · 3 other · 2 ▲ · 1 —")
+            .summary_first(),
+        SectionRule::new("Preview"),
+        SectionRule::new("要約").summary("3 件 · 東京"),
+        SectionRule::new("x").summary("y"),
+        SectionRule::new("label   ").summary("ends in spaces   "),
+    ];
+    for rule_line in &rules {
+        for width in 0..60 {
+            let line = rule_line.line(width, &theme);
+            assert_eq!(line.width(), width, "{rule_line:?} at {width}: {line}");
+        }
+    }
 }
 
 #[test]
