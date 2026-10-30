@@ -619,8 +619,11 @@ that is gone) and selects it. `Backspace` with the left pane focused then
 goes back to the view and row you left. The back list holds the last 20
 jumps: reveals, opening a search result in another view, and `.` menu
 reveals; the status bar shows `Backspace back` while it is not empty. A
-row that has since disappeared says `that row is gone`. With the right
-pane focused `Backspace` still pops the explorer's breadcrumb.
+row that has since disappeared says `that row is gone`. With nothing to
+return from, the left pane's `Backspace` says so; it leaves the right
+pane's drill alone. With the right pane focused `Backspace` (or `Esc`)
+backs the explorer out of its drill; see
+[Keys on the right pane](#keys-on-the-right-pane).
 
 Most terminals send `Shift+Enter` as plain `Enter`; Conspectus does not
 turn on the kitty keyboard protocol, so it sees `Shift+Enter` only from a
@@ -1448,6 +1451,32 @@ Conspectus has three persistent cache surfaces:
 Future caches (PR fetches, transcript indices, etc.) land
 under the same `$XDG_*_HOME/conspectus/` roots rather than
 inside `.conspectus.toml` or the project config directory.
+
+## Keys on the right pane
+
+With the right pane focused (and no dialog open), these keys drive the
+graph explorer. Every other key means what it means on the left pane:
+`E` toggles edge meta, `i` copies the id, `O`, `Shift+Enter`, and
+`Alt+Enter` reveal, `J`/`K` scroll the Preview, `Tab` moves focus, `q`
+quits. The keys that move the left tree do nothing here, so a chord the
+table does not list (`Alt-j`, `Ctrl-j`) leaves the tree alone.
+
+| Key | Does | On the left pane |
+|---|---|---|
+| `↑`/`k`, `↓`/`j` | Move the cursor through the fields and the related rows. | Move the selection. |
+| `PgUp`, `PgDn` | Page the cursor by the rows the explorer zone shows. | Page the tree. |
+| `g`/`Home`, `G`/`End` | First and last row. | First and last row. |
+| `Enter` | Copy a field's whole value, drill into a related row, or open and close `Other` on its header. | The row's default action. |
+| `e` | Open or close `Other` on its header. | Nothing. |
+| `l`/`→`, `h`/`←` | Open `Other` on its header; close it from its header or a row inside it. | Expand or collapse the tree row. |
+| `o` | Open a cut value whole. | The same (the right pane's cursor row). |
+| `F` | Expanded Node Detail: every field of the node, or its summary again. | Clear every filter. |
+| `Backspace`, `Esc` | Back out of the last drill; with none, press twice to return to the left pane. | Return from a reveal. |
+
+The status bar names the explorer's keys (`↑/↓ move · Enter copy · e
+fold · Backspace back`), with `Enter`'s word for what it does on the
+cursor's row: `copy` on a field, `follow` on a related row, `fold` on
+the `Other` header. The help page (`?`) lists every key above.
 
 ## Keys in dialogs
 

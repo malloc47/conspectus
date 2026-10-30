@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted as a design (CSP-755). Decides the `Explorer` row of
+Accepted as a design (CSP-755) and carried out in full (CSP-789,
+CSP-790, CSP-791, CSP-756). Decides the `Explorer` row of
 [ADR 0151](0151-tui-framework-control-set-and-house-rules.md)'s control
 set, which ADR 0151 staged last behind a design story, and extends
 [ADR 0150](0150-tui-framework-workspace-crate.md) with the framework's
@@ -58,6 +59,35 @@ then the divider's, then the rest of the list). An empty summary shows
 nothing, where the host drew two spaces. The rule does not give way
 below its own width, as before (the `Related` rule wraps onto a second
 row at 40 columns); CSP-794 follows that up.
+
+CSP-756 landed decisions 2 to 5. `tuikit::explorer` holds
+`ExplorerModel`, `ExplorerSource`, `Zone` and `Entry` (public fields,
+with `Zone::new(..).heading(..).lands()` and `Entry::new(..).under(..)`
+builders), `FrameView`, `Frame`, `Explorer<M>`, the ten-variant
+`Outcome`, `Refusal`, `Refreshed`, `ExplorerKey`, `EXPLORER_KEYS`, and
+`hint`; `keys::exact` binds `Enter` with no modifier, and
+`help::sections_described` generates a page from a framework table in
+the host's words. Conspectus adapts it in `explorer::source` (`Graph`,
+`GraphSource`), keeps `App.explorer: Option<Explorer<Graph>>` and lends
+it out with a source built from its other fields for each call, carries
+out each outcome in one function, and resolves `RIGHT_PANE_KEYS` (the
+explorer's table) before its keymap with a focus guard. Departures from
+the design, each recorded in the operator review: `seek`'s test takes
+the content beside the entry, since it cannot borrow the explorer it is
+moving; a page moves by the rows the zone showed (`keep_window` takes
+the window only), not by a count of entries, which the layout does not
+report; a `Back` whose every frame is gone drops them all and keeps what
+is shown; a drill and a `Back` keep the zone's window, and the host
+carries it into an explorer it opens afresh, as the App's field did, so
+the frames stayed byte-identical; `Action::OpenValueModal` goes too
+(`o` sends the explorer's `Inspect` on either pane); the global
+`Backspace` is a new `Msg::NavBack`, which says there is no reveal to
+return from where it used to pop the right pane's drill; and the status
+hint takes `Enter`'s verb from the cursor's row (`Explorer::footer`).
+The stop rule did not apply: the 26 state-machine tests kept their
+assertions (the copy tests read `Effect::Copy`), and 1015 right-pane
+frames were byte-identical after the adoption and before the key
+changes.
 
 ## Context
 

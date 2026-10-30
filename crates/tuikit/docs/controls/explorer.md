@@ -158,6 +158,7 @@ The same example is the module's documentation test, so it compiles.
 | `lines(source, width, focused, theme)` | every zone in the source's grid: headings as lines that are no row, the cursor in the active or inactive look | returns the grid's `GridLines` |
 | `window()`, `keep_window(window)` | the window the zone drew, kept between frames | a page key moves by its rows |
 | `footer(table, source)` | the keys a status line names: move, `Enter` with its verb on the cursor's row, fold, back | `Enter copy`, `Enter follow`, `Enter fold`; the table's verb, unavailable, where `Enter` does nothing |
+| `hint(table)` | the same keys with the table's verbs | `↑/↓ move · Enter open · e fold · Backspace back`; for a status line with no explorer to read |
 | `ExplorerKey`, `EXPLORER_KEYS` | the keys and their one table | implement `KeyAction` and `HelpAction` |
 
 ### The rules
@@ -247,7 +248,17 @@ message.
 keymap while the explorer has focus. The footer is
 `↑/↓ move · Enter open · e fold · o inspect · F show all · Backspace back`;
 a status line uses `Explorer::footer`, which keeps move, `Enter`, fold,
-and back and gives `Enter` its verb on the cursor's row.
+and back and gives `Enter` its verb on the cursor's row (`hint` is the
+same with the table's verbs). A help page lists every row; a host that
+names its rows its own way generates it with
+`help::sections_described(table, describe)`.
+
+A host whose other keymap binds some of these keys to other meanings
+(`Enter` for its own default action, `h`/`l` for a tree's folds)
+resolves this table first while the explorer has focus, and drops its
+own keymap's actions that drive the other pane, so a chord the table
+leaves out (`Alt-j`) does nothing instead of moving what the reader is
+not looking at.
 
 | Key | Action | Notes |
 | --- | --- | --- |

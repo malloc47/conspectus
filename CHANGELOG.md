@@ -438,6 +438,27 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   with `…` instead of running into the pane's corner, and ` · depth N`
   is never clipped. Two hops of different kinds with the same name now
   carry the `·xxxx` id suffix too.
+- **The right pane's keys are one table, and a few gained meanings.**
+  With the right pane focused, `PgUp` and `PgDn` page the explorer by
+  the rows its zone shows (they moved one row); `h`/`l` and `←`/`→`
+  close and open the `Other` zone, from its header or from a row inside
+  it (they did nothing); `Esc` goes back as `Backspace` does (it did
+  nothing). `Alt` and `Ctrl` chords of `j`, `k`, `g`, and `G` no longer
+  move the explorer or the tree behind it. `Shift+Enter` and
+  `Alt+Enter` still reveal. The help page's right-pane section now lists
+  every key the pane binds (the stale `e` text went), and the status
+  bar's right-pane hint reads `↑/↓ move · Enter copy · e fold ·
+  Backspace back`, `Enter`'s word following the cursor's row (`copy`,
+  `follow`, `fold`). See "Keys on the right pane" in
+  `docs/operations.md`.
+- **`Backspace` on the left pane only returns from a reveal.** With no
+  reveal to return from it used to pop the right pane's drill, which the
+  status bar never said; it now says there is nothing to return from,
+  and points at the right pane when that has drilled.
+- **`Backspace` to a node that is gone goes on in the same press.** A
+  drill frame whose node a refresh removed took a press of its own (a
+  warning, and the pane stayed); `Backspace` now skips it and goes back
+  to the frame before it, and says so only when every frame is gone.
 
 ### Fixed
 

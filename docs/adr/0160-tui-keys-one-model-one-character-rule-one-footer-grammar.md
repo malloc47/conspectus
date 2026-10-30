@@ -43,7 +43,14 @@ Amended by
 [ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md):
 `VIEWER_KEYS` and `VIEWER_FIND_KEYS` are gone; the
 transcript viewer resolves `READER_KEYS`, then the viewer's own
-`TRANSCRIPT_KEYS`, and its find prompt `FIND_KEYS`.
+`TRANSCRIPT_KEYS`, and its find prompt `FIND_KEYS`. Extended to the
+right pane by
+[ADR 0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md):
+the explorer's `EXPLORER_KEYS`, resolved as `RIGHT_PANE_KEYS` before the
+program-wide keymap while the pane has focus, binds characters as typed
+(`Alt-j` is not `j`) and `Enter` with no modifier (`keys::exact`), takes
+every check but `ctrl_c_first` (a pane leaves `q` and `Ctrl-C` to its
+program), and generates its help section and status hint.
 
 ## Context
 

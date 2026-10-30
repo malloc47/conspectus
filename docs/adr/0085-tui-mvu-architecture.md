@@ -15,7 +15,11 @@ itself as that context; the stack routes every key an open modal owns
 to its top entry and draws every entry bottom to top; and the outcome
 gains `Stay` for a message sent while the overlay stays open. Until
 that ADR, only the top modal drew and routing and drawing were
-per-modal ladders.
+per-modal ladders. Contract 1 applied to the right pane by
+[ADR 0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md):
+its keys are one nested `Msg::Explorer(ExplorerKey)`, answered by the
+framework explorer's outcome, instead of eight messages and a branch in
+each event loop for `Enter`'s copy, which is now `Effect::Copy`.
 
 ## Context
 

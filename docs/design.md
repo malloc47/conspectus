@@ -1019,25 +1019,35 @@ everything; `none` keeps tmux's layout and clips. It's set by
 `[tui] preview_wrap` and the controls overlay (ADR 0106).
 
 Traversal through N levels of the graph is explicit rather than
-inline. With the right pane focused:
+inline. The right pane's keys are one table (`RIGHT_PANE_KEYS`, the
+framework explorer's), resolved before the program-wide keymap while
+the pane has focus and no modal is open; the program-wide keys that
+drive the left tree do nothing there, so a chord the table does not bind
+(`Alt-j`) leaves the tree alone. With the right pane focused:
 
-- `j` / `k` walk the cursor through Node fields, validated rows, the
-  `Other` header, then its children when expanded.
+- `j` / `k` and the arrows walk the cursor through Node fields,
+  validated rows, the `Other` header, then its children when expanded;
+  `PgUp` / `PgDn` page by the rows the zone shows; `g` / `Home` and
+  `G` / `End` go to the ends.
 - `Enter` is the universal "do the obvious thing" key: on the `Other`
   header it toggles expansion; on a neighbor row it drills into the
   neighbor and pushes a breadcrumb hop; on a field row it copies the
-  field's whole value (nothing for a placeholder such as `—`).
+  field's whole value (nothing for a placeholder such as `—`). It takes
+  no modifier, so `Shift-Enter` and `Alt-Enter` still reveal.
 - `e` is the explicit expand/collapse accelerator for the `Other`
-  header.
-- `Backspace` reads as a general "go back" gesture: it pops the
-  breadcrumb stack and restores the prior focused node along with the
-  cursor and expansion state saved with it. Once the stack is empty,
-  the first `Backspace` surfaces a status hint ("press Backspace again
-  to return to the left pane") and a second consecutive `Backspace`
-  shifts focus from the right pane back to the left tree. Any
-  intervening action (navigation, focus cycle, …) cancels the arming
-  so the next `Backspace` re-prompts instead of jumping straight to
-  the focus shift.
+  header; `l` / `→` open the zone on its header and `h` / `←` close it
+  from the header or a row inside it, the tree's fold gesture.
+- `Backspace` (and `Esc`, which steps back one level) reads as a
+  general "go back" gesture: it pops the breadcrumb stack and restores
+  the prior focused node along with the cursor and expansion state
+  saved with it. Once the stack is empty, the first `Backspace`
+  surfaces a status hint ("press Backspace again to return to the left
+  pane") and a second consecutive `Backspace` shifts focus from the
+  right pane back to the left tree. Any intervening action
+  (navigation, focus cycle, …) cancels the arming so the next
+  `Backspace` re-prompts instead of jumping straight to the focus
+  shift. The left pane's `Backspace` returns from a reveal only; it
+  leaves the right pane's drill alone.
 - A drill lasts while the left selection stays on the row the pane
   reflects (the row it opened for, the row the left pane followed a
   drill to, or the row `Backspace` put back): the periodic refresh,
@@ -1047,8 +1057,8 @@ inline. With the right pane focused:
   node. Moving the selection, or jumping to a row (a pick, quick
   select's `here`, a regroup), opens the pane on that row's node with
   an empty breadcrumb. Older hops are rebuilt only when `Backspace`
-  reaches them; one whose node is gone is dropped with a warning, and
-  the next press goes on.
+  reaches them; one whose node is gone is skipped in the same press,
+  and when every hop is gone the press says so and the pane stays.
 - `o` opens the full untruncated value of the cursor row in a centered
   modal — used for `cwd`, `command`, `url`, `last_message_preview`,
   and other rows that carry `(truncated · o)` hints.
@@ -1367,22 +1377,24 @@ hit columns and cells (ADR 0185), so a search hit reads the same in the
 modal and in the view and gives way in one order; its session rows stay
 the Sessions view's.
 
-The right pane's explorer is to become a framework control (ADR 0188,
-`docs/plans/tui-framework/explorer-design.md`), staged over CSP-789,
-CSP-790, CSP-791, and CSP-756. `tuikit::explorer` will keep the cursor
+The right pane's explorer is a framework control (ADR 0188,
+`docs/plans/tui-framework/explorer-design.md`), landed over CSP-789,
+CSP-790, CSP-791, and CSP-756. `tuikit::explorer` keeps the cursor
 by each row's stable key, the open section and the all-fields switch,
 the drill frames, the armed `Backspace`, and the zone's window; it reads
-the graph only through a source `conspectus` builds for each call (load
-a node's view, its zones of rows, where a link leads, the breadcrumb
-tag, the left-pane selection a frame saves), and answers each key with
-an outcome whose effects (the copy, the value modal, the left-pane
-mirror, the focus change) and words stay in `conspectus`. A refresh
-keeps the drill while the left selection is unchanged (the host does
-this already). The right pane's
-keys will be one table resolved before the global keymap when it has
-focus; the breadcrumb, the tab strip, and the status bar share one rule
-for what gives way on a narrow line (`tuikit::text::elide`). The
-breadcrumb already draws through it (`tuikit::breadcrumb`): the last
+the graph only through a source `conspectus` builds for each call
+(`explorer::GraphSource`: load a node's view, its zones of rows, where a
+link leads, the breadcrumb tag, the left-pane selection a frame saves),
+and answers each key with an outcome whose effects (the copy as
+`Effect::Copy`, the value modal, the left-pane mirror, the focus change)
+and words stay in `conspectus`. A refresh keeps the drill while the left
+selection is unchanged. The right pane's keys are one table resolved
+before the global keymap when it has focus; its help section and its
+status hint are generated from it, the hint's `Enter` verb following
+the cursor's row (`copy`, `follow`, `fold`). The breadcrumb, the tab
+strip, and the status bar share one rule for what gives way on a narrow
+line (`tuikit::text::elide`). The breadcrumb draws through it
+(`tuikit::breadcrumb`): the last
 hop always shows, the first outlasts the middle, the oldest middle hops
 give way first with one `…` for each run that went, and a last hop that
 cannot fit is cut with `…`; the title gives the chain the room its other

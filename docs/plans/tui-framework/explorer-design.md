@@ -946,6 +946,41 @@ rule of section 2.5 and per row of the table in section 3.2;
 `crates/tuikit/docs/controls/explorer.md` from the template; the module
 map and README rows.
 
+**Steps 3 to 6 (CSP-756), as landed.** Step 3: the module is as
+sketched, with `Zone::new(..).heading(..).lands()` and
+`Entry::new(..).under(..)` builders beside the public fields, `hint`
+(the status line's keys with the table's verbs) beside
+`Explorer::footer`, `keys::exact`, and `help::sections_described` (a
+generated page in the host's words, since a host cannot implement
+`HelpAction` for a framework enum); 48 tests over a toy source. Three
+signatures moved: `seek` hands its test the content beside the entry
+(the test cannot borrow the explorer it is moving); `keep_window` takes
+the window only, and a page moves by the rows the zone showed (a count
+of entries shown needs the layout to report which lines it drew, a seam
+on the page); `zones` is public beside `entries`. A `Back` whose every
+frame is gone drops them all, keeps what is shown, and answers
+`Refused(Gone)`. Step 4: `explorer::source` holds `Graph` and
+`GraphSource` (whose zones split the rows the view model lists at its
+first relationship row; `flat_rows` moved into it); the App lends the
+explorer out with a source from its other fields
+(`App::with_explorer`) and carries out every outcome in
+`explorer_outcome`; the explorer keeps its window through a drill and a
+`Back`, and the host carries it into an explorer it opens afresh, as the
+App's field did; `Action::OpenValueModal` went as well (`o` sends
+`Msg::Explorer(Inspect)` from either pane), and the global `Backspace`
+is `Msg::NavBack`. 1015 captures at 160x40, 100x30, and 60x20 were
+byte-identical; the full suite passed with every test ported. Step 5:
+`RIGHT_PANE_KEYS` is resolved by `keymap::right_pane_action` before the
+keymap, `keymap::guard_focus` replaced `remap_for_focus`, the help
+section is `sections_described(RIGHT_PANE_KEYS, ..)` flattened under the
+host's heading with the global `E` row after it, and the status hint is
+`Explorer::footer` with the contextual verb (or `hint` with no
+explorer). The left pane's `Backspace` with nothing to return from says
+`Backspace: no reveal to return from`, and points at the right pane when
+it has drilled. Step 6: this note, the control page, ADR 0188 and the
+notes in ADRs 0085 and 0160, `docs/design.md`, `docs/operations.md`
+("Keys on the right pane"), and `CHANGELOG.md`.
+
 ## 6. Risks and the tests that guard behavior
 
 ### 6.1 Risks
