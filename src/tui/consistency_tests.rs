@@ -85,6 +85,7 @@ mod source_tree;
 
 mod actions;
 mod chrome;
+mod columns;
 mod content_filter;
 mod content_interactions;
 mod conventions;

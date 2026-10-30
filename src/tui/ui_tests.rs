@@ -3952,6 +3952,142 @@ fn success_report_sets_a_plain_status_message() {
     assert_eq!(app.messages().len(), 1);
 }
 
+/// The text of `row` laid out alone in `width` cells, its prefix (the
+/// disclosure and the kind glyph) included.
+fn row_text_at(row: &crate::tui::rows::Row, width: usize) -> String {
+    line_text(&lay_out(std::slice::from_ref(row), &Theme::default(), 0, width, None)[0])
+}
+
+#[test]
+fn a_narrow_session_row_gives_way_key_first_and_keeps_its_state() {
+    // A session's lined-up cells (key, chip, age, state) give way key
+    // first, then the chip, then the age; the state glyph stays. The
+    // label after them narrows with `…`, and leaves once it cannot keep
+    // eight cells.
+    let mut session = session_under_group("0199a3f2-ab");
+    session.depth = 0;
+    if let RowKind::AgentSession(row) = &mut session.kind {
+        row.alias = Some("a label of some length".into());
+    }
+    // The prefix is 4 cells; the lined-up cells take 29 more.
+    let wide = row_text_at(&session, 60);
+    assert!(
+        wide.contains("0199a3f2  ") && wide.contains("a label of some length"),
+        "{wide}"
+    );
+    let cut = row_text_at(&session, 4 + 29 + 2 + 10);
+    assert!(
+        cut.ends_with("a label o…"),
+        "the label narrows with the mark: {cut:?}"
+    );
+    let gone = row_text_at(&session, 4 + 29 + 2 + 7);
+    assert!(
+        !gone.contains("label"),
+        "a label under eight cells leaves: {gone:?}"
+    );
+    assert!(
+        gone.contains("0199a3f2"),
+        "the key stays while the rest fits: {gone:?}"
+    );
+    let keyless = row_text_at(&session, 30);
+    assert!(
+        !keyless.contains("0199a3f2") && keyless.contains("claude"),
+        "{keyless:?}"
+    );
+    assert!(
+        keyless
+            .trim_end()
+            .ends_with(crate::tui::icons::state::UNLINKED),
+        "{keyless:?}"
+    );
+    let ageless = row_text_at(&session, 12);
+    assert!(
+        !ageless.contains("claude"),
+        "the chip leaves before the age: {ageless:?}"
+    );
+    assert!(
+        ageless
+            .trim_end()
+            .ends_with(crate::tui::icons::state::UNLINKED),
+        "{ageless:?}"
+    );
+}
+
+#[test]
+fn a_narrow_mux_row_narrows_its_chips_and_name_before_its_age_leaves() {
+    let mux = MuxSessionRow {
+        native_id: "a-rather-long-mux-name".into(),
+        agent_labels: vec!["claude".into(), "codex".into(), "pi".into()],
+        recency: Some("2m".into()),
+        ..agentless_mux_row(None)
+    };
+    let text = |room: usize| -> String {
+        mux_spans_in(&mux, &Theme::default(), 0, room, None)
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    };
+    // Room for the name's step (20 from 39 cells), two chips and a count
+    // (24), the age, and the state.
+    let wide = text(80);
+    assert!(
+        wide.contains("claude") && wide.contains("codex") && wide.contains("+1"),
+        "{wide}"
+    );
+    // Then one chip and a count of the rest.
+    let one = text(50);
+    assert!(
+        one.contains("claude") && one.contains("+2") && !one.contains("codex"),
+        "{one}"
+    );
+    assert!(one.contains("2m"), "{one}");
+    // Then the name narrows, cut with the mark, and the age stays.
+    let narrow = text(36);
+    assert!(
+        narrow.contains('…') && narrow.contains("2m") && narrow.contains("claude"),
+        "{narrow}"
+    );
+    // Then the age leaves, then the chips; the name and the state stay.
+    let ageless = text(29);
+    assert!(
+        !ageless.contains("2m") && ageless.contains("claude"),
+        "{ageless}"
+    );
+    let bare = text(16);
+    assert!(
+        !bare.contains("claude") && bare.starts_with("a-rather"),
+        "{bare}"
+    );
+    assert!(
+        bare.trim_end()
+            .ends_with(crate::tui::icons::state::UNLINKED),
+        "{bare}"
+    );
+}
+
+#[test]
+fn a_narrow_group_header_narrows_its_path_and_keeps_its_count() {
+    let rows = vec![
+        group_header("/fixture/atelier-demo/a-long-repository-name"),
+        session_under_group("abc"),
+    ];
+    let header = |width: usize| line_text(&lay_out(&rows, &Theme::default(), 0, width, None)[0]);
+    let wide = header(120);
+    assert!(
+        wide.contains("/fixture/atelier-demo/a-long-repository-name"),
+        "{wide}"
+    );
+    let cut = header(60);
+    assert!(
+        cut.contains('…') && cut.trim_end().ends_with("(1)"),
+        "{cut}"
+    );
+    // A path that cannot keep eight cells leaves; the count stays.
+    let bare = header(4 + 23 + 2 + 7 + 2 + 3);
+    assert!(!bare.contains("/fixture"), "{bare}");
+    assert!(bare.trim_end().ends_with("(1)"), "{bare}");
+}
+
 fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
     MuxSessionRow {
         mux: MuxSessionId::new("tmux:build"),
