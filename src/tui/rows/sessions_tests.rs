@@ -607,8 +607,8 @@ fn workspace_rooted_session_nests_directly_under_workspace() {
         "workspace-rooted session sits directly under workspace at depth 1:\n{:#?}",
         tree.rows
     );
-    // Workspace header uses the shared format_workspace_display
-    // helper: name + member list + provider chip.
+    // The workspace header (`workspace_header`) is named for the
+    // workspace; its members and provider follow as its detail.
     let RowKind::Group(ws_group) = &tree.rows[0].kind else {
         panic!("expected workspace group row at index 0:\n{:#?}", tree.rows)
     };

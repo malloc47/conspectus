@@ -205,7 +205,8 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) | The Transcript Viewer Is A Pager Content, And The Viewer Boundary Keeps Only The Transcript | Accepted |
 | [0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md) | Rich Text Is A Framework Feature, And The Preview Scrolls In A Region Counted From An Anchor | Accepted |
 | [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted (amended by 0183) |
-| [0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md) | Rows Come From Column Schemas, And One Rule Decides What Gives Way | Accepted |
+| [0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md) | Rows Come From Column Schemas, And One Rule Decides What Gives Way | Accepted (amended by 0184) |
+| [0184](0184-tui-pr-pinned-and-history-rows-come-from-schemas-and-headers-carry-two-cells.md) | PR, Pinned, And History Rows Come From Schemas, And Group Headers Carry Two Cells | Accepted |
 
 ## Transcript viewer
 
@@ -248,7 +249,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0128](0128-github-hosts-gh-is-signed-in-to.md) | Forge Discovery Queries The GitHub Hosts `gh` Is Signed In To | Accepted |
 | [0129](0129-pr-local-branch-symbol-filter-and-ranking.md) | PRs Show Whether They Have A Local Branch, With A Filter And A Ranking | Accepted |
 | [0130](0130-pr-config-keys-and-no-checkout-catch-all.md) | PR Tracking Config Keys, And No "No checkout" Catch-All | Accepted |
-| [0131](0131-pr-titles-and-the-pr-row-layout.md) | PR Titles And The PR Row Layout | Accepted |
+| [0131](0131-pr-titles-and-the-pr-row-layout.md) | PR Titles And The PR Row Layout | Accepted (amended by 0184) |
 | [0132](0132-refuse-actions-on-rows-awaiting-a-handoff-refresh.md) | Refuse Actions On Rows Awaiting A Hand-Off Refresh | Accepted |
 | [0133](0133-launches-attach-before-they-refresh.md) | Launches Attach Before They Refresh | Accepted |
 | [0134](0134-pr-state-filter.md) | A PR State Filter | Accepted |

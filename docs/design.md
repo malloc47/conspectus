@@ -1335,13 +1335,17 @@ scrollbar) and each row's pending, ghost, and selection looks over the
 cells `conspectus` lays out; the App works out each row's ghost, pending,
 and pin-marker state before the frame, so laying a row out looks nothing
 up. `RowKind`, `RowId`, and the row builders stay in `conspectus`. Group
-headers, session rows, and mux rows, running and stopped, are laid out from
-the framework's column schemas (ADR 0183): `conspectus` declares each kind
-of row's columns and gives its cells, and the framework measures every row
-of the tree once a frame and lays each out by one narrow-width policy, so
-the columns of a kind of row line up in every view and give way in one
-order when the pane is narrow. The PR, Pinned, History, and Search hit and
-pane rows still lay out their own cells after the prefix.
+headers, session rows, mux rows (running and stopped), PR rows, and
+Pinned and History rows are laid out from the framework's column schemas
+(ADR 0183, 0184): `conspectus` declares each kind of row's columns and
+gives its cells, and the framework measures every row of the tree once a
+frame and lays each out by one narrow-width policy, so the columns of a
+kind of row line up in every view and give way in one order when the pane
+is narrow. A header's label and a Pinned or History row's label end in one
+column at every depth, so nested rows line up with their parents. A group
+header carries its name and what follows it as two cells, not one string.
+The Search view's hit and pane rows still lay out their own cells after
+the prefix.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

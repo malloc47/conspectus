@@ -54,10 +54,14 @@ Every row starts with the same cells, left to right:
 | 4 | Pin marker | 2 cells | `◉` pin on a running entity, `◎` pin on one that isn't | Reserved on every row of the tree once any row in it has a marker, so columns hold still |
 
 A column padded to its widest value (group labels, paths, and counts,
-PR numbers, and the label, status, and chip of a Pinned or History row)
+PR labels, and the label, status, and chip of a Pinned or History row)
 is measured over every row of the tree, folded groups included, so
 folding or unfolding a group never moves a column. A long name inside a
-folded group still widens its column.
+folded group still widens its column. A group header's label and a
+Pinned or History row's label are padded to end in one column at every
+depth (a nested row's is narrower by its indent), so what follows them, a
+header's path and count or a row's state word, lines up with its
+parent's.
 
 The pin marker is the same pair in every view. In Sessions, Mux, and
 PRs it appears on a row whose entity a pin points at. In Pinned it
@@ -216,27 +220,34 @@ Sorting by recency uses these same times.
 
 ## When a row is too narrow
 
-Group headers, session rows, and mux rows (running and stopped) lay
-their cells out by one rule, in every view that lists them. A row's room
-is the pane's width less the row's indent.
+Group headers, session rows, mux rows (running and stopped), PR rows,
+and Pinned and History rows lay their cells out by one rule, in every
+view that lists them. A row's room is the pane's width less the row's
+indent.
 
 1. The cells that line up down the tree (the prefix; a session's key,
-   chip, age, and state; a mux's name, chips, age, and state; a header's
-   label, path, count, and warning)
+   chip, age, and state; a mux's name, chips, age, and state; a PR's
+   label, tracking mark, age, and state; every cell of a Pinned or
+   History row; a header's label, path, count, and warning)
    keep the widths they have on every row: a padded column is as wide as
    its widest cell in the whole tree, folded groups included. When they
    do not fit, they give way in a fixed order, the same on every row
-   at that width, so the columns that stay keep their places.
+   at that width, so the columns that stay keep their places. Rows whose
+   label ends in one column at every depth (headers, Pinned and History
+   rows) give way alike at every depth too.
 2. What follows them on a row (a session's label, `was in` note,
    project, hit count, and preview or snippet; a mux's hit count and
-   preview, snippet, or directory) takes the cells that row has left,
-   and gives way in its own order, row by row.
+   preview, snippet, or directory; a PR's branch and title) takes the
+   cells that row has left, and gives way in its own order, row by row.
 3. A cell that gives way narrows, cut with `…`, or leaves the row with
-   the gap before it. A label, path, or project narrows to no fewer than
-   8 cells (unless its whole text is shorter) and leaves after that; a
-   mux name narrows to 10 cells and stays. A preview, snippet, or stopped
-   mux's directory shows only when it gets at least 7 cells, or its whole
-   text.
+   the gap before it. A label, path, project, or PR branch narrows to no
+   fewer than 8 cells (unless its whole text is shorter) and leaves after
+   that; a mux name narrows to 10 cells and stays; a PR's or Pinned or
+   History row's label narrows to 8 cells and stays (a nested Pinned row's
+   label may narrow further, so its state word stays in line). A PR label
+   narrows its `owner/repo` and keeps its `#N` whole. A preview, snippet,
+   PR title, the content of a Pinned or History row, or a stopped mux's
+   directory shows only when it gets at least 7 cells, or its whole text.
 4. A row that still does not fit is cut at the pane's edge with `…`. No
    cell is cut without a mark, and no column moves on one row but not
    another.
@@ -248,6 +259,28 @@ is the pane's width less the row's indent.
 | Session row, the rest | the preview or snippet, the `was in` note, the project (narrowing first), the hit count, the label (narrowing first) | |
 | Mux row, cells that line up | the chips narrow to one chip and `+N`, the name narrows, the age, the chips | the name, the state glyph |
 | Mux row, the rest | the preview, snippet, or directory, the hit count | |
+| PR row, cells that line up | the label narrows (its number stays whole), the age, the tracking mark | the label, the state glyph |
+| PR row, the rest | the title, the branch (narrowing first) | |
+| Pinned or History row | the chip, the content, the label narrows, the age | the label, the state word |
+
+A Pinned row in a narrow pane keeps its name and its state word:
+
+<!-- frame: keys="4jl" width=40 height=40 -->
+```text
+┌ ► sessions · mux · prs · pinned … ───┐
+│▼ project  ~/repos/project            │
+│  ▼ ▣ ◉ project-main     live       5m│
+│      ●   ambiguous mu…  in mux     1m│
+│      ●   ambiguous mu…  in mux     1m│
+│      ●   hook-superse…  in mux     1m│
+│      ●   claude-code …  in mux     1h│
+│    ▣ ◎ nightly          stopped    2d│
+│    ● ◉ parser-session   in mux     1h│
+│    ◇ ◎ ledger-worktree  removed    3d│
+│    ▣ ◎ weekly-review    planned     —│
+│▼ Other                               │
+│    ⇄ ◉ ledger-pr        merged     5d│
+```
 
 ## Sessions view
 
@@ -264,13 +297,29 @@ others.
 
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
-| 1 | Label | workspace name, or the last part of the path | always | bold, padded to the widest in the tree, folded groups included |
+| 1 | Label | workspace name, or the last part of the path | always | bold, padded so every header's label ends in one column, at every depth, folded groups included |
 | 2 | Path | full path with `~`, or members and provider for a workspace | when it differs from the label | dim, cut in the middle to fit |
 | 3 | `(cwd)` | the launch directory | only the group containing where Conspectus was started | cyan |
 | 4 | Count | agent sessions beneath | N > 0 | dim, in one column across the tree's headers |
 | 5 | `▲` | ambiguous links beneath | any | yellow bold |
 
 A checkout header adds `(linked · locked · prunable)` for those states.
+A checkout nested under its repo starts its path and ends its count in
+the repo header's columns:
+
+<!-- frame: keys="<C-g><C-g><C-g>jjjjjl" width=170 height=30 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
+│▼ ◆   repo-a                   ~/atelier-demo/repo-a     (2)                       │
+│  ▼ ◇   repo-a                 ~/atelier-demo/repo-a     (2)                       │
+│      ●   showcase   pi           2h  ∘  Showcase: pi in atelier member repo       │
+│      ●   showcase   codex        3d  ∘  Showcase: codex parent in atelier fork li…│
+│▶ ◆   repo-b                   ~/atelier-demo/repo-b     (1)                       │
+│▼ ◆   bare-project             ~/checkouts/bare-project  (1)                       │
+│  ▶ ◇   bare-project (linked)  ~/checkouts/bare-project  (1)                       │
+│▶ ◆   project                  ~/repos/project           (4)  ▲                    │
+│▶     Ungrouped                                          (3)                       │
+```
 
 ### Session row
 
@@ -426,12 +475,12 @@ them has an ambiguous mux link.
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
 | 1 | Prefix | indent, disclosure (only with sessions beneath), `⇄` colored by state, pin marker | always | |
-| 2 | Label | `#N`, or `owner/repo#N` | the short form only inside a group that holds one forge repo | bold, padded across the tree |
+| 2 | Label | `#N`, or `owner/repo#N` | the short form only inside a group that holds one forge repo | bold, padded across the tree; when the row is narrow `owner/repo` is cut and `#N` stays whole |
 | 3 | Tracking | `⌥` has a local branch, `◌` none | always | 1 cell |
 | 4 | Age | last update | always | 4 cells |
 | 5 | State | `○` open, `◐` draft, `⊕` merged, `⊗` closed, `?` no state | always | 1 cell |
 | 6 | Branch | the local branch | only when tracked | dim, cut at 24 |
-| 7 | Title | the PR title | always | gray, takes the rest |
+| 7 | Title | the PR title | when it gets at least 7 cells, or its whole title | gray, takes the rest |
 
 One rule decides how a pull request's state shows, everywhere it shows:
 the forge's state beats the draft flag. Only an open PR marked draft
@@ -479,11 +528,11 @@ in bold and its path dim; for kind grouping, `Muxes`, `Sessions`,
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
 | 1 | Prefix | indent, disclosure (only with rows beneath), the pin's kind glyph, pin marker | always | the glyph keeps its color even on a ghost row |
-| 2 | Label | the pin's name | always | bold, cut at 28, padded across the tree |
+| 2 | Label | the pin's name | always | bold, cut at 28, padded so it ends in one column at every depth |
 | 3 | Status | a word from [State words](#state-words) | always | cut at 9, padded; a spinner while a refresh is pending |
 | 4 | Age | see [Age](#age) | always | 4 cells |
-| 5 | Chip | the harness or program | mux and session pins | one width across the tree, so content lines up |
-| 6 | Content | by kind (below) | when room remains | gray |
+| 5 | Chip | the harness or program | mux and session pins | one width across the tree, so content lines up; the first cell to leave a narrow row |
+| 6 | Content | by kind (below) | when it gets at least 7 cells, or its whole text | gray |
 
 Content by kind: mux, its directory; session, the pin's title; worktree,
 `repo · branch`; repo, its remote (else its path); branch, `repo · ref`;
@@ -491,7 +540,8 @@ PR, `owner/repo · title`; workspace, its root; fork, `provider · name`.
 
 ### Nested row
 
-Rows beneath a pin use the same columns, with no pin marker. A nested
+Rows beneath a pin use the same columns, with no pin marker, and their
+state word starts in the pin row's column. A nested
 mux reads `live`. A nested session's label is its alias, title, mux name,
 or the first 8 characters of its key, its status is `in mux` or
 `resumable`, and its content is the directory it ran in.
@@ -557,7 +607,7 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 | 3 | Status | `stopped` (mux), `removed` (worktree, repo), or the PR state | always |
 | 4 | Age | time since it was last seen | always |
 | 5 | Chip | the harness | muxes only |
-| 6 | Content | mux, directory; worktree, `repo · branch`; repo, remote or path; PR, `owner/repo · title` | when room remains |
+| 6 | Content | mux, directory; worktree, `repo · branch`; repo, remote or path; PR, `owner/repo · title` | when it gets at least 7 cells, or its whole text |
 
 <!-- frame: keys="5" width=170 height=30 -->
 ```text

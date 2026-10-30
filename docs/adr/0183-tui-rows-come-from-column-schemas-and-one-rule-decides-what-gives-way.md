@@ -14,7 +14,12 @@ schemas, and the pointer gutter still waits for the last kind of row.
 Keeps [ADR 0145](0145-state-glyphs-and-words-in-the-left-panel.md)'s
 glyphs and words and [ADR 0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md)'s
 chip width and age cell. Leaves [ADR 0020](0020-width-aware-table-rendering.md)'s
-CLI table renderer as it is (decision 7).
+CLI table renderer as it is (decision 7). Amended by
+[ADR 0184](0184-tui-pr-pinned-and-history-rows-come-from-schemas-and-headers-carry-two-cells.md):
+the PR, Pinned, and History rows are laid out from schemas too, a capped
+column caps each cell, rows that absorb their lead give way as a row with
+no lead would, and a group header's label absorbs the indent instead of
+its path, so nested headers line up.
 
 ## Context
 

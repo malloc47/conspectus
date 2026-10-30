@@ -391,6 +391,21 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   whole, its `▣` included, and a mux with several agents keeps its age
   in line with the others. A row that fits its pane looks as before,
   apart from those last two. `docs/tui-columns.md` describes the rule.
+- **PR, Pinned, and History rows give way by the same rule.** A narrow
+  PR row cuts its `owner/repo` and keeps its `#N` whole, lets its title,
+  then its branch, then its age and tracking mark go, and keeps its
+  state glyph, which a narrow pane used to cut off. A Pinned or History
+  row lets its chip go first (as before), then its content, then narrows
+  its name and lets its age go, and keeps its name and state word in
+  line at every depth. A PR title or a Pinned or History row's content
+  needs 7 cells (it showed from 1). Rows that fit look as before.
+- **Nested group headers line up with their parents.** A checkout header
+  under its repo (the Sessions view's checkout grouping) starts its path
+  in the repo header's column; it was two cells further right for each
+  level of nesting. In a narrow pane its count stays in line too.
+- **Quick select lists a group header as its row reads it**: its name,
+  then its path or members (`repo-a  ~/atelier-demo/repo-a`), where it
+  listed the bare path.
 
 ### Fixed
 
