@@ -91,7 +91,9 @@ in step. `marks::SPACED_SEPARATOR` is
 `SEPARATOR` with a space on each side (` · `), what joins the hints of a
 footer; it is three cells, so it is not one of the marks, and
 `marks::SPACED_CRUMB` (` › `) is `CRUMB` the same way, what joins the hops
-of a breadcrumb. `marks::TIMES`
+of a breadcrumb. `marks::MORE` (` …`, two cells) is `ELLIPSIS` after a
+space, what ends a line some of whose pieces gave way (a tab bar, a
+priority line). `marks::TIMES`
 is `FAIL`'s character read as the multiplication sign in a count of
 repeats (`(×3)`), so it is not a mark of its own either. The boxes a form
 draws before an option are three cells too, built from vetted glyphs, and

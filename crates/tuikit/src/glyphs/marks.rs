@@ -9,10 +9,11 @@
 //!
 //! Every mark is exactly one terminal cell, is in the framework's vetted
 //! table, and is listed in [`ALL`]. A few constants here are not marks of
-//! their own but are built from them, three cells each: [`SPACED_SEPARATOR`]
-//! and [`SPACED_CRUMB`] ([`SEPARATOR`] and [`CRUMB`] padded with spaces)
-//! and the boxes a form draws before an option ([`CHECKED`],
-//! [`UNCHECKED`], [`CHOSEN`], [`NOT_CHOSEN`]). A host
+//! their own but are built from them: [`SPACED_SEPARATOR`] and
+//! [`SPACED_CRUMB`] ([`SEPARATOR`] and [`CRUMB`] padded with spaces),
+//! [`MORE`] ([`ELLIPSIS`] after a space), and the boxes a form draws
+//! before an option ([`CHECKED`], [`UNCHECKED`], [`CHOSEN`],
+//! [`NOT_CHOSEN`]). A host
 //! adds marks of its own to its copy of the table with
 //! [`super::VettedGlyphs::register`].
 
@@ -95,6 +96,10 @@ pub const CRUMB: &str = "›";
 /// breadcrumb. It is three cells, so it is not one of the marks in
 /// [`ALL`].
 pub const SPACED_CRUMB: &str = " › ";
+/// [`ELLIPSIS`] after a space: what ends a line some of whose pieces gave
+/// way, such as a strip of tabs or a status line (`one · two …`). It is
+/// two cells, so it is not one of the marks in [`ALL`].
+pub const MORE: &str = " …";
 /// The Up arrow key, as a key label names it.
 pub const ARROW_UP: &str = "↑";
 /// The Down arrow key, as a key label names it.
