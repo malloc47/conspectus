@@ -840,6 +840,63 @@ fn a_header_for_no_entity_starts_its_label_in_the_column_of_its_siblings() {
 }
 
 #[test]
+fn nested_group_headers_line_their_paths_and_counts_up_with_their_parents() {
+    // A repo header, a checkout under it with a longer name, and a deeper
+    // header under that: each label ends in one column whatever its
+    // indent, so the paths after them start in one column and the counts
+    // end in one, at every depth and in a narrow pane too.
+    let theme = Theme::default();
+    let header = |depth: u8, path: &str| crate::tui::rows::Row {
+        depth,
+        ..group_header(path)
+    };
+    let session = |depth: u8, key: &str| crate::tui::rows::Row {
+        depth,
+        ..session_under_group(key)
+    };
+    let rows = vec![
+        header(0, "~/src/project"),
+        header(1, "~/src/project-with-a-long-worktree-name"),
+        session(2, "a"),
+        header(2, "~/src/deep"),
+        session(3, "b"),
+        header(0, "~/src/other"),
+        session(1, "c"),
+    ];
+    let headers = [0, 1, 3, 5];
+    for width in [160, 110, 80, 60] {
+        let lines: Vec<String> = lay_out(&rows, &theme, 0, width, None)
+            .iter()
+            .map(line_text)
+            .collect();
+        let path: Vec<Option<usize>> = headers
+            .iter()
+            .map(|&at| cell_column(&lines[at], "~/src/"))
+            .collect();
+        let count: Vec<Option<usize>> =
+            headers.iter().map(|&at| count_column(&lines[at])).collect();
+        let shown = || {
+            headers
+                .iter()
+                .map(|&at| lines[at].as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert!(path.iter().all(Option::is_some), "at {width}:\n{}", shown());
+        assert!(
+            path.windows(2).all(|pair| pair[0] == pair[1]),
+            "at {width}, the paths start in different columns: {path:?}\n{}",
+            shown()
+        );
+        assert!(
+            count.windows(2).all(|pair| pair[0] == pair[1]),
+            "at {width}, the counts end in different columns: {count:?}\n{}",
+            shown()
+        );
+    }
+}
+
+#[test]
 fn group_counts_line_up_when_the_pin_marker_cell_is_reserved() {
     let mut app = sessions_app_over(nested_groups_world(true), SessionsGrouping::Graph);
     let rows = left_rows(&mut app);

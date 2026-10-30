@@ -35,7 +35,8 @@ pub(super) enum Col {
     Marker,
     /// The pin marker a Pinned or History row carries.
     MixedMarker,
-    /// A group header's label, padded to the widest in the tree.
+    /// A group header's label, padded so it ends in one column at every
+    /// depth.
     HeaderLabel,
     /// A group header's path or members, cut in the middle; its width
     /// lines the counts up.
@@ -160,12 +161,13 @@ impl Schemas {
     pub(super) fn new(theme: &Theme) -> Self {
         let mut header = prefix(Some(Col::HeaderGlyph), Col::Marker);
         header.extend([
-            Column::cap(Col::HeaderLabel, usize::MAX),
-            // The detail spaces the counts: a nested header's is narrower
-            // by its indent, so every count in the tree is in one column.
+            // The label ends in one column at every depth (a nested
+            // header's is narrower by its indent), so the path after it
+            // starts where its parent's does, and the path spaces the
+            // counts, so every count in the tree is in one column.
+            Column::cap(Col::HeaderLabel, usize::MAX).absorbs_lead(),
             Column::cap(Col::Detail, usize::MAX)
                 .ragged()
-                .absorbs_lead()
                 .shrinks(0, DETAIL_FLOOR)
                 .drops(0),
             Column::cap(Col::Count, usize::MAX).right(),
