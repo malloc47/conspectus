@@ -309,8 +309,10 @@ pub struct MixedRow {
     /// The instant behind [`Self::age`], which picks the age's recency
     /// color the way the other views do.
     pub age_epoch: Option<i64>,
-    /// The state glyph of a row in the Mux grid, where the Mux view
-    /// draws a glyph rather than a word.
+    /// The state as a glyph, for a stopped mux in the Mux view: a view of
+    /// one kind of entity shows state as a glyph (ADR 0145), so the row is
+    /// drawn in the running muxes' columns. `None` for a Pinned or History
+    /// row, which spells its state in `status`.
     pub state: Option<EntityState>,
     /// The agent or program the entity runs, drawn as the same filled
     /// chip the other views use.
@@ -323,8 +325,6 @@ pub struct MixedRow {
     pub pr_status: Option<PrStatus>,
     /// The pin marker cell after the kind glyph.
     pub marker: PinMarker,
-    /// Which column grid draws the row.
-    pub grid: MixedGrid,
 }
 
 /// An agent or program name drawn as a chip.
@@ -401,17 +401,6 @@ pub enum EntityState {
     Stopped,
     /// A mux that couldn't be checked.
     Unknown,
-}
-
-/// How a mixed-kind row lays out its columns.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MixedGrid {
-    /// Label, status, age, then chip and content, as in the Pinned and
-    /// History views.
-    Columns,
-    /// The Mux view's grid (name, chip, age, state), so a ghost mux
-    /// lines up with the live ones around it.
-    Mux,
 }
 
 /// A workspace / repo / worktree label row.

@@ -1015,12 +1015,40 @@ fn session_spans_at(
         expandable: false,
         kind: RowKind::AgentSession(session.clone()),
     };
-    let mut spans = lay_out(&[row], theme, now, width, None).remove(0).spans;
+    without_prefix(lay_out(&[row], theme, now, width, None).remove(0).spans)
+}
+
+/// `spans` after a row's prefix: the blank disclosure and the kind glyph
+/// (an unpinned row reserves no marker).
+fn without_prefix(mut spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
     let mut prefix = 4;
     while prefix > 0 && !spans.is_empty() {
         prefix -= tuikit::text::width(&spans.remove(0).content);
     }
     spans
+}
+
+/// The spans of `mux`'s row after its prefix, as the left pane lays it
+/// out alone with `room` cells after the prefix; with a `spinner`, the
+/// row awaits the hand-off.
+fn mux_spans_in(
+    mux: &MuxSessionRow,
+    theme: &Theme,
+    now: i64,
+    room: usize,
+    spinner: Option<&'static str>,
+) -> Vec<Span<'static>> {
+    let row = crate::tui::rows::Row {
+        id: RowId::MuxSession(NodeId::MuxSession(mux.mux.clone())),
+        depth: 0,
+        expandable: false,
+        kind: RowKind::MuxSession(mux.clone()),
+    };
+    without_prefix(
+        lay_out(&[row], theme, now, room + 4, spinner)
+            .remove(0)
+            .spans,
+    )
 }
 
 /// [`session_spans_at`] in a wide pane.
@@ -1869,7 +1897,7 @@ fn a_pinned_pr_draws_its_kind_glyph_and_word_in_one_style() {
     // The Pinned and History rows spell the state as a word; the kind
     // glyph and the word take the state glyph's style, so they agree
     // with the PRs view for every state crossed with draft.
-    use crate::tui::rows::{MixedGrid, MixedRow, MixedTone, PinMarker, PrStatus};
+    use crate::tui::rows::{MixedRow, MixedTone, PinMarker, PrStatus};
     let theme = Theme::default();
     let pr_row = |status: Option<PrStatus>| MixedRow {
         node_kind: crate::model::NodeKind::ForgePr,
@@ -1890,7 +1918,6 @@ fn a_pinned_pr_draws_its_kind_glyph_and_word_in_one_style() {
         )),
         pr_status: status,
         marker: PinMarker::None,
-        grid: MixedGrid::Columns,
     };
     let mut wrong = Vec::new();
     for (state, draft, _, word, style) in pr_state_cases(&theme) {
@@ -2249,7 +2276,7 @@ fn mux_session_row_mirrors_session_column_order() {
         content_hit: None,
     };
 
-    let spans = render_mux_session_spans(&row, &theme, now, 100, None);
+    let spans = mux_spans_in(&row, &theme, now, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(
@@ -3950,7 +3977,7 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
 #[test]
 fn agentless_mux_row_labels_itself_with_the_pane_command() {
     let theme = Theme::default();
-    let spans = render_mux_session_spans(&agentless_mux_row(Some("npm")), &theme, 0, 100, None);
+    let spans = mux_spans_in(&agentless_mux_row(Some("npm")), &theme, 0, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(rendered.contains(" npm "), "pane command chip: {rendered}");
@@ -3965,7 +3992,7 @@ fn agentless_mux_row_labels_itself_with_the_pane_command() {
 #[test]
 fn agentless_mux_row_without_a_pane_command_says_no_agent() {
     let theme = Theme::default();
-    let spans = render_mux_session_spans(&agentless_mux_row(None), &theme, 0, 100, None);
+    let spans = mux_spans_in(&agentless_mux_row(None), &theme, 0, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(rendered.contains("no agent"), "placeholder: {rendered}");
@@ -3979,7 +4006,7 @@ fn agentless_mux_row_running_a_harness_uses_the_harness_badge() {
             program_harness: Some(label.to_string()),
             ..agentless_mux_row(Some(program))
         };
-        let spans = render_mux_session_spans(&row, &theme, 0, 100, None);
+        let spans = mux_spans_in(&row, &theme, 0, 100, None);
         let chip = spans
             .iter()
             .find(|span| span.content.trim() == label)
@@ -4061,11 +4088,11 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
         content_hit: None,
     };
-    let settled: String = render_mux_session_spans(&row, &theme, 0, 100, None)
+    let settled: String = mux_spans_in(&row, &theme, 0, 100, None)
         .iter()
         .map(|s| s.content.to_string())
         .collect();
-    let pending: String = render_mux_session_spans(&row, &theme, 0, 100, Some("⠋"))
+    let pending: String = mux_spans_in(&row, &theme, 0, 100, Some("⠋"))
         .iter()
         .map(|s| s.content.to_string())
         .collect();
@@ -4975,7 +5002,7 @@ fn mux_rows_keep_pin_and_preview_columns_aligned_across_attach_states() {
             single_session_preview: Some("pushed to main".into()),
             ..agentless_mux_row(None)
         };
-        render_mux_session_spans(&row, &theme, 0, 100, None)
+        mux_spans_in(&row, &theme, 0, 100, None)
             .iter()
             .map(|s| s.content.to_string())
             .collect()
@@ -6539,7 +6566,7 @@ fn the_edit_form_shows_inherited_values_without_the_pins_overrides() {
 #[test]
 fn every_value_of_a_state_has_its_own_glyph() {
     use crate::tui::icons::state;
-    use crate::tui::rows::{EntityState, MixedGrid, MixedRow, MixedTone, PinMarker};
+    use crate::tui::rows::{EntityState, MixedRow, MixedTone, PinMarker};
     let theme = Theme::default();
     let text = |span: &ratatui::text::Span<'_>| span.content.to_string();
 
@@ -6583,7 +6610,6 @@ fn every_value_of_a_state_has_its_own_glyph() {
         primary_node: NodeId::MuxSession(MuxSessionId::new("m")),
         pr_status: None,
         marker: PinMarker::None,
-        grid: MixedGrid::Mux,
     };
     let mut drawn = Vec::new();
     for entity in [
@@ -6598,14 +6624,15 @@ fn every_value_of_a_state_has_its_own_glyph() {
             | EntityState::Stopped
             | EntityState::Unknown => {}
         }
-        let spans = render_mixed_spans(
-            &mux_row(entity),
-            &theme,
-            MixedWidths::default(),
-            80,
-            0,
-            None,
-        );
+        // A stopped mux is drawn in the running muxes' columns, its state
+        // the last cell when it has no directory.
+        let row = crate::tui::rows::Row {
+            id: RowId::MuxSession(NodeId::MuxSession(MuxSessionId::new("m"))),
+            depth: 0,
+            expandable: false,
+            kind: RowKind::Mixed(mux_row(entity)),
+        };
+        let spans = lay_out(&[row], &theme, 0, 80, None).remove(0).spans;
         drawn.push(spans.last().map(text).expect("a state cell"));
     }
     assert_eq!(
@@ -6709,7 +6736,7 @@ fn a_chip_keeps_its_look_on_the_selected_row() {
     // The highlight reverses the rest of the row and leaves a filled
     // chip, harness or program, live or ghost, as it is on every other
     // row, so it still reads as a chip.
-    use crate::tui::rows::{MixedChip, MixedGrid, MixedRow, MixedTone, PinMarker};
+    use crate::tui::rows::{MixedChip, MixedRow, MixedTone, PinMarker};
     use ratatui::buffer::Buffer;
     use ratatui::widgets::Widget;
     let app = seeded_app();
@@ -6736,7 +6763,6 @@ fn a_chip_keeps_its_look_on_the_selected_row() {
                 primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:main")),
                 pr_status: None,
                 marker: PinMarker::None,
-                grid: MixedGrid::Columns,
             }),
         };
         let draw = |selected: bool| {
@@ -6852,16 +6878,16 @@ fn mux_rows_with_wide_names_fit_and_keep_the_columns_of_ascii_rows() {
             .expect("badge");
         text::spans_width(&spans[..at])
     };
-    let reference = column_of_badge(&render_mux_session_spans(&ascii, &theme, 0, 100, None));
+    let reference = column_of_badge(&mux_spans_in(&ascii, &theme, 0, 100, None));
     for row in &rows {
         assert_eq!(
-            column_of_badge(&render_mux_session_spans(row, &theme, 0, 100, None)),
+            column_of_badge(&mux_spans_in(row, &theme, 0, 100, None)),
             reference,
             "{}: the badge column moved",
             row.native_id
         );
         for width in 10..=100 {
-            let spans = render_mux_session_spans(row, &theme, 0, width, None);
+            let spans = mux_spans_in(row, &theme, 0, width, None);
             assert!(
                 text::spans_width(&spans) <= width,
                 "{} at {width}: {spans:?}",

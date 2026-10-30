@@ -379,6 +379,18 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   page did not move on the first `K`. When a search appears or goes on
   the row shown, the Preview starts at the match or at the newest turns
   rather than at an older offset. What the Preview shows is unchanged.
+- **Group headers, session rows, and mux rows give way by one rule when
+  the left pane is narrow.** A cut label, project, path, or mux name ends
+  in `…` instead of stopping at the pane's edge. A session row lets its
+  harness key go first, then its chip, then its age, and keeps its link
+  glyph; a mux row narrows its chips and its name, then lets its age and
+  then its chips go, and keeps its name and state glyph; the cells after
+  them give way row by row. A label, project, or path that cannot keep 8
+  cells leaves the row, and a preview, snippet, or stopped mux's
+  directory needs 7. A stopped mux in the Mux view is drawn as a ghost
+  whole, its `▣` included, and a mux with several agents keeps its age
+  in line with the others. A row that fits its pane looks as before,
+  apart from those last two. `docs/tui-columns.md` describes the rule.
 
 ### Fixed
 

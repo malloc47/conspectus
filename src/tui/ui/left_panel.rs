@@ -117,10 +117,10 @@ impl<'a> LeftRows<'a> {
         // background refresh lands (ADR 0108).
         let spinner = spinner.filter(|_| cx.pending);
         match &row.kind {
-            RowKind::Group(_) | RowKind::AgentSession(_) => self.tree.line(row, cx),
-            RowKind::MuxSession(mux) => self.tree.line_then(row, cx, |left| {
-                render_mux_session_spans(mux, theme, now, left, spinner)
-            }),
+            RowKind::Group(_) | RowKind::AgentSession(_) | RowKind::MuxSession(_) => {
+                self.tree.line(row, cx)
+            }
+            RowKind::Mixed(mixed) if columns::stopped_mux(mixed) => self.tree.line(row, cx),
             RowKind::Pr(pr) => self.tree.line_then(row, cx, |left| {
                 render_pr_spans(pr, theme, self.pr, left, now)
             }),
@@ -638,12 +638,11 @@ pub(super) fn age_span(
     tuikit::age::cell(age, recency, tuikit::age::CELL_WIDTH, theme)
 }
 
-/// The body of a mixed-kind row after its prefix. The Columns grid is
-/// label, status word, age, then the chip and content, which fill
-/// `budget` and are cut with an ellipsis, at the `widths` the tree's
-/// measure pass found. The Mux grid is the Mux view's own (name, chip,
-/// age, state glyph), so a stopped mux lines up with the running ones.
-/// Stopped, removed, missing, planned, and unknown rows are dimmed whole.
+/// The body of a Pinned or History row after its prefix: the label, the
+/// status word, the age, then the chip and content, which fill `budget`
+/// and are cut with an ellipsis, at the `widths` the tree's measure pass
+/// found. Stopped, removed, missing, planned, and unknown rows are dimmed
+/// whole.
 pub(super) fn render_mixed_spans(
     mixed: &crate::tui::rows::MixedRow,
     theme: &Theme,
@@ -652,84 +651,45 @@ pub(super) fn render_mixed_spans(
     now: i64,
     handoff_spinner: Option<&'static str>,
 ) -> Vec<Span<'static>> {
-    use crate::tui::rows::{EntityState, MixedGrid, MixedTone};
+    use crate::tui::rows::MixedTone;
     let mut spans: Vec<Span<'static>> = Vec::new();
-    if mixed.grid == MixedGrid::Mux {
-        // Same columns as `render_mux_session_spans`: the name in the
-        // link color, the chip, the age, then the state glyph.
-        let label_width = mux_label_column_width(budget);
-        spans.push(span!(
-            Style::default().fg(theme.link);
-            "{}",
-            text::fit(&mixed.label, label_width)
-        ));
-        spans.push(Span::raw("  "));
-        match &mixed.chip {
-            Some(chip) => spans.push(mixed_chip_span(chip, theme)),
-            None => spans.push(crate::tui::widgets::badge::no_agent_chip(theme)),
-        }
-        spans.push(Span::raw("  "));
-        spans.push(age_span(mixed.age.as_deref(), mixed.age_epoch, now, theme));
-        spans.push(Span::raw("  "));
-        spans.push(match handoff_spinner {
-            Some(glyph) => span!(Style::default().fg(theme.inert); "{glyph}"),
-            None => match mixed.state {
-                Some(EntityState::Stopped) => span!(ghost_style(theme); "{}", state::STOPPED),
-                Some(EntityState::Linked) => {
-                    span!(Style::default().fg(theme.mux_attached()); "{}", state::LINKED)
-                }
-                Some(EntityState::Unlinked) => span!(theme.muted; "{}", state::UNLINKED),
-                Some(EntityState::Unknown) | None => span!(theme.muted; "{}", state::UNKNOWN),
-            },
-        });
-        let room = budget.saturating_sub(text::spans_width(&spans));
-        if room > 4 && !mixed.content.is_empty() {
-            let content = text::truncate_end(&mixed.content, room - 2);
-            spans.push(Span::styled(
-                format!("  {content}"),
-                Style::default().fg(theme.inert),
-            ));
-        }
-    } else {
-        // A row awaiting the refresh after an action shows a spinner
-        // where its status word goes.
-        let status_word = handoff_spinner.map_or(mixed.status.as_str(), |glyph| glyph);
-        // A pull request's word takes the style of its state glyph, so
-        // the two read as one signal; other live words share the
-        // attached color.
-        let status_style = match (mixed.tone, mixed.pr_status) {
-            (MixedTone::Dim, _) => Style::default(),
-            (MixedTone::Normal, Some(status)) => status.mark(theme).1,
-            (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached()),
-        };
-        let label = text::truncate_end(&mixed.label, columns::MIXED_LABEL_CELLS);
-        spans.push(span!(Modifier::BOLD; "{}", text::pad(&label, widths.label)));
-        let status = text::truncate_end(status_word, columns::MIXED_STATUS_CELLS);
-        spans.push(span!(status_style; "  {}", text::pad(&status, widths.status)));
-        spans.push(Span::raw("  "));
-        spans.push(age_span(mixed.age.as_deref(), mixed.age_epoch, now, theme));
-        // The chip cell has one width in the tree, so the content starts
-        // in one column whether or not a row has a chip.
-        if widths.chip > 0 {
-            let cell = 2 + widths.chip;
-            let fits = budget.saturating_sub(text::spans_width(&spans)) > cell + 2;
-            match (&mixed.chip, fits) {
-                (Some(chip), true) => {
-                    spans.push(Span::raw("  "));
-                    spans.push(mixed_chip_span(chip, theme));
-                }
-                (None, true) => spans.push(Span::raw(" ".repeat(cell))),
-                _ => {}
+    // A row awaiting the refresh after an action shows a spinner where
+    // its status word goes.
+    let status_word = handoff_spinner.map_or(mixed.status.as_str(), |glyph| glyph);
+    // A pull request's word takes the style of its state glyph, so the
+    // two read as one signal; other live words share the attached color.
+    let status_style = match (mixed.tone, mixed.pr_status) {
+        (MixedTone::Dim, _) => Style::default(),
+        (MixedTone::Normal, Some(status)) => status.mark(theme).1,
+        (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached()),
+    };
+    let label = text::truncate_end(&mixed.label, columns::MIXED_LABEL_CELLS);
+    spans.push(span!(Modifier::BOLD; "{}", text::pad(&label, widths.label)));
+    let status = text::truncate_end(status_word, columns::MIXED_STATUS_CELLS);
+    spans.push(span!(status_style; "  {}", text::pad(&status, widths.status)));
+    spans.push(Span::raw("  "));
+    spans.push(age_span(mixed.age.as_deref(), mixed.age_epoch, now, theme));
+    // The chip cell has one width in the tree, so the content starts in
+    // one column whether or not a row has a chip.
+    if widths.chip > 0 {
+        let cell = 2 + widths.chip;
+        let fits = budget.saturating_sub(text::spans_width(&spans)) > cell + 2;
+        match (&mixed.chip, fits) {
+            (Some(chip), true) => {
+                spans.push(Span::raw("  "));
+                spans.push(mixed_chip_span(chip, theme));
             }
+            (None, true) => spans.push(Span::raw(" ".repeat(cell))),
+            _ => {}
         }
-        let room = budget.saturating_sub(text::spans_width(&spans));
-        if room > 2 && !mixed.content.is_empty() {
-            let content = text::truncate_end(&mixed.content, room - 2);
-            spans.push(Span::styled(
-                format!("  {content}"),
-                Style::default().fg(theme.inert),
-            ));
-        }
+    }
+    let room = budget.saturating_sub(text::spans_width(&spans));
+    if room > 2 && !mixed.content.is_empty() {
+        let content = text::truncate_end(&mixed.content, room - 2);
+        spans.push(Span::styled(
+            format!("  {content}"),
+            Style::default().fg(theme.inert),
+        ));
     }
     if mixed.tone == MixedTone::Dim {
         ghostify(&mut spans, theme);
@@ -755,150 +715,6 @@ fn mixed_glyph_span(mixed: &crate::tui::rows::MixedRow, theme: &Theme) -> Span<'
         return pr_kind_glyph_span(mixed.pr_status, theme);
     }
     node_kind_glyph_span(mixed.node_kind, theme)
-}
-
-/// `handoff_spinner` replaces the attached glyph while the row awaits
-/// the refresh that follows a tmux hand-off (ADR 0108).
-pub(super) fn render_mux_session_spans(
-    mux: &MuxSessionRow,
-    theme: &Theme,
-    now: i64,
-    width: usize,
-    handoff_spinner: Option<&'static str>,
-) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    if width == 0 {
-        return spans;
-    }
-
-    // Column order mirrors the agent-session row so muxed and
-    // session rows scan as a single visual rhythm:
-    //   name · harness chip · recency · attached glyph · preview
-    // The mux name drops the backend prefix (e.g. `tmux:`) since
-    // every row in the view is the same backend and the prefix only
-    // steals horizontal space.
-    let label = compact_mux_native_id(&mux.native_id);
-    let label_width = mux_label_column_width(width);
-    let label_style = Style::default().fg(theme.link);
-    spans.push(span!(
-        label_style;
-        "{}",
-        text::fit(&label, label_width)
-    ));
-
-    if width <= text::spans_width(&spans) + 4 {
-        return text::fit_spans(spans, width);
-    }
-
-    spans.push(Span::raw("  "));
-    append_mux_agent_labels(&mut spans, mux, theme, width);
-
-    if width <= text::spans_width(&spans) + 4 {
-        return text::fit_spans(spans, width);
-    }
-
-    spans.push(Span::raw("  "));
-    spans.push(age_span(
-        mux.recency.as_deref(),
-        mux.activity_epoch,
-        now,
-        theme,
-    ));
-
-    spans.push(Span::raw("  "));
-    if let Some(glyph) = handoff_spinner {
-        spans.push(span!(Style::default().fg(theme.inert); "{glyph}"));
-    } else {
-        match mux.client_attached {
-            Some(true) => {
-                spans.push(span!(Style::default().fg(theme.mux_attached()); "{}", state::LINKED));
-            }
-            Some(false) => {
-                spans.push(span!(theme.muted; "{}", state::UNLINKED));
-            }
-            None => {
-                spans.push(span!(theme.muted; "{}", state::UNKNOWN));
-            }
-        }
-    }
-
-    append_mux_single_session_preview(&mut spans, mux, theme, width);
-    text::fit_spans(spans, width)
-}
-
-pub(super) fn append_mux_agent_labels(
-    spans: &mut Vec<Span<'static>>,
-    mux: &MuxSessionRow,
-    theme: &Theme,
-    width: usize,
-) {
-    use crate::tui::widgets::badge::{command_badge, harness_badge, no_agent_chip};
-
-    if mux.agent_labels.is_empty() {
-        // A pane running a harness whose session isn't attributed to this
-        // mux still gets that harness's badge and color; other programs
-        // get the neutral program chip.
-        match (&mux.program_harness, &mux.program) {
-            (Some(harness), _) => spans.push(harness_badge(harness, theme)),
-            (None, Some(program)) => spans.push(command_badge(program, theme)),
-            (None, None) => spans.push(no_agent_chip(theme)),
-        }
-        return;
-    }
-
-    let max_labels = if width >= 76 { 2 } else { 1 };
-    for (index, label) in mux.agent_labels.iter().take(max_labels).enumerate() {
-        if index > 0 {
-            spans.push(Span::raw(" "));
-        }
-        spans.push(harness_badge(label, theme));
-    }
-
-    let hidden_labels = mux.agent_labels.len().saturating_sub(max_labels);
-    if hidden_labels > 0 {
-        spans.push(span!(
-            Style::default().fg(theme.inert);
-            " +{hidden_labels}"
-        ));
-    }
-}
-
-pub(super) fn mux_label_column_width(width: usize) -> usize {
-    match width {
-        0..=38 => width.saturating_sub(14).clamp(10, 18),
-        39..=72 => 20,
-        73..=104 => 24,
-        _ => 30,
-    }
-}
-
-pub(super) fn append_mux_single_session_preview(
-    spans: &mut Vec<Span<'static>>,
-    mux: &MuxSessionRow,
-    theme: &Theme,
-    width: usize,
-) {
-    if let Some(hit) = &mux.content_hit {
-        append_content_hit(spans, hit, width, theme);
-        return;
-    }
-    let Some(preview) = mux
-        .single_session_preview
-        .as_deref()
-        .filter(|p| !p.is_empty())
-    else {
-        return;
-    };
-    let used = text::spans_width(spans);
-    if width <= used + 8 {
-        return;
-    }
-    spans.push(Span::raw("  "));
-    spans.push(span!(
-        Style::default().fg(theme.inert).add_modifier(Modifier::ITALIC);
-        "{}",
-        text::truncate_end(preview, width - used - 2)
-    ));
 }
 
 /// What a content search found in a row's session, in the slot a

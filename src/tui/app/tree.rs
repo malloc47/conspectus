@@ -88,15 +88,18 @@ impl App {
 
     /// What the left pane's tree needs to know about `row` that only the
     /// snapshot and the hand-off can say: whether it stands for an entity
-    /// that is gone or unknown (a non-mixed row wears the ghost look; a
-    /// mixed row dims its own cells by its tone), whether it still shows
-    /// the values from before the hand-off (ADR 0108), and the pin marker
-    /// the Sessions, Mux, PRs, and Search views put on a pinned entity's
-    /// row (the Pinned and History rows carry theirs).
+    /// that is gone or unknown (a row of the Sessions, Mux, PRs, or Search
+    /// view, a stopped mux included, wears the ghost look whole; a Pinned
+    /// or History row dims its own cells by its tone, keeping its kind
+    /// glyph's color), whether it still shows the values from before the
+    /// hand-off (ADR 0108), and the pin marker the Sessions, Mux, PRs, and
+    /// Search views put on a pinned entity's row (the Pinned and History
+    /// rows carry theirs).
     pub(crate) fn tree_row_state(&self, row: &Row) -> RowState {
         let node = crate::tui::rows::row_node(&row.id);
         let lookup = self.handle.as_ref().zip(node);
-        let ghost = !matches!(row.kind, RowKind::Mixed(_))
+        let dims_itself = matches!(&row.kind, RowKind::Mixed(mixed) if mixed.state.is_none());
+        let ghost = !dims_itself
             && lookup.is_some_and(|(handle, node)| handle.snapshot().presence(node).is_some());
         let native = matches!(
             self.active_view,

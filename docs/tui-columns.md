@@ -216,24 +216,27 @@ Sorting by recency uses these same times.
 
 ## When a row is too narrow
 
-Group headers and session rows lay their cells out by one rule, in
-every view that lists them. A row's room is the pane's width less the
-row's indent.
+Group headers, session rows, and mux rows (running and stopped) lay
+their cells out by one rule, in every view that lists them. A row's room
+is the pane's width less the row's indent.
 
 1. The cells that line up down the tree (the prefix; a session's key,
-   chip, age, and state; a header's label, path, count, and warning)
+   chip, age, and state; a mux's name, chips, age, and state; a header's
+   label, path, count, and warning)
    keep the widths they have on every row: a padded column is as wide as
    its widest cell in the whole tree, folded groups included. When they
    do not fit, they give way in a fixed order, the same on every row
    at that width, so the columns that stay keep their places.
 2. What follows them on a row (a session's label, `was in` note,
-   project, hit count, and preview or snippet) takes the cells that row
-   has left, and gives way in its own order, row by row.
+   project, hit count, and preview or snippet; a mux's hit count and
+   preview, snippet, or directory) takes the cells that row has left,
+   and gives way in its own order, row by row.
 3. A cell that gives way narrows, cut with `…`, or leaves the row with
-   the gap before it. A cell narrows to no fewer than 8 cells (unless
-   its whole text is shorter); one that would need fewer leaves. A
-   preview or snippet shows only when it gets at least 7 cells, or its
-   whole text.
+   the gap before it. A label, path, or project narrows to no fewer than
+   8 cells (unless its whole text is shorter) and leaves after that; a
+   mux name narrows to 10 cells and stays. A preview, snippet, or stopped
+   mux's directory shows only when it gets at least 7 cells, or its whole
+   text.
 4. A row that still does not fit is cut at the pane's edge with `…`. No
    cell is cut without a mark, and no column moves on one row but not
    another.
@@ -243,6 +246,8 @@ row's indent.
 | Group header | the path or members (narrowing first) | the label, the count, the warning |
 | Session row, cells that line up | the key, the chip, the age | the state glyph |
 | Session row, the rest | the preview or snippet, the `was in` note, the project (narrowing first), the hit count, the label (narrowing first) | |
+| Mux row, cells that line up | the chips narrow to one chip and `+N`, the name narrows, the age, the chips | the name, the state glyph |
+| Mux row, the rest | the preview, snippet, or directory, the hit count | |
 
 ## Sessions view
 
@@ -354,16 +359,16 @@ sessions are listed beneath a mux.
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
 | 1 | Prefix | indent, disclosure (only with more than one agent attached), `▣`, pin marker | always | |
-| 2 | Name | the mux name without its backend prefix | always | blue; padded to a column of 10 to 30 cells depending on the pane width; long names keep their start and end |
-| 3 | Chip | up to two harness chips (one if narrow) with `+N` for more; else the pane's harness; else a program chip; else ` no agent ` | always | 10 cells each |
+| 2 | Name | the mux name without its backend prefix | always | blue; a column of 18 cells, 20 once the row leaves it 39 cells, 24 from 73, and 30 from 105; long names keep their start and end |
+| 3 | Chip | its agents' harness chips, as many as fit in a column of at most two, with `+N` for the rest; else the pane's harness; else a program chip; else ` no agent ` | always | 10 cells each; the column is as wide as the widest row's chips, so the age lines up |
 | 4 | Age | the mux's own last activity | always | 4 cells |
 | 5 | State | `⊸` a client is attached, `∘` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
-| 6 | Preview | last message of the one agent | only with exactly one visible agent and room left | dim italic |
+| 6 | Preview | last message of the one agent | only with exactly one visible agent, and at least 7 cells for it | dim italic |
 
 ### Stopped mux row
 
-A stopped mux that the view lists uses the same columns, so it lines up
-with the running ones, drawn as a ghost.
+A stopped mux that the view lists is drawn in the same columns, so it
+lines up with the running ones, and as a ghost, its `▣` included.
 
 | # | Cell | Source | Condition |
 |---|---|---|---|
@@ -372,7 +377,7 @@ with the running ones, drawn as a ghost.
 | 3 | Chip | the harness it last ran, dimmed; else ` no agent ` | always |
 | 4 | Age | time since it was last seen running | always |
 | 5 | State | `⊘` stopped, `?` unknown | always |
-| 6 | Content | the directory it ran in | when room remains |
+| 6 | Content | the directory it ran in | when it gets at least 7 cells |
 
 <!-- frame: keys="2" width=170 height=30 -->
 ```text

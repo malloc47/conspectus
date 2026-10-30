@@ -20,9 +20,9 @@ use crate::model::{
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone,
-    MuxSessionRow, PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, harness_label,
-    mux_process_harnesses, mux_program, mux_program_harness, shorten_home,
+    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedRow, MixedTone, MuxSessionRow,
+    PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, harness_label, mux_process_harnesses,
+    mux_program, mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -743,7 +743,6 @@ fn collect_ghosts(
                 primary_node: id.clone(),
                 pr_status: None,
                 marker: PinMarker::None,
-                grid: MixedGrid::Mux,
             };
             Some(MuxGroup {
                 parent_row: MuxSessionRow {

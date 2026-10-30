@@ -16,8 +16,10 @@ use tuikit::columns::{Cell, Cells, Column, ColumnSchema};
 use tuikit::tree::{self, RowColumns, RowCtx, RowMark};
 
 use super::*;
-use crate::tui::rows::{MixedRow, PinMarker, Row};
-use crate::tui::widgets::badge::{harness_badge, hits_chip, was_in_chip};
+use crate::tui::rows::{EntityState, MixedRow, PinMarker, Row};
+use crate::tui::widgets::badge::{
+    command_badge, harness_badge, hits_chip, no_agent_chip, was_in_chip,
+};
 
 /// The key of a left-pane column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +62,19 @@ pub(super) enum Col {
     Hits,
     /// A session's last message or best snippet.
     Preview,
+    /// A mux's name.
+    MuxName,
+    /// The chips of a mux's agents, its program, or `no agent`.
+    MuxChips,
+    /// A mux's age.
+    MuxAge,
+    /// A mux's client glyph, or a stopped mux's state.
+    MuxState,
+    /// The `N hits` note on a mux whose agent a content search matched.
+    MuxHits,
+    /// A mux's one agent's last message or best snippet, or a stopped
+    /// mux's directory.
+    MuxContent,
     /// A Pinned or History row's label, measured for its own layout.
     MixedLabel,
     /// A Pinned or History row's status word, measured for its own layout.
@@ -79,6 +94,11 @@ const PROJECT_CELLS: usize = 16;
 const LABEL_FLOOR: usize = 8;
 /// The fewest cells a header's path narrows to before it leaves.
 const DETAIL_FLOOR: usize = 8;
+/// The mux name column, by the cells left for it and the columns after
+/// it: a wider pane gives names more room.
+const MUX_NAME_STEPS: &[(usize, usize)] = &[(105, 30), (73, 24), (39, 20), (0, 18)];
+/// The fewest cells a mux name narrows to.
+const MUX_NAME_FLOOR: usize = 10;
 /// The widest label a Pinned or History row shows.
 pub(super) const MIXED_LABEL_CELLS: usize = 28;
 /// The widest status word a Pinned or History row shows.
@@ -102,6 +122,8 @@ fn prefix(glyph: Option<Col>, marker: Col) -> Vec<Column<Col>> {
 pub(super) struct Schemas {
     header: ColumnSchema<Col>,
     session: ColumnSchema<Col>,
+    /// A mux row, running or stopped.
+    mux: ColumnSchema<Col>,
     /// The prefix alone, for a row whose body is drawn on its own.
     entity: ColumnSchema<Col>,
     /// The prefix alone for a row with no kind glyph (a matching turn,
@@ -142,9 +164,27 @@ impl Schemas {
             Column::hug(Col::Hits, usize::MAX).drops(3),
             Column::fill(Col::Preview).drops(0),
         ]);
+        // A mux's chips are up to two of its agents' and a count of the
+        // rest. When the row is narrow they narrow first (to one chip and
+        // the count), then the name narrows, then the age leaves, then
+        // the chips.
+        let chip = chip::width(theme);
+        let more = text::width(" +9");
+        let mut mux = prefix(Some(Col::Glyph), Col::Marker);
+        mux.extend([
+            Column::steps(Col::MuxName, MUX_NAME_STEPS).shrinks(2, MUX_NAME_FLOOR),
+            Column::cap(Col::MuxChips, 2 * chip + 1 + more)
+                .shrinks(1, chip + more)
+                .drops(4),
+            Column::fixed(Col::MuxAge, tuikit::age::CELL_WIDTH).drops(3),
+            Column::fixed(Col::MuxState, 1),
+            Column::hug(Col::MuxHits, usize::MAX).drops(1),
+            Column::fill(Col::MuxContent).drops(0),
+        ]);
         Self {
             header: ColumnSchema::new(header),
             session: ColumnSchema::new(session),
+            mux: ColumnSchema::new(mux),
             entity: ColumnSchema::new(prefix(Some(Col::Glyph), Col::Marker)),
             unglyphed: ColumnSchema::new(prefix(None, Col::Marker)),
             mixed: ColumnSchema::new(prefix(Some(Col::Glyph), Col::MixedMarker)),
@@ -171,11 +211,11 @@ impl RowColumns<Row> for LeftColumns<'_> {
         match &row.kind {
             RowKind::Group(_) => &self.schemas.header,
             RowKind::AgentSession(_) => &self.schemas.session,
-            RowKind::Mixed(mixed) if mixed.state.is_none() => &self.schemas.mixed,
+            RowKind::MuxSession(_) => &self.schemas.mux,
+            RowKind::Mixed(mixed) if stopped_mux(mixed) => &self.schemas.mux,
+            RowKind::Mixed(_) => &self.schemas.mixed,
             RowKind::Hit(_) | RowKind::PaneHit(_) => &self.schemas.unglyphed,
-            RowKind::MuxSession(_) | RowKind::Mixed(_) | RowKind::Pr(_) | RowKind::Pane(_) => {
-                &self.schemas.entity
-            }
+            RowKind::Pr(_) | RowKind::Pane(_) => &self.schemas.entity,
         }
     }
 
@@ -202,7 +242,17 @@ impl RowColumns<Row> for LeftColumns<'_> {
                 cells.push((Col::Marker, marker_cell(cx.mark, theme)));
                 cells.extend(self.session_cells(session, cx.pending));
             }
-            RowKind::Mixed(mixed) if mixed.state.is_none() => {
+            RowKind::MuxSession(mux) => {
+                cells.push((Col::Glyph, glyph_cell(NodeKind::MuxSession, theme)));
+                cells.push((Col::Marker, marker_cell(cx.mark, theme)));
+                cells.extend(self.mux_cells(mux, cx.pending));
+            }
+            RowKind::Mixed(mixed) if stopped_mux(mixed) => {
+                cells.push((Col::Glyph, glyph_cell(NodeKind::MuxSession, theme)));
+                cells.push((Col::Marker, marker_cell(cx.mark, theme)));
+                cells.extend(self.stopped_mux_cells(mixed, cx.pending));
+            }
+            RowKind::Mixed(mixed) => {
                 cells.push((
                     Col::Glyph,
                     Cell::spans(vec![mixed_glyph_span(mixed, theme)]),
@@ -345,6 +395,135 @@ impl LeftColumns<'_> {
         }
         cells
     }
+}
+
+impl LeftColumns<'_> {
+    /// A mux row's cells after its prefix: the name, the chips of its
+    /// agents (or of the harness or program its pane runs, or `no
+    /// agent`), its own age, whether a client is attached (a spinner while
+    /// the row awaits the hand-off), and its one agent's last message or
+    /// what a content search found in it.
+    fn mux_cells(&self, mux: &MuxSessionRow, pending: bool) -> Cells<Col> {
+        let theme = self.theme;
+        let chips = if mux.agent_labels.is_empty() {
+            let chip = match (&mux.program_harness, &mux.program) {
+                (Some(harness), _) => harness_badge(harness, theme),
+                (None, Some(program)) => command_badge(program, theme),
+                (None, None) => no_agent_chip(theme),
+            };
+            vec![chip]
+        } else {
+            mux.agent_labels
+                .iter()
+                .map(|label| harness_badge(label, theme))
+                .collect()
+        };
+        let state = self.state_cell(pending, || match mux.client_attached {
+            Some(true) => (state::LINKED, Style::default().fg(theme.mux_attached())),
+            Some(false) => (state::UNLINKED, Style::default().add_modifier(theme.muted)),
+            None => (state::UNKNOWN, Style::default().add_modifier(theme.muted)),
+        });
+        let mut cells = vec![
+            (
+                Col::MuxName,
+                Cell::text(
+                    compact_mux_native_id(&mux.native_id),
+                    Style::default().fg(theme.link),
+                ),
+            ),
+            (
+                Col::MuxChips,
+                Cell::chips(chips, Style::default().fg(theme.inert)),
+            ),
+            (
+                Col::MuxAge,
+                age_cell(mux.recency.as_deref(), mux.activity_epoch, self.now),
+            ),
+            (Col::MuxState, state),
+        ];
+        match &mux.content_hit {
+            Some(hit) => {
+                cells.push((Col::MuxHits, Cell::chip(hits_chip(hit.count, theme))));
+                cells.push((
+                    Col::MuxContent,
+                    snippet_cell(&hit.snippet, &hit.highlight, theme),
+                ));
+            }
+            None => {
+                if let Some(preview) = mux
+                    .single_session_preview
+                    .as_deref()
+                    .filter(|preview| !preview.is_empty())
+                {
+                    cells.push((Col::MuxContent, preview_cell(preview, theme)));
+                }
+            }
+        }
+        cells
+    }
+
+    /// A row's state cell: the glyph and style `glyph` gives, or the
+    /// hand-off's spinner frame while the row awaits the refresh that
+    /// follows it (ADR 0108), since its old state may no longer hold.
+    fn state_cell(&self, pending: bool, glyph: impl FnOnce() -> (&'static str, Style)) -> Cell {
+        let spinner = self.spinner.filter(|_| pending);
+        spinner.map_or_else(
+            || {
+                let (glyph, style) = glyph();
+                Cell::text(glyph, style)
+            },
+            |frame| Cell::text(frame, Style::default().fg(self.theme.inert)),
+        )
+    }
+
+    /// A stopped mux's cells, in the running ones' columns: the name, the
+    /// harness it last ran (or `no agent`), the time since it was last
+    /// seen running, its state glyph (a spinner while the row awaits the
+    /// hand-off), and the directory it ran in. The tree draws the row as a
+    /// ghost.
+    fn stopped_mux_cells(&self, mixed: &MixedRow, pending: bool) -> Cells<Col> {
+        let theme = self.theme;
+        let chip = mixed
+            .chip
+            .as_ref()
+            .map_or_else(|| no_agent_chip(theme), |chip| mixed_chip_span(chip, theme));
+        let state = self.state_cell(pending, || match mixed.state {
+            Some(EntityState::Stopped) => (state::STOPPED, ghost_style(theme)),
+            Some(EntityState::Linked) => (state::LINKED, Style::default().fg(theme.mux_attached())),
+            Some(EntityState::Unlinked) => {
+                (state::UNLINKED, Style::default().add_modifier(theme.muted))
+            }
+            Some(EntityState::Unknown) | None => {
+                (state::UNKNOWN, Style::default().add_modifier(theme.muted))
+            }
+        });
+        vec![
+            (
+                Col::MuxName,
+                Cell::text(&mixed.label, Style::default().fg(theme.link)),
+            ),
+            (
+                Col::MuxChips,
+                Cell::chips(vec![chip], Style::default().fg(theme.inert)),
+            ),
+            (
+                Col::MuxAge,
+                age_cell(mixed.age.as_deref(), mixed.age_epoch, self.now),
+            ),
+            (Col::MuxState, state),
+            (
+                Col::MuxContent,
+                Cell::text(&mixed.content, Style::default().fg(theme.inert)),
+            ),
+        ]
+    }
+}
+
+/// Whether a mixed-kind row is a stopped mux in the Mux view: a row that
+/// shows its state as a glyph, as a view of one kind of entity does, is
+/// drawn in that entity's columns.
+pub(super) fn stopped_mux(mixed: &MixedRow) -> bool {
+    mixed.state.is_some() && mixed.node_kind == NodeKind::MuxSession
 }
 
 /// The pin marker cell: the filled pin glyph for a pin on a running
