@@ -11,7 +11,7 @@ use crate::viewer::search::{ContentKinds, Grouping as ContentGroup};
 
 /// A finished search over `found`, switched to the flat listing, with
 /// the turns of each session delivered as `details`.
-fn flat(
+pub(super) fn flat(
     found: &[(&AgentSessionId, crate::viewer::search::SessionHits)],
     details: Vec<(&AgentSessionId, Vec<crate::viewer::search::Hit>)>,
 ) -> App {

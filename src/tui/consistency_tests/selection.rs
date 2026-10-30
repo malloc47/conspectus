@@ -1,5 +1,7 @@
-//! Every list shows its cursor row one way (house rules 1, 2, and 10):
-//! the pointer mark in the 2-cell gutter just inside the frame, the row
+//! Every list shows its cursor row one way (house rules 1, 2, and 10),
+//! the left pane's tree included: the pointer mark in the 2-cell gutter
+//! just inside the frame, on one row, with nothing after it moving as the
+//! cursor does, the row
 //! highlighted from the theme's selection pair, active while the list
 //! has focus and inactive while it does not, and short choice lists
 //! wrapping at their ends. The marker alone tells the cursor row apart,
@@ -17,6 +19,7 @@ use super::glyphs::sources;
 use super::layout::{Open, app_with, builders, modal_rect, press};
 use super::source_tree::{self, Tree};
 use super::*;
+use crate::tui::app::Focus;
 use tuikit::testkit::source::{Literal, production_code, string_literals};
 
 /// Modals that list rows a cursor moves over.
@@ -208,6 +211,182 @@ fn the_unfocused_explorer_keeps_its_cursor_row_in_the_inactive_pair() {
             .modifier
             .contains(theme.selection_active)
     );
+}
+
+/// Every view's tree with rows to list (the Search view's Sessions and
+/// Messages listings after a finished search, History with the records
+/// pins point at) and every group open, the cursor on its first row.
+fn tree_apps() -> Vec<(View, App)> {
+    use super::search_view::{hit, summary, two};
+    let mut apps: Vec<(View, App)> = [View::Sessions, View::Mux, View::Prs, View::Pinned]
+        .into_iter()
+        .map(|view| (view, app_in(view)))
+        .collect();
+    apps.push((View::History, app_listing_all(View::History)));
+    let (a, b) = two();
+    let found = [(&a, summary(2, 4, 1_000)), (&b, summary(1, 0, 900))];
+    apps.push((View::Search, super::search_view::searched(&found)));
+    let turns = vec![
+        (&a, vec![hit(4, Some(1_000)), hit(10, Some(950))]),
+        (&b, vec![hit(0, Some(900))]),
+    ];
+    apps.push((View::Search, super::search_flat::flat(&found, turns)));
+    for (_, app) in &mut apps {
+        let ids: Vec<RowId> = app
+            .tree()
+            .rows
+            .iter()
+            .filter(|row| row.expandable)
+            .map(|row| row.id.clone())
+            .collect();
+        for id in ids {
+            app.set_selection(id);
+            app.update(Msg::ExpandRow);
+        }
+        app.update(Msg::Home);
+    }
+    apps
+}
+
+/// Tall enough that the tree shows every row with no scrollbar.
+const TREE_SIZE: (u16, u16) = (160, 60);
+
+/// The left pane's frame: the bordered pane whose title is the tab strip.
+fn tree_rect(buf: &Buffer) -> (u16, u16, u16, u16) {
+    let area = buf.area;
+    let y0 = (0..area.height)
+        .find(|&y| {
+            buf[(0, y)].symbol() == "┌"
+                && (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    .contains("sessions")
+        })
+        .expect("the left pane's title");
+    let x1 = (1..area.width)
+        .find(|&x| buf[(x, y0)].symbol() == "┐")
+        .expect("a corner");
+    let y1 = (y0 + 1..area.height)
+        .find(|&y| buf[(0, y)].symbol() == "└")
+        .expect("a corner");
+    (0, y0, x1, y1)
+}
+
+/// The tree's cursor row, its text after the gutter on every row, and
+/// whether each cell of the cursor row from the gutter to its last
+/// character carries `modifier` (or a fill of its own, a chip).
+struct TreeFrame {
+    marked: Vec<u16>,
+    after_gutter: Vec<String>,
+    highlighted: bool,
+    reversed_elsewhere: Vec<u16>,
+}
+
+fn tree_frame(app: &mut App, modifier: Modifier) -> TreeFrame {
+    let buf = buffer_of(app, TREE_SIZE.0, TREE_SIZE.1);
+    let rect = tree_rect(&buf);
+    let (x0, y0, x1, y1) = rect;
+    let marked = marked_rows(&buf, rect);
+    let after_gutter = (y0 + 1..y1)
+        .map(|y| (x0 + 3..x1).map(|x| buf[(x, y)].symbol()).collect())
+        .collect();
+    let highlighted = marked.first().is_some_and(|&y| {
+        buf[(x0 + 2, y)].symbol() == " "
+            && (x0 + 1..=last_text_column(&buf, rect, y)).all(|x| {
+                let cell = &buf[(x, y)];
+                cell.modifier.contains(modifier) || cell.bg != Color::Reset
+            })
+    });
+    let reversed_elsewhere = (y0 + 1..y1)
+        .filter(|y| !marked.contains(y))
+        .filter(|&y| (x0 + 1..x0 + 3).any(|x| buf[(x, y)].modifier.contains(Modifier::REVERSED)))
+        .collect();
+    TreeFrame {
+        marked,
+        after_gutter,
+        highlighted,
+        reversed_elsewhere,
+    }
+}
+
+#[test]
+fn the_tree_marks_one_cursor_row_in_its_gutter_and_highlights_it_in_every_view() {
+    let theme = crate::tui::Theme::default();
+    for (view, mut app) in tree_apps() {
+        let rows = app.visible_rows().len();
+        assert!(rows > 1, "{view:?}: the tree lists rows");
+        for step in 0..rows {
+            for focused in [true, false] {
+                if focused != (app.focus() == Focus::Left) {
+                    app.update(Msg::CycleFocus);
+                }
+                let modifier = if focused {
+                    theme.selection_active
+                } else {
+                    theme.selection_inactive
+                };
+                let frame = tree_frame(&mut app, modifier);
+                assert_eq!(
+                    frame.marked.len(),
+                    1,
+                    "{view:?} row {step}, focused {focused}: one cursor row, got {:?}",
+                    frame.marked
+                );
+                assert!(
+                    frame.highlighted,
+                    "{view:?} row {step}, focused {focused}: the marked row is highlighted"
+                );
+                assert!(
+                    frame.reversed_elsewhere.is_empty(),
+                    "{view:?} row {step}: rows {:?} are highlighted too",
+                    frame.reversed_elsewhere
+                );
+            }
+            if app.focus() != Focus::Left {
+                app.update(Msg::CycleFocus);
+            }
+            app.update(Msg::NavDown);
+        }
+    }
+}
+
+#[test]
+fn no_column_of_the_tree_moves_when_its_cursor_does() {
+    for (view, mut app) in tree_apps() {
+        let rows = app.visible_rows().len();
+        let first = tree_frame(&mut app, Modifier::empty());
+        let mut cursor_rows = vec![first.marked.clone()];
+        for _ in 1..rows {
+            app.update(Msg::NavDown);
+            let frame = tree_frame(&mut app, Modifier::empty());
+            assert_eq!(
+                frame.after_gutter, first.after_gutter,
+                "{view:?}: the text after the gutter moved with the cursor"
+            );
+            cursor_rows.push(frame.marked);
+        }
+        let mut seen: Vec<u16> = cursor_rows.into_iter().flatten().collect();
+        seen.dedup();
+        assert_eq!(seen.len(), rows, "{view:?}: the marker walked every row");
+    }
+}
+
+#[test]
+fn without_selection_modifiers_the_marker_alone_shows_the_trees_cursor_row() {
+    for (view, mut app) in tree_apps() {
+        app.update(Msg::NavDown);
+        let with_pair = tree_frame(&mut app, Modifier::empty()).marked;
+        let theme = &mut app.config_mut().theme;
+        theme.selection_active = Modifier::empty();
+        theme.selection_inactive = Modifier::empty();
+        let without = tree_frame(&mut app, Modifier::empty());
+        assert_eq!(with_pair.len(), 1, "{view:?}: {with_pair:?}");
+        assert_eq!(
+            without.marked, with_pair,
+            "{view:?}: the marker does not need the pair"
+        );
+        assert!(without.reversed_elsewhere.is_empty(), "{view:?}");
+    }
 }
 
 /// A reviewed use of the reversed modifier that draws no list cursor.
