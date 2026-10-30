@@ -253,6 +253,10 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   too narrow for both of its keys now shows `Esc cancel`. Quick select's
   and content search's `Esc close` moved to the end of their footers, and
   Controls' footer starts with `changes apply as you make them`.
+- **Short lists keep their last column.** A menu, pane, or reader too
+  short for a scrollbar (fewer than five rows, such as a menu's entries on
+  a 40x10 screen) no longer leaves a blank column where the bar would go;
+  its rows take the column back.
 - **A menu recedes under its own questions.** While the worktree menu's
   branch prompt or one of its dialogs is open, the menu's cursor row takes
   the inactive selection look (bold, its `►` kept), as Controls' does under

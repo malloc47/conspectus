@@ -1131,8 +1131,8 @@ the cell measure and the end cut; their column allocation stays their own.
 Scrolling is the fourth (ADR 0156): the framework's `scroll` module steps a
 cursor (short choice lists wrap, scrollable content clamps), follows it with
 minimal motion, keeps a window that never scrolls past its content, carves the
-scrollbar gutter only when rows overflow, and counts wrapped rows from the rows
-drawn. A renderer works its window out from the App and the area it measured
+scrollbar gutter only when rows overflow and the body is tall enough for the
+bar to draw (five rows), and counts wrapped rows from the rows drawn. A renderer works its window out from the App and the area it measured
 and returns it; `ui::draw` hands the frame's windows back in a
 `ViewportReport` that the App keeps, so no draw sends a message.
 

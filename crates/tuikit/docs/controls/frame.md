@@ -240,7 +240,7 @@ assert_eq!(chip_end(&preview, "Preview"), width - SectionRule::CLOSING);
 | `Lines::new(lines)`, `following(rows)` | a body of lines laid out ahead, scrolled to keep `rows` in view | one row per line; returns the window it showed |
 | `ModalFooter::new(footer, &theme)`, `.status(line)` | a modal's footer, and the line kept above its keys | the keys of a `keys::Footer` (a modal takes its table's from `Footer::leaving_last`); the status line is a form's error line or a reader's find prompt, in its own style |
 | `.keys(width)`, `.height(width)` | the key rows in the footer's look; the rows the footer asks for | broken only between segments; the height counts the blank row and the status line |
-| `.fit(width, room)`, `.fit_beside(area, keep, body_rows)` | the footer fitted to the rows the body leaves | a `FooterFit`; `fit_beside` leaves the body `keep` rows and lays everything out a cell narrower when the body overflows beside a scrollbar |
+| `.fit(width, room)`, `.fit_beside(area, keep, body_rows)` | the footer fitted to the rows the body leaves | a `FooterFit`; `fit_beside` leaves the body `keep` rows and lays everything out a cell narrower when the body overflows beside a scrollbar (`ScrollGutter::carves`: not on a body shorter than the bar's five rows) |
 | `.border(width)` | the footer as a bottom border shows it | its last key row, in the footer's look |
 | `FooterFit { kept, spill, width }`, `.split(area)`, `.render(area, buf)` | the rows on the frame's last rows, the rows that scroll after the body, the width they were laid out at | `split` gives the body's rows and the footer's; `render` draws the kept rows |
 | `ModalFooter::style(&theme)` | the footer's look | the theme's `muted`, no color |

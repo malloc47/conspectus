@@ -219,6 +219,3 @@ field), 17 (labels and details are the host's copy), and 18 (pagers).
 - **Mouse hit testing.** The frame's rect is the compact size's for the
   rows measured, and each item is one row of the window, which a click
   would be tested against.
-- **The scrollbar on short screens.** On a screen whose items get fewer
-  than five rows the bar's column is kept and no bar is drawn, as in
-  menus; the gutter could skip such a column for every scrolled body.

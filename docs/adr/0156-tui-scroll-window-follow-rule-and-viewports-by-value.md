@@ -19,7 +19,12 @@ viewer is one. Amended by
 [ADR 0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md):
 the tree's window is kept in the framework's `TreeState`, which
 `TreeView` draws from and returns it to, and page keys move by it
-without carrying a height.
+without carrying a height. Decision 5 refined: the gutter is carved only
+where the bar can draw, a body at least five rows tall
+(`ScrollGutter::MIN_HEIGHT`: the two margin rows, the two arrows, and a
+cell of track), so a shorter body keeps its column, and
+`ScrollGutter::carves` is the one rule the layout, the wrapped rows, and
+a footer beside the bar share; carried out by CSP-779.
 
 ## Context
 

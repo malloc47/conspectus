@@ -126,7 +126,8 @@ assert_eq!(pager.visible(), 24..30);
 | `scroll_by`, `page_down`, `page_up`, `to_top`, `to_bottom` | scroll a window with no cursor | each clamps |
 | `offset`, `viewport`, `content`, `last_offset`, `visible`, `overflows`, `page` | read the window | `page` is at least 1 |
 | `paragraph_scroll()` | the offset as `Paragraph::scroll` takes it | saturates at `u16::MAX` |
-| `ScrollGutter::layout(area, rows)` | the content area and, on overflow, the gutter | fade on fit; no gutter below 2 columns |
+| `ScrollGutter::layout(area, rows)` | the content area and, on overflow, the gutter | fade on fit; no gutter below 2 columns or `MIN_HEIGHT` (5) rows |
+| `ScrollGutter::carves(width, height, rows)`, `MIN_HEIGHT` | whether a body gives its right column to the bar | the rule `layout`, `WrappedRows::fit`, and a footer beside the bar share |
 | `ScrollGutter::render(&window, buf)` | draws the bar | nothing when there is no gutter or the window fits |
 | `WrappedRows::new(lines, width)`, `fit(lines, width, height)` | lines wrapped by `text::wrap_line`, with each line's rows | `fit` narrows by the gutter's column on overflow |
 | `WrappedRows::hanging(lines, width, indent)`, `cut(lines, width)` | lines wrapped under a hanging indent (a gutter such as line numbers), or one row each cut with `…` | `rows_of(line)` and `line_of(row)` map lines and rows both ways, for a pager's content |
@@ -184,6 +185,16 @@ last offset, its length is the window's share of the content, and the
 bar removes the reversed modifier from its cells so a selection
 highlight painted there earlier does not show through.
 
+The gutter is carved only where the bar can draw. The margins and the
+bar's two arrows take four rows, so a body shorter than
+`ScrollGutter::MIN_HEIGHT` (five rows, the first with a cell of track
+for the thumb) keeps every column even when its rows overflow, as a
+body narrower than two columns does. `ScrollGutter::carves(width,
+height, rows)` is the one rule: `layout` follows it, `WrappedRows::fit`
+narrows by it, and a footer laid out beside the bar
+(`ModalFooter::fit_beside`) asks it, so a short menu, pane, or reader
+never gives up a column for a bar it cannot show.
+
 ### Wrapped rows
 
 A body that wraps must know its row count before it draws, for the
@@ -191,8 +202,9 @@ window, the scrollbar's length, a height budget, and the span a wrapped
 cursor line takes. `WrappedRows` wraps with `text::wrap_line` and keeps
 the rows, so the surface draws exactly what it counted (a paragraph
 without its own wrap). `fit` wraps at the full width when the rows fit
-and one cell narrower when they overflow, which is the width
-`ScrollGutter::layout` then leaves. For one-cell text with words one
+and one cell narrower when they overflow beside a bar
+(`ScrollGutter::carves`), which is the width `ScrollGutter::layout` then
+leaves. For one-cell text with words one
 space apart the rows match what ratatui's paragraph wrap draws; where the
 text module's [wrapping rules](text.md#wrapping-rules) differ on purpose
 (no continuation row starts with a space, a wide character never runs

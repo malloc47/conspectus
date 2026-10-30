@@ -136,9 +136,10 @@ was still its own widget:
   keys, footer, cursor, confirmation, or scrolling.
 - The conformance suite holds the framework's menu and every host menu to
   the conventions, and the worktree menu's footer is now checked.
-- On a screen whose entries get fewer than five rows the scrollbar's
-  column is kept but no bar is drawn (the shared gutter's track keeps a
-  row clear above and below); the control page records the seam.
+- On a screen whose entries get fewer than five rows no scrollbar can
+  draw (the shared gutter's track keeps a row clear above and below),
+  so the entries keep its column: the gutter is carved only where the
+  bar can draw (ADR 0156 decision 5, as refined by CSP-779).
 
 ## Alternatives Considered
 

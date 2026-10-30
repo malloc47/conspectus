@@ -194,9 +194,10 @@ it. Entries that overflow give their last column to the shared scrollbar
 (`ScrollGutter`) and are laid out again one cell narrower, and so is the
 footer. The bar's track
 keeps a row clear above and below it, so on a screen where the entries
-have fewer than five rows (a 40x10 screen gives them four) the column is
-kept but no bar is drawn. `ActionMenu::window` is the window of the last
-draw.
+have fewer than five rows (a 40x10 screen gives them four) no bar can
+draw and the entries and the footer keep the column
+(`ScrollGutter::MIN_HEIGHT`). `ActionMenu::window` is the window of the
+last draw.
 
 ### Confirming inline
 
@@ -310,6 +311,3 @@ and details are the host's copy), and 18 (pagers).
   inactive; covered by an overlay opened on its own (not a step of it) it
   keeps the active look. A stack that told every lower entry it lost focus
   would let it recede there too.
-- **The scrollbar on short screens.** On a screen whose entries get fewer
-  than five rows the bar's column is kept and no bar is drawn; the
-  gutter could skip such a column for every scrolled body at once.
