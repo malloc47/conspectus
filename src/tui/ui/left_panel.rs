@@ -10,7 +10,7 @@
 //! [`LeftRows::line`] is the producer. What only the snapshot and the
 //! hand-off can say about a row (ghost, pending, pin marker) is worked
 //! out by the App before the frame, so laying a row out looks nothing
-//! up. The PR, Pinned, History, and Search hit and pane rows still draw
+//! up. The Pinned, History, and Search hit and pane rows still draw
 //! their own cells after the prefix the framework lays out.
 
 mod columns;
@@ -83,12 +83,10 @@ impl<'a> LeftColumns<'a> {
 }
 
 /// The left pane's rows laid out for one frame: every row measured once
-/// by the framework, and the PR column widths the PR rows still work out
-/// themselves.
+/// by the framework.
 struct LeftRows<'a> {
     columns: &'a LeftColumns<'a>,
     tree: TreeColumns<'a, Row, LeftColumns<'a>>,
-    pr: PrAlign,
 }
 
 impl<'a> LeftRows<'a> {
@@ -99,7 +97,6 @@ impl<'a> LeftRows<'a> {
         Self {
             columns,
             tree: TreeColumns::new(columns, rows, app.tree_state(), states, app.theme()),
-            pr: PrAlign::of_tree(app.tree()),
         }
     }
 
@@ -117,13 +114,11 @@ impl<'a> LeftRows<'a> {
         // background refresh lands (ADR 0108).
         let spinner = spinner.filter(|_| cx.pending);
         match &row.kind {
-            RowKind::Group(_) | RowKind::AgentSession(_) | RowKind::MuxSession(_) => {
-                self.tree.line(row, cx)
-            }
+            RowKind::Group(_)
+            | RowKind::AgentSession(_)
+            | RowKind::MuxSession(_)
+            | RowKind::Pr(_) => self.tree.line(row, cx),
             RowKind::Mixed(mixed) if columns::stopped_mux(mixed) => self.tree.line(row, cx),
-            RowKind::Pr(pr) => self.tree.line_then(row, cx, |left| {
-                render_pr_spans(pr, theme, self.pr, left, now)
-            }),
             RowKind::Hit(hit) => self
                 .tree
                 .line_then(row, cx, |left| render_hit_spans(hit, theme, left, now)),
@@ -190,7 +185,6 @@ pub(super) fn lay_out(
     let left = LeftRows {
         columns: &columns,
         tree: TreeColumns::new(&columns, rows, &tree_state, &states, theme),
-        pr: PrAlign::of_tree(&tree),
     };
     rows.iter()
         .map(|row| {
@@ -225,7 +219,6 @@ pub(super) fn render_left_row(
     let left = LeftRows {
         columns: &columns,
         tree: TreeColumns::new(&columns, rows, &tree_state, &states, app.theme()),
-        pr: PrAlign::of_tree(app.tree()),
     };
     let cx = RowCtx {
         selected: is_selected,
@@ -571,35 +564,6 @@ pub(super) fn compute_group_summaries(
     out
 }
 
-/// Widest branch name a PR row shows before truncating it, so one long
-/// branch can't crowd out the title. The branch is content, not a
-/// column: only PRs with a local branch have one, so a column would sit
-/// mostly blank.
-const PR_BRANCH_MAX_WIDTH: usize = 24;
-
-/// Column widths for the PR rows of a tree, so the number column lines
-/// up across groups. Measured over the whole tree, not just the visible
-/// rows, so folding a group doesn't shift the column. The age and state
-/// cells have fixed widths, and the content (branch, then title) takes
-/// whatever width is left.
-#[derive(Clone, Copy, Default)]
-pub(super) struct PrAlign {
-    label: usize,
-}
-
-impl PrAlign {
-    pub(super) fn of_tree(tree: &crate::tui::rows::RowTree) -> Self {
-        let mut align = Self::default();
-        for row in &tree.rows {
-            let RowKind::Pr(pr) = &row.kind else {
-                continue;
-            };
-            align.label = align.label.max(text::width(pr.label.as_str()));
-        }
-        align
-    }
-}
-
 /// The pin marker cell of a row, the same in every view: the filled pin
 /// glyph for a pin on a running entity, and its hollow twin in the ghost
 /// color for a pin on one that is stopped, removed, missing, or not
@@ -907,57 +871,6 @@ pub(super) fn pr_tracking_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
     } else {
         span!(theme.muted; "{}", state::UNTRACKED)
     }
-}
-
-/// The body of a PR row after its kind glyph: number, local branch
-/// marker, age, state glyph (the same order as the Sessions and Mux rows
-/// put their age and state), then the content: the local branch, dim,
-/// and the title, gray. The number aligns to `align`; the content fills
-/// `budget`, the cells left in the row, and is cut with an ellipsis.
-pub(super) fn render_pr_spans(
-    pr: &PrRow,
-    theme: &Theme,
-    align: PrAlign,
-    budget: usize,
-    now: i64,
-) -> Vec<Span<'static>> {
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(span!(Modifier::BOLD; "{}", text::pad(&pr.label, align.label)));
-    spans.push(Span::raw(" "));
-    spans.push(pr_tracking_span(pr, theme));
-    spans.push(Span::raw("  "));
-    spans.push(age_span(
-        pr.updated_recency.as_deref(),
-        pr.updated_epoch,
-        now,
-        theme,
-    ));
-    spans.push(Span::raw("  "));
-    let (glyph, style) = pr.status().mark(theme);
-    spans.push(span!(style; "{glyph}"));
-    // The content: the local branch when there is one, then the title.
-    // Two cells separate each part from what comes before it.
-    let mut room = budget.saturating_sub(text::spans_width(&spans));
-    let mut push_content = |spans: &mut Vec<Span<'static>>, style: Style, text: &str| {
-        if room <= 2 {
-            return;
-        }
-        let text = text::truncate_end(text, room - 2);
-        room = room.saturating_sub(text::width(text.as_str()) + 2);
-        spans.push(Span::styled(format!("  {text}"), style));
-    };
-    if let Some(branch) = pr.branch_name.as_deref() {
-        let branch = text::truncate_end(branch, PR_BRANCH_MAX_WIDTH);
-        push_content(
-            &mut spans,
-            Style::default().add_modifier(theme.muted),
-            &branch,
-        );
-    }
-    if let Some(title) = pr.title.as_deref() {
-        push_content(&mut spans, Style::default().fg(theme.inert), title);
-    }
-    spans
 }
 
 /// Map a [`GroupRow`] to its node kind so the renderer can stamp the

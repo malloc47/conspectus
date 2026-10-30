@@ -304,7 +304,7 @@ fn labels(tree: &RowTree) -> Vec<String> {
     tree.rows
         .iter()
         .filter_map(|row| match &row.kind {
-            RowKind::Pr(pr) => Some(pr.label.clone()),
+            RowKind::Pr(pr) => Some(pr.label()),
             _ => None,
         })
         .collect()
@@ -319,7 +319,7 @@ fn a_group_of_one_forge_repo_names_it_and_its_rows_show_only_the_number() {
         for row in &tree.rows {
             if let RowKind::Pr(pr) = &row.kind {
                 seen += 1;
-                assert_eq!(pr.label, format!("#{}", pr.pr_number));
+                assert_eq!(pr.label(), format!("#{}", pr.pr_number));
                 // Search still matches the full name.
                 assert_eq!(pr.repo_display, format!("o/r#{}", pr.pr_number));
             }
@@ -379,7 +379,7 @@ fn a_group_with_several_forge_repos_keeps_owner_and_repo_on_its_rows() {
         .iter()
         .take_while(|row| !matches!(row.kind, RowKind::Group(_)))
         .filter_map(|row| match &row.kind {
-            RowKind::Pr(pr) => Some(pr.label.clone()),
+            RowKind::Pr(pr) => Some(pr.label()),
             _ => None,
         })
         .collect();

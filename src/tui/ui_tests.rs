@@ -1951,7 +1951,7 @@ fn pr_tracking_span_tells_a_local_branch_from_none() {
     let untracked = PrRow {
         pr_number: 1,
         repo_display: "owner/repo#1".into(),
-        label: "#1".into(),
+        forge_repo: None,
         state: Some("open".into()),
         is_draft: false,
         branch_name: None,
@@ -5209,11 +5209,11 @@ fn launch_chip_shows_alongside_a_status_message() {
     );
 }
 
-fn pr_row_for_layout(label: &str, state: &str, age: Option<&str>) -> crate::tui::rows::PrRow {
+fn pr_row_for_layout(number: u64, state: &str, age: Option<&str>) -> crate::tui::rows::PrRow {
     crate::tui::rows::PrRow {
-        pr_number: 1,
-        repo_display: format!("o/r{label}"),
-        label: label.into(),
+        pr_number: number,
+        repo_display: format!("o/r#{number}"),
+        forge_repo: None,
         state: Some(state.into()),
         is_draft: false,
         branch_name: None,
@@ -5227,48 +5227,64 @@ fn pr_row_for_layout(label: &str, state: &str, age: Option<&str>) -> crate::tui:
             "github.com",
             "o",
             "r",
-            1,
+            number,
         )),
     }
+}
+
+/// The PR rows of a tree of only `prs`, each at depth 1 as the PRs view
+/// lists them, laid out by the left pane in `room` cells after their
+/// indent and prefix (the blank disclosure and the kind glyph; an
+/// unpinned tree reserves no marker), as text.
+fn pr_texts(prs: &[crate::tui::rows::PrRow], room: usize) -> Vec<String> {
+    pr_lines(prs, room)
+        .iter()
+        .map(|spans| pr_text(spans))
+        .collect()
+}
+
+/// [`pr_texts`] as spans.
+fn pr_lines(prs: &[crate::tui::rows::PrRow], room: usize) -> Vec<Vec<Span<'static>>> {
+    let rows: Vec<crate::tui::rows::Row> = prs
+        .iter()
+        .map(|pr| crate::tui::rows::Row {
+            id: RowId::Pr(pr.primary_node.clone()),
+            depth: 1,
+            expandable: false,
+            kind: RowKind::Pr(pr.clone()),
+        })
+        .collect();
+    lay_out(&rows, &Theme::default(), 0, room + 6, None)
+        .into_iter()
+        .map(|line| {
+            let mut spans = line.spans;
+            // The indent, then the prefix.
+            spans.remove(0);
+            without_prefix(spans)
+        })
+        .collect()
 }
 
 fn pr_text(spans: &[ratatui::text::Span<'_>]) -> String {
     spans.iter().map(|span| span.content.as_ref()).collect()
 }
 
-fn pr_tree(rows: Vec<crate::tui::rows::PrRow>) -> crate::tui::rows::RowTree {
-    crate::tui::rows::RowTree {
-        rows: rows
-            .into_iter()
-            .map(|pr| crate::tui::rows::Row {
-                id: RowId::Pr(pr.primary_node.clone()),
-                depth: 1,
-                expandable: false,
-                kind: RowKind::Pr(pr),
-            })
-            .collect(),
-        view: crate::tui::rows::ViewLabel::Prs,
-    }
-}
-
 #[test]
 fn pr_columns_align_to_the_widest_value_in_the_tree() {
     // The number pads to the widest across the tree, so rows from
     // different groups line up; age and state have fixed cells.
-    let theme = Theme::default();
-    let mut long = pr_row_for_layout("#1234", "merged", Some("120d"));
+    let mut long = pr_row_for_layout(1234, "merged", Some("120d"));
     long.title = Some("long one".into());
-    let mut short = pr_row_for_layout("#7", "open", Some("2h"));
+    let mut short = pr_row_for_layout(7, "open", Some("2h"));
     short.title = Some("short one".into());
-    let align = PrAlign::of_tree(&pr_tree(vec![long.clone(), short.clone()]));
 
-    let long_text = pr_text(&render_pr_spans(&long, &theme, align, 80, 0));
-    let short_text = pr_text(&render_pr_spans(&short, &theme, align, 80, 0));
+    let texts = pr_texts(&[long, short], 80);
+    let (long_text, short_text) = (&texts[0], &texts[1]);
 
     assert_eq!(long_text, "#1234 ◌  120d  ⊕  long one");
     assert_eq!(short_text, "#7    ◌    2h  ○  short one");
     let column = |text: &str, needle: &str| text.find(needle).expect("needle");
-    assert_eq!(column(&long_text, "◌"), column(&short_text, "◌"));
+    assert_eq!(column(long_text, "◌"), column(short_text, "◌"));
     assert_eq!(
         unicode_width::UnicodeWidthStr::width(&long_text[..long_text.find("long").unwrap()]),
         unicode_width::UnicodeWidthStr::width(&short_text[..short_text.find("short").unwrap()]),
@@ -5279,11 +5295,10 @@ fn pr_columns_align_to_the_widest_value_in_the_tree() {
 #[test]
 fn pr_title_takes_the_remaining_width_and_is_cut_with_an_ellipsis() {
     let theme = Theme::default();
-    let mut pr = pr_row_for_layout("#9", "open", Some("1d"));
+    let mut pr = pr_row_for_layout(9, "open", Some("1d"));
     pr.title = Some("A rather long pull request title".into());
-    let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
 
-    let spans = render_pr_spans(&pr, &theme, align, 30, 0);
+    let spans = pr_lines(std::slice::from_ref(&pr), 30).remove(0);
     let text = pr_text(&spans);
 
     assert!(text.ends_with('…'), "{text:?}");
@@ -5291,46 +5306,36 @@ fn pr_title_takes_the_remaining_width_and_is_cut_with_an_ellipsis() {
     let title = spans.last().expect("title span");
     assert_eq!(title.style.fg, Some(theme.inert));
 
-    // No room for even a sliver of title: it is left out, not wrapped.
-    let tight = pr_text(&render_pr_spans(&pr, &theme, align, 14, 0));
+    // No room for the title's fewest cells: it is left out, not wrapped.
+    let tight = pr_texts(&[pr], 14).remove(0);
     assert_eq!(tight, "#9 ◌    1d  ○");
 }
 
 #[test]
 fn pr_row_without_a_title_or_age_still_pads_its_columns() {
-    let theme = Theme::default();
-    let aged = pr_row_for_layout("#10", "open", Some("3d"));
-    let bare = pr_row_for_layout("#2", "closed", None);
-    let align = PrAlign::of_tree(&pr_tree(vec![aged, bare.clone()]));
+    let aged = pr_row_for_layout(10, "open", Some("3d"));
+    let bare = pr_row_for_layout(2, "closed", None);
 
-    let text = pr_text(&render_pr_spans(&bare, &theme, align, 80, 0));
+    let text = pr_texts(&[aged, bare], 80).remove(1);
 
     assert_eq!(text, "#2  ◌     —  ⊗");
 }
 
 #[test]
 fn an_open_draft_shows_the_draft_glyph_and_the_local_branch_leads_the_title() {
-    let theme = Theme::default();
-    let mut pr = pr_row_for_layout("#5", "open", Some("4h"));
+    let mut pr = pr_row_for_layout(5, "open", Some("4h"));
     pr.is_draft = true;
     pr.tracked = true;
     pr.branch_name = Some("feature/login".into());
     pr.title = Some("Add login".into());
-    let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
 
-    let text = pr_text(&render_pr_spans(&pr, &theme, align, 80, 0));
+    let text = pr_texts(std::slice::from_ref(&pr), 80).remove(0);
 
     assert_eq!(text, "#5 ⌥    4h  ◐  feature/login  Add login");
     // A draft that was already merged keeps its real state.
     let mut merged = pr;
     merged.state = Some("merged".into());
-    let merged_text = pr_text(&render_pr_spans(
-        &merged,
-        &theme,
-        PrAlign::of_tree(&pr_tree(vec![merged.clone()])),
-        80,
-        0,
-    ));
+    let merged_text = pr_texts(&[merged], 80).remove(0);
     assert!(
         merged_text.contains('⊕') && !merged_text.contains('◐'),
         "{merged_text:?}"
@@ -5339,17 +5344,71 @@ fn an_open_draft_shows_the_draft_glyph_and_the_local_branch_leads_the_title() {
 
 #[test]
 fn a_long_local_branch_is_capped_so_it_cannot_crowd_out_the_title() {
-    let theme = Theme::default();
-    let mut pr = pr_row_for_layout("#5", "open", None);
+    let mut pr = pr_row_for_layout(5, "open", None);
     pr.tracked = true;
     pr.branch_name = Some("a".repeat(60));
     pr.title = Some("Title".into());
-    let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
 
-    let text = pr_text(&render_pr_spans(&pr, &theme, align, 100, 0));
+    let text = pr_texts(&[pr], 100).remove(0);
 
     assert!(text.contains(&format!("{}…", "a".repeat(23))), "{text:?}");
     assert!(text.ends_with("  Title"), "{text:?}");
+}
+
+#[test]
+fn a_pr_row_names_its_forge_repo_unless_its_group_does() {
+    // A row under a group with several forge repos leads with its own;
+    // its number is in one column with the `#N` of a row whose group
+    // names the repo.
+    let mut named = pr_row_for_layout(12, "open", Some("1h"));
+    named.forge_repo = Some("owner/repo".into());
+    let short = pr_row_for_layout(7, "open", Some("2h"));
+    let texts = pr_texts(&[named, short], 80);
+    assert_eq!(texts[0], "owner/repo#12 ◌    1h  ○");
+    assert_eq!(texts[1], "#7            ◌    2h  ○");
+}
+
+#[test]
+fn a_narrow_pr_row_gives_way_in_one_order_and_keeps_its_number_and_state() {
+    // The title leaves, then the branch narrows and leaves; then the
+    // forge repo narrows while the number stays whole, the age leaves,
+    // and the tracking mark leaves. The state glyph stays.
+    let mut pr = pr_row_for_layout(42, "merged", Some("3d"));
+    pr.forge_repo = Some("someone/a-long-repository".into());
+    pr.tracked = true;
+    pr.branch_name = Some("feature/narrow-panes".into());
+    pr.title = Some("Lay the rows out by one rule".into());
+    let at = |room: usize| pr_texts(std::slice::from_ref(&pr), room).remove(0);
+    assert_eq!(
+        at(120),
+        "someone/a-long-repository#42 ⌥    3d  ⊕  feature/narrow-panes  Lay the rows out by one rule"
+    );
+    // The title takes what is left while it gets 7 cells.
+    assert_eq!(
+        at(72),
+        "someone/a-long-repository#42 ⌥    3d  ⊕  feature/narrow-panes  Lay the …"
+    );
+    assert_eq!(
+        at(64),
+        "someone/a-long-repository#42 ⌥    3d  ⊕  feature/narrow-panes"
+    );
+    assert_eq!(at(50), "someone/a-long-repository#42 ⌥    3d  ⊕  feature/…");
+    assert_eq!(at(45), "someone/a-long-repository#42 ⌥    3d  ⊕");
+    // Then the lined-up cells: the label narrows (the number stays),
+    // then the age and the tracking mark leave.
+    assert_eq!(at(30), "someone/a-long-…#42 ⌥    3d  ⊕");
+    assert_eq!(at(20), "someo…#42 ⌥    3d  ⊕");
+    assert_eq!(at(14), "someo…#42 ⌥  ⊕");
+    // The label's own one-cell gap is all that is left before the state.
+    assert_eq!(at(12), "someon…#42 ⊕");
+    for room in [12, 14, 20, 30, 45, 50, 64, 72, 120] {
+        let text = at(room);
+        assert!(
+            text.contains("#42") && text.contains('⊕'),
+            "{room}: {text:?}"
+        );
+        assert!(unicode_width::UnicodeWidthStr::width(text.as_str()) <= room);
+    }
 }
 
 #[test]
@@ -6850,11 +6909,11 @@ fn a_pr_row_draws_its_kind_glyph_in_the_hue_of_its_state_glyph() {
     let theme = Theme::default();
     let mut wrong = Vec::new();
     for (state, draft, glyph, _, style) in pr_state_cases(&theme) {
-        let mut pr = pr_row_for_layout("#1", "open", None);
+        let mut pr = pr_row_for_layout(1, "open", None);
         pr.state = state.map(str::to_string);
         pr.is_draft = draft;
         let kind = row_kind_glyph_span(&RowKind::Pr(pr.clone()), &theme).expect("a kind glyph");
-        let spans = render_pr_spans(&pr, &theme, PrAlign::default(), 80, 0);
+        let spans = pr_lines(&[pr], 80).remove(0);
         let cell = spans.last().expect("the state cell");
         if cell.content != glyph || cell.style != style || kind.style != style {
             wrong.push(format!(

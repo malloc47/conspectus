@@ -603,12 +603,12 @@ pub struct MuxSessionRow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PrRow {
     pub pr_number: u64,
-    /// `owner/repo#N`: the text search matches, and the left-pane
-    /// label unless the group names the repo.
+    /// `owner/repo#N`: the text search matches.
     pub repo_display: String,
-    /// What the left pane shows for the PR: `#N` under a group that
-    /// names the forge repo, else [`Self::repo_display`] (ADR 0131).
-    pub label: String,
+    /// The forge repo (`owner/repo`) the left pane names before the
+    /// number, or `None` under a group that names it, where the row reads
+    /// `#N` (ADR 0131).
+    pub forge_repo: Option<String>,
     pub state: Option<String>,
     pub is_draft: bool,
     pub branch_name: Option<String>,
@@ -627,6 +627,20 @@ impl PrRow {
     /// What the PR's state reads as on its row.
     pub fn status(&self) -> PrStatus {
         PrStatus::of(self.state.as_deref(), self.is_draft)
+    }
+
+    /// The PR's number as its row shows it: `#N`.
+    pub fn number(&self) -> String {
+        format!("#{}", self.pr_number)
+    }
+
+    /// What the left pane names the PR by: `owner/repo#N`, or `#N` under
+    /// a group that names the forge repo.
+    pub fn label(&self) -> String {
+        match &self.forge_repo {
+            Some(repo) => format!("{repo}{}", self.number()),
+            None => self.number(),
+        }
     }
 }
 

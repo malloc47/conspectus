@@ -75,6 +75,19 @@ pub(super) enum Col {
     /// A mux's one agent's last message or best snippet, or a stopped
     /// mux's directory.
     MuxContent,
+    /// A PR's label: the forge repo, unless its group names it, and the
+    /// number, which stays whole.
+    PrLabel,
+    /// Whether a PR has a local branch.
+    PrTracking,
+    /// A PR's age.
+    PrAge,
+    /// A PR's state glyph.
+    PrState,
+    /// A PR's local branch.
+    PrBranch,
+    /// A PR's title.
+    PrTitle,
     /// A Pinned or History row's label, measured for its own layout.
     MixedLabel,
     /// A Pinned or History row's status word, measured for its own layout.
@@ -99,6 +112,10 @@ const DETAIL_FLOOR: usize = 8;
 const MUX_NAME_STEPS: &[(usize, usize)] = &[(105, 30), (73, 24), (39, 20), (0, 18)];
 /// The fewest cells a mux name narrows to.
 const MUX_NAME_FLOOR: usize = 10;
+/// The widest branch a PR row shows, so one long branch cannot crowd out
+/// the title. The branch is content, not a lined-up column: only PRs with
+/// a local branch have one, so a column would sit mostly blank.
+const PR_BRANCH_CELLS: usize = 24;
 /// The widest label a Pinned or History row shows.
 pub(super) const MIXED_LABEL_CELLS: usize = 28;
 /// The widest status word a Pinned or History row shows.
@@ -124,6 +141,7 @@ pub(super) struct Schemas {
     session: ColumnSchema<Col>,
     /// A mux row, running or stopped.
     mux: ColumnSchema<Col>,
+    pr: ColumnSchema<Col>,
     /// The prefix alone, for a row whose body is drawn on its own.
     entity: ColumnSchema<Col>,
     /// The prefix alone for a row with no kind glyph (a matching turn,
@@ -181,10 +199,29 @@ impl Schemas {
             Column::hug(Col::MuxHits, usize::MAX).drops(1),
             Column::fill(Col::MuxContent).drops(0),
         ]);
+        // A PR's label is as wide as the widest in the tree, so the
+        // columns after it line up across groups. When the row is narrow
+        // the title leaves first, then the branch narrows and leaves; then
+        // the label narrows (its number stays whole), the age leaves, and
+        // the tracking mark leaves. The state stays.
+        let mut pr = prefix(Some(Col::Glyph), Col::Marker);
+        pr.extend([
+            Column::cap(Col::PrLabel, usize::MAX)
+                .gap(1)
+                .shrinks(1, LABEL_FLOOR),
+            Column::fixed(Col::PrTracking, 1).drops(3),
+            Column::fixed(Col::PrAge, tuikit::age::CELL_WIDTH).drops(2),
+            Column::fixed(Col::PrState, 1),
+            Column::hug(Col::PrBranch, PR_BRANCH_CELLS)
+                .shrinks(1, LABEL_FLOOR)
+                .drops(1),
+            Column::fill(Col::PrTitle).drops(0),
+        ]);
         Self {
             header: ColumnSchema::new(header),
             session: ColumnSchema::new(session),
             mux: ColumnSchema::new(mux),
+            pr: ColumnSchema::new(pr),
             entity: ColumnSchema::new(prefix(Some(Col::Glyph), Col::Marker)),
             unglyphed: ColumnSchema::new(prefix(None, Col::Marker)),
             mixed: ColumnSchema::new(prefix(Some(Col::Glyph), Col::MixedMarker)),
@@ -214,8 +251,9 @@ impl RowColumns<Row> for LeftColumns<'_> {
             RowKind::MuxSession(_) => &self.schemas.mux,
             RowKind::Mixed(mixed) if stopped_mux(mixed) => &self.schemas.mux,
             RowKind::Mixed(_) => &self.schemas.mixed,
+            RowKind::Pr(_) => &self.schemas.pr,
             RowKind::Hit(_) | RowKind::PaneHit(_) => &self.schemas.unglyphed,
-            RowKind::Pr(_) | RowKind::Pane(_) => &self.schemas.entity,
+            RowKind::Pane(_) => &self.schemas.entity,
         }
     }
 
@@ -246,6 +284,14 @@ impl RowColumns<Row> for LeftColumns<'_> {
                 cells.push((Col::Glyph, glyph_cell(NodeKind::MuxSession, theme)));
                 cells.push((Col::Marker, marker_cell(cx.mark, theme)));
                 cells.extend(self.mux_cells(mux, cx.pending));
+            }
+            RowKind::Pr(pr) => {
+                cells.push((
+                    Col::Glyph,
+                    Cell::spans(vec![pr_kind_glyph_span(Some(pr.status()), theme)]),
+                ));
+                cells.push((Col::Marker, marker_cell(cx.mark, theme)));
+                cells.extend(self.pr_cells(pr, cx.pending));
             }
             RowKind::Mixed(mixed) if stopped_mux(mixed) => {
                 cells.push((Col::Glyph, glyph_cell(NodeKind::MuxSession, theme)));
@@ -458,6 +504,48 @@ impl LeftColumns<'_> {
                     cells.push((Col::MuxContent, preview_cell(preview, theme)));
                 }
             }
+        }
+        cells
+    }
+
+    /// A PR row's cells after its prefix: the label (bold), whether it has
+    /// a local branch, its age, its state glyph (in the style its kind
+    /// glyph shares), then the local branch, dim, and the title, gray.
+    fn pr_cells(&self, pr: &PrRow, pending: bool) -> Cells<Col> {
+        let theme = self.theme;
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        // Under a group that names the forge repo the row reads `#N`;
+        // elsewhere the repo comes first and is cut before the number is.
+        let label = match &pr.forge_repo {
+            Some(repo) => Cell::text(repo, bold).tail(vec![Span::styled(pr.number(), bold)]),
+            None => Cell::text(pr.number(), bold),
+        };
+        let mut cells = vec![
+            (Col::PrLabel, label),
+            (
+                Col::PrTracking,
+                Cell::spans(vec![pr_tracking_span(pr, theme)]),
+            ),
+            (
+                Col::PrAge,
+                age_cell(pr.updated_recency.as_deref(), pr.updated_epoch, self.now),
+            ),
+            (
+                Col::PrState,
+                self.state_cell(pending, || pr.status().mark(theme)),
+            ),
+        ];
+        if let Some(branch) = pr.branch_name.as_deref() {
+            cells.push((
+                Col::PrBranch,
+                Cell::text(branch, Style::default().add_modifier(theme.muted)),
+            ));
+        }
+        if let Some(title) = pr.title.as_deref() {
+            cells.push((
+                Col::PrTitle,
+                Cell::text(title, Style::default().fg(theme.inert)),
+            ));
         }
         cells
     }
