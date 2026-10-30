@@ -226,6 +226,79 @@ pub fn frame_rect(with: &Buffer, without: &Buffer) -> Option<Rect> {
     found.then(|| complete_frame(with, Rect::new(x0, y0, x1 - x0 + 1, y1 - y0 + 1)))
 }
 
+/// The frame `with` draws exactly over a frame of the same look that
+/// `without` has: the smallest frame `with` draws around every cell that
+/// differs between the two.
+///
+/// A modal drawn exactly over another (a step that covers the entry it is
+/// a step of, at the same size) changes no corner, so [`frame_rect`]
+/// finds nothing; what changed inside it (its body, its title, its keys)
+/// still lies within its frame, and no smaller frame holds all of it.
+/// `None` when nothing differs, or when no frame `with` draws holds every
+/// difference.
+///
+/// ```
+/// use ratatui::buffer::Buffer;
+/// use ratatui::layout::Rect;
+/// use ratatui::widgets::{Block, Paragraph, Widget};
+/// use tuikit::testkit::buffer::{covering_frame, frame_rect};
+///
+/// let area = Rect::new(0, 0, 20, 6);
+/// let framed = |text: &str| {
+///     let mut buf = Buffer::empty(area);
+///     let frame = Rect::new(2, 1, 14, 4);
+///     Paragraph::new(text).block(Block::bordered()).render(frame, &mut buf);
+///     buf
+/// };
+/// let (under, over) = (framed("a menu"), framed("a question"));
+/// assert_eq!(frame_rect(&over, &under), None, "no corner differs");
+/// assert_eq!(covering_frame(&over, &under), Some(Rect::new(2, 1, 14, 4)));
+/// ```
+pub fn covering_frame(with: &Buffer, without: &Buffer) -> Option<Rect> {
+    let area = with.area.intersection(without.area);
+    let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0, 0);
+    let mut changed = false;
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            if with[(x, y)] != without[(x, y)] {
+                changed = true;
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    if !changed {
+        return None;
+    }
+    let is = |x: u16, y: u16, symbol: &str| with[(x, y)].symbol() == symbol;
+    let mut best: Option<Rect> = None;
+    for set in BORDERS {
+        for top in (area.y..=y0).rev() {
+            for left in (area.x..=x0).rev() {
+                if !is(left, top, set.top_left) {
+                    continue;
+                }
+                let right = (x1.max(left + 1)..area.right()).find(|&x| is(x, top, set.top_right));
+                let bottom =
+                    (y1.max(top + 1)..area.bottom()).find(|&y| is(left, y, set.bottom_left));
+                let (Some(right), Some(bottom)) = (right, bottom) else {
+                    continue;
+                };
+                if !is(right, bottom, set.bottom_right) {
+                    continue;
+                }
+                let rect = Rect::new(left, top, right - left + 1, bottom - top + 1);
+                if best.is_none_or(|smallest| rect.area() < smallest.area()) {
+                    best = Some(rect);
+                }
+            }
+        }
+    }
+    best
+}
+
 /// `rect`, the span of a frame's corners that differed, completed to the
 /// frame `buffer` draws when it is one row or one column: from the pair
 /// of corners in place (the top two, the bottom two, the left two, or the

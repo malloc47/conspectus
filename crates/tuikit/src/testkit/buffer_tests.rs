@@ -140,6 +140,52 @@ fn frame_rect_completes_a_frame_whose_corners_match_a_border_under_it() {
 }
 
 #[test]
+fn covering_frame_finds_a_frame_drawn_exactly_over_another() {
+    // The screen's border, a menu's frame, and a question drawn over the
+    // menu at its very rect: no corner differs, but the body does.
+    let menu = Rect::new(3, 2, 12, 5);
+    let screen = |body: &'static str, title: &'static str| {
+        move |frame: &mut ratatui::Frame<'_>| {
+            frame.render_widget(Block::bordered(), frame.area());
+            frame.render_widget(ratatui::widgets::Clear, menu);
+            frame.render_widget(
+                Paragraph::new(body).block(Block::bordered().title(title)),
+                menu,
+            );
+        }
+    };
+    let under = render(20, 9, screen("Open\nRemove", "Menu"));
+    let over = render(20, 9, screen("Remove it?", "Menu"));
+    assert_eq!(frame_rect(&over, &under), None);
+    assert_eq!(covering_frame(&over, &under), Some(menu));
+    // A different title alone still lies inside the frame.
+    let retitled = render(20, 9, screen("Open\nRemove", "Asked"));
+    assert_eq!(covering_frame(&retitled, &under), Some(menu));
+    // Nothing differs: nothing was drawn over it.
+    assert_eq!(covering_frame(&under, &under), None);
+}
+
+#[test]
+fn covering_frame_is_the_smallest_frame_around_every_difference() {
+    let screen = |text: &'static str, at: Rect| {
+        move |frame: &mut ratatui::Frame<'_>| {
+            frame.render_widget(Block::bordered(), frame.area());
+            frame.render_widget(Paragraph::new(text), at);
+        }
+    };
+    // A change inside the screen's border only: its frame is the border.
+    let inside = Rect::new(2, 2, 6, 1);
+    let under = render(20, 6, screen("", inside));
+    let over = render(20, 6, screen("change", inside));
+    assert_eq!(covering_frame(&over, &under), Some(Rect::new(0, 0, 20, 6)));
+    // A change on the screen's own edge has no frame around it.
+    let edge = Rect::new(0, 5, 6, 1);
+    let under = render(20, 6, screen("", edge));
+    let over = render(20, 6, screen("change", edge));
+    assert_eq!(covering_frame(&over, &under), None);
+}
+
+#[test]
 fn inner_rows_read_a_scrollbar_cell_as_a_space() {
     let bar = ratatui::symbols::scrollbar::DOUBLE_VERTICAL;
     let buf = render(8, 4, |frame| {

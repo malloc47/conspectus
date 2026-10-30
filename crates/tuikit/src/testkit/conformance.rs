@@ -329,7 +329,12 @@ impl<S> Case<S> {
     /// while it is open: a list there shows its cursor row in the
     /// inactive selection look. Outside the modal's frame the `Contained`
     /// check accepts a cell whose only change is the theme's selection
-    /// modifiers, and still fails any other.
+    /// modifiers, and still fails any other. A step can sit at exactly
+    /// the rect of the entry under it, where no corner of its frame
+    /// differs from the screen under it; the checks then take the
+    /// smallest frame drawn around what changed
+    /// ([`covering_frame`](crate::testkit::buffer::covering_frame)), which
+    /// only a step gets.
     #[must_use]
     pub fn step(mut self) -> Self {
         self.step = true;

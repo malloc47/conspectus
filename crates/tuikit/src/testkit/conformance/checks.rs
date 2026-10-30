@@ -12,7 +12,9 @@ use ratatui::symbols::line;
 use super::{Case, HEIGHTS, KeyRole, Look, Rig, Selection, WIDTHS};
 use crate::glyphs::marks;
 use crate::keys::{Footer, Segment};
-use crate::testkit::buffer::{self, frame_rect, inner_rows, is_side, restyled_rows};
+use crate::testkit::buffer::{
+    self, covering_frame, frame_rect, inner_rows, is_side, restyled_rows,
+};
 use crate::testkit::keys::{ctrl, press};
 use crate::text;
 use crate::theme::Theme;
@@ -80,6 +82,16 @@ fn only_selection_changed(shown: &Cell, under: &Cell, selection: Modifier) -> bo
     &restyled == shown
 }
 
+/// The frame the case's modal draws on `with`: the one whose corners
+/// differ from `without` ([`frame_rect`]), or, for a step, the one it
+/// draws exactly over the entry it is a step of, where no corner differs
+/// ([`covering_frame`]). Only a step gets the second look: any other modal
+/// whose frame cannot be told from the screen under it draws no frame of
+/// its own.
+fn frame_of<S>(case: &Case<S>, with: &Buffer, without: &Buffer) -> Option<Rect> {
+    frame_rect(with, without).or_else(|| case.step.then(|| covering_frame(with, without)).flatten())
+}
+
 /// Every size the frame checks draw at.
 fn frame_sizes() -> impl Iterator<Item = (u16, u16)> {
     WIDTHS
@@ -107,7 +119,7 @@ pub(super) fn contained<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
     for size in frame_sizes() {
         let (with, without) = with_and_without(rig, case, size);
         let at = size_label(size);
-        let Some(rect) = frame_rect(&with, &without) else {
+        let Some(rect) = frame_of(case, &with, &without) else {
             out.push(format!("draws no frame at {at}"));
             continue;
         };
@@ -155,7 +167,7 @@ pub(super) fn title<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
     }
     let theme = rig.theme();
     let (with, without) = with_and_without(rig, case, TITLE_SIZE);
-    let Some(rect) = frame_rect(&with, &without) else {
+    let Some(rect) = frame_of(case, &with, &without) else {
         return vec![format!("draws no frame at {}", size_label(TITLE_SIZE))];
     };
     let mut out = Vec::new();
@@ -227,9 +239,9 @@ pub(super) fn selection<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
             }
             frames.push(rig.render(&mut state, area(size)));
         }
-        let rect = frame_rect(&frames[0], &without);
+        let rect = frame_of(case, &frames[0], &without);
         for frame in &frames[1..] {
-            if frame_rect(frame, &without) != rect {
+            if frame_of(case, frame, &without) != rect {
                 out.push(format!(
                     "at {at}, the frame moved or resized with the selection"
                 ));
@@ -280,14 +292,14 @@ pub(super) fn words<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
         return Vec::new();
     }
     let (wide, wide_bare) = with_and_without(rig, case, WIDE);
-    let Some(wide_rect) = frame_rect(&wide, &wide_bare) else {
+    let Some(wide_rect) = frame_of(case, &wide, &wide_bare) else {
         return vec![format!("draws no frame at {}", size_label(WIDE))];
     };
     let whole = tokens_of(&inner_rows(&wide, wide_rect));
     let mut out = Vec::new();
     for size in frame_sizes() {
         let (with, without) = with_and_without(rig, case, size);
-        let Some(rect) = frame_rect(&with, &without) else {
+        let Some(rect) = frame_of(case, &with, &without) else {
             continue;
         };
         let inner = usize::from(rect.width.saturating_sub(2));
@@ -358,7 +370,7 @@ pub(super) fn footer<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
         return Vec::new();
     };
     let (with, without) = with_and_without(rig, case, FOOTER_SIZE);
-    let frame = frame_rect(&with, &without);
+    let frame = frame_of(case, &with, &without);
     let rows = match (case.look, frame) {
         // A frame's footer is in its body or, for a body with no row to
         // spare, on its bottom border.
@@ -524,7 +536,7 @@ fn footer_fit<R: Rig>(
         return Vec::new();
     }
     let (with, without) = with_and_without(rig, case, FOOTER_SHORT);
-    let Some(rect) = frame_rect(&with, &without) else {
+    let Some(rect) = frame_of(case, &with, &without) else {
         return Vec::new();
     };
     let last: Vec<Rect> = footer_rows(rect).take(2).collect();

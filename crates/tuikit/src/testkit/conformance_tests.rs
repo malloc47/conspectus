@@ -15,11 +15,12 @@ use super::*;
 use crate::frame::{Lines, ModalBody, ModalFooter, ModalFrame, ModalSize};
 use crate::glyphs::marks;
 use crate::keys::{
-    EnterMeans, Footer, KeyRow, MENU_KEYS, MenuKey, SpaceMeans, TEXT_INPUT_KEYS, TextInputKey,
-    alias, ctrl, include, key, shown, typed_char,
+    DIALOG_KEYS, DialogKey, EnterMeans, Footer, KeyRow, MENU_KEYS, MenuKey, SpaceMeans,
+    TEXT_INPUT_KEYS, TextInputKey, alias, ctrl, include, key, shown, typed_char,
 };
 use crate::overlay::{ModalStack, Outcome, Overlay};
 use crate::selection::{self, Cursor};
+use crate::testkit::buffer::{covering_frame, frame_rect};
 
 /// The host's state: its modals and its status line.
 struct Screen {
@@ -845,5 +846,123 @@ fn a_tall_footer_fitted_by_the_one_rule_passes_the_footer_check() {
     assert!(
         !drawn.iter().any(|row| row.contains("a first note")),
         "{drawn:#?}"
+    );
+}
+
+/// A question the menu asks as a step of it, in the menu's frame size
+/// with as many rows as the menu, so it covers the menu exactly at every
+/// size: no corner of its frame differs from the screen under it.
+struct Covering;
+
+impl Overlay<String, ()> for Covering {
+    fn handle(&mut self, key: KeyEvent, (): &()) -> Outcome<String> {
+        match crate::keys::resolve(DIALOG_KEYS, key) {
+            Some(DialogKey::Abort) => Outcome::Dismiss,
+            Some(DialogKey::Cancel) => Outcome::Close,
+            Some(DialogKey::Confirm) => Outcome::Commit("removed".to_string()),
+            _ => Outcome::Consumed,
+        }
+    }
+
+    fn render(&mut self, area: Rect, buf: &mut Buffer, (): &(), theme: &Theme) {
+        let frame = ModalFrame::new(theme, ModalSize::MENU).title("Actions");
+        let width = usize::from(frame.inner_width(area));
+        let mut lines: Vec<Line<'static>> = ["Remove the file?", "It goes for good.", ""]
+            .into_iter()
+            .map(Line::from)
+            .collect();
+        lines.extend(
+            ModalFooter::new(Footer::leaving_last(DIALOG_KEYS), theme)
+                .fit(width, usize::MAX)
+                .kept,
+        );
+        frame.render(area, buf, Lines::new(lines));
+    }
+
+    fn hints(&self) -> Footer {
+        Footer::leaving_last(DIALOG_KEYS)
+    }
+}
+
+/// The menu with its question open over it, as a step or as an overlay
+/// of its own.
+fn covered(step: bool) -> Registry<Host> {
+    let open = move || {
+        let mut stack: ModalStack<Box<dyn Overlay<String, ()>>> = ModalStack::new();
+        stack.push(Menu::boxed());
+        if step {
+            stack.push_step(Box::new(Covering));
+        } else {
+            stack.push(Box::new(Covering));
+        }
+        Screen {
+            stack,
+            status: None,
+        }
+    };
+    let case = Case::new("Covering", open)
+        .unchecked_selection("its arrow keys do nothing")
+        .keys(
+            Convention::new("Covering", EnterMeans::Submits, SpaceMeans::Types, ""),
+            [table("DIALOG_KEYS", DIALOG_KEYS)],
+        )
+        .footer(Footer::leaving_last(DIALOG_KEYS));
+    Registry::new(host()).case(if step { case.step() } else { case })
+}
+
+/// The menu alone, or with its question open over it as a step.
+fn menu_screen(asked: bool) -> Screen {
+    let mut stack: ModalStack<Box<dyn Overlay<String, ()>>> = ModalStack::new();
+    stack.push(Menu::boxed());
+    if asked {
+        stack.push_step(Box::new(Covering));
+    }
+    Screen {
+        stack,
+        status: None,
+    }
+}
+
+#[test]
+fn a_step_that_covers_the_entry_under_it_exactly_is_found_by_what_changed_inside() {
+    // The question's frame is the menu's at every size: no corner differs
+    // from the screen with only the menu open.
+    for (width, height) in [(60, 20), (220, 40)] {
+        let area = Rect::new(0, 0, width, height);
+        let with = host().render(&mut menu_screen(true), area);
+        let without = host().render(&mut menu_screen(false), area);
+        assert_eq!(frame_rect(&with, &without), None, "{width}x{height}");
+        let menu = ModalSize::MENU.rect(area, 5 + 2);
+        assert_eq!(
+            covering_frame(&with, &without),
+            Some(menu),
+            "{width}x{height}"
+        );
+    }
+    let failures = check_conventions(&covered(true));
+    assert!(
+        failures.is_empty(),
+        "{}",
+        failures
+            .iter()
+            .map(Failure::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn only_a_step_is_found_by_what_changed_inside_its_frame() {
+    // The same question opened as an overlay of its own is not a step of
+    // the menu: a frame the suite cannot tell from the screen under it is
+    // no frame of its own.
+    let failures = check_conventions_of(&covered(false), &[Check::Contained]);
+    let contained = failed(&failures, Check::Contained);
+    assert!(
+        !contained.is_empty()
+            && contained
+                .iter()
+                .all(|message| message.starts_with("draws no frame")),
+        "{contained:?}"
     );
 }
