@@ -77,7 +77,8 @@ behind its feature (ANSI text, captured terminal output fitted in a wrap
 mode, and Markdown with its tables and highlighted code), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age
 text, recency tint, and the age cell), the `frame` module (the modal
-frame, its footer on the bottom border, and its named sizes), the `selection` module (the list cursor's
+frame, its footer on the bottom border, its named sizes, and the section
+rule that heads a section of a pane), the `selection` module (the list cursor's
 marker and highlight, the ghost and pending looks, and the wrap-or-clamp
 rule), the `keys` module (key tables, footers, key labels, roles, and the
 standard tables for menus, dialogs, pagers, prompts, checklists, log lists,

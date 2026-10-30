@@ -1,4 +1,4 @@
-# `ModalFrame`
+# `ModalFrame` and `SectionRule`
 
 | | |
 | --- | --- |
@@ -6,7 +6,7 @@
 | Layer | 1 (foundation) |
 | Type parameters | none; a body is any type that implements `ModalBody`, and its `Output` is what drawing it returns |
 | Cargo feature | none |
-| Outcomes | none: the frame handles no keys; drawing returns the body's output (the window a scrolled body showed, or `()`) |
+| Outcomes | none: the frame handles no keys; drawing returns the body's output (the window a scrolled body showed, or `()`); a section rule is a line |
 
 ## Purpose
 
@@ -40,6 +40,17 @@ echo back the size its caller had just computed, titles padded by the
 caller or by the widget or not at all, and one or two titles in bold
 where the rest are not. The host keeps what is in the modal: its rows,
 its title text, its keys, and which named size suits it.
+
+Inside a pane, a `SectionRule` heads each section: a rule that fills the
+width in the theme's `muted`, the section's label as a chip in `accent`
+under `badge`, an optional summary in `inert` before or after the chip,
+and a two-cell closing rule. Every section rule puts its chip two cells
+from the right end, so the labels of the sections down a pane line up;
+with the summary first, the chip keeps that column however long the
+summary grows. It replaces a divider function a host keeps beside one
+pane, with an anchor enum whose names and docs disagreed about where the
+chip goes. The host keeps the label and the summary's words (what a
+section counts).
 
 ## Usage example
 
@@ -106,6 +117,34 @@ let shown = ModalFrame::new(&theme, ModalSize::WIDE)
 assert_eq!(shown.viewport(), 20, "24 rows, less a row clear above and below and the border");
 ```
 
+Two sections of one pane, each headed by a rule laid out at the width it
+is drawn in: a list of links with its counts before the chip, and a
+preview with no summary. Their chips end in the same column.
+
+```rust
+use ratatui::text::Line;
+use tuikit::frame::SectionRule;
+use tuikit::text;
+use tuikit::theme::Theme;
+
+let theme = Theme::default();
+let width = 36;
+let links = SectionRule::new("Links")
+    .summary("3 shown · 1 more")
+    .summary_first()
+    .line(width, &theme);
+let preview = SectionRule::new("Preview").line(width, &theme);
+assert_eq!(links.to_string(), "───────── 3 shown · 1 more  Links ──");
+assert_eq!(preview.to_string(), "───────────────────────── Preview ──");
+
+let chip_end = |line: &Line, label: &str| {
+    let drawn = line.to_string();
+    text::width(&drawn[..drawn.find(label).expect("chip") + label.len() + 1])
+};
+assert_eq!(chip_end(&links, "Links"), width - SectionRule::CLOSING);
+assert_eq!(chip_end(&preview, "Preview"), width - SectionRule::CLOSING);
+```
+
 ### The API
 
 | Item | Does | Notes |
@@ -121,6 +160,10 @@ assert_eq!(shown.viewport(), 20, "24 rows, less a row clear above and below and 
 | `ModalSize { width, height, fit }` | a policy | `width(screen)`, `height(screen, wanted)`, `rect(area, wanted)` |
 | `Extent::new(cap, min, margin)`, `share(percent)` | one direction of a policy | `cells(screen, wanted)` applies the rule |
 | `Fit::Content`, `Fit::Fill` | where the height comes from | the body's rows, or all the extent allows |
+| `SectionRule::new(label)` | the rule of the section named `label` | no summary |
+| `.summary(text)`, `.summary_first()` | show a summary beside the chip, after it or before it | an empty summary shows nothing |
+| `.line(width, &theme)` | the rule `width` cells wide | wider only when the chip, the summary, and the closing rule alone are |
+| `SectionRule::CLOSING` | the closing rule's cells | 2 |
 
 ### Sizing policies
 
@@ -160,18 +203,50 @@ when the screen is short; the body scrolls. A body that scrolls returns
 its window as its `Output`, which the host keeps for the next key and
 frame (see [scroll.md](scroll.md#the-window)).
 
+### `SectionRule`
+
+A section rule is one line, laid out for the width it is drawn in:
+
+```text
+──────────────────────── Label  summary ──    the summary after the chip
+──────────────────────── summary  Label ──    summary_first
+─────────────────────────────────── Label ──  no summary
+```
+
+- The chip is the label with a space on each side, in `accent` under
+  `badge` (a filled pill), at the label's own width.
+- The summary, when there is one, has a space on each side, in `inert`.
+  After the chip by default; `summary_first` puts it before the chip, so
+  the chip sits against the closing rule in the same column whatever the
+  summary says, which keeps the labels easy to find down a pane whose
+  counts change.
+- The closing rule is `CLOSING` (two) cells of `marks::RULE`; the leading
+  rule fills what the chip, the summary, and the closing rule leave, all
+  measured in terminal cells, and drops out when they leave nothing.
+- Both rules are in `muted`.
+
+Nothing else gives way: at a width below the chip, the summary, and the
+closing rule, the line is wider than asked, and a paragraph clips it at
+its area's edge or a wrap folds it onto a second row. Lay a rule out at
+the width it is drawn in; in a list that may scroll, that is the width the
+scrollbar leaves.
+
 ## Key table
 
 None: the frame handles no keys. The modal inside it has its own key
 table, and its footer is part of its body or, for a body with no row to
-spare, the line the modal hands `footer`.
+spare, the line the modal hands `footer`. A section rule is a line and
+handles no keys either.
 
 ## Theme tokens
 
 | Token | Used for |
 | --- | --- |
-| `accent` | the border, and so the title and the footer, which take the border's color |
+| `accent` | the border, and so the title and the footer, which take the border's color; a section rule's chip |
 | `surface` | the background painted over the cleared rect |
+| `badge` | the modifier that fills a section rule's chip |
+| `muted` | a section rule's leading and closing rules |
+| `inert` | a section rule's summary |
 
 A title's chips (a segmented choice) keep the look their own module gave
 them, from `badge` and `accent`. The body styles itself.
@@ -181,13 +256,14 @@ them, from `badge` and `accent`. The body styles itself.
 | # | Rule | How this control follows it |
 | --- | --- | --- |
 | 8 | Footers and hints | The frame draws no hint of its own; a modal's footer is its body's or the bottom-border line it hands the frame, either way generated from its key table |
-| 13 | Theme | The border and background come from `accent` and `surface`; the frame names no color |
-| 14 | Width | A body is laid out for the inner width the policy gives in cells, so nothing is laid out for one width and drawn at another |
+| 13 | Theme | The border and background come from `accent` and `surface`, a section rule's pieces from `muted`, `accent`, `badge`, and `inert`; nothing names a color |
+| 14 | Width | A body is laid out for the inner width the policy gives in cells, so nothing is laid out for one width and drawn at another; a section rule measures its chip and summary in cells and fills the width it is given |
 
 Not applicable: 1 to 7, 9 to 12, and 15 to 18 govern how lists move, how
 modals confirm, close, edit, and page, and how panes show focus. The
-frame only places and draws the box; the modals inside it follow those
-rules. Rule 9 belongs to the pane frame (below).
+frame only places and draws the box, and a section rule only draws a
+line; the modals and lists around them follow those rules. Rule 9
+belongs to the pane frame (below).
 
 ## Seams left open
 
@@ -195,8 +271,11 @@ rules. Rule 9 belongs to the pane frame (below).
   and title joins this module, drawing the same border and title form
   through the same private helper, with the border in
   `panel_focus_accent` when focused.
-- **Rules and split panes.** The horizontal rule and the split pane join
-  this module with the pane frame.
+- **Split panes.** The split pane joins this module with the pane frame.
+- **A section rule that gives way.** Below the width of its chip, summary,
+  and closing rule a section rule runs past its width. Cutting the summary
+  first (with `…`) and then the label, by `text::elide`, would keep it in
+  its room.
 - **Mouse hit testing.** `rect(area, rows)` is the rect the frame drew
   for the same rows, which a click on or outside the modal would be
   tested against.

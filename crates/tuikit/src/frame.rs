@@ -1,4 +1,5 @@
-//! Frames: the bordered box a modal draws in, and how large it is.
+//! Frames: the bordered box a modal draws in, how large it is, and the
+//! rule that heads a section of a pane.
 //!
 //! This is a layer 1 foundation. A modal (a prompt, a checklist, a
 //! menu, a form, a reader, a search palette) floats over the screen in
@@ -30,6 +31,11 @@
 //!   frame leaves; the frame places itself from those rows, once.
 //!   [`Lines`] is the body for lines laid out ahead and scrolled to keep
 //!   a cursor in view.
+//! - **Section rules.** Inside a pane, a [`SectionRule`] heads each
+//!   section: a rule in the theme's `muted`, the section's label as a
+//!   chip in `accent` under `badge`, an optional summary in `inert`
+//!   before or after the chip, and a two-cell closing rule, so the labels
+//!   of the sections down a pane line up near its right edge.
 //!
 //! ```
 //! use ratatui::buffer::Buffer;
@@ -57,14 +63,16 @@
 //! # What joins this module
 //!
 //! The pane frame (a bordered pane with the focus cue on its border and
-//! title), the split pane, and the horizontal rule belong here too. They
-//! will share the border and title rule [`ModalFrame`] draws with, so a
-//! pane's title reads like a modal's.
+//! title) and the split pane belong here too. They will share the border
+//! and title rule [`ModalFrame`] draws with, so a pane's title reads like
+//! a modal's.
 
 mod modal;
+mod rule;
 mod size;
 
 pub use modal::{Lines, ModalBody, ModalFrame};
+pub use rule::SectionRule;
 pub use size::{Extent, Fit, ModalSize};
 
 #[cfg(test)]
