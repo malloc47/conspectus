@@ -4,7 +4,7 @@ expression: "trimmed(pinned_frame(&mut app, 100))"
 ---
 updated 0s ago · 1 sessions · 1 mux
 ┌ ► sessions · mux · prs · pinned · history … ───┐┌   ◉ pin ───────────────────────────────────────┐
-│▶ ▣ ◉ conspectus-main         live       2m  ~/…││► id            conspectus-main                 │
+│▶ ▣ ◉ conspectus-main         live       2m     ││► id            conspectus-main                 │
 │  ▣ ◎ config-agen┌ pin conspectus-main ─────────────────────────────────────────┐                 │
 │  ● ◉ e44d01cb   │                                                              │                 │
 │  ◇ ◎ ledger-work│► Show rebuild plan                                           │                 │

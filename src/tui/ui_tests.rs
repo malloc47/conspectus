@@ -1923,12 +1923,24 @@ fn a_pinned_pr_draws_its_kind_glyph_and_word_in_one_style() {
     for (state, draft, _, word, style) in pr_state_cases(&theme) {
         let row = pr_row(Some(PrStatus::of(state, draft)));
         let kind = row_kind_glyph_span(&RowKind::Mixed(row.clone()), &theme).expect("a glyph");
-        let spans = render_mixed_spans(&row, &theme, MixedWidths::default(), 80, 0, None);
-        let status = &spans[1];
-        if status.content.trim() != word || status.style != style || kind.style != style {
+        let laid = crate::tui::rows::Row {
+            id: RowId::Pin {
+                pin_id: "pr".into(),
+            },
+            depth: 0,
+            expandable: false,
+            kind: RowKind::Mixed(row),
+        };
+        let spans = lay_out(&[laid], &theme, 0, 80, None).remove(0).spans;
+        // The word after the label, padded in its own style.
+        let status = spans
+            .iter()
+            .find(|span| span.content.trim() == word)
+            .map(|span| span.style);
+        if status != Some(style) || kind.style != style {
             wrong.push(format!(
-                "state {state:?}, draft {draft}: {} {:?} beside {:?} {:?}, want {word} {style:?}",
-                kind.content, kind.style, status.content, status.style
+                "state {state:?}, draft {draft}: {} {:?} beside {word} {status:?}, want {style:?}",
+                kind.content, kind.style
             ));
         }
     }
@@ -5634,6 +5646,151 @@ fn folding_a_group_does_not_shift_the_columns_of_the_rows_left() {
         after.iter().all(|column| *column == columns[0]),
         "columns stayed put: {after:?} vs {columns:?}"
     );
+}
+
+/// A Pinned row of `kind` at `depth`, unpinned, with a claude chip.
+fn mixed_row_for_layout(
+    depth: u8,
+    label: &str,
+    status: &str,
+    age: &str,
+    content: &str,
+    tone: crate::tui::rows::MixedTone,
+) -> crate::tui::rows::Row {
+    use crate::tui::rows::{MixedChip, MixedRow, PinMarker};
+    crate::tui::rows::Row {
+        id: RowId::Pin {
+            pin_id: label.into(),
+        },
+        depth,
+        expandable: false,
+        kind: RowKind::Mixed(MixedRow {
+            node_kind: crate::model::NodeKind::MuxSession,
+            label: label.into(),
+            status: status.into(),
+            tone,
+            age: Some(age.into()),
+            age_epoch: None,
+            state: None,
+            chip: Some(MixedChip::agent("claude")),
+            content: content.into(),
+            primary_node: NodeId::MuxSession(MuxSessionId::new(format!("tmux:{label}"))),
+            pr_status: None,
+            marker: PinMarker::None,
+        }),
+    }
+}
+
+#[test]
+fn a_narrow_pinned_row_gives_way_in_one_order_and_keeps_its_state_word() {
+    // The chip leaves first, then the content; then the label narrows
+    // and the age leaves. The state word stays, and it starts in one
+    // column at every depth and every width.
+    use crate::tui::rows::MixedTone;
+    let rows = [
+        mixed_row_for_layout(
+            0,
+            "project-main",
+            "live",
+            "5m",
+            "~/repos/project",
+            MixedTone::Normal,
+        ),
+        mixed_row_for_layout(
+            1,
+            "nested-session",
+            "in mux",
+            "1h",
+            "~/x",
+            MixedTone::Normal,
+        ),
+    ];
+    let at = |width: usize| -> Vec<String> {
+        lay_out(&rows, &Theme::default(), 0, width, None)
+            .iter()
+            .map(line_text)
+            .collect()
+    };
+    let wide = at(90);
+    assert_eq!(
+        wide[0],
+        "  ▣ project-main      live      5m   claude     ~/repos/project"
+    );
+    assert_eq!(
+        wide[1],
+        "    ▣ nested-session  in mux    1h   claude     ~/x"
+    );
+    assert_eq!(
+        at(54)[0],
+        "  ▣ project-main      live      5m  ~/repos/project"
+    );
+    assert_eq!(at(42)[0], "  ▣ project-main      live      5m");
+    assert_eq!(at(30)[0], "  ▣ project-main  live      5m");
+    assert_eq!(at(30)[1], "    ▣ nested-se…  in mux    1h");
+    assert_eq!(at(26)[0], "  ▣ project…  live      5m");
+    assert_eq!(at(26)[1], "    ▣ neste…  in mux    1h");
+    // Once the label is down to 8 cells the age leaves, and the label
+    // takes back what the age freed.
+    assert_eq!(at(24)[0], "  ▣ project-main  live  ");
+    assert_eq!(at(24)[1], "    ▣ nested-se…  in mux");
+    for width in [24, 26, 28, 30, 42, 54, 90] {
+        let lines = at(width);
+        let status = |line: &str, word: &str| {
+            let at = line.find(word).expect("the state word");
+            line[..at].chars().count()
+        };
+        assert_eq!(
+            status(&lines[0], "live"),
+            status(&lines[1], "in mux"),
+            "at {width}:\n{}\n{}",
+            lines[0],
+            lines[1]
+        );
+        assert!(lines.iter().all(|line| text::width(line) <= width));
+    }
+}
+
+#[test]
+fn a_dimmed_pinned_row_keeps_its_kind_glyph_and_dims_the_rest() {
+    // In a list of mixed kinds the glyph is the only sign of a row's
+    // kind, so it keeps its color; every cell after it, and the gaps
+    // between them, take the ghost look.
+    use crate::tui::rows::MixedTone;
+    let theme = Theme::default();
+    let row = mixed_row_for_layout(
+        0,
+        "nightly",
+        "stopped",
+        "2d",
+        "~/repos/project",
+        MixedTone::Dim,
+    );
+    let spans = lay_out(&[row], &theme, 0, 90, None).remove(0).spans;
+    let glyph = spans
+        .iter()
+        .position(|span| span.content.starts_with('▣'))
+        .expect("the kind glyph");
+    assert_eq!(spans[glyph].style.fg, Some(theme.node_mux_session()));
+    let ghost = ghost_style(&theme);
+    for span in &spans[glyph + 1..] {
+        if span.style.bg.is_some() || span.style.add_modifier.contains(Modifier::REVERSED) {
+            // A chip keeps its fill and recedes.
+            assert!(
+                span.style.add_modifier.contains(Modifier::ITALIC),
+                "{span:?}"
+            );
+            continue;
+        }
+        assert_eq!(span.style.fg, ghost.fg, "{span:?}");
+        assert!(
+            span.style.add_modifier.contains(Modifier::ITALIC),
+            "{span:?}"
+        );
+        assert!(
+            !span.style.add_modifier.contains(Modifier::BOLD),
+            "{span:?}"
+        );
+    }
 }
 
 #[test]

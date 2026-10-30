@@ -4,8 +4,8 @@ expression: "pinned_frame(&mut app, 110)"
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                           
 ┌ ► sessions · mux · prs · pinned · history · search ─┐┌   detail ───────────────────────────────────────────┐
-│  ◇ ◎ conspectus-ledger  removed    2d              …││Select a row to view its detail.                     │
-│  ▣ ◎ config-agent3      stopped    3d   claude     …││                                                     │
+│  ◇ ◎ conspectus-ledger  removed    2d  conspectus ·…││Select a row to view its detail.                     │
+│  ▣ ◎ config-agent3      stopped    3d  ~/src/config ││                                                     │
 │                                                     ││                                                     │
 │                                                     ││                                                     │
 │                                                     ││                                                     │

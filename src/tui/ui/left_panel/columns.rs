@@ -16,7 +16,7 @@ use tuikit::columns::{Cell, Cells, Column, ColumnSchema};
 use tuikit::tree::{self, RowColumns, RowCtx, RowMark};
 
 use super::*;
-use crate::tui::rows::{EntityState, MixedRow, PinMarker, Row};
+use crate::tui::rows::{EntityState, MixedRow, MixedTone, PinMarker, Row};
 use crate::tui::widgets::badge::{
     command_badge, harness_badge, hits_chip, no_agent_chip, was_in_chip,
 };
@@ -88,12 +88,17 @@ pub(super) enum Col {
     PrBranch,
     /// A PR's title.
     PrTitle,
-    /// A Pinned or History row's label, measured for its own layout.
+    /// A Pinned or History row's label: it ends in one column at every
+    /// depth, so nested rows line their status up with their parents'.
     MixedLabel,
-    /// A Pinned or History row's status word, measured for its own layout.
+    /// A Pinned or History row's state word.
     MixedStatus,
-    /// A Pinned or History row's chip, measured for its own layout.
+    /// A Pinned or History row's age.
+    MixedAge,
+    /// A Pinned or History row's chip, one width across the tree.
     MixedChip,
+    /// What a Pinned or History row says after its chip.
+    MixedContent,
 }
 
 /// The widest label a session row shows.
@@ -117,9 +122,9 @@ const MUX_NAME_FLOOR: usize = 10;
 /// a local branch have one, so a column would sit mostly blank.
 const PR_BRANCH_CELLS: usize = 24;
 /// The widest label a Pinned or History row shows.
-pub(super) const MIXED_LABEL_CELLS: usize = 28;
+const MIXED_LABEL_CELLS: usize = 28;
 /// The widest status word a Pinned or History row shows.
-pub(super) const MIXED_STATUS_CELLS: usize = 9;
+const MIXED_STATUS_CELLS: usize = 9;
 
 /// The cells every row starts with: the disclosure, the kind glyph, and
 /// the pin marker. Each cell carries its own trailing space.
@@ -147,7 +152,7 @@ pub(super) struct Schemas {
     /// The prefix alone for a row with no kind glyph (a matching turn,
     /// a matching pane line).
     unglyphed: ColumnSchema<Col>,
-    /// The prefix alone for a Pinned or History row.
+    /// A Pinned or History row.
     mixed: ColumnSchema<Col>,
 }
 
@@ -217,6 +222,20 @@ impl Schemas {
                 .drops(1),
             Column::fill(Col::PrTitle).drops(0),
         ]);
+        // A Pinned or History row lines every cell up, its label at every
+        // depth. When the row is narrow the chip leaves first, then the
+        // content; then the label narrows and the age leaves. The state
+        // word stays.
+        let mut mixed = prefix(Some(Col::Glyph), Col::MixedMarker);
+        mixed.extend([
+            Column::cap(Col::MixedLabel, MIXED_LABEL_CELLS)
+                .absorbs_lead()
+                .shrinks(2, LABEL_FLOOR),
+            Column::cap(Col::MixedStatus, MIXED_STATUS_CELLS),
+            Column::fixed(Col::MixedAge, tuikit::age::CELL_WIDTH).drops(3),
+            Column::cap(Col::MixedChip, usize::MAX).drops(0),
+            Column::fill(Col::MixedContent).drops(1),
+        ]);
         Self {
             header: ColumnSchema::new(header),
             session: ColumnSchema::new(session),
@@ -224,7 +243,7 @@ impl Schemas {
             pr: ColumnSchema::new(pr),
             entity: ColumnSchema::new(prefix(Some(Col::Glyph), Col::Marker)),
             unglyphed: ColumnSchema::new(prefix(None, Col::Marker)),
-            mixed: ColumnSchema::new(prefix(Some(Col::Glyph), Col::MixedMarker)),
+            mixed: ColumnSchema::new(mixed),
         }
     }
 }
@@ -304,7 +323,7 @@ impl RowColumns<Row> for LeftColumns<'_> {
                     Cell::spans(vec![mixed_glyph_span(mixed, theme)]),
                 ));
                 cells.push((Col::MixedMarker, mixed_marker_cell(mixed, theme)));
-                cells.extend(mixed_measures(mixed, theme));
+                cells.extend(self.mixed_cells(mixed, cx.pending));
             }
             kind => {
                 if let Some(glyph) = row_kind_glyph_span(kind, theme) {
@@ -564,6 +583,47 @@ impl LeftColumns<'_> {
         )
     }
 
+    /// A Pinned or History row's cells after its prefix: the bold label,
+    /// the state word (a spinner while the row awaits the hand-off, as wide
+    /// as the word, so its column holds still), the age, the chip, and the
+    /// content. A row for something stopped, removed, missing, planned, or
+    /// unknown is dimmed from its label on when it is drawn.
+    fn mixed_cells(&self, mixed: &MixedRow, pending: bool) -> Cells<Col> {
+        let theme = self.theme;
+        // A pull request's word takes the style of its state glyph, so the
+        // two read as one signal; other live words share the attached
+        // color.
+        let status_style = match (mixed.tone, mixed.pr_status) {
+            (MixedTone::Dim, _) => Style::default(),
+            (MixedTone::Normal, Some(status)) => status.mark(theme).1,
+            (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached()),
+        };
+        let word = text::truncate_end(&mixed.status, MIXED_STATUS_CELLS);
+        let status = match self.spinner.filter(|_| pending) {
+            Some(glyph) => text::pad(glyph, text::width(&word)),
+            None => word,
+        };
+        let mut cells = vec![
+            (
+                Col::MixedLabel,
+                Cell::text(&mixed.label, Style::default().add_modifier(Modifier::BOLD)),
+            ),
+            (Col::MixedStatus, Cell::text(status, status_style)),
+            (
+                Col::MixedAge,
+                age_cell(mixed.age.as_deref(), mixed.age_epoch, self.now),
+            ),
+        ];
+        if let Some(chip) = &mixed.chip {
+            cells.push((Col::MixedChip, Cell::chip(mixed_chip_span(chip, theme))));
+        }
+        cells.push((
+            Col::MixedContent,
+            Cell::text(&mixed.content, Style::default().fg(theme.inert)),
+        ));
+        cells
+    }
+
     /// A stopped mux's cells, in the running ones' columns: the name, the
     /// harness it last ran (or `no agent`), the time since it was last
     /// seen running, its state glyph (a spinner while the row awaits the
@@ -665,29 +725,4 @@ fn snippet_cell(snippet: &str, highlight: &std::ops::Range<usize>, theme: &Theme
         theme.match_style(),
     )
     .dropping(crate::tui::widgets::search::MARKDOWN_TICKS)
-}
-
-/// What a Pinned or History row's own layout measures: its label and
-/// status word as it cuts them, and its chip.
-fn mixed_measures(mixed: &MixedRow, theme: &Theme) -> Cells<Col> {
-    let mut cells = vec![
-        (
-            Col::MixedLabel,
-            Cell::text(
-                text::truncate_end(&mixed.label, MIXED_LABEL_CELLS),
-                Style::default(),
-            ),
-        ),
-        (
-            Col::MixedStatus,
-            Cell::text(
-                text::truncate_end(&mixed.status, MIXED_STATUS_CELLS),
-                Style::default(),
-            ),
-        ),
-    ];
-    if let Some(chip) = &mixed.chip {
-        cells.push((Col::MixedChip, Cell::chip(mixed_chip_span(chip, theme))));
-    }
-    cells
 }

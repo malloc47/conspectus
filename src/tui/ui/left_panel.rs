@@ -10,8 +10,8 @@
 //! [`LeftRows::line`] is the producer. What only the snapshot and the
 //! hand-off can say about a row (ghost, pending, pin marker) is worked
 //! out by the App before the frame, so laying a row out looks nothing
-//! up. The Pinned, History, and Search hit and pane rows still draw
-//! their own cells after the prefix the framework lays out.
+//! up. The Search view's hit and pane rows still draw their own cells
+//! after the prefix the framework lays out.
 
 mod columns;
 
@@ -103,22 +103,21 @@ impl<'a> LeftRows<'a> {
     /// The producer the tree draws a row with: its cells at the width
     /// the context gives. The tree applies the row's looks.
     fn line(&self, row: &Row, cx: &RowCtx<'_>) -> Line<'static> {
-        let LeftColumns {
-            theme,
-            now,
-            spinner,
-            ..
-        } = *self.columns;
-        // Rows the operator just left in tmux keep their old values,
-        // dimmed, with a spinner where their state goes, until the
-        // background refresh lands (ADR 0108).
-        let spinner = spinner.filter(|_| cx.pending);
+        let LeftColumns { theme, now, .. } = *self.columns;
         match &row.kind {
             RowKind::Group(_)
             | RowKind::AgentSession(_)
             | RowKind::MuxSession(_)
             | RowKind::Pr(_) => self.tree.line(row, cx),
             RowKind::Mixed(mixed) if columns::stopped_mux(mixed) => self.tree.line(row, cx),
+            // A Pinned or History row for something stopped, removed,
+            // missing, planned, or unknown dims its cells from the label
+            // on: in a list of mixed kinds its glyph is the only sign of
+            // its kind, so the glyph keeps its color.
+            RowKind::Mixed(mixed) if mixed.tone == crate::tui::rows::MixedTone::Dim => self
+                .tree
+                .line_with_look(row, cx, Col::MixedLabel, |spans| ghostify(spans, theme)),
+            RowKind::Mixed(_) => self.tree.line(row, cx),
             RowKind::Hit(hit) => self
                 .tree
                 .line_then(row, cx, |left| render_hit_spans(hit, theme, left, now)),
@@ -128,27 +127,6 @@ impl<'a> LeftRows<'a> {
             RowKind::PaneHit(hit) => self
                 .tree
                 .line_then(row, cx, |left| render_pane_hit_spans(hit, theme, left, now)),
-            RowKind::Mixed(mixed) => {
-                let widths = self.mixed_widths(row);
-                self.tree.line_then(row, cx, |left| {
-                    render_mixed_spans(mixed, theme, widths, left, now, spinner)
-                })
-            }
-        }
-    }
-
-    /// The column widths a Pinned or History row lays its own cells out
-    /// with, from the one measure pass: the label cell runs from the row's
-    /// indent to a common column, so nested rows line their status up with
-    /// their parents'.
-    fn mixed_widths(&self, row: &Row) -> MixedWidths {
-        let measure = self.tree.measure();
-        MixedWidths {
-            label: measure
-                .widest_with_lead(Col::MixedLabel)
-                .saturating_sub(self.tree.lead(row)),
-            status: measure.widest(Col::MixedStatus),
-            chip: measure.widest(Col::MixedChip),
         }
     }
 }
@@ -233,17 +211,6 @@ pub(super) fn render_left_row(
     let mut line = left.line(row, &cx);
     cx.apply_looks(&mut line.spans);
     line
-}
-
-/// How wide a Pinned or History row's own cells are.
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct MixedWidths {
-    /// The label cell, from the end of the row's prefix.
-    pub(super) label: usize,
-    /// The status word.
-    pub(super) status: usize,
-    /// The chip; 0 when no row has one.
-    pub(super) chip: usize,
 }
 
 /// Render the left pane title as a lazydocker-style tab strip
@@ -600,65 +567,6 @@ pub(super) fn age_span(
 ) -> Span<'static> {
     let recency = Age::of(epoch, Some(now)).map(Age::recency);
     tuikit::age::cell(age, recency, tuikit::age::CELL_WIDTH, theme)
-}
-
-/// The body of a Pinned or History row after its prefix: the label, the
-/// status word, the age, then the chip and content, which fill `budget`
-/// and are cut with an ellipsis, at the `widths` the tree's measure pass
-/// found. Stopped, removed, missing, planned, and unknown rows are dimmed
-/// whole.
-pub(super) fn render_mixed_spans(
-    mixed: &crate::tui::rows::MixedRow,
-    theme: &Theme,
-    widths: MixedWidths,
-    budget: usize,
-    now: i64,
-    handoff_spinner: Option<&'static str>,
-) -> Vec<Span<'static>> {
-    use crate::tui::rows::MixedTone;
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    // A row awaiting the refresh after an action shows a spinner where
-    // its status word goes.
-    let status_word = handoff_spinner.map_or(mixed.status.as_str(), |glyph| glyph);
-    // A pull request's word takes the style of its state glyph, so the
-    // two read as one signal; other live words share the attached color.
-    let status_style = match (mixed.tone, mixed.pr_status) {
-        (MixedTone::Dim, _) => Style::default(),
-        (MixedTone::Normal, Some(status)) => status.mark(theme).1,
-        (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached()),
-    };
-    let label = text::truncate_end(&mixed.label, columns::MIXED_LABEL_CELLS);
-    spans.push(span!(Modifier::BOLD; "{}", text::pad(&label, widths.label)));
-    let status = text::truncate_end(status_word, columns::MIXED_STATUS_CELLS);
-    spans.push(span!(status_style; "  {}", text::pad(&status, widths.status)));
-    spans.push(Span::raw("  "));
-    spans.push(age_span(mixed.age.as_deref(), mixed.age_epoch, now, theme));
-    // The chip cell has one width in the tree, so the content starts in
-    // one column whether or not a row has a chip.
-    if widths.chip > 0 {
-        let cell = 2 + widths.chip;
-        let fits = budget.saturating_sub(text::spans_width(&spans)) > cell + 2;
-        match (&mixed.chip, fits) {
-            (Some(chip), true) => {
-                spans.push(Span::raw("  "));
-                spans.push(mixed_chip_span(chip, theme));
-            }
-            (None, true) => spans.push(Span::raw(" ".repeat(cell))),
-            _ => {}
-        }
-    }
-    let room = budget.saturating_sub(text::spans_width(&spans));
-    if room > 2 && !mixed.content.is_empty() {
-        let content = text::truncate_end(&mixed.content, room - 2);
-        spans.push(Span::styled(
-            format!("  {content}"),
-            Style::default().fg(theme.inert),
-        ));
-    }
-    if mixed.tone == MixedTone::Dim {
-        ghostify(&mut spans, theme);
-    }
-    spans
 }
 
 /// The ghost style: the theme's `inert` color in italics. Gone entities
