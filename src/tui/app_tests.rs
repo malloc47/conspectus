@@ -1886,6 +1886,283 @@ fn explorer_state_resets_when_left_tree_selection_changes() {
     assert!(after.breadcrumb.is_empty());
 }
 
+// ----- The right pane's drill across a refresh -----
+
+fn session_node(key: &str) -> NodeId {
+    NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", key))
+}
+
+fn mux_node(name: &str) -> NodeId {
+    NodeId::MuxSession(crate::model::MuxSessionId::new(name))
+}
+
+/// A repo checked out at `/p/proj`, an agent session working there for
+/// each of `sessions`, a tmux session for each of `muxes`, and a
+/// `linked_to_mux` candidate for each `(session, mux)` of `links`. The
+/// Sessions view lists the sessions and none of the muxes.
+fn sessions_and_muxes(sessions: &[&str], muxes: &[&str], links: &[(&str, &str)]) -> GraphSnapshot {
+    let mut snap = GraphSnapshot::empty();
+    let repo_id = RepoId::new("/p/proj");
+    snap.nodes
+        .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+    snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+        id: CheckoutId::new(repo_id, "/p/proj".to_string()),
+        root: "/p/proj".to_string(),
+        git_dir: None,
+        current_branch: None,
+        worktree: None,
+        head_commit: None,
+    }));
+    for key in sessions {
+        snap.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("claude-code", "/state", *key),
+                "claude-code".to_string(),
+            )
+            .with_cwd("/p/proj".to_string())
+            .with_last_active_epoch(1_700_000_000),
+        ));
+    }
+    for name in muxes {
+        snap.nodes.push(GraphNode::MuxSession(
+            MuxSessionNode::new(
+                crate::model::MuxSessionId::new(*name),
+                "tmux".to_string(),
+                (*name).to_string(),
+            )
+            .with_activity_epoch(1_700_000_000)
+            .with_created_epoch(1_700_000_000),
+        ));
+    }
+    for (session, name) in links {
+        snap.candidate_links.push(crate::model::GraphLink {
+            id: format!("{session}-in-{name}"),
+            source: session_node(session),
+            target: LinkEndpoint::Node { id: mux_node(name) },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+    }
+    resolve_snapshot(snap)
+}
+
+/// Deliver `snap` the way the periodic refresh and `r` do.
+fn refresh_with(app: &mut App, snap: &GraphSnapshot) {
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(snap),
+        tree: build_tree(snap),
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+}
+
+fn session_row(app: &App, key: &str) -> RowId {
+    app.tree()
+        .rows
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::AgentSession(s) if s.session.session_key == key => Some(row.id.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("a row for session {key}"))
+}
+
+/// An app on the Sessions view with `snap` loaded and the left pane on
+/// the session `key`.
+fn app_on_session(snap: &GraphSnapshot, key: &str) -> App {
+    let mut app = App::new(RunConfig::defaults());
+    refresh_with(&mut app, snap);
+    let row = session_row(&app, key);
+    app.set_selection(row);
+    app
+}
+
+fn move_explorer_cursor_to(app: &mut App, index: usize) {
+    app.update(Msg::ExplorerHome);
+    for _ in 0..index {
+        app.update(Msg::ExplorerNavDown);
+    }
+}
+
+/// Put the explorer cursor on the row that leads to `target`, opening
+/// the `Other` zone when that is where the row is.
+fn put_explorer_cursor_on(app: &mut App, target: &NodeId) {
+    let find = |app: &App| {
+        let state = app.explorer().expect("explorer state");
+        state
+            .rows()
+            .iter()
+            .position(|row| state.view.drill_target(row).as_ref() == Some(target))
+    };
+    let index = find(app).unwrap_or_else(|| {
+        let header = app
+            .explorer()
+            .expect("explorer state")
+            .rows()
+            .iter()
+            .position(ExplorerRow::is_other_header)
+            .unwrap_or_else(|| panic!("no row leads to {target}"));
+        move_explorer_cursor_to(app, header);
+        app.update(Msg::ExplorerToggleGroup);
+        find(app).unwrap_or_else(|| panic!("no row leads to {target}"))
+    });
+    move_explorer_cursor_to(app, index);
+}
+
+fn drill_to(app: &mut App, target: &NodeId) {
+    put_explorer_cursor_on(app, target);
+    app.update(Msg::ExplorerActivate);
+    assert_eq!(
+        &app.explorer().expect("explorer state").view.focused,
+        target,
+        "the drill lands on {target}"
+    );
+}
+
+#[test]
+#[ignore = "backlog CSP-789: a refresh throws the right pane's drill away"]
+fn a_refresh_keeps_a_drill_into_a_neighbor_the_view_has_no_row_for() {
+    // The session could be in either tmux session. The resolver picks
+    // one, so the other lists the session in its `Other` zone, which
+    // gives the drilled pane a fold to keep.
+    let snap = sessions_and_muxes(
+        &["abc"],
+        &["work", "spare"],
+        &[("abc", "work"), ("abc", "spare")],
+    );
+    let mut app = app_on_session(&snap, "abc");
+    let left = app.selection().cloned();
+    let picked = {
+        let state = app.explorer().expect("explorer state");
+        state
+            .rows()
+            .iter()
+            .find_map(|row| match row {
+                ExplorerRow::ValidatedLink { .. } => state.view.drill_target(row),
+                _ => None,
+            })
+            .expect("the resolver picks one tmux session")
+    };
+    let other = if picked == mux_node("work") {
+        mux_node("spare")
+    } else {
+        mux_node("work")
+    };
+    app.update(Msg::CycleFocus);
+    drill_to(&mut app, &other);
+    assert_eq!(
+        app.selection(),
+        left.as_ref(),
+        "premise: the Sessions view has no row for a mux, so the left pane stays"
+    );
+    // Open the fold, show every field, and leave the cursor on the
+    // session's row inside the fold.
+    put_explorer_cursor_on(&mut app, &session_node("abc"));
+    app.update(Msg::ExplorerToggleFullDetail);
+    let before = app.explorer().expect("explorer state").clone();
+    let cursor = before.selected_row().map(|row| row.key(&before.view));
+    assert!(before.other_expanded && before.full_detail_expanded);
+    assert_eq!(before.breadcrumb.len(), 1);
+
+    refresh_with(&mut app, &snap);
+
+    let after = app.explorer().expect("explorer state after the refresh");
+    assert_eq!(after.view.focused, other, "the pane stays on the mux");
+    assert_eq!(after.breadcrumb, before.breadcrumb, "the breadcrumb stays");
+    assert!(after.other_expanded, "the fold stays open");
+    assert!(after.full_detail_expanded, "every field still shows");
+    assert_eq!(
+        after.selected_row().map(|row| row.key(&after.view)),
+        cursor,
+        "the cursor stays on the session's row"
+    );
+    assert_eq!(app.selection(), left.as_ref());
+}
+
+#[test]
+fn moving_the_left_selection_opens_the_right_pane_on_the_new_row() {
+    let snap = sessions_and_muxes(&["abc", "def"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    drill_to(&mut app, &mux_node("work"));
+    let from = app.selection().cloned().expect("a selection");
+    let to = session_row(&app, "def");
+    let position = |id: &RowId| {
+        app.visible_rows()
+            .iter()
+            .position(|row| &row.id == id)
+            .expect("both sessions show")
+    };
+    let steps = position(&to) as i64 - position(&from) as i64;
+    for _ in 0..steps.unsigned_abs() {
+        app.update(if steps > 0 { Msg::NavDown } else { Msg::NavUp });
+    }
+    assert_eq!(app.selection(), Some(&to));
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.view.focused, session_node("def"));
+    assert!(state.breadcrumb.is_empty());
+}
+
+#[test]
+fn a_refresh_that_removes_the_drilled_node_opens_the_right_pane_on_the_left_selection() {
+    let snap = sessions_and_muxes(&["abc"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    drill_to(&mut app, &mux_node("work"));
+
+    refresh_with(&mut app, &sessions_and_muxes(&["abc"], &[], &[]));
+
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.view.focused, session_node("abc"));
+    assert!(state.breadcrumb.is_empty());
+}
+
+#[test]
+fn backspace_to_a_frame_whose_node_is_gone_drops_it_and_the_next_press_goes_on() {
+    // Both sessions are in one tmux session. From the first, drill into
+    // the mux and on to the second session, whose row the left pane
+    // moves to; then a refresh finds the mux gone.
+    let snap = sessions_and_muxes(
+        &["abc", "def"],
+        &["work"],
+        &[("abc", "work"), ("def", "work")],
+    );
+    let mut app = app_on_session(&snap, "abc");
+    let first = app.selection().cloned();
+    app.update(Msg::CycleFocus);
+    drill_to(&mut app, &mux_node("work"));
+    drill_to(&mut app, &session_node("def"));
+    assert_eq!(app.selection(), Some(&session_row(&app, "def")));
+    refresh_with(&mut app, &sessions_and_muxes(&["abc", "def"], &[], &[]));
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.view.focused, session_node("def"));
+    assert_eq!(state.breadcrumb.len(), 2);
+
+    // The mux's frame can't be restored: the press says so and drops it.
+    app.update(Msg::ExplorerBack);
+    assert!(
+        app.status_message()
+            .is_some_and(|s| s.contains("node missing from snapshot")),
+        "the press says the node is gone; got {:?}",
+        app.status_message()
+    );
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.view.focused, session_node("def"), "the pane stays");
+    assert_eq!(state.breadcrumb.len(), 1);
+    assert_eq!(state.breadcrumb[0].focused, session_node("abc"));
+
+    // The next press goes on to the first session, and the left pane
+    // with it.
+    app.update(Msg::ExplorerBack);
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.view.focused, session_node("abc"));
+    assert!(state.breadcrumb.is_empty());
+    assert_eq!(app.selection(), first.as_ref());
+    assert_eq!(app.focus(), Focus::Right);
+}
+
 // ------------------------------------------------------------------
 // Enter-to-copy on Node-zone field rows + `i` for full id.
 // ------------------------------------------------------------------
