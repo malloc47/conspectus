@@ -98,9 +98,10 @@ frame, its footer on the bottom border, its named sizes, the pane frame
 with the focus cue on its border and title, the split pane, and the
 section rule that heads a section of a pane), the `selection` module (the list cursor's
 marker and highlight, the ghost and pending looks, and the wrap-or-clamp
-rule), the `keys` module (key tables, footers, key labels, roles, and the
+rule), the `keys` module (key tables, footers, key labels, roles, the
 standard tables for menus, dialogs, pagers, prompts, checklists, log lists,
-palettes, settings panels, and forms), the `overlay` module (the overlay contract, its outcomes, and the
+palettes, settings panels, and forms, and the scoped keymap a program's own
+keys live in), the `overlay` module (the overlay contract, its outcomes, and the
 host-owned modal stack that routes keys to its top entry, opens a
 follow-up question as a step of the overlay that asks it, and draws every
 entry), the `help` and `feedback` modules, the `testkit` module behind its

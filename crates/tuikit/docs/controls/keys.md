@@ -4,9 +4,9 @@
 | --- | --- |
 | Module | `tuikit::keys` |
 | Layer | 2 (convention) |
-| Type parameters | `A`: the action enum of one table (the framework's standard enums, or the host's own) |
+| Type parameters | `A`: the action enum of one table (the framework's standard enums, or the host's own), or of a keymap; `Cx` (default `()`): the host's context a keymap binding's availability predicate reads |
 | Cargo feature | none |
-| Outcomes | none of its own: `resolve` returns the action a key is bound to, or `None` for a key no row binds, and the control turns that into its outcome |
+| Outcomes | none of its own: `resolve` returns the action a key is bound to, or `None` for a key no row binds, and the control turns that into its outcome; `Keymap::resolve` returns the binding a key reaches in the active scopes |
 
 ## Purpose
 
@@ -15,7 +15,11 @@ table of rows over its own action enum, asks `resolve` what a key means,
 and matches on the action exhaustively, so a bound key the overlay
 ignores fails to compile. Its footer is generated from the same table, so
 a footer cannot advertise a key the overlay does not act on, and a help
-page can be generated from it too.
+page can be generated from it too. A program's own keys, the ones no
+overlay owns, are one scoped keymap: bindings in scopes (the program, a
+pane with focus, an overlay mode), each with a stable id and the words
+its hint and its help row say, which refuses to build when two keys of
+one scope could match one key event.
 
 The module replaces what a program grows overlay by overlay: hand-written
 `match` arms on key codes, footers typed as strings that drift from the
@@ -23,11 +27,14 @@ keys, four ways to write a key's name, three footer dialects (`Esc close`,
 `Esc to close`, `m = merge`), the same letter matched with and without its
 chords in different overlays (so `Ctrl-G` jumped to the top of one pager
 and not another), movement rows copied into every pager, and convention
-checks that matched action names as strings.
+checks that matched action names as strings. Its keymap replaces a
+program-wide table with one mode, help strings nothing drew, keys matched
+by hand outside the table, a rewrite of actions for the pane with focus,
+and a duplicate check that missed a row an earlier one shadowed.
 
 The host keeps the tables of its own overlays (their action enums, verbs,
 and notes), what an action does, which actions are available now, and its
-program-wide keymap.
+keymap's bindings, their words, and which scopes have the keys.
 
 ## Usage example
 
@@ -130,6 +137,13 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 | `KeyRole`, `KeyAction` | what an action is for | `Abort`, `Leave`, `Apply`, `Change`, `Move`, `Page`, `Other` |
 | `Convention`, `EnterMeans`, `SpaceMeans` | one modal against the modal key convention | `Convention::breaks` checks it by role |
 | `mislabeled`, `unresolved`, `loose_characters`, `ctrl_c_first` | what a table gets wrong | each returns its findings, so a host runs them over every table |
+| `KeyMatcher::overlap` | a key event two matchers both fire on | `None` when no event fires both; what the keymap's build checks |
+| `Scope::{Global, Pane, Overlay}`, `ActiveScopes` | where a binding applies; which scopes have the keys now | `ActiveScopes::global()`, `pane(name)`, `.overlay(name)`; `scopes()` in lookup order, `contains` |
+| `bind(id, scope, keys, action)` and `Bind::{verb, help, rank, available_when}` | one keymap binding, as a `const` | the first key is the one a hint names |
+| `Keymap::builder()`, `KeymapBuilder::{rows, table, build}` | a keymap from declarations and controls' tables | `build` returns every `Conflict` (`Conflicts`) or the keymap |
+| `Keymap::{resolve, get, bindings, first_key_reaches, overrides}` | a key's binding in the active scopes; a binding by id; all of them; whether a binding's hint key reaches it; where a scope takes a global key | `resolve` ignores availability |
+| `Binding::{id, scope, keys, action, verb, section, help, rank, can_act, matches}` | one binding of a built keymap | `can_act(&cx)` is true unless its predicate says otherwise |
+| `Conflict::{DuplicateId, MalformedId, NoKeys, Undescribed, Overlap}` | what keeps a keymap's bindings from working together | each says which binding, and `Overlap` the scope and the key both take |
 
 ### The rules the model encodes
 
@@ -159,6 +173,117 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
   level below in the same overlay. `Enter` names what it does: `pick` in a
   list of choices, `confirm` in a prompt, a dialog, or a checklist, and a
   form's own verb (`save`, `launch`).
+
+### The scoped keymap
+
+A program's own keys, the ones no overlay owns, are one `Keymap`: a table
+of bindings, each in a `Scope`.
+
+- **Scopes.** `Scope::Global` applies wherever the keymap has the keys;
+  `Scope::Pane(name)` while that pane has focus; `Scope::Overlay(name)`
+  while an overlay mode of that name is on (a mode that lets the program's
+  keys through but gives some keys its own meaning; an overlay that owns
+  every key keeps its own table and resolves it first, as a modal does).
+  `ActiveScopes` says which scopes have the keys now
+  (`ActiveScopes::pane("left")`, `.overlay("select")`), and `resolve`
+  looks a key up in them most particular first: the overlay mode, the pane
+  with focus, then the program. So the same key meaning one thing on one
+  pane and another on the other is two bindings of one table, one in each
+  pane's scope.
+- **A binding** (`bind(id, scope, keys, action)`, a `const`) carries a
+  stable id, its keys (the first is the one a hint names, the rest
+  aliases), the action it stands for, the short verb its hint says
+  (`.verb`, none keeps it out of hints), the help section and text its help
+  row says (`.help`), the rank its hint holds on at in a narrow status bar
+  (`.rank`), and, if it needs one, a predicate over the host's context
+  saying whether it can act now (`.available_when`). The key resolves
+  either way, so the host can say why nothing happened; a status bar leaves
+  out a binding that cannot act now, and a help page generated with a
+  context dims it.
+- **No key shadows another.** `KeymapBuilder::build` fails, listing every
+  `Conflict`, when two keys of one scope can match one key event
+  (`KeyMatcher::overlap`): two bindings of one key, a key with any modifier
+  beside a chord of it (`g` with any modifier takes `Ctrl-G`), and a
+  binding that repeats a key. Either order is refused, so the table's
+  order never decides what a key does: it is free to be the order the
+  help page lists the bindings in and the status bar names them in. Keys
+  in different scopes may overlap; `overrides` lists where a pane's or an
+  overlay mode's binding takes a key of a global one, so a host's test can
+  hold it to the ones it means.
+- **Ids are stable.** Every id is unique, lower-case letters, digits, `.`,
+  and `-` (`tree.down`, `view.next`), checked at build; a help annotation
+  names a binding by it (`help::HelpAnnotation`), and so would a remap.
+- **A control's own table** becomes a pane's scope without a copy of its
+  rows: `KeymapBuilder::table(table, describe)` makes one binding per
+  action the table binds, in the order the action enum's help lists them
+  (`HelpAction::LISTED`), with every key bound to it (the shown keys first)
+  and the verb and rank of its first shown row; `describe` gives each its
+  id, scope, the program's action, and its help.
+
+```rust
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tuikit::keys::{ActiveScopes, Bind, Keymap, Scope, bind, ch, ctrl, exact, key};
+use tuikit::status_bar::{Annotation, KeyHintBar};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Do {
+    Open,
+    Down,
+    Peek,
+    Back,
+    Quit,
+}
+
+/// What the program knows: whether there is anything to go back to.
+struct Model {
+    history: usize,
+}
+
+const LIST: Scope = Scope::Pane("list");
+const PREVIEW: Scope = Scope::Pane("preview");
+
+const KEYS: &[Bind<Do, Model>] = &[
+    bind("list.open", LIST, &[exact(KeyCode::Enter)], Do::Open)
+        .verb("open")
+        .help("List", "Open the selected row"),
+    bind("list.down", LIST, &[key(KeyCode::Down), ch('j')], Do::Down)
+        .verb("move")
+        .help("List", "Move to the next row"),
+    // The same key, another meaning, on the other pane.
+    bind("preview.down", PREVIEW, &[key(KeyCode::Down), ch('j')], Do::Peek)
+        .help("Preview", "Scroll the preview"),
+    bind("back", Scope::Global, &[key(KeyCode::Backspace)], Do::Back)
+        .verb("back")
+        .help("Program", "Go back")
+        .available_when(|model: &Model| model.history > 0),
+    bind("quit", Scope::Global, &[ch('q'), ctrl('c')], Do::Quit)
+        .verb("quit")
+        .help("Program", "Quit"),
+];
+
+let keymap = Keymap::builder().rows(KEYS).build().expect("no key shadows another");
+let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+let action = |pane| keymap.resolve(ActiveScopes::pane(pane), down).map(|b| b.action());
+assert_eq!(action("list"), Some(Do::Down));
+assert_eq!(action("preview"), Some(Do::Peek));
+
+// The status bar names the bindings that act where the reader is.
+let model = Model { history: 0 };
+let bar = KeyHintBar::new().keymap(&keymap, ActiveScopes::pane("list"), &model, 1, |_| {
+    Some(Annotation::new())
+});
+assert!(bar.text().starts_with("Enter open"));
+assert!(!bar.text().contains("back"), "nothing to go back to");
+
+// A key that a scope binds twice fails the build.
+const CLASH: &[Bind<Do>] = &[
+    bind("top", Scope::Global, &[tuikit::keys::KeyMatcher::AnyMod(KeyCode::Char('g'))], Do::Open)
+        .help("x", "Top"),
+    bind("group", Scope::Global, &[ctrl('g')], Do::Down).help("x", "Group"),
+];
+let conflicts = Keymap::builder().rows(CLASH).build().unwrap_err();
+assert_eq!(conflicts.conflicts().len(), 1);
+```
 
 ## Key table
 
@@ -199,8 +324,10 @@ by a pager whose content can be copied, and `LogListKey::Copy` by a log
 list whose entries can; no standard table binds either.
 
 A pane's table lives with its control: `EXPLORER_KEYS` (`ExplorerKey`)
-is the explorer's, which a host resolves before its program-wide keymap
-while the explorer has focus (see [explorer.md](explorer.md)). A pane
+is the explorer's, which a host takes in as the explorer pane's scope of
+its keymap (`KeymapBuilder::table`), so it is looked up before the
+program's keys while the explorer has focus (see
+[explorer.md](explorer.md)). A pane
 leaves `q` and `Ctrl-C` to its program, so its table takes `mislabeled`,
 `unresolved`, and `loose_characters` but not `ctrl_c_first`.
 
@@ -221,7 +348,7 @@ the style the control draws its footer in.
 | 3 | Confirmation | `DIALOG_KEYS` is the one dialog keymap: `y`/`Enter` confirm, `n`/`Esc` cancel, in a confirmation, a choice (beside its verbs), and a notice alike |
 | 4 | Close keys | `Esc` leaves one level in every standard table; `Ctrl-C` comes first and dismisses (`ctrl_c_first`); `q` dismisses too in every table where nothing is typed (menus, dialogs, checklists, settings panels, pagers, a palette's options pane) and types in the text, form, and palette tables |
 | 6 | Forms | `FORM_KEYS`: `Tab`/`↓`/`Ctrl-N` next and `S-Tab`/`↑`/`Ctrl-P` previous; `Enter` is the form's submit row |
-| 8 | Footers and hints | every footer is generated from its table in one grammar; `unresolved` fails a footer that names a key an earlier row takes |
+| 8 | Footers and hints | every footer is generated from its table in one grammar; `unresolved` fails a footer that names a key an earlier row takes; a keymap binding carries the verb its hint says and the help its row says, and no key of a scope can shadow another |
 | 12 | Paging | `PAGER_KEYS`, `CHECKLIST_KEYS`, and `SETTINGS_KEYS` bind `PgUp`/`PgDn`, `Home`/`End`, and `g`/`G` as typed, the pager tables add half-page `Ctrl-D`/`Ctrl-U`, and `PALETTE_KEYS` binds `PgUp`/`PgDn` (its `Home`/`End` move the query's caret and `g`/`G` type); the control sizes the page |
 | 13 | Theme | the one look it adds, for an unavailable action, comes from `inert` and `muted` |
 | 14 | Width | `Footer::lines` measures segments in cells and wraps only between them |
@@ -239,9 +366,11 @@ pager's stepping is the pager's; its keys come from here).
   a help page dim what is not. Hiding an action entirely (the third state)
   is a filter over `with_availability`'s copy; explaining why it is
   unavailable is the control's message when the key still resolves.
-- **A scoped program-wide keymap.** The host's main keymap keeps its own
-  table for now. A later step adds scopes (program, pane focus, overlay)
-  whose rows carry help text, built on `KeyMatcher` and `KeyRow`.
+- **One character rule for a keymap.** A keymap takes any matcher, so a
+  program's letters may keep binding their Alt forms
+  (`KeyMatcher::AnyModExceptCtrl`) where an overlay binds characters as
+  typed; `loose_characters` over its bindings would show where they
+  differ before a program adopts the overlay rule.
 - **Generated help pages.** `rows` and `key_label` are what the `help`
   module's generator reads: `help::sections_for` turns a table and a
   description per action into a help page, and `help::undescribed` finds
@@ -250,4 +379,8 @@ pager's stepping is the pager's; its keys come from here).
   notation back into a matcher (for configuration or a test key DSL) would
   sit beside it.
 - **User remapping.** Tables are `const`; a remapped table is a copy with
-  other matchers, built the way `with_availability` builds its copy.
+  other matchers, built the way `with_availability` builds its copy. A
+  keymap binding's stable id names it for a remap with no change to the
+  table: a host would replace the keys of the bindings its configuration
+  names before `build`, which checks the result for overlaps as it checks
+  any table.

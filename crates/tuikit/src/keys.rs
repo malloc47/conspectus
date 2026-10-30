@@ -1,5 +1,6 @@
 //! Keys: the key-table model every overlay resolves its keys through and
-//! generates its footer from.
+//! generates its footer from, and the scoped keymap a program's own keys
+//! live in.
 //!
 //! This is a layer 2 convention. An overlay's keys are a `const` table
 //! of [`KeyRow`]s over the overlay's own action enum `A`. The overlay
@@ -76,21 +77,68 @@
 //! assert!(keys::ctrl_c_first(HELP_KEYS));
 //! ```
 //!
+//! # The scoped keymap
+//!
+//! A program's own keys, the ones no overlay owns, are a [`Keymap`]: one
+//! table of [`Bind`]ings in [`Scope`]s (the program's, a pane's while it
+//! has focus, an overlay mode's while it is on). Each binding has a
+//! stable id, its keys, the action it stands for, the short verb its hint
+//! says, the help section and text its help row says, a rank for a status
+//! bar, and, if it needs one, a predicate over the host's context saying
+//! whether it can act now. A key is looked up in the scopes that have the
+//! keys ([`ActiveScopes`]), the most particular first. Building the keymap
+//! fails when two keys of one scope can match one key event, so no key
+//! shadows another and the table's order is free to be the order a help
+//! page and a status bar list the keys in. A pane control's own table
+//! becomes a pane's scope through [`KeymapBuilder::table`].
+//!
+//! ```
+//! use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+//! use tuikit::keys::{ActiveScopes, Bind, Keymap, Scope, bind, ch, exact};
+//!
+//! #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//! enum Do {
+//!     Open,
+//!     Quit,
+//! }
+//!
+//! const KEYS: &[Bind<Do>] = &[
+//!     bind("row.open", Scope::Pane("list"), &[exact(KeyCode::Enter)], Do::Open)
+//!         .verb("open")
+//!         .help("Rows", "Open the selected row"),
+//!     bind("quit", Scope::Global, &[ch('q')], Do::Quit).verb("quit").help("Program", "Quit"),
+//! ];
+//! let keymap = Keymap::builder().rows(KEYS).build().expect("no key shadows another");
+//! let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+//! assert_eq!(
+//!     keymap.resolve(ActiveScopes::pane("list"), enter).map(|b| b.action()),
+//!     Some(Do::Open)
+//! );
+//! // Another pane has focus: `Enter` is not bound there.
+//! assert!(keymap.resolve(ActiveScopes::pane("preview"), enter).is_none());
+//! ```
+//!
 //! # What a host keeps
 //!
 //! The tables of its own overlays (their action enums, verbs, and notes),
 //! what an action does, which actions are available now, and its
-//! program-wide keymap. A later step adds a scoped program-wide keymap
-//! here. The help generator ([`help::sections_for`](crate::help::sections_for))
-//! reads these tables.
+//! keymap's bindings, their words, and which scopes have the keys. The
+//! help generator ([`help::sections_for`](crate::help::sections_for) and
+//! [`help::keymap_sections`](crate::help::keymap_sections)) reads these
+//! tables, and the status bar
+//! ([`KeyHintBar`](crate::status_bar::KeyHintBar)) names their keys.
 
 mod footer;
+mod keymap;
 mod matcher;
 mod role;
 mod standard;
 mod table;
 
 pub use footer::{Footer, HINT_SEPARATOR, Segment, footer, unavailable_style};
+pub use keymap::{
+    ActiveScopes, Bind, Binding, Conflict, Conflicts, Keymap, KeymapBuilder, Scope, bind,
+};
 pub use matcher::{KeyMatcher, alt, alt_key, ch, ctrl, ctrl_key, exact, key, key_label};
 pub use role::{Convention, EnterMeans, KeyAction, KeyRole, SpaceMeans, ctrl_c_first};
 pub use standard::{

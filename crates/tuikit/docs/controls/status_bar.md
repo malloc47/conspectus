@@ -4,7 +4,7 @@
 | --- | --- |
 | Module | `tuikit::status_bar` |
 | Layer | 1 (component), built on the layer 2 key model |
-| Type parameters | none on the types; `KeyHintBar::table` and `annotated` take any table's action enum `A` |
+| Type parameters | none on the types; `KeyHintBar::table` and `annotated` take any table's action enum `A`, and `KeyHintBar::keymap` a keymap's action `A` and the host's context `Cx` its availability reads |
 | Cargo feature | none |
 | Outcomes | none: `line` returns the bar's spans for the width it is given, `render` draws them |
 
@@ -16,8 +16,9 @@ are written by hand drifts from the keys: it names a key that a pane or an
 overlay on top has taken for something else, words a key one way while the
 footer and the help page word it another, and copies an overlay's footer
 into itself when the overlay opens. `StatusBar` draws the row, and its
-`KeyHintBar` generates the hints from the key tables of the scope that has
-the keys, so a hint cannot name a key its scope does not bind.
+`KeyHintBar` generates the hints from the key tables, and the scoped
+keymap, of the scope that has the keys, so a hint cannot name a key its
+scope does not bind.
 
 - **A message** is a [`Feedback`](feedback.md) in its severity's style
   (`Feedback::span`), after the host's lead, cut with `…` when it is wider
@@ -36,6 +37,11 @@ bar ([`Annotation`]): leave a row out, give it another verb, a detail after
 the verb (`Enter/a open report.txt`), a reason it cannot act (drawn dimmed:
 `d delete: read-only`), or another rank. An overlay names its own keys with
 [`Overlay::hints`](overlay.md), its footer at its level, which goes in whole.
+A program's own keys come from its [scoped keymap](keys.md#the-scoped-keymap):
+`KeyHintBar::keymap` names the bindings with a verb that act in the scopes
+that have the keys, in the keymap's order, leaving out a binding that cannot
+act now (its availability predicate) and one whose key a more particular
+scope takes.
 
 The host keeps which scope has the keys and which tables are its, every
 verb, detail, and reason (its words), the ranks, its own segments, and the
@@ -144,6 +150,7 @@ assert_eq!(shown.line(20).to_string(), "could not read note…");
 | `.table(table, rank)` | every shown row of `table` and its notes as hints, as written | included tables spliced in; a row with no rank holds on at `rank` |
 | `.annotated(table, rank, annotate)` | the rows `annotate` keeps, as it says | `annotate(&action)` returns `None` to leave a row out, or an `Annotation`; notes stay |
 | `.footer(&footer, rank)` | a control's footer, each segment a hint, whole | what `Overlay::hints` returns; a segment never joins another |
+| `.keymap(&keymap, active, &cx, rank, annotate)` | the bindings of a scoped keymap with a verb, in the scopes `active`, as `annotate` says | each names its first key; left out when `annotate` returns `None`, when it cannot act in `cx`, or when a scope looked up before its own takes the key; joins and ranks as `annotated` |
 | `.hints()`, `.keys()`, `.text()`, `.is_empty()` | the hints, every key they name, the hints as one line | `keys` is what a check presses |
 | `.segments(&theme)` | the hints as `PriorityLine` segments with their ranks | `muted`; a hint that cannot act in `keys::unavailable_style` |
 | `KeyHint::text`, `keys`, `rank`, `is_available` | one hint | |
@@ -210,9 +217,11 @@ the host's).
 
 ## Seams left open
 
-- **A scoped program-wide keymap.** The host names which tables are the
-  scope's each time it builds the bar. A keymap with scopes (the screen, a
-  pane, an overlay) would hand the bar the active scope's tables itself.
+- **Grouping a keymap's hints.** `keymap` names bindings in the keymap's
+  order, which is the help page's. A host that wants the bar in another
+  order (what acts on the selection, then the program's keys) calls it once
+  per group with an `annotate` that keeps that group, as the hints join
+  across calls; a group on each binding would let one call do it.
 - **Showing why a dimmed key cannot act.** `because` puts the reason in the
   hint. A narrow bar could keep the dimmed key and drop its reason first.
 - **Clicking a hint.** `PriorityLine::fit` reports the kept segments, and

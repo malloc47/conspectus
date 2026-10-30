@@ -302,3 +302,123 @@ fn the_bar_draws_on_the_first_row_of_its_area() {
         .spans(20);
     assert_eq!(styled[0].style, bold);
 }
+
+mod from_a_keymap {
+    use super::*;
+    use crate::keys::{ActiveScopes, Bind, Keymap, Scope, bind, exact};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Do {
+        Up,
+        Down,
+        Open,
+        Back,
+        Peek,
+        Quit,
+    }
+
+    /// Whether there is anything to go back to.
+    struct Model {
+        history: usize,
+    }
+
+    const FILES: Scope = Scope::Pane("files");
+    const PREVIEW: Scope = Scope::Pane("preview");
+
+    const KEYS: &[Bind<Do, Model>] = &[
+        bind("files.open", FILES, &[exact(KeyCode::Enter)], Do::Open)
+            .verb("open")
+            .rank(6)
+            .help("Files", "Open the file"),
+        bind("files.up", FILES, &[key(KeyCode::Up), ch('k')], Do::Up)
+            .verb("move")
+            .rank(3)
+            .help("Files", "Up"),
+        bind(
+            "files.down",
+            FILES,
+            &[key(KeyCode::Down), ch('j')],
+            Do::Down,
+        )
+        .verb("move")
+        .rank(3)
+        .help("Files", "Down"),
+        bind("preview.peek", PREVIEW, &[ch('p')], Do::Peek)
+            .verb("peek")
+            .help("Preview", "Peek"),
+        bind("peek", Scope::Global, &[ch('p')], Do::Peek)
+            .verb("peek")
+            .help("Program", "Peek from anywhere"),
+        bind("back", Scope::Global, &[key(KeyCode::Backspace)], Do::Back)
+            .verb("back")
+            .rank(10)
+            .help("Program", "Go back")
+            .available_when(|model: &Model| model.history > 0),
+        bind("quit", Scope::Global, &[ch('q'), ctrl('c')], Do::Quit)
+            .verb("quit")
+            .rank(9)
+            .help("Program", "Quit"),
+    ];
+
+    fn keymap() -> Keymap<Do, Model> {
+        Keymap::builder().rows(KEYS).build().unwrap()
+    }
+
+    #[test]
+    fn the_bar_names_the_active_scopes_bindings_in_the_keymaps_order() {
+        let keymap = keymap();
+        let model = Model { history: 0 };
+        let every = |_: &Do| Some(Annotation::new());
+        let bar = KeyHintBar::new().keymap(&keymap, ActiveScopes::pane("files"), &model, 1, every);
+        let moves = format!("{}/{} move", marks::ARROW_UP, marks::ARROW_DOWN);
+        assert_eq!(
+            bar.text(),
+            format!("Enter open · {moves} · p peek · q quit")
+        );
+        // Each hint names the first key of its binding, with its rank.
+        let ranks: Vec<u32> = bar.hints().iter().map(KeyHint::rank).collect();
+        assert_eq!(ranks, [6, 3, 1, 9]);
+        assert_eq!(bar.hints()[3].keys(), &[ch('q')]);
+    }
+
+    #[test]
+    fn a_key_a_more_particular_scope_takes_is_named_once_as_its() {
+        let keymap = keymap();
+        let model = Model { history: 0 };
+        // On the preview pane its own `p` takes the program's.
+        let bar = KeyHintBar::new().keymap(
+            &keymap,
+            ActiveScopes::pane("preview"),
+            &model,
+            1,
+            |action| {
+                Some(match action {
+                    Do::Peek => Annotation::new().detail("here"),
+                    _ => Annotation::new(),
+                })
+            },
+        );
+        assert_eq!(bar.text(), "p peek here · q quit");
+        assert_eq!(
+            keymap.overrides(),
+            vec![("preview.peek", "peek", "p".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_binding_that_cannot_act_now_is_left_out_and_an_annotation_still_decides() {
+        let keymap = keymap();
+        let global = ActiveScopes::global();
+        let every = |_: &Do| Some(Annotation::new());
+        let none = KeyHintBar::new().keymap(&keymap, global, &Model { history: 0 }, 1, every);
+        assert_eq!(none.text(), "p peek · q quit");
+        let some = KeyHintBar::new().keymap(&keymap, global, &Model { history: 3 }, 1, |action| {
+            (*action != Do::Peek).then(|| match action {
+                Do::Quit => Annotation::new().because("unsaved"),
+                _ => Annotation::new(),
+            })
+        });
+        assert_eq!(some.text(), "Backspace back · q quit: unsaved");
+        assert!(!some.hints()[1].is_available());
+    }
+}

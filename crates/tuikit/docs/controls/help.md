@@ -20,6 +20,10 @@ frame, and generates the footer from the key table that scrolls and
 closes it. `sections_for` generates the sections from a key table and a
 description for each action, so a page cannot disagree with the keys it
 describes, and `undescribed` finds a key the page would leave out.
+`keymap_sections` generates a program's page from its
+[scoped keymap](keys.md#the-scoped-keymap), one row per binding with the
+help text the binding carries, and takes what a binding cannot say as
+`HelpAnnotation`s anchored to a binding by its stable id.
 
 The module replaces what a program grows help page by help page: a
 generator copied for every viewer that differs only in its message type,
@@ -31,10 +35,10 @@ the next key up did nothing, and a scroll state and renderer of the
 page's own beside the readers' pager.
 
 The host keeps what each action does and where it is listed (its
-`HelpAction` impl), the prose of the rows it writes by hand where a table's
-one-line descriptions are not enough, the marks its legends explain and
-their styles, which table scrolls and closes its pages, and which actions
-are available now.
+`HelpAction` impl, or its keymap bindings' help), the annotations it
+writes by hand where a binding's one sentence is not enough, the marks its
+legends explain and their styles, which table scrolls and closes its pages,
+and which actions are available now.
 
 ## Usage example
 
@@ -133,6 +137,10 @@ assert_eq!(lines.len(), 7, "two headings, three rows, two blank lines");
 | `sections_for(table)` | the page of a key table | one row per listed action the table binds; rows group under their sections in listing order; an unbound action is left out |
 | `sections_described(table, describe)` | the same page in the host's words | `describe` returns the host's sentence for an action, or `None` to keep the action's own; for a table over a framework enum (an explorer's keys) on a host's page |
 | `undescribed(table)` | the keys a table binds that its page would not describe | an action left out of `LISTED`, or one whose entry is empty; a host asserts it is empty for every table it generates a page for |
+| `keymap_sections(keymap, annotations)` | the page of a scoped keymap | one row per binding, in the keymap's order, under the section it names; its keys in the binding's order; its help text; then the annotations |
+| `keymap_sections_in(keymap, annotations, &cx)` | the same, each row dimmed whose binding cannot act now in `cx` | |
+| `HelpAnnotation::more(id, text)`, `row_after(id, row)`, `section(section)` | what a binding cannot say: prose after its row's description, a row of its own after its row, a section after the generated ones | `anchor` is the binding's id; a section has none |
+| `unanchored(keymap, annotations)` | the ids annotations name that no binding has | a host asserts it is empty, so a removed binding leaves no prose behind unseen |
 | `HelpSection::new(title)`, `keys`, `legend`, `row` | a heading and its rows, built by hand | for prose a table's descriptions cannot hold |
 | `HelpRow::Keys`, `HelpRow::Legend` | a row of keys and what they do; a legend entry | `HelpRow::keys(..).available(false)` dims a row |
 | `HelpPage::new(sections)`, `title` | a page of `sections`, titled `Help` unless `title` says otherwise | `HelpPage::SIZE` is `ModalSize::WIDE` |
@@ -150,6 +158,46 @@ shows one key of each action, and the help lists them all. A row is
 available when any of its keys is, so a table copied through
 `with_availability` dims the rows of actions that cannot act now, the key
 column included. An action listed twice gets one row.
+
+### Generated from a keymap
+
+A program's own keys live in one scoped keymap whose bindings carry their
+help ([keys.md](keys.md#the-scoped-keymap)). `keymap_sections` lists one row
+per binding: its keys in the order the binding lists them, joined with
+` / ` (`↑ / k`), and its help text. Sections come in the order the bindings
+first name each, and rows in the keymap's order, which no shadowing can
+constrain because the keymap refuses keys that overlap in a scope.
+
+What a binding's one sentence cannot carry is an annotation, so the hand-written
+part of a page is only what a table cannot say:
+
+- `more(id, text)`: prose after the row's description, written with its
+  own leading punctuation (`; Enter picks it`): the keys of the overlay the
+  key opens, which that overlay's table binds.
+- `row_after(id, row)`: a row of its own after the binding's row: a key
+  sequence the keymap does not bind as one key (`/ then Tab`).
+- `section(section)`: a section after the generated ones: a legend of the
+  marks a screen draws.
+
+```rust
+use ratatui::crossterm::event::KeyCode;
+use tuikit::help::{HelpAnnotation, HelpRow, keymap_sections, unanchored};
+use tuikit::keys::{Bind, Keymap, Scope, bind, ch, key};
+
+const KEYS: &[Bind<u8>] = &[
+    bind("list.down", Scope::Pane("list"), &[key(KeyCode::Down), ch('j')], 0)
+        .help("Moving", "Move to the next row"),
+    bind("find", Scope::Global, &[ch('/')], 1).help("Finding", "Find a row by name"),
+];
+let keymap = Keymap::builder().rows(KEYS).build().expect("no key shadows another");
+let notes = [
+    HelpAnnotation::more("find", "; Enter picks it"),
+    HelpAnnotation::row_after("find", HelpRow::keys("/ then Tab", "Find anything")),
+];
+assert!(unanchored(&keymap, &notes).is_empty());
+let sections = keymap_sections(&keymap, &notes);
+assert_eq!(sections[1].rows.len(), 2, "the binding's row, then the annotation's");
+```
 
 ### Layout
 
@@ -241,10 +289,10 @@ the pager decides).
 
 ## Seams left open
 
-- **A program-wide keymap's page.** `sections_for` reads any table of
-  `KeyRow`s; the scoped program-wide keymap planned for `keys` carries
-  help text on its rows and generates the main page, with hand-written
-  rows kept as annotations beside the generated ones.
+- **A keymap page that reflects the moment.** `keymap_sections_in` dims
+  the rows whose bindings cannot act in the context it is given; a host that
+  builds its page once when it opens gives none, so every row reads as
+  able to act.
 - **Hiding instead of dimming.** An unavailable row is dimmed; hiding it
   is a filter over the sections, and explaining it is the control's.
 - **Per-section ordering and columns.** The key column is one width for

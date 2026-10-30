@@ -253,12 +253,13 @@ same with the table's verbs). A help page lists every row; a host that
 names its rows its own way generates it with
 `help::sections_described(table, describe)`.
 
-A host whose other keymap binds some of these keys to other meanings
-(`Enter` for its own default action, `h`/`l` for a tree's folds)
-resolves this table first while the explorer has focus, and drops its
-own keymap's actions that drive the other pane, so a chord the table
-leaves out (`Alt-j`) does nothing instead of moving what the reader is
-not looking at.
+A host whose other keys give some of these keys other meanings
+(`Enter` for its own default action, `h`/`l` for a tree's folds) takes
+this table in as the explorer pane's scope of its
+[scoped keymap](keys.md#the-scoped-keymap) (`KeymapBuilder::table`), and
+puts the other pane's keys in that pane's scope, so both meanings sit in
+one table and a chord the explorer's table leaves out (`Alt-j`) does
+nothing instead of moving what the reader is not looking at.
 
 | Key | Action | Notes |
 | --- | --- | --- |
@@ -325,10 +326,6 @@ opens in the host's `Pager`, which follows it).
 - **Caching.** The rows are asked for on every key and every frame, which
   is cheap for a few dozen rows. A host with hundreds would cache them by
   content and view; nothing in the explorer assumes it does not.
-- **A scoped keymap.** `EXPLORER_KEYS` is resolved by the host before its
-  program-wide keymap. When the framework's keymap grows scopes, the
-  table becomes the explorer's scope, with the program's meanings of the
-  same keys beside it.
 - **A page by entries.** A page moves by the rows the zone showed. An
   entry that wraps onto two rows makes a page move one entry more than
   showed; counting entries instead needs the layout to report which lines

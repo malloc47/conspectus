@@ -386,7 +386,8 @@ copy), and 18 (pagers).
   so `Item::new(verb, action).detail(label)` lists the verb with its key
   and `every_word` filters them; `on_pick` commits the row's action, and a
   row's availability (`KeyRow::Bind { available, .. }`) can recede or
-  hide it. The program-wide keymap a later step adds would be its source.
+  hide it. A scoped keymap's bindings, each with its verb and help
+  (`Keymap::bindings`), would be its source.
   No adapter is built.
 - **A row preview.** A pane beside or under the results showing the
   cursor's row (a file's start, a command's help). The body lays the

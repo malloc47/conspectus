@@ -233,8 +233,8 @@ tree handles no key itself.
   a time and keeps a producer of its own, or `TreeColumns::line_then`,
   for the rest.
 - **A key table.** A `TREE_KEYS` table over a tree action enum would let a
-  host resolve the keys above and generate its help from them, with the
-  program-wide keymap.
+  host take the keys above into a pane's scope of its keymap
+  (`KeymapBuilder::table`) and generate its help from them.
 - **Rows loaded later.** A row may say it has children before they are
   loaded (it is `expandable` with no deeper rows yet); the host loads them
   when it is expanded. A loading look on such a row is the host's today.

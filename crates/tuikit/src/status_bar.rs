@@ -13,8 +13,9 @@
 //!   own segments (settings in effect, a count), all on one
 //!   [`PriorityLine`] that gives way lowest rank first.
 //!
-//! The keys are a [`KeyHintBar`]: hints generated from key tables, never
-//! written by hand, so a hint cannot name a key its scope does not bind.
+//! The keys are a [`KeyHintBar`]: hints generated from key tables and a
+//! program's scoped keymap ([`KeyHintBar::keymap`]), never written by
+//! hand, so a hint cannot name a key its scope does not bind.
 //! Each shown row of a table is a hint of its label and verb in the
 //! footer's grammar (`Enter open`), rows that share their words join
 //! their labels (`↑/↓ move`), and hints keep the order of their tables.
@@ -99,7 +100,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
 use crate::feedback::Feedback;
-use crate::keys::{Footer, Hint, KeyMatcher, KeyRow, rows, unavailable_style};
+use crate::keys::{
+    ActiveScopes, Footer, Hint, KeyMatcher, KeyRow, Keymap, key_label, rows, unavailable_style,
+};
 use crate::priority_line::{PriorityLine, Segment};
 use crate::text;
 use crate::theme::Theme;
@@ -297,6 +300,89 @@ impl KeyHintBar {
                 }),
                 _ => {}
             }
+        }
+        self
+    }
+
+    /// The bar with the bindings of `keymap` that act in the scopes
+    /// `active` (the pane with focus and the program's) as hints, in the
+    /// keymap's order, those the host `annotate`s now: each binding with a
+    /// verb names its first key, as `label verb`. A binding is left out
+    /// when `annotate` returns `None`, when it cannot act now in the
+    /// host's context `cx` ([`Bind::available_when`]), and when a scope
+    /// looked up before its own takes its key, so the bar names only keys
+    /// that do what it says where the reader is. Ranks and joining are
+    /// [`annotated`](Self::annotated)'s.
+    ///
+    /// [`Bind::available_when`]: crate::keys::Bind::available_when
+    ///
+    /// ```
+    /// use ratatui::crossterm::event::KeyCode;
+    /// use tuikit::keys::{ActiveScopes, Bind, Keymap, Scope, bind, ch, key};
+    /// use tuikit::status_bar::{Annotation, KeyHintBar};
+    ///
+    /// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    /// enum Do {
+    ///     Next,
+    ///     Back,
+    ///     Quit,
+    /// }
+    ///
+    /// /// What the host knows: whether there is anything to go back to.
+    /// struct Model {
+    ///     history: usize,
+    /// }
+    ///
+    /// const KEYS: &[Bind<Do, Model>] = &[
+    ///     bind("list.next", Scope::Pane("list"), &[key(KeyCode::Down)], Do::Next)
+    ///         .verb("move")
+    ///         .help("List", "Move to the next row"),
+    ///     bind("back", Scope::Global, &[key(KeyCode::Backspace)], Do::Back)
+    ///         .verb("back")
+    ///         .help("Program", "Go back")
+    ///         .available_when(|model: &Model| model.history > 0),
+    ///     bind("quit", Scope::Global, &[ch('q')], Do::Quit).verb("quit").help("Program", "Quit"),
+    /// ];
+    /// let keymap = Keymap::builder().rows(KEYS).build().unwrap();
+    /// let bar = |active, model: &Model| {
+    ///     KeyHintBar::new()
+    ///         .keymap(&keymap, active, model, 1, |_| Some(Annotation::new()))
+    ///         .text()
+    /// };
+    /// let fresh = Model { history: 0 };
+    /// assert_eq!(bar(ActiveScopes::pane("list"), &fresh), "\u{2193} move \u{b7} q quit");
+    /// assert_eq!(
+    ///     bar(ActiveScopes::global(), &Model { history: 2 }),
+    ///     "Backspace back \u{b7} q quit"
+    /// );
+    /// ```
+    #[must_use]
+    pub fn keymap<A: Copy + PartialEq, Cx>(
+        mut self,
+        keymap: &Keymap<A, Cx>,
+        active: ActiveScopes,
+        cx: &Cx,
+        rank: u32,
+        annotate: impl Fn(&A) -> Option<Annotation>,
+    ) -> Self {
+        for binding in keymap.bindings() {
+            let Some(verb) = binding.verb() else {
+                continue;
+            };
+            if !keymap.first_key_reaches(active, binding) || !binding.can_act(cx) {
+                continue;
+            }
+            let Some(annotation) = annotate(&binding.action()) else {
+                continue;
+            };
+            let key = binding.keys()[0];
+            self.join(KeyHint {
+                labels: vec![key_label(&key)],
+                words: annotation.words(verb),
+                keys: vec![key],
+                rank: annotation.rank.or_else(|| binding.rank()).unwrap_or(rank),
+                available: annotation.is_available(),
+            });
         }
         self
     }

@@ -76,6 +76,50 @@ impl KeyMatcher {
         }
     }
 
+    /// A key event both this matcher and `other` fire on, if there is one:
+    /// the plainest, with no modifier where both take that. Two keys of
+    /// one keymap scope that overlap would shadow each other, so a keymap
+    /// refuses them ([`Keymap`](super::Keymap)).
+    ///
+    /// ```
+    /// use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+    /// use tuikit::keys::{KeyMatcher, ch, ctrl, key};
+    ///
+    /// // `g` with any modifier takes `Ctrl-G` too.
+    /// let any_g = KeyMatcher::AnyMod(KeyCode::Char('g'));
+    /// let event = any_g.overlap(&ctrl('g')).expect("both take Ctrl-G");
+    /// assert_eq!(event.modifiers, KeyModifiers::CONTROL);
+    /// // A character as typed leaves its chords free.
+    /// assert_eq!(ch('g').overlap(&ctrl('g')), None);
+    /// assert_eq!(key(KeyCode::Up).overlap(&key(KeyCode::Down)), None);
+    /// ```
+    pub fn overlap(&self, other: &KeyMatcher) -> Option<KeyEvent> {
+        let code = self.code();
+        if code != other.code() {
+            return None;
+        }
+        let exact = |matcher: &KeyMatcher| match *matcher {
+            KeyMatcher::Exact { modifiers, .. } => Some(modifiers),
+            _ => None,
+        };
+        // Every matcher but an exact one takes the key alone, and an exact
+        // one takes only its own modifiers, so these are the only sets two
+        // matchers can share.
+        [Some(KeyModifiers::NONE), exact(self), exact(other)]
+            .into_iter()
+            .flatten()
+            .find(|&modifiers| self.matches(modifiers, code) && other.matches(modifiers, code))
+            .map(|modifiers| KeyEvent::new(code, modifiers))
+    }
+
+    /// The key this matcher binds, whatever its modifiers.
+    fn code(&self) -> KeyCode {
+        match *self {
+            KeyMatcher::Char(c) | KeyMatcher::AnyModExceptCtrl(c) => KeyCode::Char(c),
+            KeyMatcher::Exact { code, .. } | KeyMatcher::AnyMod(code) => code,
+        }
+    }
+
     /// Whether this matcher binds a character but ignores its modifiers,
     /// against the overlay rule (see the type's documentation).
     pub fn ignores_chords_of_a_character(&self) -> bool {

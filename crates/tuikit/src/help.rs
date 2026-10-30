@@ -26,6 +26,13 @@
 //!   [`undescribed`] finds a key the page would leave out, so a test fails
 //!   when a key has no description. [`sections_described`] is the same
 //!   page in the host's words, for a table over a framework enum.
+//! - **Generated from a keymap.** [`keymap_sections`] reads a program's
+//!   scoped [`Keymap`](crate::keys::Keymap): one row per binding, under
+//!   the section it names, with its help text. What the keymap cannot say
+//!   is a [`HelpAnnotation`] anchored to a binding by its stable id (more
+//!   prose for its row, a row of its own after it) or a section of its
+//!   own (a legend of marks); [`unanchored`] finds an annotation whose
+//!   binding is gone.
 //! - **The page.** [`HelpPage`] lays the sections out in cells for the
 //!   width its pager gives, through [`text`](crate::text), and is a
 //!   [`PagerContent`](crate::pager::PagerContent);
@@ -99,17 +106,19 @@
 //! # What a host keeps
 //!
 //! What each action does and where it is listed (its [`HelpAction`]
-//! impl), the prose of rows it writes by hand and the marks its legends
-//! explain, which key table scrolls and closes its pages, and which
-//! actions are available now. A later step generates a program-wide
-//! keymap's page from the scoped keymap's own rows.
+//! impl, or its keymap binding's help), the annotations and legends it
+//! writes by hand where a table cannot say what a page needs, which key
+//! table scrolls and closes its pages, and which actions are available
+//! now.
 
 mod content;
+mod keymap;
 mod page;
 
 pub use content::{
     HelpAction, HelpEntry, HelpRow, HelpSection, sections_described, sections_for, undescribed,
 };
+pub use keymap::{HelpAnnotation, keymap_sections, keymap_sections_in, unanchored};
 pub use page::HelpPage;
 
 #[cfg(test)]
