@@ -4,6 +4,7 @@ title: 'Extract `Explorer`, `Breadcrumb`, and `StackedMasterDetail` per the desi
 status: To Do
 assignee: []
 created_date: '2026-10-27 20:27'
+updated_date: '2026-10-30 08:10'
 labels:
   - tui-framework
   - tuifw-data
@@ -11,8 +12,12 @@ milestone: m-25
 dependencies:
   - CSP-755
   - CSP-729
+  - CSP-789
+  - CSP-790
+  - CSP-791
 documentation:
   - docs/plans/tui-framework/inventory/07-chrome-and-explorer.md
+  - docs/plans/tui-framework/explorer-design.md
 priority: medium
 type: enhancement
 ordinal: 842000

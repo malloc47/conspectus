@@ -4,6 +4,7 @@ title: 'Extract `TabBar`, `PriorityLine`, and `EmptyState`'
 status: To Do
 assignee: []
 created_date: '2026-10-27 20:27'
+updated_date: '2026-10-30 08:10'
 labels:
   - tui-framework
   - tuifw-chrome
@@ -13,6 +14,7 @@ dependencies:
   - CSP-725
   - CSP-757
   - CSP-716
+  - CSP-790
 documentation:
   - docs/plans/tui-framework/inventory/07-chrome-and-explorer.md
 priority: medium
