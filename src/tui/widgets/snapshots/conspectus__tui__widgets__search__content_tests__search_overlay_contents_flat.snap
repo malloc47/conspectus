@@ -20,7 +20,7 @@ expression: text
         │                                                                                   │
         │                                                                                   │
         │                                                                                   │
-        │↑/↓ move · Enter open hit · Esc close · Tab search current/all                     │
-        │S-Tab list sessions/messages · Ctrl-R recall search · Ctrl-O set options           │
-        │Ctrl-F filter lists · Ctrl-S open Search view                                      │
+        │↑/↓ move · Enter open hit · Tab search current/all · S-Tab list sessions/messages  │
+        │Ctrl-R recall search · Ctrl-O set options · Ctrl-F filter lists                    │
+        │Ctrl-S open Search view · Esc close                                                │
         └───────────────────────────────────────────────────────────────────────────────────┘

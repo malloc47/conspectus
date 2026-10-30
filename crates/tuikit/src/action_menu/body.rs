@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
 use super::entry::Entry;
-use crate::frame::ModalBody;
+use crate::frame::{ModalBody, ModalFooter};
 use crate::glyphs::marks;
 use crate::keys::{Footer, KeyRow, MENU_KEYS, MenuKey, key_label, rows, unavailable_style};
 use crate::scroll::{ScrollGutter, ScrollWindow};
@@ -139,63 +139,44 @@ impl<M> View<'_, M> {
         }
     }
 
-    /// The footer `width` cells wide under a blank row, broken only
-    /// between hints.
-    pub fn footer(&self, width: usize) -> Vec<Line<'static>> {
-        let mut footer = vec![Line::default()];
-        footer.extend(Footer::new(MENU_KEYS).lines(width, self.theme));
-        footer
+    /// The footer the standard menu table generates.
+    pub fn footer(&self) -> ModalFooter<'_> {
+        ModalFooter::new(Footer::leaving_last(MENU_KEYS), self.theme)
     }
 }
 
 /// The menu inside its frame: the entries, scrolled in the window the
-/// menu kept, over the footer, which keeps the bottom rows.
+/// menu kept, over the footer, which keeps the frame's last rows.
 pub(super) struct Body<'a, M> {
     pub view: View<'a, M>,
     pub window: ScrollWindow,
-    pub width: usize,
-    pub layout: Option<Layout>,
-    pub footer: Vec<Line<'static>>,
 }
 
 impl<M> ModalBody for Body<'_, M> {
     type Output = ScrollWindow;
 
     fn measure(&mut self, width: u16) -> u16 {
-        self.width = usize::from(width);
-        let layout = self.view.layout(self.width);
-        self.footer = self.view.footer(self.width);
-        let rows = layout.lines.len() + self.footer.len();
-        self.layout = Some(layout);
+        let width = usize::from(width);
+        let rows = self.view.layout(width).lines.len() + self.view.footer().height(width);
         u16::try_from(rows).unwrap_or(u16::MAX)
     }
 
     fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let Self {
-            view,
-            mut window,
-            width,
-            layout,
-            mut footer,
-        } = self;
-        let mut layout = layout.unwrap_or_else(|| view.layout(usize::from(area.width)));
-        // A frame shorter than the menu gives the footer every row but
-        // one (its blank row going first) and the entries the rest.
-        let rows = usize::from(area.height);
-        let footer_rows = footer.len().min(rows.saturating_sub(1));
-        let footer = footer.split_off(footer.len() - footer_rows);
-        let entry_rows = rows - footer_rows;
-        let entries_area = Rect {
-            height: u16::try_from(entry_rows).unwrap_or(area.height),
-            ..area
-        };
-        // Entries that overflow give a column to the scrollbar, so they
-        // are laid out again one cell narrower.
-        if layout.lines.len() > entry_rows && entries_area.width >= 2 {
-            layout = view.layout(width.saturating_sub(1));
-        }
+        let Self { view, mut window } = self;
+        // The footer keeps the frame's last rows and leaves the entries
+        // one; entries that overflow give a column to the scrollbar, so
+        // they and the footer are laid out a cell narrower.
+        let mut fit = view
+            .footer()
+            .fit_beside(area, 1, |width| view.layout(usize::from(width)).lines.len());
+        let [entries_area, footer_area] = fit.split(area);
+        let mut layout = view.layout(usize::from(fit.width));
+        // The footer rows that do not fit follow the last entry. They spill
+        // only while the entries are down to the cursor's row, which the
+        // window keeps, so a menu shows none of them.
+        layout.lines.append(&mut fit.spill);
         let gutter = ScrollGutter::layout(entries_area, layout.lines.len());
-        window.resize(entry_rows, layout.lines.len());
+        window.resize(usize::from(entries_area.height), layout.lines.len());
         if let Some(span) = layout.spans.get(view.cursor) {
             window.follow(span.clone());
         }
@@ -208,12 +189,7 @@ impl<M> ModalBody for Body<'_, M> {
             .scroll(window.paragraph_scroll())
             .render(gutter.content(), buf);
         gutter.render(&window, buf);
-        let footer_area = Rect {
-            y: area.y + entries_area.height,
-            height: area.height - entries_area.height,
-            ..area
-        };
-        Paragraph::new(footer).render(footer_area, buf);
+        fit.render(footer_area, buf);
         window
     }
 }

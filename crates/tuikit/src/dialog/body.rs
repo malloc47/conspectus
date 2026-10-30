@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
 use super::Warning;
-use crate::frame::ModalBody;
+use crate::frame::{ModalBody, ModalFooter};
 use crate::glyphs::marks;
 use crate::keys::Footer;
 use crate::scroll::{ScrollGutter, ScrollWindow};
@@ -65,12 +65,9 @@ impl View<'_> {
         lines
     }
 
-    /// The footer `width` cells wide under a blank row, broken only
-    /// between hints.
-    pub fn footer(&self, width: usize) -> Vec<Line<'static>> {
-        let mut footer = vec![Line::default()];
-        footer.extend(self.footer.lines(width, self.theme));
-        footer
+    /// The dialog's footer.
+    pub fn footer(&self) -> ModalFooter<'_> {
+        ModalFooter::new(self.footer.clone(), self.theme)
     }
 }
 
@@ -80,12 +77,10 @@ fn is_blank(line: &Line<'_>) -> bool {
 }
 
 /// The dialog inside its frame: the body, scrolled in the window the
-/// dialog kept, over the footer, which keeps the bottom rows.
+/// dialog kept, over the footer, which keeps the frame's last rows.
 pub(super) struct Body<'a> {
     pub view: View<'a>,
     pub window: ScrollWindow,
-    pub lines: Option<Vec<Line<'static>>>,
-    pub footer: Vec<Line<'static>>,
 }
 
 impl ModalBody for Body<'_> {
@@ -93,66 +88,41 @@ impl ModalBody for Body<'_> {
 
     fn measure(&mut self, width: u16) -> u16 {
         let width = usize::from(width);
-        let lines = self.view.layout(width);
-        self.footer = self.view.footer(width);
-        let rows = lines.len() + self.footer.len();
-        self.lines = Some(lines);
+        let rows = self.view.layout(width).len() + self.view.footer().height(width);
         u16::try_from(rows).unwrap_or(u16::MAX)
     }
 
     fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let Self {
-            view,
-            mut window,
-            lines,
-            mut footer,
-        } = self;
-        let width = usize::from(area.width);
-        let mut lines = lines.unwrap_or_else(|| view.layout(width));
-        if footer.is_empty() {
-            footer = view.footer(width);
-        }
-        // A frame too short for the dialog gives up its blank rows first,
-        // as many as it must: the one above the body, then the one
-        // between the body and the keys.
+        let Self { view, mut window } = self;
+        let footer = view.footer();
+        // A frame too short for the dialog gives up the blank row above
+        // the body first.
         let rows = usize::from(area.height);
-        let trimmed = lines.len() + footer.len() > rows && lines.first().is_some_and(is_blank);
-        if trimmed {
-            lines.remove(0);
-        }
-        if lines.len() + footer.len() > rows && footer.len() > 1 {
-            footer.remove(0);
-        }
-        // Then the footer keeps the bottom rows, every one of them on a
-        // frame too short for more (the title still says what is asked),
-        // and the body scrolls in the rest.
-        let footer_rows = footer.len().min(rows);
-        let footer = footer.split_off(footer.len() - footer_rows);
-        let body_rows = rows - footer_rows;
-        let body_area = Rect {
-            height: u16::try_from(body_rows).unwrap_or(area.height),
-            ..area
-        };
-        // A body that overflows gives a column to the scrollbar, so it is
-        // laid out again one cell narrower.
-        if lines.len() > body_rows && area.width >= 2 {
-            lines = view.layout(width - 1);
-            if trimmed {
+        let width = usize::from(area.width);
+        let trimmed = view.layout(width).len() + footer.height(width) > rows;
+        let lines = |width: u16| {
+            let mut lines = view.layout(usize::from(width));
+            if trimmed && lines.first().is_some_and(is_blank) {
                 lines.remove(0);
             }
-        }
+            lines
+        };
+        // Then the footer keeps the frame's last rows and leaves the body
+        // one (the title still says what is asked); a body that overflows
+        // gives a column to the scrollbar, so it and the footer are laid
+        // out a cell narrower.
+        let mut fit = footer.fit_beside(area, 1, |width| lines(width).len());
+        let [body_area, footer_area] = fit.split(area);
+        // The footer rows that do not fit scroll after the body's last.
+        let mut lines = lines(fit.width);
+        lines.append(&mut fit.spill);
         let gutter = ScrollGutter::layout(body_area, lines.len());
-        window.resize(body_rows, lines.len());
+        window.resize(usize::from(body_area.height), lines.len());
         Paragraph::new(lines)
             .scroll(window.paragraph_scroll())
             .render(gutter.content(), buf);
         gutter.render(&window, buf);
-        let footer_area = Rect {
-            y: area.y + body_area.height,
-            height: area.height - body_area.height,
-            ..area
-        };
-        Paragraph::new(footer).render(footer_area, buf);
+        fit.render(footer_area, buf);
         window
     }
 }

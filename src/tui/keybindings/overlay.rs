@@ -92,7 +92,6 @@ pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "pick"),
-    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
     shown(
         key(KeyCode::Tab),
         SearchKey::Scope,
@@ -100,6 +99,7 @@ pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
         "search current/all",
     ),
     alias(key(KeyCode::BackTab), SearchKey::Scope),
+    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
 ];
 
 /// Searching what was said in the sessions and in mux scrollback.
@@ -115,7 +115,6 @@ pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "open hit"),
-    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
     shown(
         key(KeyCode::Tab),
         SearchKey::Scope,
@@ -133,6 +132,7 @@ pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     shown(ctrl('o'), SearchKey::Options, "Ctrl-O", "set options"),
     shown(ctrl('f'), SearchKey::ApplyFilter, "Ctrl-F", "filter lists"),
     shown(ctrl('s'), SearchKey::Keep, "Ctrl-S", "open Search view"),
+    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
 ];
 
 // ---------------------------------------------------------------------

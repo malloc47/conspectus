@@ -273,16 +273,29 @@ fn an_empty_warning_list_draws_nothing() {
 }
 
 #[test]
-fn a_short_screen_keeps_the_keys_and_gives_up_the_blank_rows_first() {
-    // Nine rows of content in a frame of six: the two blank rows around
-    // the body go, and what is left fits with the footer.
-    let buf = drawn(&mut delete(), 40, 10);
-    let drawn = text(&buf);
-    assert!(drawn.contains("Enter/y confirm · Esc/n cancel"), "{drawn}");
-    assert!(drawn.contains("the right window"), "{drawn}");
+fn a_short_screen_gives_up_the_blank_row_above_the_body_and_keeps_the_keys() {
+    // Eight rows of content in a frame of six: the blank row above the
+    // body goes; the footer keeps the last row under its blank row, as in
+    // every framed control, and the body scrolls in the four rows left.
+    let mut dialog = delete();
+    let buf = drawn(&mut dialog, 40, 10);
+    let shown = text(&buf);
     let lines = rows(&buf);
     let top = lines.iter().position(|row| row.contains('┌')).expect("top");
-    assert!(lines[top + 1].contains("Delete `plan.txt`"), "{drawn}");
+    let bottom = lines
+        .iter()
+        .position(|row| row.contains('└'))
+        .expect("bottom");
+    assert!(lines[top + 1].contains("Delete `plan.txt`"), "{shown}");
+    assert!(
+        lines[bottom - 1].contains("Enter/y confirm · Esc/n cancel"),
+        "{shown}"
+    );
+    assert_eq!(lines[bottom - 2].trim_matches(['│', ' ']), "", "{shown}");
+    assert!(!shown.contains("the right window"), "{shown}");
+    key(&mut dialog, press(KeyCode::Down));
+    let scrolled = text(&drawn(&mut dialog, 40, 10));
+    assert!(scrolled.contains("the right window"), "{scrolled}");
 }
 
 #[test]
@@ -316,9 +329,10 @@ fn the_dialog_keeps_its_keys_on_the_smallest_screens() {
     for height in 1..=8 {
         for mut dialog in [delete(), close(), notice(), tall(6)] {
             let buf = drawn(&mut dialog, 40, height);
-            // From five rows on, the frame has an inner row, which the
-            // footer takes before the body does.
-            if height >= 5 {
+            // From six rows on, the frame has two inner rows: the body
+            // keeps one and the footer's last row, the keys that leave,
+            // takes the other.
+            if height >= 6 {
                 let drawn = text(&buf);
                 assert!(
                     drawn.contains("Esc/n cancel") || drawn.contains("Enter/Esc close"),
@@ -557,4 +571,37 @@ fn the_dialog_table_passes_the_table_checks() {
         resolve(DIALOG_KEYS, ctrl_key('c').example()),
         Some(DialogKey::Abort)
     );
+}
+
+/// The rows inside the one frame drawn on `buf`, trailing spaces trimmed.
+fn inside(buf: &Buffer) -> Vec<String> {
+    let rect = crate::testkit::buffer::frame_rect(buf, &Buffer::empty(buf.area)).expect("a frame");
+    crate::testkit::buffer::inner_rows(buf, rect)
+        .into_iter()
+        .map(|row| row.trim_end().to_string())
+        .collect()
+}
+
+#[test]
+fn a_footer_too_tall_for_a_short_frame_keeps_the_keys_that_leave_and_scrolls_the_rest() {
+    // At 16 by 6 the frame has two rows inside and the footer three: the
+    // body keeps a row, the footer its last, the keys that leave. Its
+    // first rows follow the body's last row, where scrolling reaches them.
+    let mut dialog = delete();
+    let buf = drawn(&mut dialog, 16, 6);
+    let rows = inside(&buf);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows[0].starts_with("Delete"), "{rows:?}");
+    assert_eq!(rows[1], "Esc/n cancel", "{rows:?}");
+    assert!(!rows.iter().any(|row| row.contains("confirm")), "{rows:?}");
+    for _ in 0..30 {
+        key(&mut dialog, press(KeyCode::Down));
+    }
+    let rows = inside(&drawn(&mut dialog, 16, 6));
+    assert_eq!(
+        rows[0].trim_end_matches(['▼', '║', '█', '▲', ' ']),
+        "confirm",
+        "{rows:?}"
+    );
+    assert_eq!(rows[1], "Esc/n cancel", "{rows:?}");
 }

@@ -271,7 +271,7 @@ impl<M> Dialog<M> {
     /// [`DIALOG_KEYS`] (and the verbs).
     pub fn footer(&self) -> Footer {
         match &self.kind {
-            Kind::Confirm(_) => Footer::new(DIALOG_KEYS),
+            Kind::Confirm(_) => Footer::leaving_last(DIALOG_KEYS),
             Kind::Choice(verbs) => {
                 let cancel = Footer::only(DIALOG_KEYS, |action| *action == DialogKey::Cancel);
                 verbs
@@ -335,8 +335,6 @@ impl<M> Dialog<M> {
                 theme,
             },
             window: self.window,
-            lines: None,
-            footer: Vec::new(),
         };
         self.window = frame.render(area, buf, body);
     }

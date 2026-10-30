@@ -677,3 +677,32 @@ fn a_form_keeps_the_conventions_every_modal_keeps() {
     );
     conformance::assert_conventions(&registry);
 }
+
+/// The rows inside the one frame drawn on `buf`, trailing spaces trimmed.
+fn inside(buf: &Buffer) -> Vec<String> {
+    let rect = crate::testkit::buffer::frame_rect(buf, &Buffer::empty(buf.area)).expect("a frame");
+    crate::testkit::buffer::inner_rows(buf, rect)
+        .into_iter()
+        .map(|row| row.trim_end().to_string())
+        .collect()
+}
+
+#[test]
+fn a_footer_too_tall_for_a_short_frame_keeps_the_error_and_the_keys_that_leave() {
+    let mut form = form();
+    key(&mut form, press(KeyCode::Enter));
+    // Forty columns by eight rows: four inside the frame. The focused row
+    // and the error line keep theirs, and the footer, three rows at this
+    // width, gives up its blank row and its first row: its last rows, the
+    // keys that leave among them, stay.
+    let buf = drawn(&form, 40, 8);
+    let rows = inside(&buf);
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert!(rows[0].contains("name"), "{rows:?}");
+    assert_eq!(rows[1], "a name is required", "{rows:?}");
+    assert!(rows[3].ends_with("Esc cancel"), "{rows:?}");
+    assert!(
+        !rows.iter().any(|row| row.contains("Tab complete/next")),
+        "{rows:?}"
+    );
+}

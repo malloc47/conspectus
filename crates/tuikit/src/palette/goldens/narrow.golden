@@ -5,18 +5,18 @@ text  |│/                                     │|
 style |aac                                    a|
 text  |│3 found                               │|
 style |addddddd                               a|
-text  |│  alpha  · running                    │|
-style |a       ddddddddddd                    a|
-text  |│  beta  · gone · stopped              │|
-style |a      dddddddddddddddddd              a|
 text  |│► alphabet  · running                 │|
 style |aeeeeeeeeeefffffffffff                 a|
-text  |│↑/↓ move · Enter open · Esc close     │|
-style |addddddddddddddddddddddddddddddddd     a|
+text  |│                                      │|
+style |a                                      a|
+text  |│↑/↓ move · Enter open                 │|
+style |addddddddddddddddddddd                 a|
 text  |│Tab look here/everywhere              │|
 style |adddddddddddddddddddddddd              a|
 text  |│Ctrl-O set options · Ctrl-S keep      │|
 style |adddddddddddddddddddddddddddddddd      a|
+text  |│Esc close                             │|
+style |addddddddd                             a|
 text  |└──────────────────────────────────────┘|
 style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
 legend

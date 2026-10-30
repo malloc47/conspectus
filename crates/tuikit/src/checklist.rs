@@ -273,8 +273,6 @@ impl<M> Checklist<M> {
                 theme,
             },
             window: self.window,
-            rows: None,
-            footer: Vec::new(),
         };
         self.window = frame.render(area, buf, body);
     }
@@ -382,7 +380,7 @@ impl<M, Cx: ?Sized> Overlay<M, Cx> for Checklist<M> {
 
     /// The standard checklist table's footer.
     fn hints(&self) -> Footer {
-        Footer::new(CHECKLIST_KEYS)
+        Footer::leaving_last(CHECKLIST_KEYS)
     }
 }
 

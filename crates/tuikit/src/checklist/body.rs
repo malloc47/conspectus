@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
 use super::item::Item;
-use crate::frame::ModalBody;
+use crate::frame::{ModalBody, ModalFooter};
 use crate::glyphs::marks;
 use crate::keys::{CHECKLIST_KEYS, Footer, unavailable_style};
 use crate::scroll::{ScrollGutter, ScrollWindow};
@@ -64,23 +64,18 @@ impl View<'_> {
             .collect()
     }
 
-    /// The footer `width` cells wide under a blank row, broken only
-    /// between hints.
-    pub fn footer(&self, width: usize) -> Vec<Line<'static>> {
-        let mut footer = vec![Line::default()];
-        footer.extend(Footer::new(CHECKLIST_KEYS).lines(width, self.theme));
-        footer
+    /// The footer the standard checklist table generates.
+    pub fn footer(&self) -> ModalFooter<'_> {
+        ModalFooter::new(Footer::leaving_last(CHECKLIST_KEYS), self.theme)
     }
 }
 
 /// The checklist inside its frame: a blank row and the items, scrolled
 /// in the window the checklist kept, over the footer, which keeps the
-/// bottom rows.
+/// frame's last rows.
 pub(super) struct Body<'a> {
     pub view: View<'a>,
     pub window: ScrollWindow,
-    pub rows: Option<Vec<Line<'static>>>,
-    pub footer: Vec<Line<'static>>,
 }
 
 impl ModalBody for Body<'_> {
@@ -88,53 +83,35 @@ impl ModalBody for Body<'_> {
 
     fn measure(&mut self, width: u16) -> u16 {
         let width = usize::from(width);
-        let rows = self.view.rows(width);
-        self.footer = self.view.footer(width);
         // The blank row above the items, the items, and the footer.
-        let wanted = 1 + rows.len() + self.footer.len();
-        self.rows = Some(rows);
+        let wanted = 1 + self.view.items.len() + self.view.footer().height(width);
         u16::try_from(wanted).unwrap_or(u16::MAX)
     }
 
     fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let Self {
-            view,
-            mut window,
-            rows,
-            mut footer,
-        } = self;
-        let width = usize::from(area.width);
-        let mut rows = rows.unwrap_or_else(|| view.rows(width));
-        if footer.is_empty() {
-            footer = view.footer(width);
-        }
+        let Self { view, mut window } = self;
+        let footer = view.footer();
         let height = usize::from(area.height);
-        // A frame too short for the checklist gives up its blank rows
-        // first: the one above the items, then the one above the keys.
-        let lead = usize::from(1 + rows.len() + footer.len() <= height);
-        if lead + rows.len() + footer.len() > height && footer.len() > 1 {
-            footer.remove(0);
-        }
-        // Then the footer keeps the bottom rows, all but one, so the
-        // cursor's row always shows, and the items scroll in the rest.
-        let footer_rows = footer.len().min(height.saturating_sub(1));
-        let footer = footer.split_off(footer.len() - footer_rows);
-        let item_rows = height - footer_rows;
-        let items_area = Rect {
-            height: u16::try_from(item_rows).unwrap_or(area.height),
-            ..area
-        };
-        // Items that overflow give a column to the scrollbar, so they
-        // are laid out again one cell narrower.
-        if lead + rows.len() > item_rows && area.width >= 2 {
-            rows = view.rows(width - 1);
-        }
-        let mut lines = Vec::with_capacity(lead + rows.len());
+        let items = view.items.len();
+        // A frame too short for the checklist gives up the blank row above
+        // the items first.
+        let lead = usize::from(1 + items + footer.height(usize::from(area.width)) <= height);
+        // Then the footer keeps the frame's last rows and leaves the items
+        // one, so the cursor's row always shows; items that overflow give
+        // a column to the scrollbar, so they and the footer are laid out a
+        // cell narrower.
+        let mut fit = footer.fit_beside(area, 1, |_| lead + items);
+        let [items_area, footer_area] = fit.split(area);
+        // The footer rows that do not fit follow the last item. They spill
+        // only while the items are down to the cursor's row, which the
+        // window keeps, so a checklist shows none of them.
+        let mut lines = Vec::with_capacity(lead + items + fit.spill.len());
         lines.extend((0..lead).map(|_| Line::default()));
-        lines.extend(rows);
+        lines.extend(view.rows(usize::from(fit.width)));
+        lines.append(&mut fit.spill);
         let gutter = ScrollGutter::layout(items_area, lines.len());
-        window.resize(item_rows, lines.len());
-        if view.cursor < view.items.len() {
+        window.resize(usize::from(items_area.height), lines.len());
+        if view.cursor < items {
             let row = lead + view.cursor;
             window.follow(row..row + 1);
         }
@@ -142,12 +119,7 @@ impl ModalBody for Body<'_> {
             .scroll(window.paragraph_scroll())
             .render(gutter.content(), buf);
         gutter.render(&window, buf);
-        let footer_area = Rect {
-            y: area.y + items_area.height,
-            height: area.height - items_area.height,
-            ..area
-        };
-        Paragraph::new(footer).render(footer_area, buf);
+        fit.render(footer_area, buf);
         window
     }
 }

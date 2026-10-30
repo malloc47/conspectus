@@ -6,10 +6,12 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use tuikit::form::{
-    Cols, Tone, check_row, chips, choice_row, footer_lines, one_of_row, path_cells, path_row,
-    read_only_row, text_cells, text_row,
+    Cols, Tone, check_row, chips, choice_row, one_of_row, path_cells, path_row, read_only_row,
+    text_cells, text_row,
 };
+use tuikit::frame::ModalFooter;
 use tuikit::glyphs::marks;
+use tuikit::keys::Footer;
 use tuikit::text_edit::LineEdit;
 
 use crate::tui::Theme;
@@ -184,7 +186,8 @@ fn launch_options_show_checked_when_the_argv_carries_the_flags() {
 fn the_footer_wraps_at_separators_without_breaking_a_hint() {
     let keys = crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS;
     let footer = tuikit::keys::footer(keys);
-    let lines = footer_lines(keys, 40, &theme());
+    let theme = theme();
+    let lines = ModalFooter::new(Footer::new(keys), &theme).keys(40);
     assert!(lines.len() >= 2);
     for line in &lines {
         assert!(tuikit::text::width(&text(line)) <= 40, "{}", text(line));
@@ -286,9 +289,13 @@ fn chips_notes_footers_and_warnings_follow_the_theme() {
         style_of(&note.spans, "a note"),
         Style::default().add_modifier(Modifier::ITALIC)
     );
-    let footer = footer_lines(crate::tui::keybindings::overlay::PIN_EDIT_KEYS, 40, &theme);
+    let footer = ModalFooter::new(
+        Footer::new(crate::tui::keybindings::overlay::PIN_EDIT_KEYS),
+        &theme,
+    )
+    .keys(40);
     assert_eq!(
-        footer[0].style,
+        footer[0].spans[0].style,
         Style::default().add_modifier(Modifier::ITALIC)
     );
     let derived = read_only_row("command", "nothing", Tone::Warning, Cols::new(40), &theme);

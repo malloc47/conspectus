@@ -649,11 +649,11 @@ fn the_standard_footers_read_in_the_one_grammar() {
     assert_eq!(
         footer(SETTINGS_KEYS),
         [
+            "changes apply as you make them",
             "↑/↓ move",
             "Space select/toggle",
             "Enter apply & close",
             "Esc close",
-            "changes apply as you make them"
         ]
         .join(sep)
     );
@@ -768,4 +768,42 @@ fn a_readers_esc_steps_back_and_q_dismisses() {
         resolve(FIND_KEYS, chord(KeyModifiers::CONTROL, KeyCode::Char('c'))),
         Some(FindKey::Abort)
     );
+}
+
+#[test]
+fn a_footer_can_list_the_keys_that_leave_last() {
+    const KEYS: &[KeyRow<MenuKey>] = &[
+        alias(ctrl('c'), MenuKey::Abort),
+        shown(key(KeyCode::Esc), MenuKey::Close, "Esc", "close"),
+        KeyRow::Note("a note"),
+        shown(key(KeyCode::Up), MenuKey::Up, marks::ARROW_UP, "move"),
+        shown(key(KeyCode::Enter), MenuKey::Pick, "Enter", "pick"),
+    ];
+    let sep = HINT_SEPARATOR;
+    assert_eq!(
+        Footer::new(KEYS).text(),
+        ["Esc close", "a note", "↑ move", "Enter pick"].join(sep)
+    );
+    // The other rows and the note keep their order; the rows that leave
+    // or dismiss follow them, and the note is not repeated.
+    let leaving = Footer::leaving_last(KEYS);
+    assert_eq!(
+        leaving.text(),
+        ["a note", "↑ move", "Enter pick", "Esc close"].join(sep)
+    );
+    assert_eq!(leaving.segments()[3].keys, [key(KeyCode::Esc)]);
+    // A standard table that already ends with them reads the same.
+    for (leaving, text) in [
+        (Footer::leaving_last(MENU_KEYS), footer(MENU_KEYS)),
+        (Footer::leaving_last(DIALOG_KEYS), footer(DIALOG_KEYS)),
+        (Footer::leaving_last(CHECKLIST_KEYS), footer(CHECKLIST_KEYS)),
+        (Footer::leaving_last(SETTINGS_KEYS), footer(SETTINGS_KEYS)),
+        (Footer::leaving_last(PALETTE_KEYS), footer(PALETTE_KEYS)),
+        (
+            Footer::leaving_last(TEXT_INPUT_KEYS),
+            footer(TEXT_INPUT_KEYS),
+        ),
+    ] {
+        assert_eq!(leaving.text(), text);
+    }
 }

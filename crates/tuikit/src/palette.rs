@@ -540,12 +540,13 @@ impl<R, M, A: PaletteAction> Palette<R, M, A> {
     }
 
     /// The footer as it is drawn now: the options pane's while it is
-    /// open, and otherwise the palette's table's.
+    /// open, and otherwise the palette's table's, the keys that leave last
+    /// ([`Footer::leaving_last`]).
     pub fn footer(&self) -> Footer {
         if self.options_open() {
-            Footer::new(PALETTE_OPTION_KEYS)
+            Footer::leaving_last(PALETTE_OPTION_KEYS)
         } else {
-            Footer::new(self.keys)
+            Footer::leaving_last(self.keys)
         }
     }
 

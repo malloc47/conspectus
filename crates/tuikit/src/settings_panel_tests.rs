@@ -617,12 +617,12 @@ fn the_footer_is_the_standard_table_in_the_one_grammar() {
     let prefs = Prefs::new();
     let drawn = text(&drawn(&mut panel(), &prefs, 100, 40));
     assert!(
-        drawn.contains("↑/↓ move · Space select/toggle · Enter apply & close"),
+        drawn.contains("changes apply as you make them · ↑/↓ move"),
         "{drawn}"
     );
     assert!(
-        drawn.contains("Esc close · changes apply as you make them"),
-        "broken between hints: {drawn}"
+        drawn.contains("Space select/toggle · Enter apply & close · Esc close"),
+        "broken between hints, the key that leaves last: {drawn}"
     );
 }
 
@@ -878,7 +878,11 @@ fn the_settings_table_passes_the_table_checks() {
     assert!(unresolved(SETTINGS_KEYS).is_empty());
     assert!(loose_characters(SETTINGS_KEYS).is_empty());
     assert!(ctrl_c_first(SETTINGS_KEYS));
-    assert!(footer(SETTINGS_KEYS).ends_with("changes apply as you make them"));
+    assert!(footer(SETTINGS_KEYS).starts_with("changes apply as you make them"));
+    assert!(
+        footer(SETTINGS_KEYS).ends_with("Esc close"),
+        "the key that leaves last"
+    );
 }
 
 /// A host whose stack holds a panel with an editor open over it as a
@@ -959,4 +963,28 @@ fn an_editor_over_the_panel_keeps_the_conventions_as_a_step() {
             .any(|failure| failure.to_string().contains("outside the frame")),
         "{failures:?}"
     );
+}
+
+/// The rows inside the one frame drawn on `buf`, trailing spaces trimmed.
+fn inside(buf: &Buffer) -> Vec<String> {
+    let rect = crate::testkit::buffer::frame_rect(buf, &Buffer::empty(buf.area)).expect("a frame");
+    crate::testkit::buffer::inner_rows(buf, rect)
+        .into_iter()
+        .map(|row| row.trim_end().to_string())
+        .collect()
+}
+
+#[test]
+fn a_footer_too_tall_for_a_short_frame_keeps_the_keys_that_leave() {
+    // At 14 by 6 the frame has two rows inside and the footer many more:
+    // the rows keep the cursor's, and the footer its last row, the key
+    // that leaves; its note and first keys go after the rows.
+    let prefs = Prefs::new();
+    let mut panel = panel();
+    let buf = drawn(&mut panel, &prefs, 14, 6);
+    let rows = inside(&buf);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows[0].contains(marks::POINTER), "{rows:?}");
+    assert_eq!(rows[1], "Esc close", "{rows:?}");
+    assert!(!rows.iter().any(|row| row.contains("changes")), "{rows:?}");
 }

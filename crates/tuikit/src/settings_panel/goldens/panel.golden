@@ -45,10 +45,10 @@ text  |    │  date                                                        │ 
 style |    a                                                              a    |
 text  |    │                                                              │    |
 style |    a                                                              a    |
-text  |    │↑/↓ move · Space select/toggle · Enter apply & close          │    |
-style |    a                                                              a    |
-text  |    │Esc close · changes apply as you make them                    │    |
-style |    a                                                              a    |
+text  |    │changes apply as you make them · ↑/↓ move                     │    |
+style |    addddddddddddddddddddddddddddddddddddddddd                     a    |
+text  |    │Space select/toggle · Enter apply & close · Esc close         │    |
+style |    addddddddddddddddddddddddddddddddddddddddddddddddddddd         a    |
 text  |    └──────────────────────────────────────────────────────────────┘    |
 style |    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa    |
 text  |                                                                        |
@@ -63,3 +63,4 @@ legend
   a  fg Cyan
   b  bold
   c  bold, reversed
+  d  dim

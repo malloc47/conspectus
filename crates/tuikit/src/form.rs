@@ -122,9 +122,9 @@ pub use field::{CheckGroup, Choice, Field, FieldKind, OneOf, ReadOnly, Toggle, V
 pub use override_row::{KEPT, OverrideRow, OverrideView, Standing, WILL_FOLLOW, WILL_KEEP};
 pub use row::{
     CHOICE_SLOT, CUSTOM, Cols, EMPTY, LABEL_GAP, LABEL_MAX, LABEL_MIN, SOURCE_GAP, Tone, check_row,
-    checkbox, chips, choice_cells, choice_row, detail_line, error_line, field_style, footer_lines,
-    label, one_of_row, option, paragraph_lines, path_cells, path_row, read_only_row, row,
-    source_cells, static_cells, static_row, text_cells, text_row, toggle_row,
+    checkbox, chips, choice_cells, choice_row, detail_line, error_line, field_style, label,
+    one_of_row, option, paragraph_lines, path_cells, path_row, read_only_row, row, source_cells,
+    static_cells, static_row, text_cells, text_row, toggle_row,
 };
 
 use std::fmt;
@@ -135,7 +135,7 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 
-use crate::frame::{ModalBody, ModalFrame, ModalSize};
+use crate::frame::{ModalBody, ModalFooter, ModalFrame, ModalSize};
 use crate::keys::{Footer, FormKey, KeyRow, resolve};
 use crate::overlay::{Outcome, Overlay};
 use crate::selection::Ends;
@@ -334,9 +334,9 @@ impl<M> Form<M> {
 
     /// The body laid out `width` cells wide: the intro and a blank line,
     /// fixed above the rows; a row per shown field, the cursor on the
-    /// focused one; a blank line; the detail lines and a blank line; the
-    /// error line; the footer.
-    fn body(&self, width: usize, theme: &Theme) -> FormBody<'static> {
+    /// focused one; a blank line and the detail lines; the footer under
+    /// its blank row, with the error line in its slot.
+    fn body<'t>(&self, width: usize, theme: &'t Theme) -> FormBody<'t> {
         let shown = self.shown();
         let focus = self.settled();
         let source = shown
@@ -364,17 +364,17 @@ impl<M> Form<M> {
             lines.push(Line::default());
             lines
         });
-        let mut notes = vec![Line::default()];
+        let mut notes = Vec::new();
         if self.details > 0 {
             let hints = focus.map_or_else(Vec::new, |index| self.fields[index].hints());
             // Every line of the band is drawn, a blank one too, so the band
             // keeps its look as the focus moves and only its words change.
+            notes.push(Line::default());
             notes.extend(
                 (0..self.details).map(|line| {
                     detail_line(hints.get(line).map_or("", String::as_str), width, theme)
                 }),
             );
-            notes.push(Line::default());
         }
         FormBody::new(rows, cursor)
             .top(top)
@@ -384,7 +384,7 @@ impl<M> Form<M> {
                     .as_deref()
                     .map(|reason| error_line(reason, width, theme)),
             )
-            .footer(footer_lines(self.keys, width, theme))
+            .footer(ModalFooter::new(Footer::leaving_last(self.keys), theme))
     }
 
     /// The indexes of the shown fields, in order.
@@ -576,7 +576,7 @@ impl<M, Cx: ?Sized> Overlay<M, Cx> for Form<M> {
 
     /// The footer of the form's table, the one it keeps in view.
     fn hints(&self) -> Footer {
-        Footer::new(self.keys)
+        Footer::leaving_last(self.keys)
     }
 }
 

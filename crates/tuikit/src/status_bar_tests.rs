@@ -172,9 +172,13 @@ fn a_controls_footer_goes_in_whole_with_its_keys() {
         .collect();
     assert_eq!(keys, expected);
     assert!(!keys.is_empty());
-    // A ranked row keeps its rank in a footer, and in the bar.
+    // A ranked row keeps its rank in a footer, and in the bar; a note,
+    // which names no key, holds on a step below the footer's rank, so it
+    // gives way before the keys.
     let ranked = KeyHintBar::new().footer(&Footer::new(LIST), 1);
-    assert_eq!(ranks(&ranked), [3, 6, 1, 2, 1]);
+    assert_eq!(ranks(&ranked), [3, 6, 1, 2, 0]);
+    let noted = KeyHintBar::new().footer(&Footer::new(LIST), 5);
+    assert_eq!(ranks(&noted), [3, 6, 5, 2, 4]);
     // A whole segment never joins another, even with the same words.
     let twice = KeyHintBar::new().footer(&footer, 7).footer(&footer, 7);
     assert_eq!(twice.hints().len(), 2 * footer.segments().len());

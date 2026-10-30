@@ -593,3 +593,26 @@ fn a_menu_keeps_the_conventions_every_modal_keeps() {
         );
     conformance::assert_conventions(&registry);
 }
+
+/// The rows inside the one frame drawn on `buf`, trailing spaces trimmed.
+fn inside(buf: &Buffer) -> Vec<String> {
+    let rect = crate::testkit::buffer::frame_rect(buf, &Buffer::empty(buf.area)).expect("a frame");
+    crate::testkit::buffer::inner_rows(buf, rect)
+        .into_iter()
+        .map(|row| row.trim_end().to_string())
+        .collect()
+}
+
+#[test]
+fn a_footer_too_tall_for_a_short_frame_keeps_the_keys_that_leave() {
+    // At 14 by 6 the frame has two rows inside and the footer takes three
+    // at its width: the entries keep the cursor's row, and the footer its
+    // last row, the keys that leave; its first rows go after the entries.
+    let mut menu = menu();
+    let buf = drawn(&mut menu, 14, 6);
+    let rows = inside(&buf);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows[0].contains("Open"), "{rows:?}");
+    assert_eq!(rows[1], "Esc close", "{rows:?}");
+    assert!(!rows.iter().any(|row| row.contains("move")), "{rows:?}");
+}

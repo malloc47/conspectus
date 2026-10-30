@@ -4,7 +4,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::*;
-use crate::keys::{FORM_KEYS, FormKey, include, key, shown};
+use crate::frame::ModalFooter;
+use crate::keys::{FORM_KEYS, Footer, FormKey, include, key, shown};
 use crate::path_field::PathKind;
 use crate::testkit::paths::MemoryPaths;
 
@@ -252,7 +253,7 @@ const KEYS: &[crate::keys::KeyRow<FormKey>] = &[
 #[test]
 fn the_footer_is_generated_muted_and_breaks_only_between_hints() {
     let theme = theme();
-    let lines = footer_lines(KEYS, 40, &theme);
+    let lines = ModalFooter::new(Footer::new(KEYS), &theme).keys(40);
     let drawn: Vec<String> = lines.iter().map(text).collect();
     assert_eq!(
         drawn,
@@ -261,8 +262,8 @@ fn the_footer_is_generated_muted_and_breaks_only_between_hints() {
             "S-Tab back · Enter save · Esc cancel".to_string(),
         ]
     );
-    for line in &lines {
-        assert_eq!(line.style.add_modifier, theme.muted);
+    for span in lines.iter().flat_map(|line| &line.spans) {
+        assert_eq!(span.style.add_modifier, theme.muted);
     }
 }
 

@@ -595,14 +595,15 @@ pub enum SettingsKey {
     Close,
 }
 
-/// A settings panel: `↑/↓ move · Space select/toggle · Enter apply &
-/// close · Esc close · changes apply as you make them`. Nothing is typed
-/// in the panel, so `k`/`j` move and `q` dismisses it, as `Ctrl-C` does;
+/// A settings panel: `changes apply as you make them · ↑/↓ move · Space
+/// select/toggle · Enter apply & close · Esc close`, the note first and
+/// the key that leaves last. Nothing is typed in the panel, so `k`/`j` move and `q` dismisses it, as `Ctrl-C` does;
 /// `PgUp`/`PgDn` move by the rows shown, and `g`/`Home` and `G`/`End` go
 /// to the ends (aliases).
 pub const SETTINGS_KEYS: &[KeyRow<SettingsKey>] = &[
     alias(ctrl('c'), SettingsKey::Abort),
     alias(ch('q'), SettingsKey::Abort),
+    KeyRow::Note("changes apply as you make them"),
     shown(key(KeyCode::Up), SettingsKey::Up, marks::ARROW_UP, "move"),
     alias(ch('k'), SettingsKey::Up),
     alias(ctrl('p'), SettingsKey::Up),
@@ -628,7 +629,6 @@ pub const SETTINGS_KEYS: &[KeyRow<SettingsKey>] = &[
         "apply & close",
     ),
     shown(key(KeyCode::Esc), SettingsKey::Close, "Esc", "close"),
-    KeyRow::Note("changes apply as you make them"),
 ];
 
 impl KeyAction for SettingsKey {

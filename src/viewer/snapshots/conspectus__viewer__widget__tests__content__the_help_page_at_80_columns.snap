@@ -15,14 +15,14 @@ expression: "help_page(80, 24, \"\")"
   │  G / End       Jump to the end, where the viewer opens, and stay there  █│
   │                                                                         █│
   │Finding                                                                  █│
-  │  /             Find in transcript; a match in hidden content turns that █│
+  │  /             Find in transcript; a match in hidden content turns that ║│
   │                content on                                               ║│
   │  n             Next match, wrapping at the end                          ║│
   │  N             Previous match, wrapping at the start                    ║│
   │                                                                         ║│
-  │Showing more or less                                                     ║│
-  │  t             Cycle tool detail: hidden, summary, truncated, full      ▼│
-  │  T             Show or hide thinking turns                               │
+  │Showing more or less                                                     ▼│
+  │  t             Cycle tool detail: hidden, summary, truncated, full       │
+  │                                                                          │
   │j/k/PgDn/PgUp scroll · Esc/? back · q close                               │
 ──└──────────────────────────────────────────────────────────────────────────┘──
 [ 1/4 ] · tools·off   (t) · think·off (T) · aborted·hide (I) · Esc/q close

@@ -9,16 +9,13 @@ use ratatui::widgets::{Paragraph, Widget};
 
 use super::options::Options;
 use super::row::RowContext;
-use crate::frame::ModalBody;
+use crate::frame::{ModalBody, ModalFooter};
 use crate::keys::Footer;
 use crate::scroll::{ScrollGutter, ScrollWindow};
 use crate::selection::{self, Cursor, GUTTER_WIDTH};
 use crate::text;
 use crate::text_edit::{LineEdit, TextField};
 use crate::theme::Theme;
-
-/// The most rows the footer takes; a longer footer shows its first rows.
-const MAX_FOOTER_ROWS: usize = 4;
 
 /// What the layout reads from the palette.
 pub(super) struct View<'a, R> {
@@ -48,14 +45,17 @@ impl<R> View<'_, R> {
         1 + usize::from(self.status.is_some())
     }
 
-    /// The footer `width` cells wide, receding, broken only between hints.
-    fn footer_lines(&self, width: usize) -> Vec<Line<'static>> {
-        let muted = Style::default().add_modifier(self.theme.muted);
-        self.footer
-            .lines(width, self.theme)
-            .into_iter()
-            .map(|line| line.patch_style(muted))
-            .collect()
+    /// The palette's footer: the palette's keys, or the options pane's.
+    fn footer(&self) -> ModalFooter<'_> {
+        ModalFooter::new(self.footer.clone(), self.theme)
+    }
+
+    /// The rows the list shows: the options, the results, or the note.
+    fn list_rows(&self) -> usize {
+        match self.options {
+            Some(options) => options.len(),
+            None => self.ranked.len().max(1),
+        }
     }
 
     /// The query row: the prompt, then the field with its caret while the
@@ -103,15 +103,8 @@ impl<R> ModalBody for Body<'_, R> {
     /// and the footer. The named palette size fills its extent instead.
     fn measure(&mut self, width: u16) -> u16 {
         let view = &self.view;
-        let list = match view.options {
-            Some(options) => options.len(),
-            None => view.ranked.len(),
-        };
-        let footer = view
-            .footer_lines(usize::from(width))
-            .len()
-            .min(MAX_FOOTER_ROWS);
-        u16::try_from(view.lead() + list.max(1) + footer).unwrap_or(u16::MAX)
+        let rows = view.lead() + view.list_rows() + view.footer().height(usize::from(width));
+        u16::try_from(rows).unwrap_or(u16::MAX)
     }
 
     fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
@@ -131,50 +124,59 @@ impl<R> ModalBody for Body<'_, R> {
             buf.set_line(area.x, area.y + 1, &line, area.width);
         }
 
-        // The footer keeps the bottom rows, leaving the query, the status
-        // row, and one row of the list above it.
-        let mut footer = view.footer_lines(width);
-        let footer_rows = footer
-            .len()
-            .min(MAX_FOOTER_ROWS)
-            .min(height.saturating_sub(lead + 1));
-        footer.truncate(footer_rows);
-        let list_rows = height - lead - footer_rows;
+        // The footer keeps the frame's last rows, leaving the query, the
+        // status row, and one row of the list above it; a list that
+        // overflows gives a column to the scrollbar, so the footer is laid
+        // out a cell narrower beside it.
+        let mut fit = view
+            .footer()
+            .fit_beside(area, lead + 1, |_| lead + view.list_rows());
+        let [above, footer_area] = fit.split(area);
         let top = area.y + u16::try_from(lead).unwrap_or(area.height);
         let list = Rect {
             y: top,
-            height: u16::try_from(list_rows).unwrap_or(0),
+            height: above.height.saturating_sub(top - area.y),
             ..area
         };
-        let footer_area = Rect {
-            y: list.y + list.height,
-            height: u16::try_from(footer_rows).unwrap_or(0),
-            ..area
-        };
-        Paragraph::new(footer).render(footer_area, buf);
+        let list_rows = usize::from(list.height);
+        let spill = std::mem::take(&mut fit.spill);
+        fit.render(footer_area, buf);
 
+        // The footer rows that do not fit follow the list's last row.
         if let Some(options) = view.options {
-            Paragraph::new(options.lines(theme)).render(list, buf);
+            let mut lines = options.lines(theme);
+            lines.extend(spill);
+            Paragraph::new(lines).render(list, buf);
             return window;
         }
         if view.ranked.is_empty() {
             window.resize(list_rows, 0);
             let note = Line::from(Span::styled(text::truncate_end(view.note, width), muted));
-            Paragraph::new(note).render(list, buf);
+            Paragraph::new([note].into_iter().chain(spill).collect::<Vec<_>>()).render(list, buf);
             return window;
         }
         // Results that overflow give the list's last column to the shared
         // scrollbar (a palette that reserves it keeps the column blank
         // while they fit), and the window follows the cursor by the one
-        // rule.
-        let gutter = ScrollGutter::layout(list, view.ranked.len());
+        // rule. The footer rows that do not fit follow the last result;
+        // they spill only while the list is down to the cursor's row, so a
+        // palette shows none of them.
+        let results = view.ranked.len();
+        let rows = results + spill.len();
+        let gutter = ScrollGutter::layout(list, rows);
         let mut content = gutter.content();
         if view.reserve_scrollbar && gutter.bar().is_none() && content.width >= 2 {
             content.width -= 1;
         }
-        window.resize(usize::from(content.height), view.ranked.len());
+        window.resize(usize::from(content.height), rows);
         window.follow(view.cursor..view.cursor + 1);
-        let lines = view.result_lines(window.visible(), usize::from(content.width));
+        let visible = window.visible();
+        let mut lines = view.result_lines(
+            visible.start.min(results)..visible.end.min(results),
+            usize::from(content.width),
+        );
+        let after = visible.start.saturating_sub(results)..visible.end.saturating_sub(results);
+        lines.extend(spill[after].iter().cloned());
         Paragraph::new(lines).render(content, buf);
         gutter.render(&window, buf);
         window

@@ -389,7 +389,9 @@ impl KeyHintBar {
 
     /// The bar with `footer`'s segments as hints, each whole: a control's
     /// own footer ([`Overlay::hints`](crate::overlay::Overlay::hints)). A
-    /// segment with no rank of its own holds on at `rank`.
+    /// segment with no rank of its own holds on at `rank`, and a note,
+    /// which names no key, a step below it, so a narrow bar gives up the
+    /// note before any key wherever the footer puts it.
     #[must_use]
     pub fn footer(mut self, footer: &Footer, rank: u32) -> Self {
         self.hints
@@ -397,7 +399,11 @@ impl KeyHintBar {
                 labels: Vec::new(),
                 words: segment.text.clone(),
                 keys: segment.keys.clone(),
-                rank: segment.rank.unwrap_or(rank),
+                rank: segment.rank.unwrap_or(if segment.keys.is_empty() {
+                    rank.saturating_sub(1)
+                } else {
+                    rank
+                }),
                 available: segment.available,
             }));
         self

@@ -785,8 +785,8 @@ fn a_framed_pager_is_titled_scrolls_with_a_bar_and_keeps_its_footer_down() {
     );
     assert_eq!(
         pager.window().viewport(),
-        15,
-        "the body less the footer row"
+        14,
+        "the body less the footer row and the blank row above it"
     );
     assert!(!Overlay::<String, ()>::fills_screen(&pager));
 }
@@ -808,7 +808,8 @@ fn a_framed_pager_shows_its_find_above_the_footer() {
 fn a_framed_footer_too_tall_keeps_the_keys_that_leave_and_scrolls_the_rest() {
     // Four rows of screen, two inside the frame: the body keeps one, and
     // the footer its last row, the keys that leave. Its first rows go
-    // after the content's last row and scroll with it.
+    // after the content's last row, behind a blank row, and scroll with
+    // it.
     let mut pager =
         Pager::new(Doc::rows_of(3, &[])).mode(PagerMode::Modal(crate::frame::ModalSize::WIDE));
     let footer = pager.footer().lines(26, &theme());
@@ -816,7 +817,7 @@ fn a_framed_footer_too_tall_keeps_the_keys_that_leave_and_scrolls_the_rest() {
     let shown = draw(&mut pager, 30, 4);
     assert!(shown[1].contains("row 1"), "{shown:?}");
     assert!(shown[2].contains("Esc/q close"), "{shown:?}");
-    assert_eq!(pager.window().content(), 3 + footer.len() - 1);
+    assert_eq!(pager.window().content(), 3 + 1 + footer.len() - 1);
     pager.handle_key(shift('G'));
     let shown = draw(&mut pager, 30, 4);
     assert!(

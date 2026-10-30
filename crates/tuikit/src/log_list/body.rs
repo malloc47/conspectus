@@ -10,7 +10,7 @@ use ratatui::widgets::{Paragraph, Widget};
 use super::LogList;
 use crate::age::{self, Age};
 use crate::feedback::{Entry, Log};
-use crate::frame::ModalBody;
+use crate::frame::{FooterFit, ModalBody, ModalFooter};
 use crate::glyphs::marks;
 use crate::scroll::{ScrollGutter, ScrollWindow};
 use crate::selection::{self, Cursor, GUTTER_WIDTH};
@@ -65,7 +65,7 @@ impl<R, M, Cx: ?Sized> ModalBody for Body<'_, '_, R, M, Cx> {
             .min(height);
         let rule = usize::from(height > shown);
         let room = height - shown - rule;
-        let (kept, spill) = fit_footer(list, width, room, theme);
+        let FooterFit { kept, spill, width } = fit_footer(list, width, room, theme);
         let rows = |count: usize| u16::try_from(count).unwrap_or(u16::MAX);
         let list_area = Rect {
             height: rows(shown),
@@ -83,12 +83,13 @@ impl<R, M, Cx: ?Sized> ModalBody for Body<'_, '_, R, M, Cx> {
         };
         let footer_area = Rect {
             y: detail_area.y + detail_area.height,
+            width: width.min(area.width),
             height: rows(kept.len()),
             ..area
         };
         draw_entries(list, log, now, list_area, buf, theme);
         Paragraph::new(Line::from(Span::styled(
-            marks::RULE.repeat(width),
+            marks::RULE.repeat(usize::from(area.width)),
             Style::default().add_modifier(theme.muted),
         )))
         .render(rule_area, buf);
@@ -116,14 +117,21 @@ fn empty<R, M, Cx: ?Sized>(
 ) {
     list.window = ScrollWindow::default();
     let width = usize::from(area.width);
-    let mut footer = footer_rows(list, width, theme);
-    let kept = footer.len().min(usize::from(area.height));
-    let footer = footer.split_off(footer.len() - kept);
+    // The footer leaves the note a row; its rows that do not fit follow
+    // the note, as far as the frame shows them.
+    let FooterFit {
+        kept: footer,
+        spill,
+        ..
+    } = ModalFooter::new(list.footer(), theme)
+        .fit(width, usize::from(area.height).saturating_sub(1));
+    let kept = footer.len();
     let note: Vec<Line<'static>> = list
         .empty
         .lines()
         .flat_map(|line| text::wrap(line, width))
         .map(|row| Line::from(row.trim_end().to_string()))
+        .chain(spill)
         .collect();
     let footer_height = u16::try_from(kept).unwrap_or(area.height);
     let note_area = Rect {
@@ -197,46 +205,22 @@ fn entry_row<R>(
     )
 }
 
-/// The footer laid out `width` cells wide, broken only between segments,
-/// in the receding look.
-fn footer_rows<R, M, Cx: ?Sized>(
-    list: &LogList<R, M, Cx>,
-    width: usize,
-    theme: &Theme,
-) -> Vec<Line<'static>> {
-    let muted = Style::default().add_modifier(theme.muted);
-    list.footer()
-        .lines(width, theme)
-        .into_iter()
-        .map(|mut line| {
-            for span in &mut line.spans {
-                span.style = muted.patch(span.style);
-            }
-            line
-        })
-        .collect()
-}
-
 /// The footer fitted to the `room` rows under the rule, leaving the detail
-/// at least one: the rows kept on the frame's last rows (the footer's
-/// last, the keys that leave), and the first rows that do not fit, which
-/// scroll after the detail's last row. Rows that scroll there sit beside
-/// the detail's scrollbar, so they are laid out a cell narrower.
+/// at least one ([`ModalFooter::fit`]): the rows kept on the frame's last
+/// rows (the footer's last, the keys that leave), and the first rows that
+/// do not fit, which scroll after the detail's last row. Rows that scroll
+/// there sit beside the detail's scrollbar, so they are laid out a cell
+/// narrower.
 fn fit_footer<R, M, Cx: ?Sized>(
     list: &LogList<R, M, Cx>,
     width: usize,
     room: usize,
     theme: &Theme,
-) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
-    let split = |width: usize| {
-        let mut spill = footer_rows(list, width, theme);
-        let stay = spill.len().min(room.saturating_sub(1));
-        let kept = spill.split_off(spill.len() - stay);
-        (kept, spill)
-    };
-    let (kept, spill) = split(width);
-    if spill.is_empty() || width < 2 {
-        return (kept, spill);
+) -> FooterFit {
+    let footer = ModalFooter::new(list.footer(), theme);
+    let fit = footer.fit(width, room.saturating_sub(1));
+    if fit.spill.is_empty() || width < 2 {
+        return fit;
     }
-    split(width - 1)
+    footer.fit(width - 1, room.saturating_sub(1))
 }

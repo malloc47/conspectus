@@ -179,8 +179,8 @@ fn generated_footers_read_in_the_one_grammar() {
         joined(&[
             "↑/↓ move",
             "Enter pick",
-            "Esc close",
-            "Tab search current/all"
+            "Tab search current/all",
+            "Esc close"
         ])
     );
     assert_eq!(
@@ -188,23 +188,23 @@ fn generated_footers_read_in_the_one_grammar() {
         joined(&[
             "↑/↓ move",
             "Enter open hit",
-            "Esc close",
             "Tab search current/all",
             "S-Tab list sessions/messages",
             "Ctrl-R recall search",
             "Ctrl-O set options",
             "Ctrl-F filter lists",
             "Ctrl-S open Search view",
+            "Esc close",
         ])
     );
     assert_eq!(
         footer(SETTINGS_KEYS),
         joined(&[
+            "changes apply as you make them",
             "↑/↓ move",
             "Space select/toggle",
             "Enter apply & close",
             "Esc close",
-            "changes apply as you make them",
         ])
     );
     assert_eq!(

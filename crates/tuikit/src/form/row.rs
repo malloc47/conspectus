@@ -12,7 +12,6 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::glyphs::marks;
-use crate::keys::{Footer, KeyRow};
 use crate::path_field::PathField;
 use crate::selection::{self, Cursor};
 use crate::text;
@@ -469,17 +468,6 @@ pub fn read_only_row(
         Span::raw(" ".repeat(TEXT_INDENT)),
         Span::styled(text::truncate_end(value, width), value_style),
     ])
-}
-
-/// The footer `keys` generate, in rows at most `width` cells wide broken
-/// only between hints, receding (`muted`).
-pub fn footer_lines<A>(keys: &[KeyRow<A>], width: usize, theme: &Theme) -> Vec<Line<'static>> {
-    let muted = Style::default().add_modifier(theme.muted);
-    Footer::new(keys)
-        .lines(width, theme)
-        .into_iter()
-        .map(|line| line.patch_style(muted))
-        .collect()
 }
 
 /// A form's error line: `reason` in `error`, cut with the ellipsis mark

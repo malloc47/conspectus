@@ -3,18 +3,18 @@ text  |                                        |
 style |                                        |
 text  |┌ Settings ────────────────────────────┐|
 style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
-text  |│                                      │|
-style |a                                      a|
 text  |│Actions                               │|
 style |abbbbbbb                               a|
 text  |│► Clear all                           │|
 style |accccccccccc                           a|
-text  |│↑/↓ move · Space select/toggle        │|
-style |a                                      a|
-text  |│Enter apply & close · Esc close       │|
+text  |│                                      │|
 style |a                                      a|
 text  |│changes apply as you make them        │|
-style |a                                      a|
+style |adddddddddddddddddddddddddddddd        a|
+text  |│↑/↓ move · Space select/toggle        │|
+style |adddddddddddddddddddddddddddddd        a|
+text  |│Enter apply & close · Esc close       │|
+style |addddddddddddddddddddddddddddddd       a|
 text  |└──────────────────────────────────────┘|
 style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
 text  |                                        |
@@ -23,3 +23,4 @@ legend
   a  fg Cyan
   b  bold
   c  bold, reversed
+  d  dim

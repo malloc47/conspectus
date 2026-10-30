@@ -298,8 +298,8 @@ fn the_end_key_shows_the_last_page_not_blank_rows() {
     let buf = draw(&mut pager, area);
     let window = pager.window();
     assert_eq!(window.offset(), window.last_offset());
-    // The last row of the page sits right above the footer: no blank
-    // tail.
+    // The last row of the page sits right above the footer's blank row:
+    // no blank tail.
     let footer_row = rect.y + rect.height - 2;
     let above: Vec<String> = (rect.y + 1..footer_row)
         .map(|y| {
@@ -311,9 +311,10 @@ fn the_end_key_shows_the_last_page_not_blank_rows() {
     assert_eq!(
         above.last().map(String::as_str),
         Some(""),
-        "the section's blank line"
+        "the footer's blank row"
     );
-    assert!(above[above.len() - 2].starts_with("  39"), "{above:?}");
+    assert_eq!(above[above.len() - 2], "", "the section's blank line");
+    assert!(above[above.len() - 3].starts_with("  39"), "{above:?}");
 }
 
 #[test]

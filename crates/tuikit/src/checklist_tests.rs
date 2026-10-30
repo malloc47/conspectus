@@ -690,3 +690,27 @@ fn the_checklist_table_passes_the_table_checks() {
     assert!(ctrl_c_first(CHECKLIST_KEYS));
     assert!(footer(CHECKLIST_KEYS).contains("a select all · n select none"));
 }
+
+/// The rows inside the one frame drawn on `buf`, trailing spaces trimmed.
+fn inside(buf: &Buffer) -> Vec<String> {
+    let rect = crate::testkit::buffer::frame_rect(buf, &Buffer::empty(buf.area)).expect("a frame");
+    crate::testkit::buffer::inner_rows(buf, rect)
+        .into_iter()
+        .map(|row| row.trim_end().to_string())
+        .collect()
+}
+
+#[test]
+fn a_footer_too_tall_for_a_short_frame_keeps_the_keys_that_leave() {
+    // At 24 by 6 the frame has two rows inside and the footer takes six
+    // at its width: the items keep the cursor's row, and the footer its
+    // last row; the count stays on the bottom border.
+    let mut list = toppings();
+    let buf = drawn(&mut list, 24, 6);
+    let rows = inside(&buf);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows[0].contains("cheese"), "{rows:?}");
+    assert_eq!(rows[1], "Esc cancel", "{rows:?}");
+    assert!(!rows.iter().any(|row| row.contains("move")), "{rows:?}");
+    assert!(text(&buf).contains("3 of 5 selected"), "{}", text(&buf));
+}

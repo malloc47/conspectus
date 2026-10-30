@@ -102,7 +102,7 @@
 //! assert!(drawn.contains("  [x] Wrap long lines"), "{drawn}");
 //! assert!(drawn.contains("  name  active"), "{drawn}");
 //! assert!(drawn.contains("► date"), "{drawn}");
-//! assert!(drawn.contains("Esc close · changes apply as you make them"), "{drawn}");
+//! assert!(drawn.contains("Enter apply & close · Esc close"), "{drawn}");
 //! ```
 //!
 //! # What a host keeps
@@ -304,8 +304,6 @@ impl<Id: Clone + PartialEq, M, Cx: ?Sized> SettingsPanel<Id, M, Cx> {
                 theme,
             },
             window: self.window,
-            lines: None,
-            footer: Vec::new(),
         };
         self.window = frame.render(area, buf, body);
     }
@@ -496,7 +494,7 @@ impl<Id: Clone + PartialEq, M, Cx: ?Sized> Overlay<M, Cx> for SettingsPanel<Id, 
 
     /// The standard settings table's footer.
     fn hints(&self) -> Footer {
-        Footer::new(SETTINGS_KEYS)
+        Footer::leaving_last(SETTINGS_KEYS)
     }
 }
 

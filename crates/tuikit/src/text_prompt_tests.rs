@@ -231,12 +231,12 @@ fn a_long_reason_is_cut_to_one_line() {
 }
 
 #[test]
-fn a_narrow_prompt_keeps_the_hints_that_fit_whole() {
+fn a_narrow_prompt_keeps_the_hints_that_fit_whole_and_the_keys_that_leave() {
     let prompt = naming("");
     let rows = framed(&prompt, 22, 9);
     assert_eq!(
-        rows[2], "└ Enter confirm ───┘",
-        "the footer breaks between hints"
+        rows[2], "└ Esc cancel ──────┘",
+        "the footer breaks between hints and keeps its last row"
     );
 }
 

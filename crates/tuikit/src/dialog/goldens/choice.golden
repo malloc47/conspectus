@@ -12,12 +12,13 @@ style |a                                      a|
 text  |│                                      │|
 style |a                                      a|
 text  |│a archive & close · d delete & close  │|
-style |a                                      a|
+style |abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  a|
 text  |│Esc/n cancel                          │|
-style |a                                      a|
+style |abbbbbbbbbbbb                          a|
 text  |└──────────────────────────────────────┘|
 style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
 text  |                                        |
 style |                                        |
 legend
   a  fg Cyan
+  b  dim

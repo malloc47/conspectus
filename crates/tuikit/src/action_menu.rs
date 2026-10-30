@@ -281,9 +281,6 @@ impl<M> ActionMenu<M> {
                 theme,
             },
             window: self.window,
-            width: 0,
-            layout: None,
-            footer: Vec::new(),
         };
         let window = frame.render(area, buf, body);
         self.window = window;
@@ -375,7 +372,7 @@ impl<M: Clone, Cx: ?Sized> Overlay<M, Cx> for ActionMenu<M> {
 
     /// The standard menu table's footer.
     fn hints(&self) -> Footer {
-        Footer::new(MENU_KEYS)
+        Footer::leaving_last(MENU_KEYS)
     }
 }
 

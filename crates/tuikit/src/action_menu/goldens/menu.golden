@@ -26,7 +26,7 @@ style |  a                                                          a  |
 text  |  │                                                          │  |
 style |  a                                                          a  |
 text  |  │↑/↓ move · Enter pick · Esc close                         │  |
-style |  a                                                          a  |
+style |  aeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee                         a  |
 text  |  └──────────────────────────────────────────────────────────┘  |
 style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
 text  |                                                                |
@@ -36,3 +36,4 @@ legend
   b  fg DarkGray, dim
   c  bold, reversed
   d  fg Red, bold, reversed
+  e  dim

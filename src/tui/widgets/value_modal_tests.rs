@@ -97,13 +97,15 @@ fn g_and_capital_g_jump_to_top_and_bottom() {
     let window = modal.window();
     assert_eq!(window.offset(), window.last_offset());
     // The last page, never a blank body: the first row shows the page's
-    // first line and the last line sits right above the footer.
+    // first line and the last line sits right above the footer's blank
+    // row.
     let rows: Vec<&str> = end.lines().collect();
     let footer = rows
         .iter()
         .position(|row| row.contains("j/k/PgDn/PgUp scroll"))
         .expect("the footer");
-    assert!(rows[footer - 1].contains("line 42"), "{end}");
+    assert_eq!(rows[footer - 1].trim_matches(['│', ' ']), "", "{end}");
+    assert!(rows[footer - 2].contains("line 42"), "{end}");
     let first = 42 - window.viewport() + 1;
     assert!(rows[2].contains(&format!("line {first} ")), "{end}");
     modal.handle_key(typed('g'));
@@ -117,9 +119,10 @@ fn the_draw_reports_the_rows_the_value_fills() {
     let mut modal = open(ValueText::new("detail", numbered(40)));
     draw(&mut modal, area);
     let window = modal.window();
-    // A 22-row modal: 20 inside the frame, one of them the footer.
-    assert_eq!(window.viewport(), 19);
-    assert_eq!(window.last_offset(), 40 - 19);
+    // A 22-row modal: 20 inside the frame, two of them the footer and the
+    // blank row above it.
+    assert_eq!(window.viewport(), 18);
+    assert_eq!(window.last_offset(), 40 - 18);
 }
 
 #[test]

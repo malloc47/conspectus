@@ -461,9 +461,10 @@ fn a_host_table_drives_the_palette_and_keeps_its_own_actions() {
         key_in(&mut palette, press(KeyCode::Enter)),
         Outcome::Commit(Msg::Pick("b"))
     );
+    // The footer lists the key that leaves last, after the host's rows.
     assert_eq!(
         palette.footer().text(),
-        "↑/↓ move · Enter open · Esc close · Tab look here/everywhere · Ctrl-O set options · Ctrl-S keep"
+        "↑/↓ move · Enter open · Tab look here/everywhere · Ctrl-O set options · Ctrl-S keep · Esc close"
     );
 }
 
@@ -832,8 +833,9 @@ fn the_palette_takes_the_palette_size_and_keeps_it_as_the_list_narrows() {
     let small = drawn(&mut compact, 100, 30);
     let (_, _, width, height) = frame(&small);
     assert_eq!(width, 60);
-    // Query, three rows, and one footer row inside the border.
-    assert_eq!(height, 7, "{}", text(&small));
+    // Query, three rows, the blank row, and one footer row inside the
+    // border.
+    assert_eq!(height, 8, "{}", text(&small));
 }
 
 #[test]
@@ -875,7 +877,7 @@ fn scrolling_moves_no_further_than_the_cursor_needs() {
 }
 
 #[test]
-fn the_smallest_frames_keep_the_query_the_cursor_and_the_footer() {
+fn the_smallest_frames_keep_the_query_the_cursor_and_the_keys_that_leave() {
     for (width, height) in [(40, 10), (30, 8), (20, 6)] {
         let mut palette = many(20);
         key_in(&mut palette, press(KeyCode::Up));
@@ -883,7 +885,15 @@ fn the_smallest_frames_keep_the_query_the_cursor_and_the_footer() {
         let all = text(&buf);
         assert!(find(&buf, "│/").is_some(), "{width}x{height}: {all}");
         assert_eq!(marked(&buf).len(), 1, "{width}x{height}: {all}");
-        assert!(all.contains("move"), "{width}x{height}: {all}");
+        assert!(all.contains("Esc close"), "{width}x{height}: {all}");
+        // The keys that leave are on the frame's last row inside it.
+        let rect =
+            crate::testkit::buffer::frame_rect(&buf, &Buffer::empty(buf.area)).expect("a frame");
+        let rows = crate::testkit::buffer::inner_rows(&buf, rect);
+        assert!(
+            rows.last().is_some_and(|row| row.contains("Esc close")),
+            "{width}x{height}: {all}"
+        );
     }
 }
 

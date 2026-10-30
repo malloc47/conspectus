@@ -24,11 +24,11 @@ expression: "help_page(120, 30, \"\")"
           │  T             Show or hide thinking turns                                                      █│
           │  I             Show or hide aborted and interrupted turns                                       █│
           │  H             Show or hide records the harness's own UI never showed                           █│
-          │                                                                                                 █│
-          │Viewer                                                                                           █│
-          │  ?             Show or hide this help                                                           ║│
-          │  Esc           Step back: close this help, then the find, then the viewer                       ▼│
-          │  q / Ctrl-C    Leave the viewer at once, even with a find active                                 │
+          │                                                                                                 ║│
+          │Viewer                                                                                           ║│
+          │  ?             Show or hide this help                                                           ▼│
+          │  Esc           Step back: close this help, then the find, then the viewer                        │
+          │                                                                                                  │
           │j/k/PgDn/PgUp scroll · Esc/? back · q close                                                       │
 ──────────└──────────────────────────────────────────────────────────────────────────────────────────────────┘──────────
 [ 1/4 ] · tools·off   (t) · think·off (T) · aborted·hide (I) · j/k/PgDn/PgUp scroll · / find · ? help · Esc/q close

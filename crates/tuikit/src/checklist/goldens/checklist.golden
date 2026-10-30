@@ -22,9 +22,9 @@ style |  a                                                          a  |
 text  |  │                                                          │  |
 style |  a                                                          a  |
 text  |  │↑/↓ move · Space toggle · a select all · n select none    │  |
-style |  a                                                          a  |
+style |  aeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee    a  |
 text  |  │Enter confirm · Esc cancel                                │  |
-style |  a                                                          a  |
+style |  aeeeeeeeeeeeeeeeeeeeeeeeeee                                a  |
 text  |  └ 3 of 5 selected ─────────────────────────────────────────┘  |
 style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
 text  |                                                                |
@@ -36,3 +36,4 @@ legend
   b  fg Cyan, bold
   c  bold, reversed
   d  fg DarkGray, dim
+  e  dim

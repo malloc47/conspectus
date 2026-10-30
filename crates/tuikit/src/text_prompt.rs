@@ -89,7 +89,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
-use crate::frame::{ModalBody, ModalFrame, ModalSize};
+use crate::frame::{ModalBody, ModalFooter, ModalFrame, ModalSize};
 use crate::keys::{Footer, TEXT_INPUT_KEYS, TextInputKey, resolve};
 use crate::overlay::{Outcome, Overlay};
 use crate::text;
@@ -201,7 +201,8 @@ impl<M> TextPrompt<M> {
     pub fn draw(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let frame = ModalFrame::new(theme, PROMPT_SIZE).title(self.title.as_str());
         // The footer sits on the bottom border, one space in from each
-        // corner, and breaks only between hints.
+        // corner, in the footer's look; too wide for it, it keeps its last
+        // row, the keys that leave.
         let room = usize::from(frame.inner_width(area)).saturating_sub(2);
         let squeezed = self.rect(area.intersection(buf.area)).height < self.rows() + 2;
         let footer = match &self.error {
@@ -211,11 +212,7 @@ impl<M> TextPrompt<M> {
                 text::truncate_end(reason, room),
                 Style::default().fg(theme.error),
             )),
-            _ => Footer::new(TEXT_INPUT_KEYS)
-                .lines(room, theme)
-                .into_iter()
-                .next()
-                .unwrap_or_default(),
+            _ => ModalFooter::new(Footer::leaving_last(TEXT_INPUT_KEYS), theme).border(room),
         };
         frame.footer(footer).render(
             area,
@@ -288,7 +285,7 @@ impl<M, Cx: ?Sized> Overlay<M, Cx> for TextPrompt<M> {
 
     /// The text input table's footer, the one on its bottom border.
     fn hints(&self) -> Footer {
-        Footer::new(TEXT_INPUT_KEYS)
+        Footer::leaving_last(TEXT_INPUT_KEYS)
     }
 }
 

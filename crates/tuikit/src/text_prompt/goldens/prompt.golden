@@ -6,7 +6,7 @@ style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
 text  |  │draft                       │  |
 style |  a     b                      a  |
 text  |  └ Enter confirm · Esc cancel ┘  |
-style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+style |  aaccccccccccccccccccccccccccaa  |
 text  |                                  |
 style |                                  |
 text  |                                  |
@@ -14,15 +14,16 @@ style |                                  |
 text  |  ┌ Name ──────────────────────┐  |
 style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
 text  |  │name                        │  |
-style |  abccc                        a  |
+style |  abddd                        a  |
 text  |  │a name is required          │  |
-style |  adddddddddddddddddd          a  |
+style |  aeeeeeeeeeeeeeeeeee          a  |
 text  |  └ Enter confirm · Esc cancel ┘  |
-style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+style |  aaccccccccccccccccccccccccccaa  |
 text  |                                  |
 style |                                  |
 legend
   a  fg Cyan
   b  fg Black, bg White
-  c  fg DarkGray
-  d  fg Red
+  c  fg Cyan, dim
+  d  fg DarkGray
+  e  fg Red

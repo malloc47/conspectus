@@ -22,7 +22,7 @@ style |  a                                                          a  |
 text  |  │                                                          │  |
 style |  a                                                          a  |
 text  |  │Enter/y confirm · Esc/n cancel                            │  |
-style |  a                                                          a  |
+style |  acccccccccccccccccccccccccccccc                            a  |
 text  |  └──────────────────────────────────────────────────────────┘  |
 style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
 text  |                                                                |
@@ -34,3 +34,4 @@ style |                                                                |
 legend
   a  fg Cyan
   b  fg Yellow, bold
+  c  dim

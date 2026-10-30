@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 
 use super::row::{Kind, Row, Section};
-use crate::frame::ModalBody;
+use crate::frame::{ModalBody, ModalFooter};
 use crate::glyphs::marks;
 use crate::keys::{Footer, SETTINGS_KEYS};
 use crate::scroll::{ScrollGutter, ScrollWindow};
@@ -125,23 +125,18 @@ impl<Id, M> View<'_, Id, M> {
         Span::raw(format!("{name} {value}  {tag}"))
     }
 
-    /// The footer `width` cells wide under a blank row, broken only
-    /// between hints.
-    pub fn footer(&self, width: usize) -> Vec<Line<'static>> {
-        let mut footer = vec![Line::default()];
-        footer.extend(Footer::new(SETTINGS_KEYS).lines(width, self.theme));
-        footer
+    /// The footer the standard settings table generates.
+    pub fn footer(&self) -> ModalFooter<'_> {
+        ModalFooter::new(Footer::leaving_last(SETTINGS_KEYS), self.theme)
     }
 }
 
 /// The panel inside its frame: the sections, scrolled in the window the
-/// panel kept, over the footer, which keeps the bottom rows.
+/// panel kept, over the footer, which keeps the frame's last rows.
 pub(super) struct Body<'a, Id, M> {
     pub view: View<'a, Id, M>,
     pub places: Vec<Place>,
     pub window: ScrollWindow,
-    pub lines: Option<Vec<Line<'static>>>,
-    pub footer: Vec<Line<'static>>,
 }
 
 impl<Id, M> ModalBody for Body<'_, Id, M> {
@@ -149,10 +144,7 @@ impl<Id, M> ModalBody for Body<'_, Id, M> {
 
     fn measure(&mut self, width: u16) -> u16 {
         let width = usize::from(width);
-        let lines = self.view.lines(width);
-        self.footer = self.view.footer(width);
-        let wanted = lines.len() + self.footer.len();
-        self.lines = Some(lines);
+        let wanted = self.view.lines(width).len() + self.view.footer().height(width);
         u16::try_from(wanted).unwrap_or(u16::MAX)
     }
 
@@ -161,36 +153,22 @@ impl<Id, M> ModalBody for Body<'_, Id, M> {
             view,
             places,
             mut window,
-            lines,
-            mut footer,
         } = self;
-        let width = usize::from(area.width);
-        let mut lines = lines.unwrap_or_else(|| view.lines(width));
-        if footer.is_empty() {
-            footer = view.footer(width);
-        }
-        let height = usize::from(area.height);
-        // A frame too short for the panel gives up the blank row above
-        // the keys first.
-        if lines.len() + footer.len() > height && footer.len() > 1 {
-            footer.remove(0);
-        }
-        // Then the footer keeps the bottom rows, all but one, so the
-        // cursor's row always shows, and the rows scroll in the rest.
-        let footer_rows = footer.len().min(height.saturating_sub(1));
-        let footer = footer.split_off(footer.len() - footer_rows);
-        let body_rows = height - footer_rows;
-        let rows_area = Rect {
-            height: u16::try_from(body_rows).unwrap_or(area.height),
-            ..area
-        };
-        // Rows that overflow give a column to the scrollbar, so they are
-        // laid out again one cell narrower.
-        if lines.len() > body_rows && area.width >= 2 {
-            lines = view.lines(width - 1);
-        }
+        // The footer keeps the frame's last rows and leaves the rows one,
+        // so the cursor's row always shows; rows that overflow give a
+        // column to the scrollbar, so they and the footer are laid out a
+        // cell narrower.
+        let mut fit = view
+            .footer()
+            .fit_beside(area, 1, |width| view.lines(usize::from(width)).len());
+        let [rows_area, footer_area] = fit.split(area);
+        // The footer rows that do not fit follow the last row. They spill
+        // only while the rows are down to the cursor's, which the window
+        // keeps, so the panel shows none of them.
+        let mut lines = view.lines(usize::from(fit.width));
+        lines.append(&mut fit.spill);
         let gutter = ScrollGutter::layout(rows_area, lines.len());
-        window.resize(body_rows, lines.len());
+        window.resize(usize::from(rows_area.height), lines.len());
         if let Some(place) = view.cursor.and_then(|cursor| places.get(cursor)) {
             window.follow(place.span.clone());
             // A span taller than the window shows its start: keep the
@@ -201,12 +179,7 @@ impl<Id, M> ModalBody for Body<'_, Id, M> {
             .scroll(window.paragraph_scroll())
             .render(gutter.content(), buf);
         gutter.render(&window, buf);
-        let footer_area = Rect {
-            y: area.y + rows_area.height,
-            height: area.height - rows_area.height,
-            ..area
-        };
-        Paragraph::new(footer).render(footer_area, buf);
+        fit.render(footer_area, buf);
         window
     }
 }
