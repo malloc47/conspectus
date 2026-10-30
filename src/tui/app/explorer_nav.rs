@@ -5,19 +5,27 @@ use super::*;
 
 impl App {
     /// Point the explorer at the node the left-pane selection names, or
-    /// clear it when the selection names no node.
+    /// clear it when the selection names no node. While the selection
+    /// is still the row the pane reflects (a refresh, a filter or sort
+    /// change, `r`), a drilled pane reloads the node it shows instead,
+    /// and opens on the selection's node only when that one is gone.
     pub(super) fn recompute_explorer(&mut self) {
         self.reset_preview_scroll();
-        let Some(selection) = self.tree_state.selected() else {
+        let selection = self.tree_state.selected().cloned();
+        let reflected = std::mem::replace(&mut self.explorer_reflects, selection.clone());
+        let Some(selection) = selection else {
             self.explorer = None;
             return;
         };
+        if reflected.as_ref() == Some(&selection) && self.reload_drill() {
+            return;
+        }
         let Some(handle) = self.handle.as_ref() else {
             self.explorer = None;
             return;
         };
         let snapshot = handle.snapshot();
-        let raw_target = match selection {
+        let raw_target = match &selection {
             RowId::Group(node) => Some(node.clone()),
             RowId::AgentSession(node) => Some(node.clone()),
             RowId::MuxSession(node) => Some(node.clone()),
@@ -39,6 +47,34 @@ impl App {
         };
         let home = home_for_config(&self.config);
         self.recompute_explorer_for(raw_target, home.as_deref(), false);
+    }
+
+    /// Rebuild the node a drilled pane shows from the current snapshot,
+    /// keeping its breadcrumb, fold, Expanded Node Detail toggle, and
+    /// cursor. Older frames are rebuilt only when `Backspace` reaches
+    /// them. Says whether it did: not when the pane has no drill, nor
+    /// when its node is gone.
+    fn reload_drill(&mut self) -> bool {
+        let (Some(state), Some(handle)) = (self.explorer.as_ref(), self.handle.as_ref()) else {
+            return false;
+        };
+        if state.breadcrumb.is_empty() {
+            return false;
+        }
+        let home = home_for_config(&self.config);
+        let view = build_node_view(ExplorerInputs {
+            snapshot: handle.snapshot(),
+            target: &state.view.focused,
+            home: home.as_deref(),
+            now: Some(crate::tui::rows::tree_current_unix_epoch()),
+        });
+        match (view, self.explorer.as_mut()) {
+            (Some(view), Some(state)) => {
+                state.reload(view);
+                true
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn recompute_explorer_for(
@@ -75,18 +111,7 @@ impl App {
                 });
                 match preserved {
                     Some(mut state) => {
-                        let prev_key = state.selected_row().map(|row| row.key(&state.view));
-                        // Replace the view while keeping cursor /
-                        // Other-zone expansion / breadcrumb
-                        // identity. ADR 0074 §6: the Other zone is
-                        // either open or closed; there is no
-                        // per-group expansion state to invalidate
-                        // when the view rebuilds.
-                        state.view = view;
-                        if !state.view.has_other_rows() {
-                            state.other_expanded = false;
-                        }
-                        state.reseat_cursor(prev_key);
+                        state.reload(view);
                         self.explorer = Some(state);
                     }
                     None => {
@@ -287,6 +312,7 @@ impl App {
         // the drilled neighbor and that's what we want to keep.
         let target_id = self.tree.rows[row_index].id.clone();
         self.tree_state.select(&self.tree.rows, target_id);
+        self.explorer_reflects = self.tree_state.selected().cloned();
     }
 
     pub(super) fn explorer_back(&mut self) {
@@ -351,5 +377,6 @@ impl App {
         if let Some(prev_selection) = hop.left_pane_selection {
             self.tree_state.select(&self.tree.rows, prev_selection);
         }
+        self.explorer_reflects = self.tree_state.selected().cloned();
     }
 }

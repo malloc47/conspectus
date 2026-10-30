@@ -135,11 +135,19 @@ pub struct App {
     /// Right-panel graph explorer state. Carries
     /// the focused node view, the navigation cursor, group expansion,
     /// and the breadcrumb stack for drilldown. Recomputed whenever
-    /// selection or snapshot changes. `None` until the reducer has
-    /// resolved a selection into a node view, and again whenever the
-    /// selection names no node; the right pane shows its placeholder
-    /// then.
+    /// selection or snapshot changes; a drill survives the recompute
+    /// while the selection is still [`Self::explorer_reflects`]. `None`
+    /// until the reducer has resolved a selection into a node view, and
+    /// again whenever the selection names no node; the right pane shows
+    /// its placeholder then.
     explorer: Option<ExplorerState>,
+    /// The left-pane selection the right pane reflects: the row it was
+    /// last opened or reloaded for, the row the left pane moved to
+    /// after a drill, or the row a `Backspace` put back. While the
+    /// selection stays on it, a refresh or a projection change reloads
+    /// the node a drilled pane shows instead of opening the pane on the
+    /// selection's node again.
+    explorer_reflects: Option<RowId>,
     /// Which panel currently consumes navigation keys.
     focus: Focus,
     /// Whether the explorer's link rows render the trailing
@@ -481,6 +489,20 @@ impl ExplorerState {
                 .unwrap_or(0)
         });
     }
+
+    /// Show `view`, a rebuild of the node this state already shows,
+    /// keeping the breadcrumb, the Expanded Node Detail toggle, the
+    /// `Other` fold while the zone still has rows (ADR 0074 §6: the
+    /// zone is open or closed, with no per-group state to invalidate),
+    /// and the cursor on the same row by key.
+    fn reload(&mut self, view: NodeView) {
+        let previous_key = self.selected_row().map(|row| row.key(&self.view));
+        self.view = view;
+        if !self.view.has_other_rows() {
+            self.other_expanded = false;
+        }
+        self.reseat_cursor(previous_key);
+    }
 }
 
 impl App {
@@ -528,6 +550,7 @@ impl App {
             tree: RowTree::default(),
             tree_state: TreeState::new(),
             explorer: None,
+            explorer_reflects: None,
             focus: Focus::Left,
             edge_meta_visible,
             explorer_back_armed: false,
@@ -736,6 +759,9 @@ impl App {
             return;
         }
         self.status_message = None;
+        // A jump shows the row's node even when it lands on the row
+        // already selected and the right pane has drilled away from it.
+        self.explorer_reflects = None;
         self.recompute_explorer();
     }
 

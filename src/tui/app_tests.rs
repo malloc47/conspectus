@@ -2024,7 +2024,6 @@ fn drill_to(app: &mut App, target: &NodeId) {
 }
 
 #[test]
-#[ignore = "backlog CSP-789: a refresh throws the right pane's drill away"]
 fn a_refresh_keeps_a_drill_into_a_neighbor_the_view_has_no_row_for() {
     // The session could be in either tmux session. The resolver picks
     // one, so the other lists the session in its `Other` zone, which
@@ -2081,6 +2080,43 @@ fn a_refresh_keeps_a_drill_into_a_neighbor_the_view_has_no_row_for() {
         "the cursor stays on the session's row"
     );
     assert_eq!(app.selection(), left.as_ref());
+}
+
+#[test]
+fn a_sort_or_filter_change_keeps_a_drill_while_the_left_selection_stays() {
+    let snap = sessions_and_muxes(&["abc"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    let left = app.selection().cloned();
+    drill_to(&mut app, &mux_node("work"));
+    let rebuilds = app.tree_rebuilds;
+
+    let filter = app.filter().clone();
+    app.update(Msg::SetSort(crate::tui::Sort::Recency));
+    app.update(Msg::SetFilter(filter));
+
+    assert_eq!(app.tree_rebuilds, rebuilds + 2, "premise: both rebuild");
+    assert_eq!(app.selection(), left.as_ref());
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.view.focused, mux_node("work"));
+    assert_eq!(state.breadcrumb.len(), 1);
+    assert_eq!(state.breadcrumb[0].focused, session_node("abc"));
+}
+
+#[test]
+fn picking_the_selected_row_opens_the_right_pane_on_it() {
+    // A pick (the row search, a menu entry, quick select's `here`)
+    // shows the picked row's node, even when the left pane is already
+    // on that row and the right pane has drilled away from it.
+    let snap = sessions_and_muxes(&["abc"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    let row = app.selection().cloned().expect("a selection");
+    drill_to(&mut app, &mux_node("work"));
+
+    app.update(Msg::SelectRow(Box::new(row)));
+
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.view.focused, session_node("abc"));
+    assert!(state.breadcrumb.is_empty());
 }
 
 #[test]
