@@ -17,6 +17,7 @@
 
 pub mod action_menu;
 pub mod age;
+pub mod app_frame;
 pub mod breadcrumb;
 pub mod checklist;
 pub mod chip;
