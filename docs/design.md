@@ -1398,8 +1398,8 @@ line (`tuikit::text::elide`). The breadcrumb draws through it
 hop always shows, the first outlasts the middle, the oldest middle hops
 give way first with one `…` for each run that went, and a last hop that
 cannot fit is cut with `…`; the title gives the chain the room its other
-parts leave. The tab strip and the status bar move onto the rule with
-their own ranks. The pane's layout is the framework's too
+parts leave. The tab strip, the header, and the status bar are on the
+rule too, with their own ranks (ADR 0190). The pane's layout is the framework's too
 (`tuikit::master_detail::StackedMasterDetail`): the explorer zone is as
 tall as its rows wrap to, at least three and at most what six Preview
 rows and the `Preview` rule leave (the Preview's six give way first on
@@ -1421,6 +1421,22 @@ the focused pane's border and the `►` before its title take
 where the marker goes, and the titles' own text keeps its look. The
 header's words, the titles, and which view fills the body stay
 `conspectus`'s.
+
+The chrome's lines give way by that one rule (ADR 0190). The left pane's
+tab strip is a `tuikit::tab_bar::TabBar`: every view while they fit,
+otherwise the inactive names go from the end of the strip, the active one
+stays, and the strip ends with `…`. The header and the status bar's
+settings and hints are `tuikit::priority_line::PriorityLine`s, whose
+segments drop lowest rank first and whose room is filled back with what
+still fits (`text::elide_filled`), ending with `…` when something went:
+the header keeps its session count always, then the freshness, the mux
+count, the `▲ N` triage chip, the stopped count, and the opt-in harness
+chips, from the last to go; the status bar keeps its old priority order.
+Every empty slot says so through `tuikit::empty_state::EmptyState` (a
+message and a hint, wrapped and receding): the left pane's placeholders,
+the right pane's, and a Preview with nothing to show, with their words
+`conspectus`'s; a Preview that failed says why in the body's look. There
+is no minimum-size screen yet (CSP-319, CSP-190).
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

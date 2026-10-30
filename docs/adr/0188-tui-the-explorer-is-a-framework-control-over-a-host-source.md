@@ -89,6 +89,13 @@ assertions (the copy tests read `Effect::Copy`), and 1015 right-pane
 frames were byte-identical after the adoption and before the key
 changes.
 
+CSP-758 landed decision 6's `TabBar` and `PriorityLine`
+([ADR 0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an-empty-slot-says-so-one-way.md)):
+the tab strip on `text::elide` with the mark at the end, and the header
+and the status bar on `text::elide_filled`, the same rule with a pass
+that fills the room back, which keeps the status bar's packing by
+priority.
+
 ## Context
 
 The inventory for the framework extraction

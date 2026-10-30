@@ -127,6 +127,22 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   follows `accent`), beside the `►` before its title that was already
   that color; the other pane keeps the plain border. Nothing else on the
   screen changes.
+- **The header gives way by importance on a narrow screen.** The header
+  line used to run off the right edge, cutting `4 stopped` to `4` at 40
+  columns and a harness chip mid-name when `show_harness_chips` is on.
+  It now drops whole parts and ends with `…`: the opt-in harness chips
+  first (from the end), then the stopped count, the `▲ N` triage chip,
+  and the mux count; the freshness and the session count stay longest.
+  A header that fits looks as before. The tab strip and the status bar
+  fit by the same rule and look as before.
+- **Empty previews recede like empty panes.** A Preview with nothing to
+  show (`loading mux preview…`, `no mux target for this row`, `no
+  preview for this row`, `no turns yet`, `(empty pane)`, `preview
+  disabled (--no-live-preview)`) is drawn in the dim look the panes'
+  empty messages already have; a Preview that failed to load
+  (`transcript unavailable: …`, `tmux unavailable: …`) keeps the plain
+  look. The right pane's `Select a row to view its detail.` wraps on a
+  pane too narrow for it instead of being cut by the border.
 - **The right pane's rows read alike.** A field label of 14 characters or
   more keeps a space before its value (`current_commit e52b2ef`, where it
   read `current_commite52b2ef`), so a long path beside one starts on the

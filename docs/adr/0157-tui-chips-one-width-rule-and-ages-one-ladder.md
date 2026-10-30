@@ -7,6 +7,10 @@ ADR 0150 with the framework's `chip` and `age` modules. Amends ADR 0149
 item 25 (the content search's chip column is a chip's footprint from the
 theme, not a fixed 10 cells). Keeps ADR 0032's chip contract (every chip
 is `badge_width + 2` cells) and makes it hold for every chip.
+Decision 8's status-bar settings segments (`group:`, `filter:`, `sort:`,
+`find:`) became segments of a `PriorityLine` in
+[ADR 0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an-empty-slot-says-so-one-way.md);
+`StatusChip` stays in `tuikit::chip`.
 
 ## Context
 

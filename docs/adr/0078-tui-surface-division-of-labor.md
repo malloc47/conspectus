@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an-empty-slot-says-so-one-way.md):
+the header keeps what it carries and gives way on a narrow screen in
+order of importance (the opt-in chips first, then the stopped count,
+the triage chip, the mux count, and the freshness; the session count
+never), ending with `…`.
 
 ## Context
 

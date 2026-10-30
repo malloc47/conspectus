@@ -1097,3 +1097,33 @@ segments unchanged.
   filter's predicates, so the content search and pinned-only narrowed its
   rows without its count. The per-view count words ADR 0078 deferred
   (`N prs`, `N pins`) were not added: the header stays `sessions · mux`.
+
+## Verification (CSP-758)
+
+The tab strip, the header line, the status bar's segments, and the empty
+states moved onto the framework (ADR 0190). Checked with `conspectus tui
+--snapshot` on the showcase fixture and an empty one at 40, 60, 80, 100,
+107, 120, and 160 columns: 329 frames before and after, 273
+byte-identical.
+
+- **Tab strip (3.4).** `TabBar` on `text::elide`, CSP-716's rule kept:
+  byte-identical at every width; `tab_strip_fit` is gone.
+- **Header line (3.5, section 6).** Confirmed by render: it had no fit and
+  the edge cut it (`· 4` at 40 columns; a harness chip mid-name below 115
+  with `show_harness_chips`). It is a `PriorityLine` in Conspectus now and
+  drops whole parts by rank with ` …`; a consistency test checks every
+  width from 40 to 120 in every view. The separators stay as they were
+  (` · ` in the counts, `  ·  ` before a chip section, `  ` between chips),
+  each a segment's own gap.
+- **Status bar (3.6).** The hand-written packing is `text::elide_filled`
+  under a `PriorityLine`, with named, distinct ranks in the old order:
+  byte-identical at every width and in both focus states. The inline
+  priority numbers the inventory noted are named tiers now.
+- **Empty states (3.14).** The left pane has 15 messages today and the
+  right pane 2; all are `EmptyState`s with their copy, drawn as before
+  (the right pane's now wraps below 34 columns). The Preview's
+  nothing-to-show placeholders take the same muted look; its failure
+  reasons keep the body's.
+- **Separators (8.6).** Three separators remain on purpose (` · `,
+  `  ·  `, `  `), now declared as a line's separator and segments' gaps
+  rather than spliced spans.
