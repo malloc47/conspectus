@@ -728,3 +728,38 @@ fn an_overflowing_list_keeps_its_columns_and_shows_the_scrollbar() {
     assert!(!few.contains('█'), "{few}");
     assert!(many.contains('█') && many.contains('▼'), "{many}");
 }
+
+#[test]
+fn page_keys_move_by_the_rows_shown_and_stop_at_the_ends() {
+    let mut state = contents_overlay("quokka");
+    let rows: Vec<ContentRow> = (0..40).map(|n| row(&format!("{n:08}"), n)).collect();
+    let theme = Theme::default();
+    let area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(area);
+    SearchOverlayWidget::new(&mut state, &[], &theme)
+        .with_content(&view(rows.clone(), true))
+        .render(area, &mut buf);
+    let Palettes::Content(palette) = &state.palette else {
+        panic!("content search is a content palette");
+    };
+    let page = palette.window().page();
+    assert!(page > 2 && page < 40, "{page}");
+
+    handle(&mut state, &rows, press(KeyCode::PageDown));
+    assert_eq!(state.cursor(), page);
+    for _ in 0..10 {
+        handle(&mut state, &rows, press(KeyCode::PageDown));
+    }
+    assert_eq!(state.cursor(), 39, "stops at the last result");
+    handle(&mut state, &rows, press(KeyCode::PageUp));
+    assert_eq!(state.cursor(), 39 - page);
+    for _ in 0..10 {
+        handle(&mut state, &rows, press(KeyCode::PageUp));
+    }
+    assert_eq!(state.cursor(), 0, "stops at the first");
+    assert_eq!(state.query(), "quokka", "the page keys type nothing");
+    assert!(
+        state.take_due_search(Instant::now(), true).is_none(),
+        "paging asks for no new scan"
+    );
+}

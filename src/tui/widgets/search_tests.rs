@@ -331,3 +331,49 @@ fn refresh_matches_resets_cursor_when_truncated() {
     assert_eq!(state.matches().len(), 1);
     assert_eq!(state.cursor(), 0);
 }
+
+/// How many results the palette's last draw showed (what a page is).
+fn page_rows(state: &SearchOverlayState) -> usize {
+    match &state.palette {
+        Palettes::Quick(palette) => palette.window().page(),
+        Palettes::Content(palette) => palette.window().page(),
+    }
+}
+
+#[test]
+fn page_keys_move_by_the_rows_shown_and_stop_at_the_ends() {
+    let rows: Vec<Row> = (0..30)
+        .map(|n| agent_row(&format!("s{n:02}"), Some(&format!("puffin {n:02}"))))
+        .collect();
+    let items = items_from_rows(&rows);
+    let ctx = || SearchContext {
+        items: &items,
+        content: &[],
+        entities: None,
+    };
+    let mut state = SearchOverlayState::new();
+    for c in "puf".chars() {
+        state.handle_in(ctx(), press(KeyCode::Char(c)));
+    }
+    assert_eq!(state.matches().len(), 30);
+    let theme = Theme::default();
+    let area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(area);
+    SearchOverlayWidget::new(&mut state, &items, &theme).render(area, &mut buf);
+    let page = page_rows(&state);
+    assert!(page > 2 && page < 30, "{page}");
+
+    state.handle_in(ctx(), press(KeyCode::PageDown));
+    assert_eq!(state.cursor(), page);
+    for _ in 0..10 {
+        state.handle_in(ctx(), press(KeyCode::PageDown));
+    }
+    assert_eq!(state.cursor(), 29, "stops at the last result");
+    state.handle_in(ctx(), press(KeyCode::PageUp));
+    assert_eq!(state.cursor(), 29 - page);
+    for _ in 0..10 {
+        state.handle_in(ctx(), press(KeyCode::PageUp));
+    }
+    assert_eq!(state.cursor(), 0, "stops at the first");
+    assert_eq!(state.query(), "puf", "the page keys type nothing");
+}

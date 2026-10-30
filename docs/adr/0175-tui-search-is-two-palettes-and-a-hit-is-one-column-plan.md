@@ -18,6 +18,8 @@ columns out. Amended by
 [ADR 0196](0196-tui-quick-selects-entity-rows-come-from-a-column-schema.md):
 the entity rows the alternatives below left on their own split come from
 a column schema too.
+Its consequence that the search does not page no longer holds: both
+search tables bind `PgUp`/`PgDn` (CSP-782).
 
 ## Context
 
@@ -129,8 +131,10 @@ Facts established while moving the search:
   too narrow to read drops and gives its room to the label, two rules the
   plan does not have. The current reach's rows are a label and a snippet
   with no grid. The palette page lists the rules as a seam.
-- `PgUp`/`PgDn` are not in the search tables, so the search does not page
-  (house rule 12); the palette would page if they were.
+- `PgUp`/`PgDn` were not in the search tables, so the search did not page
+  (house rule 12); CSP-782 binds them in both as aliases of the palette's
+  page actions (`SearchKey::PageUp`/`PageDown`), so the search pages by
+  the rows shown and stops at the ends, and the footers are unchanged.
 
 ## Alternatives Considered
 

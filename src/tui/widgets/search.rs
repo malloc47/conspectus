@@ -231,6 +231,8 @@ impl PaletteAction for SearchKey {
             Self::Pick => Some(PaletteKey::Pick),
             Self::Down => Some(PaletteKey::Down),
             Self::Up => Some(PaletteKey::Up),
+            Self::PageUp => Some(PaletteKey::PageUp),
+            Self::PageDown => Some(PaletteKey::PageDown),
             Self::Scope => Some(PaletteKey::Scope),
             Self::Options => Some(PaletteKey::Options),
             Self::Granularity
@@ -650,7 +652,8 @@ impl SearchOverlayState {
     /// Dispatch a crossterm key event: the palette's keys (`Esc` and
     /// `Ctrl-C` close, `Enter` picks the result under the cursor or closes
     /// an empty list, the arrows and `Ctrl-N`/`Ctrl-P` move, wrapping,
-    /// `Tab` switches the reach, `Ctrl-O` opens the options, and the rest
+    /// `PgUp`/`PgDn` move by the rows shown and stop at the ends, `Tab`
+    /// switches the reach, `Ctrl-O` opens the options, and the rest
     /// edit the query, `j` and `k` included), and content search's own
     /// verbs.
     pub fn handle_key(&mut self, event: KeyEvent) -> SearchOutcome {
@@ -714,6 +717,8 @@ impl SearchOverlayState {
             | SearchKey::Pick
             | SearchKey::Down
             | SearchKey::Up
+            | SearchKey::PageUp
+            | SearchKey::PageDown
             | SearchKey::Scope
             | SearchKey::Options => SearchOutcome::Continue,
         }

@@ -43,6 +43,12 @@ pub enum SearchKey {
     Pick,
     Down,
     Up,
+    /// Move the cursor up by the rows the list shows, stopping at the
+    /// first result.
+    PageUp,
+    /// Move the cursor down by the rows the list shows, stopping at the
+    /// last result.
+    PageDown,
     /// Quick select: switch between the current view and everything.
     Scope,
     /// Contents scope: list sessions, or the matching messages.
@@ -67,6 +73,7 @@ impl KeyAction for SearchKey {
             Self::Cancel => KeyRole::Leave,
             Self::Pick => KeyRole::Apply,
             Self::Down | Self::Up => KeyRole::Move,
+            Self::PageUp | Self::PageDown => KeyRole::Page,
             Self::Scope
             | Self::Granularity
             | Self::Options
@@ -91,6 +98,8 @@ pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     ),
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
+    alias(key(KeyCode::PageUp), SearchKey::PageUp),
+    alias(key(KeyCode::PageDown), SearchKey::PageDown),
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "pick"),
     shown(
         key(KeyCode::Tab),
@@ -114,6 +123,8 @@ pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     ),
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
+    alias(key(KeyCode::PageUp), SearchKey::PageUp),
+    alias(key(KeyCode::PageDown), SearchKey::PageDown),
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "open hit"),
     shown(
         key(KeyCode::Tab),

@@ -392,12 +392,14 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   with `…`, and every change to the filter puts the cursor back on the
   first match (it stayed at the same position). The count in the title
   sits two spaces after the title (`Retarget project-main  (3/7)`).
-- **Quick select and content search scroll like the picker.** A result
-  list taller than the modal shows a scrollbar in the column its rows
-  already left blank, so no column moves as a content search's results
-  arrive, and the list scrolls only as far as the cursor needs (moving
-  back up no longer drags it to the top). Searching itself, the keys,
-  and the rest of the look are unchanged.
+- **Quick select and content search scroll and page like the picker.** A
+  result list taller than the modal shows a scrollbar in the column its
+  rows already left blank, so no column moves as a content search's
+  results arrive, and the list scrolls only as far as the cursor needs
+  (moving back up no longer drags it to the top). `PgUp`/`PgDn` move the
+  cursor by the results shown and stop at the first and the last (they
+  did nothing); the footers do not list them, as the picker's does not.
+  Searching itself and the rest of the look are unchanged.
 - **The controls dialog keeps its keys in view and pages.** The controls
   dialog (`f`) shows its keys at the bottom while its sections scroll
   (they were the last lines of the list, so on most screens they never
