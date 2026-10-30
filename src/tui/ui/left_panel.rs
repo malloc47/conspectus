@@ -15,6 +15,7 @@
 
 mod columns;
 
+use tuikit::empty_state::EmptyState;
 use tuikit::selection;
 use tuikit::tab_bar::TabBar;
 use tuikit::tree::{RowCtx, RowState, TreeColumns, TreeView};
@@ -58,7 +59,7 @@ pub(super) fn draw_left_panel(app: &App, buf: &mut Buffer, area: Rect) -> Option
     // A tree with rows always shows its first, so the placeholder's copy
     // is worked out only when there are none.
     if app.tree().rows.is_empty() {
-        view = view.empty(empty_left_panel_text(app));
+        view = view.empty(empty_left_panel(app));
     }
     view.render(area, buf)
 }
@@ -286,17 +287,25 @@ pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
     Some(Line::from(spans))
 }
 
-pub(super) fn empty_left_panel_text(app: &App) -> String {
+/// What the left pane says when its tree has no rows: why it is empty
+/// (still loading, a search that found nothing, a filter that hides
+/// everything, a view with nothing in it) and, on the hint's row, what
+/// would fill it.
+pub(super) fn empty_left_panel(app: &App) -> EmptyState {
     if app.snapshot_handle().is_none() {
-        return "Loading discovery…".to_string();
+        return EmptyState::new("Loading discovery…");
     }
     if app.active_view() == crate::tui::View::Search {
         if !app.config().live_preview_enabled {
-            return format!("{}.", crate::tui::widgets::search::CONTENT_SEARCH_OFF);
+            return EmptyState::new(format!(
+                "{}.",
+                crate::tui::widgets::search::CONTENT_SEARCH_OFF
+            ));
         }
         if app.viewed_search().is_none() {
-            return "Press `s` (or Ctrl-/) to search the contents of sessions and mux panes."
-                .to_string();
+            return EmptyState::new(
+                "Press `s` (or Ctrl-/) to search the contents of sessions and mux panes.",
+            );
         }
     }
     let shown = if app.active_view() == crate::tui::View::Search {
@@ -310,42 +319,29 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
             crate::tui::View::Pinned | crate::tui::View::History
         )
     {
+        let reading =
+            content.group == crate::viewer::search::Grouping::Flat && !content.hits().is_empty();
+        let running = matches!(content.status, crate::tui::ContentStatus::Running(_));
+        let searching = format!("Searching for \"{}\"…", content.text);
+        let reading_text = format!("Reading the messages that match \"{}\"…", content.text);
         if app.active_view() == crate::tui::View::Search {
-            return match content.status {
-                crate::tui::ContentStatus::Running(_) => format!(
-                    "Searching for \"{}\"…\nMatches appear as they are found.",
-                    content.text
-                ),
-                crate::tui::ContentStatus::Done(_)
-                    if content.group == crate::viewer::search::Grouping::Flat
-                        && !content.hits().is_empty() =>
-                {
-                    format!("Reading the messages that match \"{}\"…", content.text)
-                }
-                crate::tui::ContentStatus::Done(_) => format!(
-                    "Nothing matches \"{}\".\nPress `s` to search again, `<` for an earlier search.",
-                    content.text
-                ),
+            return if running {
+                EmptyState::new(searching).hint("Matches appear as they are found.")
+            } else if reading {
+                EmptyState::new(reading_text)
+            } else {
+                EmptyState::new(format!("Nothing matches \"{}\".", content.text))
+                    .hint("Press `s` to search again, `<` for an earlier search.")
             };
         }
-        return match content.status {
-            crate::tui::ContentStatus::Running(_) => format!(
-                "Searching for \"{}\"…\nSessions that match appear as they are found. Press `F` to clear.",
-                content.text
-            ),
-            crate::tui::ContentStatus::Done(_)
-                if content.group == crate::viewer::search::Grouping::Flat
-                    && !content.hits().is_empty() =>
-            {
-                format!(
-                    "Reading the messages that match \"{}\"…\nPress `F` to clear.",
-                    content.text
-                )
-            }
-            crate::tui::ContentStatus::Done(_) => format!(
-                "No sessions match \"{}\".\nPress `s` to search again, `F` to clear.",
-                content.text
-            ),
+        return if running {
+            EmptyState::new(searching)
+                .hint("Sessions that match appear as they are found. Press `F` to clear.")
+        } else if reading {
+            EmptyState::new(reading_text).hint("Press `F` to clear.")
+        } else {
+            EmptyState::new(format!("No sessions match \"{}\".", content.text))
+                .hint("Press `s` to search again, `F` to clear.")
         };
     }
     if !app.filter().is_empty() {
@@ -354,13 +350,14 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
         // "no sessions discovered" so the operator knows their
         // filter — not the world — is the reason.
         let chips = render_filter_chips(app.filter());
-        return format!("No rows match `{chips}`.\nPress `F` to clear filters, `f` to edit.");
+        return EmptyState::new(format!("No rows match `{chips}`."))
+            .hint("Press `F` to clear filters, `f` to edit.");
     }
     if app.active_view() == crate::tui::View::Pinned {
-        return format!(
-            "No pins yet.\nPin something with `{} pin add <target>`.",
+        return EmptyState::new("No pins yet.").hint(format!(
+            "Pin something with `{} pin add <target>`.",
             crate::invocation::invoked_name()
-        );
+        ));
     }
     if app.active_view() == crate::tui::View::History {
         let pinned_gone = app.snapshot_handle().map_or(0, |handle| {
@@ -373,20 +370,23 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
                 .count()
         });
         if pinned_gone > 0 && !app.filter().show_pinned_history {
-            return format!(
-                "Every stopped or removed record is pinned ({pinned_gone}), so it is in the Pinned view.\nClear `Unpinned only` in Controls (`f`) to list them here."
-            );
+            return EmptyState::new(format!(
+                "Every stopped or removed record is pinned ({pinned_gone}), so it is in the Pinned view."
+            ))
+            .hint("Clear `Unpinned only` in Controls (`f`) to list them here.");
         }
-        return "Nothing has stopped. Entities Conspectus has seen stop or vanish are listed here.\nPress `.` for the menu (Clean up…)."
-            .to_string();
+        return EmptyState::new(
+            "Nothing has stopped. Entities Conspectus has seen stop or vanish are listed here.",
+        )
+        .hint("Press `.` for the menu (Clean up…).");
     }
     if app.active_view() == crate::tui::View::Prs {
         // Forge listings are reused for the forge interval, so `r`
         // alone won't show a PR opened a minute ago.
-        return "No pull requests discovered.\nPress `Ctrl-R` to ask the forges again or `q` to quit."
-            .to_string();
+        return EmptyState::new("No pull requests discovered.")
+            .hint("Press `Ctrl-R` to ask the forges again or `q` to quit.");
     }
-    "No sessions discovered.\nPress `r` to refresh or `q` to quit.".to_string()
+    EmptyState::new("No sessions discovered.").hint("Press `r` to refresh or `q` to quit.")
 }
 
 /// What a group header counts: the sessions beneath it, and how many of

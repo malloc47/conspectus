@@ -1,6 +1,7 @@
 //! Right panel: the graph explorer (ADR 0074) and its title.
 
 use tuikit::breadcrumb::Breadcrumb;
+use tuikit::empty_state::EmptyState;
 use tuikit::master_detail::StackedMasterDetail;
 use tuikit::property_grid::PropertyRow;
 
@@ -53,9 +54,7 @@ pub(super) fn draw_right_panel(
     // No explorer means the selection names no node (or nothing has
     // loaded yet): show the placeholder instead of the explorer.
     let Some(mut list) = lines else {
-        Paragraph::new(empty_right_panel_text(app))
-            .style(Style::default().add_modifier(app.theme().muted))
-            .render(inner, buf);
+        empty_right_panel(app).render(inner, buf, app.theme());
         return (None, None);
     };
     // A selected hit row says which turn it is and shows what matched.
@@ -284,11 +283,13 @@ pub(super) fn draw_explorer_preview(app: &App, buf: &mut Buffer, area: Rect) -> 
     draw_preview_view(app, view, buf, area)
 }
 
-pub(super) fn empty_right_panel_text(app: &App) -> &'static str {
+/// What the right pane says when the selection names no node: that the
+/// graph is still loading, or that a row needs selecting.
+pub(super) fn empty_right_panel(app: &App) -> EmptyState {
     if app.snapshot_handle().is_none() {
-        "Loading…"
+        EmptyState::new("Loading…")
     } else {
-        "Select a row to view its detail."
+        EmptyState::new("Select a row to view its detail.")
     }
 }
 

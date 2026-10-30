@@ -1,5 +1,6 @@
 //! Preview pane: transcripts, pane captures, and pin diagnostics.
 
+use tuikit::empty_state::EmptyState;
 use tuikit::frame::SectionRule;
 
 use super::*;
@@ -137,6 +138,18 @@ fn failure_banner(entry: &crate::tui::messages::LogEntry, theme: &Theme) -> Text
     Text::from(lines)
 }
 
+/// A Preview with nothing to show, for now or at all (not loaded yet,
+/// no source, switched off), as the framework's empty state: its message
+/// wrapped to the zone's `width`, receding. A Preview that failed to load
+/// says why in the body's own look instead; that is content.
+pub(super) fn placeholder(app: &App, message: &str, width: u16) -> Text<'static> {
+    Text::from(EmptyState::new(message).lines(usize::from(width), app.theme()))
+}
+
+/// What a Preview says when `--no-live-preview` hides the conversation
+/// and terminal content (ADR 0112 §6).
+const LIVE_PREVIEW_OFF: &str = "preview disabled (--no-live-preview)";
+
 fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
     let Some(selection) = app.selection() else {
         return PreviewView::text("");
@@ -148,13 +161,13 @@ fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
     match preview_subject(app) {
         PreviewSubject::Selection => match crate::tui::preview::preview_source(app) {
             Some(source) => source_view(app, &source, width, height),
-            None => PreviewView::text(sourceless_preview(app, row, selection, live_preview)),
+            None => PreviewView::text(sourceless_preview(app, row, selection, live_preview, width)),
         },
         PreviewSubject::Node(node) => match node_source(app, &node) {
             Some(source) => source_view(app, &source, width, height),
             None => PreviewView::text(
                 sourceless_node_text(app, &node)
-                    .unwrap_or_else(|| Text::raw("no preview for this node")),
+                    .unwrap_or_else(|| placeholder(app, "no preview for this node", width)),
             ),
         },
         PreviewSubject::Field(value) => field_view(app, &value, width, height),
@@ -182,7 +195,7 @@ fn field_view(
         None => match value {
             FieldValue::Node(node) => PreviewView::text(
                 sourceless_node_text(app, node)
-                    .unwrap_or_else(|| Text::raw("no preview for this node")),
+                    .unwrap_or_else(|| placeholder(app, "no preview for this node", width)),
             ),
             _ => PreviewView::text(""),
         },
@@ -207,15 +220,13 @@ pub(super) fn source_view(
     height: usize,
 ) -> PreviewView {
     if source.is_live() && !app.config().live_preview_enabled {
-        // `--no-live-preview` hides conversation and terminal content
-        // (ADR 0112 §6).
-        return PreviewView::text("preview disabled (--no-live-preview)");
+        return PreviewView::text(placeholder(app, LIVE_PREVIEW_OFF, width));
     }
     match source {
         PreviewSource::Path(_)
         | PreviewSource::Git(_)
         | PreviewSource::Process(_)
-        | PreviewSource::PullRequest(_) => loaded_view(app, source),
+        | PreviewSource::PullRequest(_) => loaded_view(app, source, width),
         PreviewSource::Transcript(_) => transcript_view(app, source, width, height),
         PreviewSource::Pane(mux) => PreviewView::text(format_preview_for_mux(
             app,
@@ -234,6 +245,7 @@ fn sourceless_preview(
     row: &crate::tui::rows::Row,
     selection: &RowId,
     live_preview: bool,
+    width: u16,
 ) -> Text<'static> {
     let pin_summary = |pin_id: &str| {
         app.snapshot_handle()
@@ -244,11 +256,11 @@ fn sourceless_preview(
             )
     };
     let disabled_or = |text: &'static str| {
-        Text::raw(if live_preview {
-            text
-        } else {
-            "preview disabled (--no-live-preview)"
-        })
+        placeholder(
+            app,
+            if live_preview { text } else { LIVE_PREVIEW_OFF },
+            width,
+        )
     };
     match (&row.kind, selection) {
         (_, RowId::Pin { pin_id }) => {
@@ -273,9 +285,9 @@ fn sourceless_preview(
 
 /// A loaded source composed as lines, scrolled from the top, or what
 /// stands in for it.
-fn loaded_view(app: &App, source: &PreviewSource) -> PreviewView {
+fn loaded_view(app: &App, source: &PreviewSource, width: u16) -> PreviewView {
     let Some(entry) = app.previews().get(source) else {
-        return PreviewView::text("loading…");
+        return PreviewView::text(placeholder(app, "loading…", width));
     };
     match &entry.content {
         PreviewContent::Lines(lines) => PreviewView::text(lines.clone()),
@@ -291,7 +303,7 @@ fn loaded_view(app: &App, source: &PreviewSource) -> PreviewView {
 /// from that anchor (ADR 0181). One column stays free for the scrollbar.
 fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize) -> PreviewView {
     let Some(entry) = app.previews().get(source) else {
-        return PreviewView::text("loading transcript…");
+        return PreviewView::text(placeholder(app, "loading transcript…", width));
     };
     let preview = match &entry.content {
         PreviewContent::Transcript(preview) => preview,
@@ -318,11 +330,11 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
         &composed
     };
     let Some(cache) = preview.transcript.rendered.as_ref() else {
-        return PreviewView::text("no turns yet");
+        return PreviewView::text(placeholder(app, "no turns yet", width));
     };
     let lines = &cache.lines;
     if lines.is_empty() {
-        return PreviewView::text("no turns yet");
+        return PreviewView::text(placeholder(app, "no turns yet", width));
     }
     let total = lines.len();
     let height = height.max(1);
@@ -369,7 +381,7 @@ pub(super) fn format_preview_for_mux(
                     width,
                 );
                 if rows.is_empty() {
-                    return Text::raw("(empty pane)");
+                    return placeholder(app, "(empty pane)", width);
                 }
                 if let Some(search) = crate::tui::preview::search::preview_search(app) {
                     crate::tui::preview::search::mark_rows(
@@ -392,7 +404,7 @@ pub(super) fn format_preview_for_mux(
             // A pane source only ever holds a capture.
             PreviewContent::Transcript(_) | PreviewContent::Lines(_) => Text::raw(""),
         },
-        None => Text::raw("loading mux preview…"),
+        None => placeholder(app, "loading mux preview…", width),
     }
 }
 
