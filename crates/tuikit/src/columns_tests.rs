@@ -563,6 +563,61 @@ fn a_capped_column_that_absorbs_the_lead_ends_in_one_place_past_its_cap() {
 }
 
 #[test]
+fn rows_that_absorb_the_lead_give_way_alike_at_every_depth() {
+    // A label that absorbs the lead and narrows to a floor, a word that
+    // stays, and an age that leaves: at every room the deeper row loses
+    // what the top row loses and keeps its word in the top row's column,
+    // even once its own label is below the floor.
+    let schema = ColumnSchema::new([
+        Column::cap(Col::Name, 28).absorbs_lead().shrinks(2, 8),
+        Column::cap(Col::State, 9),
+        Column::fixed(Col::Age, 4).drops(3),
+    ]);
+    let top = vec![
+        (Col::Name, t("project-main")),
+        (Col::State, t("live")),
+        (Col::Age, t("5m")),
+    ];
+    let nested = vec![
+        (Col::Name, t("nested-entry-a")),
+        (Col::State, t("in use")),
+        (Col::Age, t("1h")),
+    ];
+    let mut measure = Measure::new();
+    measure.add(&schema, 0, &top);
+    measure.add(&schema, 4, &nested);
+    let theme = Theme::default();
+    let column = |line: &str, word: &str| line.find(word).map(|at| line[..at].chars().count());
+    // From the narrowest room the deeper row's word still fits in whole.
+    for width in 16..40 {
+        let row = |lead: usize, cells: &Cells<Col>| {
+            let room = width - lead;
+            format!(
+                "{}{}",
+                " ".repeat(lead),
+                Cell::plain(&schema.draw(&measure, lead, room, cells, &theme))
+            )
+        };
+        let (top, nested) = (row(0, &top), row(4, &nested));
+        assert_eq!(
+            column(&top, "live"),
+            column(&nested, "in use"),
+            "at {width}:\n{top}\n{nested}"
+        );
+        assert!(column(&top, "live").is_some(), "{top}");
+        assert_eq!(
+            top.contains("5m"),
+            nested.contains("1h"),
+            "at {width}:\n{top}\n{nested}"
+        );
+        assert_eq!(
+            schema.layout(&measure, 0, width).is_shown(Col::Age),
+            schema.layout(&measure, 4, width - 4).is_shown(Col::Age)
+        );
+    }
+}
+
+#[test]
 fn draw_split_parts_a_row_where_a_column_starts() {
     let schema = ColumnSchema::new([
         Column::fixed(Col::Mark, 2).gap(0),

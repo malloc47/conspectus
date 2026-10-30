@@ -178,7 +178,11 @@ TreeView::new(&rows, &state, |row, cx| columns.line(row, cx), &theme).render(are
 
 The columns before the first hugging one line up: they give way by the
 widths measured over the whole list, so every row drawn in one room loses
-the same ones. The hugging column and those after it give way row by row,
+the same ones. When one of them absorbs the lead, they give way as a row
+with no lead would in the whole width, and only that column is narrower
+on a deeper row, so rows at every depth lose the same ones (a deeper
+row's cell may then narrow below its floor). The hugging column and those
+after it give way row by row,
 from each row's own cells. A row's last cell needs only its own text, not
 its column's pad, and a ragged cell that ends its row runs on into the room
 left, even where its column gave way on other rows (when the room holds its

@@ -169,12 +169,36 @@ fn step(steps: &[(usize, usize)], left: usize) -> Option<usize> {
 }
 
 impl<K: Copy + Eq> ColumnSchema<K> {
+    /// The columns that line up, laid out for `room` after a `lead`. When
+    /// one of them absorbs the lead, they are laid out as a row with no
+    /// lead would be in the whole width (`lead + room`), and the lead is
+    /// taken off the column that absorbs it: rows at every depth then give
+    /// way alike, at the same widths, and the columns after it stay in one
+    /// place, though a deeper row's cell may narrow below its floor.
+    fn aligned(&self, measure: &Measure<K>, lead: usize, room: usize) -> Vec<Item> {
+        let absorbs =
+            |column: &Column<K>| column.absorbs_lead && matches!(column.width, Width::Cap(_));
+        if lead == 0 || !self.columns[..self.split].iter().any(absorbs) {
+            return self.laid_out(measure, lead, room);
+        }
+        let mut items = self.laid_out(measure, 0, lead + room);
+        for item in items
+            .iter_mut()
+            .filter(|item| absorbs(&self.columns[item.index]))
+        {
+            item.width = item.width.map(|width| width.saturating_sub(lead));
+            item.wanted = item.wanted.saturating_sub(lead);
+            item.own = item.own.saturating_sub(lead);
+        }
+        items
+    }
+
     /// The columns that line up, laid out for `room` after a `lead` from
     /// the widths in `measure`: each at its width (a capped column at its
     /// widest cell, less the lead when it absorbs it, a stepped one at its
     /// step, a fill at [`MIN_FILL`] until it takes what is left), then given
     /// way by the policy until they fit.
-    fn aligned(&self, measure: &Measure<K>, lead: usize, room: usize) -> Vec<Item> {
+    fn laid_out(&self, measure: &Measure<K>, lead: usize, room: usize) -> Vec<Item> {
         let mut items = Vec::with_capacity(self.split);
         let mut used = 0;
         let mut gap: Option<usize> = None;

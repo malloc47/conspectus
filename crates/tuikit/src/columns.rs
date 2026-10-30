@@ -53,7 +53,10 @@
 //! The columns before the first hugging column line up: they give way
 //! for the room by the widths measured over the whole list, so every row
 //! drawn in the same room loses the same ones and keeps the rest in one
-//! place. The hugging column and the columns after it follow each row's
+//! place. When one of them [absorbs the lead](Column::absorbs_lead), they
+//! give way as a row with no lead would in the whole width, and only that
+//! column is narrower on a deeper row, so rows at every depth lose the
+//! same ones. The hugging column and the columns after it follow each row's
 //! own cells and give way row by row. A blank cell of a lined-up column is
 //! padded while a later cell on its row shows; a row ends at its last cell
 //! that is not blank, and draws no gap after it. A row's last cell needs
