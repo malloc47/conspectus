@@ -39,6 +39,13 @@ this plan.
 5. **Milestone and backlog** — milestone, stories, and the ADR(s) recording
    the decisions.
 
+Design notes written during execution:
+
+- [`explorer-design.md`](explorer-design.md) — the generic `Explorer`
+  (CSP-755): the measured code, the `ExplorerSource` seam, the state and
+  outcome type, `Breadcrumb` and the stacked layout, the right pane's key
+  table, the migration steps, and the go decision (ADR 0188).
+
 ## Deliverables
 
 - This directory (inventory, control set, gap analysis).
@@ -158,14 +165,17 @@ palette adapter keeps aider's entries until m-24 lands and deletes them then.
 | CSP-753 | Migrate the Search view and hit rows to `ColumnSchema` | CSP-752, CSP-743 |
 | CSP-754 | Extract `PropertyGrid`: property, link, and disclosure rows | CSP-723, CSP-727, CSP-713, CSP-746, CSP-710 |
 | CSP-755 | Design the generic `Explorer`: decouple the zoned cursor and drill stack from `App` | CSP-754, CSP-750 |
-| CSP-756 | Extract `Explorer`, `Breadcrumb`, and `StackedMasterDetail` per the design | CSP-755, CSP-729 |
+| CSP-789 | Keep the right pane's drill across a refresh (found by CSP-755) | none |
+| CSP-790 | Extract `Breadcrumb` and one rule for pieces of a line that give way (split from CSP-756) | CSP-755 |
+| CSP-791 | Extract `StackedMasterDetail` and the section rule from the right pane's layout (split from CSP-756) | CSP-755 |
+| CSP-756 | Extract `Explorer`, `Breadcrumb`, and `StackedMasterDetail` per the design | CSP-755, CSP-729, CSP-789, CSP-790, CSP-791 |
 
 ### Chrome
 
 | Task | Story | Depends on |
 | --- | --- | --- |
 | CSP-757 | Extract `AppFrame`, `SplitPane`, and `PaneFrame` with the focus cue | CSP-726, CSP-721, CSP-729 |
-| CSP-758 | Extract `TabBar`, `PriorityLine`, and `EmptyState` | CSP-723, CSP-725, CSP-757, CSP-716 |
+| CSP-758 | Extract `TabBar`, `PriorityLine`, and `EmptyState` | CSP-723, CSP-725, CSP-757, CSP-716, CSP-790 |
 | CSP-759 | Extract `StatusBar` and generate its hints from the key tables | CSP-728, CSP-730, CSP-723, CSP-731 |
 | CSP-760 | Design and extract the scoped global keymap and generate the main help from it | CSP-759, CSP-730, CSP-710 |
 
