@@ -45,6 +45,20 @@ had been handed the pane's whole width, so the corner clipped a full
 title's pad and sometimes the depth's digit), and its trailing pad
 gives way before any hop.
 
+CSP-791 landed decision 7, byte for byte:
+`tuikit::master_detail::StackedMasterDetail` (`min_list` 3 and
+`min_detail` 6 by default; `layout_width`, `areas`, and `render` over
+the host's `GridLines`, a divider line, and the window it kept,
+returning a `Stacked` with the window and the three areas) and
+`tuikit::frame::SectionRule` (`new(label)`, `.summary(..)`,
+`.summary_first()`, `.line(width, &theme)`). The split is hand
+arithmetic instead of ratatui's solver, with the solver's result on an
+area under the list's minimum and the divider (the list's first row,
+then the divider's, then the rest of the list). An empty summary shows
+nothing, where the host drew two spaces. The rule does not give way
+below its own width, as before (the `Related` rule wraps onto a second
+row at 40 columns); CSP-794 follows that up.
+
 ## Context
 
 The inventory for the framework extraction

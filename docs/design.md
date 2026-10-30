@@ -1387,7 +1387,14 @@ hop always shows, the first outlasts the middle, the oldest middle hops
 give way first with one `…` for each run that went, and a last hop that
 cannot fit is cut with `…`; the title gives the chain the room its other
 parts leave. The tab strip and the status bar move onto the rule with
-their own ranks.
+their own ranks. The pane's layout is the framework's too
+(`tuikit::master_detail::StackedMasterDetail`): the explorer zone is as
+tall as its rows wrap to, at least three and at most what six Preview
+rows and the `Preview` rule leave (the Preview's six give way first on
+a short pane), laid out a column short of the pane so a rule never
+wraps when the zone's scrollbar appears; the `Related` and `Preview`
+rules are `tuikit::frame::SectionRule`s, their chips ending in one
+column, and their words are `conspectus`'s.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

@@ -916,6 +916,26 @@ expectations; the kind color test and a new tag and suffix test are
 adapter tests in `explorer_tests.rs`; a title test in `ui_tests.rs`
 checks the fit at every width and that the corner clips nothing.
 
+**The second framework step (CSP-791), as landed.** `crates/tuikit/src/frame/rule.rs`
+holds `SectionRule` (`new(label)`, `.summary(text)`, `.summary_first()`,
+`.line(width, &theme)`, `CLOSING`), re-exported from `tuikit::frame`;
+`crates/tuikit/src/master_detail.rs` holds `StackedMasterDetail` and
+`Stacked` as section 4.2 sketches them, with `MIN_LIST` and `MIN_DETAIL`
+as the defaults and `Default`. `render` takes `Line<'_>` for the
+divider. The split is arithmetic rather than a ratatui `Layout`: it
+matches the solver everywhere, including an area under the list's
+minimum and the divider (the list keeps its first row, then the
+divider its row, then the list the rest). An empty summary shows
+nothing (the host drew two spaces; it never passed one). The host keeps
+`MIN_PREVIEW_HEIGHT` and one `LAYOUT` constant, lays its lines out at
+`layout_width`, and drops `chip_divider_line`, `ChipAnchor`, and
+`preview_divider_line`'s unused `App`. 261 frames at 160x40, 100x30, and
+60x20, focused and unfocused, are byte-identical; the framework has 16
+layout tests and 8 rule tests. The rule still runs past a width below
+its chip, summary, and closing rule (the explorer wraps it onto a
+second row, as at 40 columns); giving way there is a seam on the frame
+page and CSP-794.
+
 **The first step of CSP-756 itself (step 3).** Create
 `crates/tuikit/src/explorer.rs` (types and docs) with
 `explorer/state.rs` (`Explorer`), `explorer/keys.rs` (`ExplorerKey`,
