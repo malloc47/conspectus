@@ -5,10 +5,10 @@
 //!
 //! Split out of `tui::runtime` so `runtime.rs` can shrink toward
 //! the ADR 0085 contract 5 target of a thin loop-driver module
-//! separate from the keymap. Focus-aware remapping ([`remap_for_focus`])
-//! and view cycling ([`cycle_view`]) live here too since they are
-//! keymap-adjacent transformations the loop applies before
-//! dispatch.
+//! separate from the keymap. The right pane's table
+//! ([`right_pane_action`]), the focus guard ([`guard_focus`]), and view
+//! cycling ([`cycle_view`]) live here too since they are
+//! keymap-adjacent steps the loop applies before dispatch.
 //!
 //! Overlay-owned input is not this module's responsibility — the
 //! [`crate::tui::modal`] contract routes keys to the top-of-stack
@@ -19,6 +19,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use tuikit::explorer::ExplorerKey;
 
 use crate::tui::app::{App, Focus};
+use crate::tui::keybindings::RIGHT_PANE_KEYS;
 use crate::tui::{Msg, View};
 
 /// The key that opens the explorer cursor row's whole value
@@ -92,9 +93,8 @@ pub enum Action {
     View,
     /// `Enter` on the left pane. The dispatcher resolves
     /// the selected row's default action: attach a mux row, view an
-    /// un-muxed session, or expand/collapse a group row. Right-pane
-    /// focus is remapped to the explorer's `Activate` before this
-    /// variant ever reaches the dispatcher.
+    /// un-muxed session, or expand/collapse a group row. On the right
+    /// pane its table takes `Enter` first (the explorer's `Activate`).
     DefaultAction,
     /// `i` on any row. When the selected row is an agent
     /// session or mux session, copies the full id to the clipboard
@@ -111,77 +111,57 @@ pub fn cycle_view(view: View, delta: i32) -> View {
     VIEW_OPTIONS[tuikit::scroll::wrap_step(idx, VIEW_OPTIONS.len(), delta)]
 }
 
-/// Re-map an action based on which pane currently has focus. Used
-/// so that j/k drive whichever pane the operator is looking at —
-/// left pane focus keeps them on the row tree; right pane focus
-/// routes them into the explorer as [`Msg::Explorer`] keys, `Enter`
-/// as its `Activate`, `F` as its `ToggleFull`, and `Backspace` as its
-/// `Back`. Only key-derived actions touch this pass; overlay-owned keys
-/// never reach here — the modal stack routes them before the fallback
-/// keymap.
-///
-/// Uppercase J/K continue to scroll the preview regardless of focus,
-/// so operators with the left panel focused can still poke the
-/// preview without switching panes.
-pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
+/// The action of a key the right pane's table ([`RIGHT_PANE_KEYS`])
+/// binds, while the right pane has focus: a [`Msg::Explorer`] key. `None`
+/// on the left pane, for a key the table leaves to the program-wide
+/// keymap, and for an event that is not a key press. An open modal owns
+/// every key, so the caller asks the modal stack first.
+pub fn right_pane_action(focus: Focus, event: &Event) -> Option<Action> {
+    let Event::Key(key) = event else {
+        return None;
+    };
+    if focus != Focus::Right || key.kind != KeyEventKind::Press {
+        return None;
+    }
+    tuikit::keys::resolve(RIGHT_PANE_KEYS, *key)
+        .map(|key| Action::Msg(Box::new(Msg::Explorer(key))))
+}
+
+/// The program-wide keymap's `action` with the right pane focused: the
+/// actions that drive the left tree (its moves, pages, ends, folds,
+/// default action, filter clearing, and `Backspace`) do nothing there, so
+/// a key the right pane's table does not bind (`Alt-j`, `Ctrl-j`) leaves
+/// the tree alone instead of moving it behind the operator. Every other
+/// action, and every action on the left pane, passes. Overlay-owned keys
+/// never reach here; the modal stack routes them first.
+pub fn guard_focus(action: Action, focus: Focus) -> Option<Action> {
     if focus != Focus::Right {
-        // `e` toggles the explorer's Other zone, which only the right
-        // pane shows; the left tree has nothing for it to act on.
-        return match action {
-            Action::Msg(boxed) if matches!(*boxed, Msg::Explorer(ExplorerKey::ToggleSection)) => {
-                None
-            }
-            other => Some(other),
-        };
+        return Some(action);
     }
-    let explorer = |key| Some(Action::Msg(Box::new(Msg::Explorer(key))));
-    match action {
-        Action::Msg(boxed) => match *boxed {
-            // J/k drive the explorer cursor when the right
-            // pane has focus, replacing the prior raw preview-scroll
-            // remap. Uppercase J/K still scroll the preview.
-            Msg::NavDown | Msg::PageDown => explorer(ExplorerKey::Down),
-            Msg::NavUp | Msg::PageUp => explorer(ExplorerKey::Up),
-            // `h`/`l`/`←`/`→` are left-tree expand/collapse keys.
-            // When the right pane has focus, drop them so they
-            // don't reach across panes and mutate the tree the
-            // operator is no longer driving. The explorer has no
-            // analogous binding in v1; `Enter` drills, `Backspace`
-            // pops a hop.
-            Msg::ExpandRow | Msg::CollapseRow => None,
-            // `g`/`Home` and `G`/`End` should snap the
-            // explorer cursor to its first / last row on right-
-            // pane focus, the right-pane-equivalent of how those
-            // keys jump the left-tree selection. `Tab` /
-            // `Msg::CycleFocus` is intentionally left alone — that
-            // key is the focus toggle itself and stays useful
-            // regardless of which pane currently has focus.
-            Msg::Home => explorer(ExplorerKey::First),
-            Msg::End => explorer(ExplorerKey::Last),
-            // Backspace backs the explorer out of its drill, and with no
-            // drill arms, then leaves the pane.
-            Msg::NavBack => explorer(ExplorerKey::Back),
-            other => Some(Action::Msg(Box::new(other))),
-        },
-        // Enter on the explorer cursor copies a Node-zone field
-        // value, folds the Other header, or drills into a link row:
-        // the explorer reads the row and says which. Left-pane Enter
-        // (DefaultAction) is dispatched against the selected row's
-        // kind separately.
-        Action::DefaultAction => explorer(ExplorerKey::Activate),
-        // `F` toggles the Expanded Node Detail view when the
-        // right pane is focused. The same key still clears filters
-        // when the left tree has focus (ADR 0031).
-        Action::ClearFilters => explorer(ExplorerKey::ToggleFull),
-        other => Some(other),
-    }
+    let drives_the_tree = match &action {
+        Action::DefaultAction | Action::ClearFilters => true,
+        Action::Msg(msg) => matches!(
+            **msg,
+            Msg::NavDown
+                | Msg::NavUp
+                | Msg::PageDown
+                | Msg::PageUp
+                | Msg::Home
+                | Msg::End
+                | Msg::ExpandRow
+                | Msg::CollapseRow
+                | Msg::NavBack
+        ),
+        _ => false,
+    };
+    (!drives_the_tree).then_some(action)
 }
 
 /// Map crossterm events to [`Action`]s. Returns `None` for events
 /// the v1 shell ignores. Pulled out so tests don't need a terminal.
-/// Focus-aware remapping (j/k driving the focused pane) happens in
-/// a separate pass via [`remap_for_focus`] so the keymap stays
-/// pure with respect to terminal state.
+/// The right pane's table ([`right_pane_action`]) is consulted before
+/// this, and the focus guard ([`guard_focus`]) after it, so the keymap
+/// stays pure with respect to terminal state.
 pub fn translate(event: Event) -> Option<Action> {
     // Consult the declarative KEYBINDINGS table first; keys it
     // doesn't hold fall through to the match below.

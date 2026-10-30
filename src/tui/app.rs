@@ -1169,7 +1169,7 @@ impl App {
                 }
                 effects.push(Effect::Persist);
             }
-            Msg::NavBack => effects.extend(self.left_back()),
+            Msg::NavBack => self.left_back(),
             Msg::CycleFocus => {
                 self.focus = match self.focus {
                     Focus::Left => Focus::Right,

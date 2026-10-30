@@ -1019,6 +1019,17 @@ fn the_footer_names_moving_enter_with_its_verb_on_the_row_folding_and_going_back
     assert!(footer.segments()[0].available);
 }
 
+#[test]
+fn the_hint_keeps_moving_enter_folding_and_going_back_with_the_tables_verbs() {
+    // A host table that includes the explorer's hints the same keys.
+    const HOST: &[keys::KeyRow<ExplorerKey>] = &[keys::include(EXPLORER_KEYS)];
+    assert_eq!(
+        hint(EXPLORER_KEYS).text(),
+        "↑/↓ move · Enter open · e fold · Backspace back"
+    );
+    assert_eq!(hint(HOST), hint(EXPLORER_KEYS));
+}
+
 // ---- the table -----------------------------------------------------------
 
 #[test]

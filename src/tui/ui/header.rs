@@ -496,12 +496,11 @@ pub(super) fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize)
 /// keeps on a narrow bar.
 fn contextual_status_segments(app: &App) -> Vec<(u8, String)> {
     let focus_hint = match app.focus() {
-        Focus::Left => "j/k move · h/l fold · Enter default",
-        // With the right pane focused, j/k drive the graph
-        // explorer cursor, Enter drills or expands a group
-        // depending on the cursor position, `e` toggles a group,
-        // and Backspace pops the breadcrumb stack.
-        Focus::Right => "j/k cursor · Enter drill/expand · e group · Backspace back",
+        Focus::Left => "j/k move · h/l fold · Enter default".to_string(),
+        // With the right pane focused, its own table's hint: moving,
+        // Enter with what it does on the cursor's row (copy a field,
+        // follow a link, fold the Other zone), folding, and going back.
+        Focus::Right => right_pane_hint(app),
     };
     let refresh_hint = if app.active_view() == crate::tui::View::Prs {
         "r refresh · ^R forges"
@@ -512,10 +511,7 @@ fn contextual_status_segments(app: &App) -> Vec<(u8, String)> {
         (4, default_action_status_hint(app)),
         // With the right pane focused its own keys matter more than the
         // action hint, which describes the left pane's row.
-        (
-            if app.focus() == Focus::Right { 3 } else { 7 },
-            focus_hint.to_string(),
-        ),
+        (if app.focus() == Focus::Right { 3 } else { 7 }, focus_hint),
         (8, "Tab focus".to_string()),
         (9, refresh_hint.to_string()),
         (2, "q quit".to_string()),
@@ -524,6 +520,17 @@ fn contextual_status_segments(app: &App) -> Vec<(u8, String)> {
         segments.push((1, "Backspace back".to_string()));
     }
     segments
+}
+
+/// The right pane's keys as the status bar names them, generated from
+/// the table it resolves: the explorer's footer, whose `Enter` verb is
+/// the cursor row's, or the table's hint with no explorer to read.
+fn right_pane_hint(app: &App) -> String {
+    use crate::tui::keybindings::RIGHT_PANE_KEYS;
+    match (app.explorer(), app.graph_source()) {
+        (Some(explorer), Some(source)) => explorer.footer(RIGHT_PANE_KEYS, &source).text(),
+        _ => tuikit::explorer::hint(RIGHT_PANE_KEYS).text(),
+    }
 }
 
 /// The status bar's settings chips and key hints, fitted to `room`

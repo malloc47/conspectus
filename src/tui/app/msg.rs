@@ -78,9 +78,9 @@ pub enum Msg {
     /// regardless.
     ToggleEdgeMeta,
     /// Left panel: `Backspace`. Returns to where the last reveal
-    /// started; with no reveal to undo, backs the right pane out of its
-    /// most recent drill, and with neither says there is nothing to go
-    /// back to.
+    /// started, or says there is no reveal to return from. It leaves the
+    /// right pane's drill alone: that is the right pane's `Backspace`
+    /// (`Msg::Explorer(ExplorerKey::Back)`).
     NavBack,
     /// Move keyboard focus to the next panel.
     CycleFocus,

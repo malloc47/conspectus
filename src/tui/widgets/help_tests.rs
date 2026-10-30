@@ -269,7 +269,7 @@ fn body_lines_cover_every_documented_key() {
         "Cycle focus",
         "Scroll the right-panel preview",
         "Move the explorer cursor",
-        "Toggle expand/collapse on a multi-link",
+        "Open or close the Other zone",
         "Back out of the most recent drilldown",
         "Toggle Expanded Node Detail",
         "Toggle edge meta",
@@ -453,4 +453,37 @@ fn the_content_search_row_names_the_key_the_search_binds() {
         row.contains(&format!("{label} switches between listing sessions")),
         "{row}"
     );
+}
+
+/// The right pane's section is generated from the table the right pane
+/// resolves, so every key it binds has a row that says what it does, and
+/// the page lists no key the pane does not bind.
+#[test]
+fn the_right_panes_section_is_generated_from_its_table() {
+    use crate::tui::keybindings::RIGHT_PANE_KEYS;
+    use tuikit::keys::{KeyRow, key_label, rows};
+    assert!(tuikit::help::undescribed(RIGHT_PANE_KEYS).is_empty());
+    let section = explorer_section();
+    assert_eq!(section.title, "Detail-pane graph explorer (right focus)");
+    let keys: Vec<String> = section
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            HelpRow::Keys { keys, .. } => Some(keys.clone()),
+            HelpRow::Legend { .. } => None,
+        })
+        .collect();
+    for row in rows(RIGHT_PANE_KEYS) {
+        if let KeyRow::Bind { key, .. } = row {
+            let label = key_label(key);
+            assert!(
+                keys.iter()
+                    .any(|row| row.split(" / ").any(|key| key == label)),
+                "`{label}` has no row: {keys:?}"
+            );
+        }
+    }
+    // One row per action the table binds, then the program-wide `E`.
+    assert_eq!(keys.len(), 14, "{keys:?}");
+    assert_eq!(keys.last().map(String::as_str), Some("E"));
 }

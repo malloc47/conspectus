@@ -5,7 +5,7 @@ use ratatui::crossterm::event::KeyCode;
 
 use crate::glyphs::marks;
 use crate::help::{HelpAction, HelpEntry};
-use crate::keys::{KeyAction, KeyRole, KeyRow, alias, ch, exact, key, shown};
+use crate::keys::{Footer, KeyAction, KeyRole, KeyRow, alias, ch, exact, key, shown};
 
 /// What a key asks of an explorer ([`Explorer::handle`](super::Explorer::handle)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -98,6 +98,27 @@ pub const EXPLORER_KEYS: &[KeyRow<ExplorerKey>] = &[
     ),
     alias(key(KeyCode::Esc), ExplorerKey::Back),
 ];
+
+/// The keys a status line names for an explorer, from `table` (the
+/// explorer's own, or a host table that includes it), with the table's
+/// verbs: moving, `Enter`, folding, and going back
+/// (`↑/↓ move · Enter open · e fold · Backspace back`). A hint has less
+/// room than a footer, so it leaves out the keys a reader looks up
+/// (`o`, `F`, the page keys). [`Explorer::footer`](super::Explorer::footer)
+/// is the same with `Enter`'s verb on the cursor's row; this is what a
+/// host shows with no explorer to read.
+pub fn hint(table: &[KeyRow<ExplorerKey>]) -> Footer {
+    Footer::only(table, |key| {
+        matches!(
+            key,
+            ExplorerKey::Up
+                | ExplorerKey::Down
+                | ExplorerKey::Activate
+                | ExplorerKey::ToggleSection
+                | ExplorerKey::Back
+        )
+    })
+}
 
 impl KeyAction for ExplorerKey {
     fn role(self) -> KeyRole {

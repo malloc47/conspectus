@@ -8,7 +8,9 @@ use tuikit::keys::{
 };
 
 use super::*;
+use crate::tui::keybindings::RIGHT_PANE_KEYS;
 use crate::viewer::keys::{TRANSCRIPT_KEYS, TranscriptKey};
+use tuikit::explorer::EXPLORER_KEYS;
 use tuikit::testkit::keys::chord;
 
 /// What a table gets wrong, by rule.
@@ -60,6 +62,8 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("PIN_EDIT_KEYS", problems(PIN_EDIT_KEYS)),
         ("PANE_KEYS", problems(PANE_KEYS)),
         ("TRANSCRIPT_KEYS", problems(TRANSCRIPT_KEYS)),
+        ("EXPLORER_KEYS", problems(EXPLORER_KEYS)),
+        ("RIGHT_PANE_KEYS", problems(RIGHT_PANE_KEYS)),
     ]
 }
 
@@ -79,6 +83,11 @@ const FRAGMENTS: &[&str] = &[
     "LINE_EDIT_KEYS",
     "PATH_FIELD_KEYS",
 ];
+
+/// Tables a pane resolves while it has focus, not an overlay: a pane
+/// leaves `q` and `Ctrl-C` to the program, so its table need not start
+/// with `Ctrl-C`; it takes every other check.
+const PANES: &[&str] = &["EXPLORER_KEYS", "RIGHT_PANE_KEYS"];
 
 #[test]
 fn every_advertised_key_resolves_to_what_its_footer_says() {
@@ -118,8 +127,8 @@ fn every_overlay_table_starts_with_ctrl_c() {
     for (name, found) in registry() {
         assert_eq!(
             found.ctrl_c_first,
-            !FRAGMENTS.contains(&name),
-            "{name}: Ctrl-C first (a fragment is exempt, and says so)"
+            !FRAGMENTS.contains(&name) && !PANES.contains(&name),
+            "{name}: Ctrl-C first (a fragment or a pane is exempt, and says so)"
         );
     }
 }
@@ -131,7 +140,9 @@ fn the_registry_names_every_table() {
     let registered: Vec<&str> = registry().into_iter().map(|(name, _)| name).collect();
     for source in [
         include_str!("overlay.rs"),
+        include_str!("../keybindings.rs"),
         include_str!("../../../crates/tuikit/src/keys/standard.rs"),
+        include_str!("../../../crates/tuikit/src/explorer/keys.rs"),
     ] {
         for line in source.lines() {
             let Some(rest) = line.trim_start().strip_prefix("pub const ") else {

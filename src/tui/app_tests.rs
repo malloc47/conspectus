@@ -1168,10 +1168,73 @@ fn explorer_back_with_no_breadcrumb_and_left_focus_surfaces_status_hint() {
     app.update(Msg::NavBack);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("no drill history"))
+            .is_some_and(|s| s.contains("no reveal to return from"))
     );
     // Focus stays put when there's nothing to back out of.
     assert_eq!(app.focus(), Focus::Left);
+}
+
+#[test]
+fn the_right_panes_status_hint_names_what_enter_does_on_the_cursor_row() {
+    let mut app = app_for_explorer();
+    app.update(Msg::CycleFocus);
+    let status = |app: &mut App| {
+        let buffer =
+            crate::tui::ui::render_to_buffer(app, ratatui::layout::Rect::new(0, 0, 200, 30));
+        let text = crate::tui::ui::buffer_to_string(&buffer);
+        text.lines().last().unwrap_or_default().to_string()
+    };
+    assert!(
+        status(&mut app).contains("↑/↓ move · Enter copy · e fold · Backspace back"),
+        "a field copies: {}",
+        status(&mut app)
+    );
+    let link = app
+        .explorer_rows()
+        .iter()
+        .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
+        .expect("link row");
+    for _ in 0..link {
+        app.update(Msg::Explorer(ExplorerKey::Down));
+    }
+    assert!(
+        status(&mut app).contains("Enter follow"),
+        "a link drills: {}",
+        status(&mut app)
+    );
+}
+
+#[test]
+fn backspace_on_the_left_pane_leaves_the_right_panes_drill_alone() {
+    // The left pane's Backspace returns from a reveal; the right pane's
+    // drill is the right pane's Backspace's. With no reveal to return
+    // from, the press says so and points at the right pane.
+    let mut app = app_for_explorer();
+    let link = app
+        .explorer_rows()
+        .iter()
+        .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
+        .expect("link row");
+    app.update(Msg::CycleFocus);
+    for _ in 0..link {
+        app.update(Msg::Explorer(ExplorerKey::Down));
+    }
+    app.update(Msg::Explorer(ExplorerKey::Activate));
+    let drilled = app.explorer().expect("state").id().clone();
+    app.update(Msg::CycleFocus);
+    assert_eq!(app.focus(), Focus::Left);
+
+    app.update(Msg::NavBack);
+
+    let state = app.explorer().expect("state");
+    assert_eq!(state.id(), &drilled, "the right pane stays drilled");
+    assert_eq!(state.frames().len(), 1);
+    assert!(
+        app.status_message()
+            .is_some_and(|s| s.contains("no reveal to return from") && s.contains("right pane")),
+        "{:?}",
+        app.status_message()
+    );
 }
 
 #[test]

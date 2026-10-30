@@ -338,10 +338,11 @@ impl<M: ExplorerModel> Explorer<M> {
     }
 
     /// The keys a status line names for the explorer, from `table` (the
-    /// explorer's table, or a host table that includes it): moving,
-    /// `Enter` with the verb of what it does on the cursor's row (`copy`,
-    /// `follow`, `fold`; the table's own verb, unavailable, on a row where
-    /// it does nothing), folding, and going back.
+    /// explorer's table, or a host table that includes it): the
+    /// [`hint`](super::hint) of moving, `Enter`, folding, and going back,
+    /// with `Enter`'s verb the one for what it does on the cursor's row
+    /// (`copy`, `follow`, `fold`; the table's own verb, unavailable, on a
+    /// row where it does nothing).
     pub fn footer<S: ExplorerSource<Model = M>>(
         &self,
         table: &[KeyRow<ExplorerKey>],
@@ -364,17 +365,7 @@ impl<M: ExplorerModel> Explorer<M> {
             } => Some(format!("{label} {verb}")),
             _ => None,
         });
-        let shown = Footer::only(table, |key| {
-            matches!(
-                key,
-                ExplorerKey::Up
-                    | ExplorerKey::Down
-                    | ExplorerKey::Activate
-                    | ExplorerKey::ToggleSection
-                    | ExplorerKey::Back
-            )
-        });
-        shown
+        super::hint(table)
             .segments()
             .iter()
             .map(|segment| match (&activate, verb) {

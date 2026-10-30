@@ -217,23 +217,19 @@ impl App {
         }
     }
 
-    /// `Backspace` on the left pane with no reveal to undo: back the right
-    /// pane out of its most recent drill, or say there is nothing to go
-    /// back to.
-    pub(super) fn left_back(&mut self) -> Vec<crate::tui::Effect> {
-        let Some(explorer) = self.explorer.as_ref() else {
-            return Vec::new();
-        };
-        if explorer.frames().is_empty() {
-            self.status_message = Some(Feedback::warning(
-                "explorer: no drill history to back out of",
-            ));
-            return Vec::new();
-        }
-        match self.with_explorer(|explorer, source| explorer.back(source)) {
-            Some(outcome) => self.explorer_outcome(outcome),
-            None => Vec::new(),
-        }
+    /// `Backspace` on the left pane with no reveal to return from: say
+    /// so. The right pane's drill is the right pane's `Backspace`'s, so
+    /// the hint points there when the pane has drilled.
+    pub(super) fn left_back(&mut self) {
+        let drilled = self
+            .explorer
+            .as_ref()
+            .is_some_and(|explorer| !explorer.frames().is_empty());
+        self.status_message = Some(Feedback::warning(if drilled {
+            "Backspace: no reveal to return from · Tab to the right pane to back out of its drill"
+        } else {
+            "Backspace: no reveal to return from"
+        }));
     }
 
     pub(super) fn toggle_edge_meta(&mut self) {

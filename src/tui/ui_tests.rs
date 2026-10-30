@@ -2680,9 +2680,9 @@ fn right_focus_keeps_selected_row_highlighted_and_changes_status_scope() {
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert!(
-        // Right-focus hint now describes the explorer
-        // cursor instead of preview scroll.
-        text.contains("j/k cursor"),
+        // The right-focus hint is the right pane's table's: the
+        // explorer cursor, not the preview scroll.
+        text.contains("↑/↓ move · Enter"),
         "right focus status hint missing: {text}"
     );
     assert!(

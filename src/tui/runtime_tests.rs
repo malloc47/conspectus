@@ -105,24 +105,44 @@ fn translate_i_requests_copy_session_id() {
     );
 }
 
+/// What `event` does with `focus` on that pane and no modal open, as every
+/// loop resolves it (`action_for_event`).
+fn resolved(focus: crate::tui::app::Focus, event: KeyEvent) -> Option<Action> {
+    let mut app = App::new(RunConfig::defaults());
+    if focus == crate::tui::app::Focus::Right {
+        app.update(Msg::CycleFocus);
+    }
+    action_for_event(&app, Event::Key(event))
+}
+
+/// The action of an explorer key.
+fn explorer(key: ExplorerKey) -> Action {
+    Action::Msg(Box::new(Msg::Explorer(key)))
+}
+
+/// A key action that sends `msg`.
+fn sends(msg: Msg) -> Action {
+    Action::Msg(Box::new(msg))
+}
+
 #[test]
-fn translate_e_toggles_the_explorer_other_zone_on_the_right_pane_only() {
+fn e_folds_the_explorer_other_zone_on_the_right_pane_only() {
     use crate::tui::app::Focus;
-    let key = translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('e'))))
-        .expect("`e` is bound in the keymap");
+    let e = chord(KeyModifiers::NONE, KeyCode::Char('e'));
     assert_eq!(
-        key,
-        Action::Msg(Box::new(Msg::Explorer(ExplorerKey::ToggleSection))),
+        resolved(Focus::Right, e),
+        Some(explorer(ExplorerKey::ToggleSection)),
         "`e` has one meaning: the explorer's Other zone"
     );
     assert_eq!(
-        remap_for_focus(key.clone(), Focus::Right),
-        Some(key.clone())
-    );
-    assert_eq!(
-        remap_for_focus(key, Focus::Left),
+        resolved(Focus::Left, e),
         None,
         "the left tree has no Other zone, so the key does nothing there"
+    );
+    assert_eq!(
+        translate(Event::Key(e)),
+        None,
+        "only the right pane's table binds it"
     );
 }
 
@@ -386,163 +406,355 @@ fn translate_maps_navigation_keys() {
 }
 
 #[test]
-fn remap_for_focus_left_is_identity() {
+fn the_left_pane_keeps_the_program_wide_keymap() {
     use crate::tui::app::Focus;
-    let action = Action::Msg(Box::new(Msg::NavDown));
-    assert_eq!(remap_for_focus(action.clone(), Focus::Left), Some(action));
-    let action = Action::Msg(Box::new(Msg::PageDown));
-    assert_eq!(remap_for_focus(action.clone(), Focus::Left), Some(action));
-}
-
-#[test]
-fn remap_for_focus_right_routes_nav_keys_into_the_explorer() {
-    use crate::tui::app::Focus;
-    // With the right pane focused, j/k and PageUp/Down
-    // move the explorer cursor instead of scrolling the preview.
-    // J/K (uppercase) keep their preview-scroll role via the
-    // standalone bindings in `translate`.
+    let key = |code| chord(KeyModifiers::NONE, code);
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::NavDown)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Down))))
+        resolved(Focus::Left, key(KeyCode::Char('j'))),
+        Some(sends(Msg::NavDown))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::NavUp)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Up))))
+        resolved(Focus::Left, key(KeyCode::PageDown)),
+        Some(sends(Msg::PageDown))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::PageDown)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Down))))
-    );
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::PageUp)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Up))))
-    );
-}
-
-#[test]
-fn remap_for_focus_right_routes_enter_and_e_to_the_explorer() {
-    use crate::tui::app::Focus;
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::CycleFocus)))
-    );
-    // Locked decision 8: Enter is the universal "do the obvious
-    // thing" key on the explorer cursor. The explorer reads the row
-    // (Node-zone fields copy; other rows drill/expand), so the remap
-    // produces its `Activate`, and the outcome says which.
-    assert_eq!(
-        remap_for_focus(Action::DefaultAction, Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Activate))))
-    );
-    // Left-pane DefaultAction is left untouched here so the main
-    // loop can resolve it against the selected row.
-    assert_eq!(
-        remap_for_focus(Action::DefaultAction, Focus::Left),
+        resolved(Focus::Left, key(KeyCode::Enter)),
         Some(Action::DefaultAction)
     );
-    // `e` is the explicit expand/collapse accelerator for the Other
-    // zone. The explorer is the only pane that shows it, so the left
-    // pane ignores the key.
     assert_eq!(
-        remap_for_focus(
-            Action::Msg(Box::new(Msg::Explorer(ExplorerKey::ToggleSection))),
-            Focus::Right
-        ),
-        Some(Action::Msg(Box::new(Msg::Explorer(
-            ExplorerKey::ToggleSection
-        ))))
-    );
-    assert_eq!(
-        remap_for_focus(
-            Action::Msg(Box::new(Msg::Explorer(ExplorerKey::ToggleSection))),
-            Focus::Left
-        ),
-        None
-    );
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::Quit)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Quit)))
-    );
-    assert_eq!(
-        remap_for_focus(Action::Refresh, Focus::Right),
-        Some(Action::Refresh)
-    );
-    // F clears filters on the left tree but toggles the
-    // Expanded Node Detail view on the right pane.
-    assert_eq!(
-        remap_for_focus(Action::ClearFilters, Focus::Left),
+        resolved(Focus::Left, chord(KeyModifiers::SHIFT, KeyCode::Char('F'))),
         Some(Action::ClearFilters)
     );
     assert_eq!(
-        remap_for_focus(Action::ClearFilters, Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Explorer(
-            ExplorerKey::ToggleFull
-        ))))
+        resolved(Focus::Left, key(KeyCode::Backspace)),
+        Some(sends(Msg::NavBack))
+    );
+    assert_eq!(
+        resolved(Focus::Left, key(KeyCode::Char('h'))),
+        Some(sends(Msg::CollapseRow))
+    );
+    assert_eq!(
+        resolved(Focus::Left, key(KeyCode::Esc)),
+        None,
+        "Esc means nothing here"
+    );
+    // Every action passes the guard on the left pane.
+    for action in [
+        Action::DefaultAction,
+        Action::ClearFilters,
+        Action::Msg(Box::new(Msg::NavDown)),
+        Action::Msg(Box::new(Msg::NavBack)),
+    ] {
+        assert_eq!(guard_focus(action.clone(), Focus::Left), Some(action));
+    }
+}
+
+#[test]
+fn the_right_pane_moves_and_pages_the_explorer() {
+    use crate::tui::app::Focus;
+    // With the right pane focused, j/k and the arrows move the explorer
+    // cursor, and the page keys page it by the rows its zone shows (they
+    // moved one row). J/K (uppercase) keep their preview-scroll role.
+    let key = |code| resolved(Focus::Right, chord(KeyModifiers::NONE, code));
+    assert_eq!(key(KeyCode::Char('j')), Some(explorer(ExplorerKey::Down)));
+    assert_eq!(key(KeyCode::Down), Some(explorer(ExplorerKey::Down)));
+    assert_eq!(key(KeyCode::Char('k')), Some(explorer(ExplorerKey::Up)));
+    assert_eq!(key(KeyCode::Up), Some(explorer(ExplorerKey::Up)));
+    assert_eq!(
+        key(KeyCode::PageDown),
+        Some(explorer(ExplorerKey::PageDown))
+    );
+    assert_eq!(key(KeyCode::PageUp), Some(explorer(ExplorerKey::PageUp)));
+    assert_eq!(
+        resolved(Focus::Right, chord(KeyModifiers::SHIFT, KeyCode::Char('J'))),
+        Some(sends(Msg::ScrollPreviewBy(1)))
     );
 }
 
 #[test]
-fn remap_for_focus_right_suppresses_left_tree_expand_collapse_keys() {
-    // Regression: `h` / `l` / `←` / `→` are left-tree
-    // expand/collapse keys. When the right pane is focused they
-    // used to leak through and mutate the tree the operator
-    // wasn't driving. The focus remap drops them.
+fn the_right_pane_takes_enter_f_and_backspace_and_leaves_the_rest_global() {
     use crate::tui::app::Focus;
+    let none = KeyModifiers::NONE;
+    // Locked decision 8: Enter is the universal "do the obvious thing"
+    // key on the explorer cursor. The explorer reads the row (Node-zone
+    // fields copy; other rows drill or fold), and the outcome says which.
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::ExpandRow)), Focus::Right),
-        None
+        resolved(Focus::Right, chord(none, KeyCode::Enter)),
+        Some(explorer(ExplorerKey::Activate))
+    );
+    // The reveal chords are not the explorer's Enter: they reach the
+    // program-wide keymap on either pane.
+    for modifiers in [KeyModifiers::SHIFT, KeyModifiers::ALT] {
+        assert_eq!(
+            resolved(Focus::Right, chord(modifiers, KeyCode::Enter)),
+            Some(sends(Msg::RevealSelected)),
+            "{modifiers:?}"
+        );
+    }
+    // F clears filters on the left tree but toggles the Expanded Node
+    // Detail view on the right pane.
+    assert_eq!(
+        resolved(Focus::Right, chord(KeyModifiers::SHIFT, KeyCode::Char('F'))),
+        Some(explorer(ExplorerKey::ToggleFull))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CollapseRow)), Focus::Right),
-        None
+        resolved(Focus::Right, chord(none, KeyCode::Backspace)),
+        Some(explorer(ExplorerKey::Back))
     );
-    // Left focus still routes them through unchanged.
+    // `o` opens the right pane's cursor value from either pane.
+    for focus in [Focus::Left, Focus::Right] {
+        assert_eq!(
+            resolved(focus, chord(none, KeyCode::Char('o'))),
+            Some(explorer(ExplorerKey::Inspect)),
+            "{focus:?}"
+        );
+    }
+    // Keys the right pane's table leaves alone mean what they mean
+    // everywhere.
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::ExpandRow)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::ExpandRow)))
+        resolved(Focus::Right, chord(none, KeyCode::Tab)),
+        Some(sends(Msg::CycleFocus))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CollapseRow)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::CollapseRow)))
+        resolved(Focus::Right, chord(none, KeyCode::Char('q'))),
+        Some(sends(Msg::Quit))
+    );
+    assert_eq!(
+        resolved(Focus::Right, chord(none, KeyCode::Char('r'))),
+        Some(Action::Refresh)
+    );
+    assert_eq!(
+        resolved(Focus::Right, chord(KeyModifiers::SHIFT, KeyCode::Char('E'))),
+        Some(sends(Msg::ToggleEdgeMeta))
+    );
+    assert_eq!(
+        resolved(Focus::Right, chord(KeyModifiers::SHIFT, KeyCode::Char('O'))),
+        Some(sends(Msg::RevealSelected))
     );
 }
 
 #[test]
-fn remap_for_focus_right_routes_home_and_end_into_the_explorer() {
-    // Paired with the h/l/Left/Right suppression above:
-    // `g`/`Home` and `G`/`End` snap the explorer
-    // cursor to its first / last row on right-pane focus
-    // instead of bleeding into the left tree's Home/End
-    // jumps. `Tab`/`CycleFocus` is intentionally left alone —
-    // it is the focus toggle and must stay useful regardless
-    // of which pane has focus.
+fn the_right_pane_folds_its_section_with_h_l_and_the_arrows() {
+    // `h` / `l` / `←` / `→` fold the left tree's row on the left pane.
+    // On the right pane they used to do nothing (the focus remap dropped
+    // them so they could not mutate the tree the operator wasn't
+    // driving); now they close and open the explorer's Other zone, the
+    // tree's fold gesture.
     use crate::tui::app::Focus;
+    let key = |focus, code| resolved(focus, chord(KeyModifiers::NONE, code));
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::Home)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::First)))),
+        key(Focus::Right, KeyCode::Char('h')),
+        Some(explorer(ExplorerKey::CloseSection))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::End)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Last)))),
-    );
-    // Left focus still drives the left tree.
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::Home)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::Home))),
+        key(Focus::Right, KeyCode::Left),
+        Some(explorer(ExplorerKey::CloseSection))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::End)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::End))),
-    );
-    // Tab cycles focus on either side — never remapped.
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::CycleFocus))),
+        key(Focus::Right, KeyCode::Char('l')),
+        Some(explorer(ExplorerKey::OpenSection))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::CycleFocus))),
+        key(Focus::Right, KeyCode::Right),
+        Some(explorer(ExplorerKey::OpenSection))
     );
+    assert_eq!(
+        key(Focus::Left, KeyCode::Char('l')),
+        Some(sends(Msg::ExpandRow))
+    );
+    assert_eq!(
+        key(Focus::Left, KeyCode::Right),
+        Some(sends(Msg::ExpandRow))
+    );
+    assert_eq!(
+        key(Focus::Left, KeyCode::Char('h')),
+        Some(sends(Msg::CollapseRow))
+    );
+    assert_eq!(
+        key(Focus::Left, KeyCode::Left),
+        Some(sends(Msg::CollapseRow))
+    );
+}
+
+#[test]
+fn the_right_pane_goes_to_its_ends_and_steps_back_with_backspace_and_esc() {
+    // `g`/`Home` and `G`/`End` go to the explorer's first and last row on
+    // right-pane focus instead of bleeding into the left tree's ends.
+    // `Esc` steps back one level, as `Backspace` does. `Tab` is the focus
+    // toggle on either side.
+    use crate::tui::app::Focus;
+    let none = KeyModifiers::NONE;
+    let key = |focus, modifiers, code| resolved(focus, chord(modifiers, code));
+    assert_eq!(
+        key(Focus::Right, none, KeyCode::Home),
+        Some(explorer(ExplorerKey::First))
+    );
+    assert_eq!(
+        key(Focus::Right, none, KeyCode::Char('g')),
+        Some(explorer(ExplorerKey::First))
+    );
+    assert_eq!(
+        key(Focus::Right, none, KeyCode::End),
+        Some(explorer(ExplorerKey::Last))
+    );
+    assert_eq!(
+        key(Focus::Right, KeyModifiers::SHIFT, KeyCode::Char('G')),
+        Some(explorer(ExplorerKey::Last))
+    );
+    assert_eq!(
+        key(Focus::Right, none, KeyCode::Esc),
+        Some(explorer(ExplorerKey::Back))
+    );
+    assert_eq!(
+        key(Focus::Left, none, KeyCode::Home),
+        Some(sends(Msg::Home))
+    );
+    assert_eq!(key(Focus::Left, none, KeyCode::End), Some(sends(Msg::End)));
+    for focus in [Focus::Left, Focus::Right] {
+        assert_eq!(key(focus, none, KeyCode::Tab), Some(sends(Msg::CycleFocus)));
+    }
+}
+
+#[test]
+fn the_right_panes_table_declares_what_each_shared_key_means_on_either_pane() {
+    // The table on `RIGHT_PANE_KEYS`: the keys that mean one thing on the
+    // left pane (the program-wide keymap) and another on the right (the
+    // right pane's table).
+    use crate::tui::app::Focus;
+    let none = KeyModifiers::NONE;
+    let cases = [
+        (
+            chord(none, KeyCode::Enter),
+            Some(Action::DefaultAction),
+            Some(explorer(ExplorerKey::Activate)),
+        ),
+        (
+            chord(KeyModifiers::SHIFT, KeyCode::Char('F')),
+            Some(Action::ClearFilters),
+            Some(explorer(ExplorerKey::ToggleFull)),
+        ),
+        (
+            chord(none, KeyCode::Backspace),
+            Some(sends(Msg::NavBack)),
+            Some(explorer(ExplorerKey::Back)),
+        ),
+        (
+            chord(none, KeyCode::Char('h')),
+            Some(sends(Msg::CollapseRow)),
+            Some(explorer(ExplorerKey::CloseSection)),
+        ),
+        (
+            chord(none, KeyCode::Right),
+            Some(sends(Msg::ExpandRow)),
+            Some(explorer(ExplorerKey::OpenSection)),
+        ),
+        (
+            chord(none, KeyCode::PageDown),
+            Some(sends(Msg::PageDown)),
+            Some(explorer(ExplorerKey::PageDown)),
+        ),
+        (
+            chord(none, KeyCode::PageUp),
+            Some(sends(Msg::PageUp)),
+            Some(explorer(ExplorerKey::PageUp)),
+        ),
+        (
+            chord(none, KeyCode::Esc),
+            None,
+            Some(explorer(ExplorerKey::Back)),
+        ),
+        (
+            chord(none, KeyCode::Char('e')),
+            None,
+            Some(explorer(ExplorerKey::ToggleSection)),
+        ),
+        (
+            chord(none, KeyCode::Char('o')),
+            Some(explorer(ExplorerKey::Inspect)),
+            Some(explorer(ExplorerKey::Inspect)),
+        ),
+    ];
+    for (event, left, right) in cases {
+        assert_eq!(resolved(Focus::Left, event), left, "left {event:?}");
+        assert_eq!(resolved(Focus::Right, event), right, "right {event:?}");
+    }
+}
+
+#[test]
+fn the_inspect_key_the_cut_hint_names_is_the_right_panes_inspect_key() {
+    use crate::tui::keybindings::RIGHT_PANE_KEYS;
+    use crate::tui::keymap::INSPECT_KEY;
+    use tuikit::keys::{Hint, KeyRow, ch, rows};
+    let bound: Vec<_> = rows(RIGHT_PANE_KEYS)
+        .filter_map(|row| match row {
+            KeyRow::Bind {
+                key,
+                action: ExplorerKey::Inspect,
+                hint,
+                ..
+            } => Some((*key, *hint)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bound.len(), 1, "one inspect key");
+    let (key, hint) = bound[0];
+    assert_eq!(key, ch(INSPECT_KEY));
+    assert!(
+        matches!(hint, Hint::Shown { label, .. } if label == INSPECT_KEY.to_string()),
+        "{hint:?}"
+    );
+}
+
+#[test]
+fn chords_the_right_pane_does_not_bind_leave_the_left_tree_alone() {
+    // The program-wide keymap matches `j` with any modifier, so `Alt-j`
+    // used to move the explorer through the remap. The right pane's
+    // table binds characters as typed, and the focus guard drops the
+    // left tree's actions, so these chords do nothing on the right pane.
+    use crate::tui::app::Focus;
+    for (modifiers, c) in [
+        (KeyModifiers::ALT, 'j'),
+        (KeyModifiers::ALT, 'k'),
+        (KeyModifiers::CONTROL, 'j'),
+        (KeyModifiers::CONTROL, 'k'),
+        (KeyModifiers::ALT, 'g'),
+        (KeyModifiers::ALT | KeyModifiers::SHIFT, 'G'),
+        (KeyModifiers::ALT, 'h'),
+        (KeyModifiers::ALT, 'l'),
+    ] {
+        let event = chord(modifiers, KeyCode::Char(c));
+        assert_eq!(resolved(Focus::Right, event), None, "{modifiers:?} {c}");
+        assert!(
+            resolved(Focus::Left, event).is_some(),
+            "the left tree keeps {c}"
+        );
+    }
+    for action in [
+        Action::DefaultAction,
+        Action::ClearFilters,
+        Action::Msg(Box::new(Msg::NavDown)),
+        Action::Msg(Box::new(Msg::NavUp)),
+        Action::Msg(Box::new(Msg::PageDown)),
+        Action::Msg(Box::new(Msg::PageUp)),
+        Action::Msg(Box::new(Msg::Home)),
+        Action::Msg(Box::new(Msg::End)),
+        Action::Msg(Box::new(Msg::ExpandRow)),
+        Action::Msg(Box::new(Msg::CollapseRow)),
+        Action::Msg(Box::new(Msg::NavBack)),
+    ] {
+        assert_eq!(
+            guard_focus(action.clone(), Focus::Right),
+            None,
+            "{action:?}"
+        );
+    }
+    for action in [
+        Action::Refresh,
+        Action::Msg(Box::new(Msg::CycleFocus)),
+        Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Inspect))),
+    ] {
+        assert_eq!(guard_focus(action.clone(), Focus::Right), Some(action));
+    }
 }
 
 mod selected_default_action_tests {

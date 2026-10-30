@@ -9,16 +9,19 @@
 //! the viewer), so the three share one frame, one column grid, and one
 //! heading style. This one's rows are hand-written prose, kept as
 //! annotation sections until the program-wide keymap carries help text the
-//! page can be generated from (backlog `CSP-760`), followed by legends of
-//! the marks the screens draw.
+//! page can be generated from (backlog `CSP-760`), except the right pane's,
+//! which is generated from the right pane's table in this page's words;
+//! then legends of the marks the screens draw.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
+use tuikit::explorer::ExplorerKey;
 use tuikit::glyphs::marks;
-use tuikit::help::{HelpPage, HelpSection};
+use tuikit::help::{HelpPage, HelpSection, sections_described};
 use tuikit::pager::Pager;
 
 use crate::tui::icons::{NodeKind, node_kind_style};
+use crate::tui::keybindings::RIGHT_PANE_KEYS;
 use crate::tui::keybindings::overlay::HELP_KEYS;
 use crate::tui::{Msg, Theme};
 
@@ -45,7 +48,8 @@ pub(crate) fn sections(theme: &Theme) -> Vec<HelpSection> {
 
 /// The keymap as hand-written sections. Their prose says more than a
 /// key table's one-line descriptions can, so they stay annotations until
-/// the program-wide keymap's rows carry help text of their own.
+/// the program-wide keymap's rows carry help text of their own. The
+/// right pane's section is generated ([`explorer_section`]).
 fn keymap_sections() -> Vec<HelpSection> {
     vec![
         HelpSection::new("Discoverable controls")
@@ -164,7 +168,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             .keys("g / G", "First / last row")
             .keys(
                 "Enter",
-                "Left tree: row-kind default action (attach / view / rebuild / expand); right pane: drill or expand a group",
+                "Left tree: row-kind default action (attach / view / rebuild / expand); on the right pane, see its keys below",
             )
             .keys(
                 "Shift-Enter / Alt-Enter / O",
@@ -172,33 +176,53 @@ fn keymap_sections() -> Vec<HelpSection> {
             )
             .keys("Tab", "Cycle focus between left tree and right panel")
             .keys("J / K", "Scroll the right-panel preview"),
-        HelpSection::new("Detail-pane graph explorer (right focus)")
-            .keys(
-                "j / k",
-                "Move the explorer cursor between Node fields and relationship rows",
-            )
-            .keys(
-                "Enter",
-                "Copy the value on a Node-zone field row · drill on a link row · expand on a group header",
-            )
-            .keys("e", "Toggle expand/collapse on a multi-link group header")
-            .keys(
-                "Backspace",
-                "Back out of the most recent drilldown hop · once the stack is empty, press twice to return focus to the left pane",
-            )
-            .keys(
-                "F",
-                "Toggle Expanded Node Detail (every per-kind field) on the focused node",
-            )
-            .keys(
-                "E",
-                "Toggle edge meta (provenance · confidence · state) on link rows",
-            )
-            .keys(
-                "o",
-                "Open the full untruncated value for the cursor row in a modal",
-            ),
+        explorer_section(),
     ]
+}
+
+/// The right pane's keys, generated from the table the right pane
+/// resolves (`RIGHT_PANE_KEYS`) in this page's words, so the page lists
+/// every key it binds and no other; then `E`, which the program-wide
+/// keymap binds for the explorer's link rows.
+fn explorer_section() -> HelpSection {
+    let mut section = HelpSection::new("Detail-pane graph explorer (right focus)");
+    section.rows = sections_described(RIGHT_PANE_KEYS, |key| Some(explorer_key_help(key)))
+        .into_iter()
+        .flat_map(|generated| generated.rows)
+        .collect();
+    section.keys(
+        "E",
+        "Toggle edge meta (provenance · confidence · state) on link rows",
+    )
+}
+
+/// What each of the right pane's keys does, in this page's words.
+fn explorer_key_help(key: ExplorerKey) -> &'static str {
+    match key {
+        ExplorerKey::Down => {
+            "Move the explorer cursor down, from the Node fields into the relationship rows"
+        }
+        ExplorerKey::Up => "Move the explorer cursor up",
+        ExplorerKey::PageDown => "Page the explorer cursor down by the rows the zone shows",
+        ExplorerKey::PageUp => "Page the explorer cursor up by the rows the zone shows",
+        ExplorerKey::First => "First explorer row",
+        ExplorerKey::Last => "Last explorer row",
+        ExplorerKey::Activate => {
+            "Copy the value on a Node-zone field row · drill on a link row · open or close the Other zone on its header"
+        }
+        ExplorerKey::Inspect => "Open the full untruncated value for the cursor row in a modal",
+        ExplorerKey::ToggleFull => {
+            "Toggle Expanded Node Detail (every per-kind field) on the focused node"
+        }
+        ExplorerKey::ToggleSection => {
+            "Open or close the Other zone (alternates, conflicts, unresolved evidence) on its header"
+        }
+        ExplorerKey::OpenSection => "Open the Other zone on its header",
+        ExplorerKey::CloseSection => "Close the Other zone from its header or a row inside it",
+        ExplorerKey::Back => {
+            "Back out of the most recent drilldown hop · once the stack is empty, press twice to return focus to the left pane"
+        }
+    }
 }
 
 /// Built-in legend mapping each `NodeKind` glyph to its

@@ -810,15 +810,18 @@ pub(super) fn draw_screen(app: &mut App, frame: &mut ratatui::Frame<'_>) {
 }
 
 /// Resolve a terminal event to an action the way every key path
-/// must: an open overlay owns the key, otherwise the keymap
-/// translates it and the focus pass routes navigation keys to the
-/// focused pane. The interactive loop and the `--snapshot-keys`
-/// driver both go through here so they can't disagree about what a
-/// key does. Page keys move the tree by the rows it drew in the last
-/// frame, which its state keeps.
+/// must: an open overlay owns the key; otherwise, with the right pane
+/// focused, its table ([`right_pane_action`]) takes the keys it binds;
+/// the program-wide keymap translates the rest, and the focus guard
+/// drops the left tree's actions on the right pane. The interactive
+/// loop, the fixture loop, and the `--snapshot-keys` driver all go
+/// through here so they can't disagree about what a key does. Page keys
+/// move the tree by the rows it drew in the last frame, which its state
+/// keeps, and the explorer by the rows its zone drew.
 pub(super) fn action_for_event(app: &App, event: Event) -> Option<Action> {
     overlay_key_from_event(app, &event)
-        .or_else(|| translate(event).and_then(|a| remap_for_focus(a, app.focus())))
+        .or_else(|| right_pane_action(app.focus(), &event))
+        .or_else(|| translate(event).and_then(|a| guard_focus(a, app.focus())))
 }
 
 /// Type a bracketed paste into the text field that has the keys, one key
@@ -2200,8 +2203,8 @@ pub(super) use crate::tui::keymap::cycle_view;
 /// Dispatch `Enter` on the left pane to the selected
 /// row's default action. Group rows expand/collapse; mux rows and
 /// muxed agent sessions attach; un-muxed agent sessions open the
-/// transcript viewer. Right-pane focus is handled in
-/// [`remap_for_focus`] before this is reached.
+/// transcript viewer. On the right pane, `Enter` is the explorer's
+/// ([`right_pane_action`]) and never reaches this.
 /// Actions that read the selected row's live mux or session and then
 /// change something (rename, worktree, pin edits). The attach, resume,
 /// and launch actions are guarded in the reducer, so `Enter` can still
@@ -2267,7 +2270,7 @@ pub(in crate::tui) fn copy_feedback(written: std::io::Result<()>, done: String) 
     }
 }
 
-pub(super) use crate::tui::keymap::{remap_for_focus, translate};
+pub(super) use crate::tui::keymap::{guard_focus, right_pane_action, translate};
 
 #[cfg(test)]
 #[path = "runtime_tests.rs"]

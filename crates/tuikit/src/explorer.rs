@@ -161,7 +161,7 @@ mod keys;
 mod outcome;
 mod state;
 
-pub use keys::{EXPLORER_KEYS, ExplorerKey};
+pub use keys::{EXPLORER_KEYS, ExplorerKey, hint};
 pub use outcome::{Outcome, Refreshed, Refusal};
 pub use state::Explorer;
 

@@ -20,7 +20,8 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
 pub mod overlay;
 
-use tuikit::keys::KeyMatcher;
+use tuikit::explorer::{EXPLORER_KEYS, ExplorerKey};
+use tuikit::keys::{KeyMatcher, KeyRow, include};
 
 use crate::tui::View;
 use crate::tui::keymap::Action;
@@ -57,6 +58,31 @@ pub enum KeyMode {
 
 /// The undo key. Toasts that offer an undo name it from here.
 pub const UNDO_KEY: char = 'u';
+
+/// The right pane's keys: what each key means while the right pane has
+/// focus and no modal is open. The runtime resolves this table before
+/// [`KEYBINDINGS`], so a key it binds never reaches the program-wide
+/// keymap from the right pane. A key it leaves out (`E`, `i`, `O`,
+/// `Shift-Enter`, `Alt-Enter`, `Tab`, `J`/`K`, `q`, the view and search
+/// keys) means what it means everywhere, except that the global keys
+/// that drive the left tree do nothing here, so a chord this table does
+/// not bind (`Alt-j`) leaves the tree alone.
+///
+/// It is the framework explorer's table: its moves, its section keys,
+/// `Enter`, `o`, `F`, and `Backspace`/`Esc`. Several of these keys mean
+/// something else on the left pane, where [`KEYBINDINGS`] binds them:
+///
+/// | Key | Left pane | Right pane |
+/// | --- | --- | --- |
+/// | `Enter` | the row's default action | copy a field, drill a link, fold `Other` |
+/// | `F` | clear every filter | Expanded Node Detail |
+/// | `Backspace` | return from a reveal | back out of a drill; with none, arm, then leave the pane |
+/// | `h`/`l`, `←`/`→` | fold the tree row | close or open the `Other` zone |
+/// | `PgUp`/`PgDn` | page the tree | page the explorer |
+/// | `Esc` | nothing | back, as `Backspace` |
+/// | `e` | nothing | fold `Other` on its header |
+/// | `o` | open the right pane's cursor value | the same |
+pub const RIGHT_PANE_KEYS: &[KeyRow<ExplorerKey>] = &[include(EXPLORER_KEYS)];
 
 /// Wave 1 pilot: view switching bindings. Each entry produces
 /// a parameterized `Action::SwitchView` or `Action::CycleView`.
@@ -385,16 +411,6 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         action: || Action::Msg(Box::new(crate::tui::Msg::CollapseRow)),
         help_text: "Collapse the selected row's children",
     },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('e'),
-        action: || {
-            Action::Msg(Box::new(crate::tui::Msg::Explorer(
-                tuikit::explorer::ExplorerKey::ToggleSection,
-            )))
-        },
-        help_text: "Toggle the explorer's Other zone (right pane)",
-    },
     // Arrow / nav keys — any modifier is fine.
     KeyBinding {
         mode: KeyMode::Global,
@@ -456,7 +472,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         mode: KeyMode::Global,
         key: KeyMatcher::AnyMod(KeyCode::Backspace),
         action: || Action::Msg(Box::new(crate::tui::Msg::NavBack)),
-        help_text: "Pop one drilldown hop in the explorer",
+        help_text: "Return to where the last reveal started",
     },
     KeyBinding {
         mode: KeyMode::Global,
