@@ -95,22 +95,18 @@ fn the_no_agent_chip_is_muted_and_as_wide_as_a_badge() {
     );
 }
 
+/// The notes recede; the row's column gap, not the note, sets them apart
+/// from the label before them.
 #[test]
-fn the_row_notes_recede_two_cells_after_the_label() {
+fn the_row_notes_recede() {
     let theme = Theme::default();
     let note = Style::default().fg(theme.inert).add_modifier(theme.muted);
-    assert_eq!(hits_chip(1, &theme).content, "  1 hit");
-    assert_eq!(hits_chip(3, &theme).content, "  3 hits");
+    assert_eq!(hits_chip(1, &theme).content, "1 hit");
+    assert_eq!(hits_chip(3, &theme).content, "3 hits");
     assert_eq!(hits_chip(3, &theme).style, note);
-    assert_eq!(
-        was_in_chip("build", false, &theme).content,
-        "  was in build"
-    );
-    assert_eq!(
-        was_in_chip("build", true, &theme).content,
-        "  (mux stopped)"
-    );
+    assert_eq!(was_in_chip("build", false, &theme).content, "was in build");
+    assert_eq!(was_in_chip("build", true, &theme).content, "(mux stopped)");
     let long = was_in_chip("a-very-long-mux-name-indeed", false, &theme);
-    assert_eq!(long.content, "  was in a-very-long-mux-nam…");
+    assert_eq!(long.content, "was in a-very-long-mux-nam…");
     assert_eq!(long.style, note);
 }

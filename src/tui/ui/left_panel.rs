@@ -1,22 +1,28 @@
 //! Left panel: the row tree in the framework's `TreeView`, and the
-//! per-row spans it is drawn from.
+//! cells it is drawn from.
 //!
 //! The framework draws the pane (its title, the Search header, the
 //! Pinned banner, the placeholder, the window over the showing rows, the
-//! scrollbar) and gives each row its looks (the hand-off's pending look,
-//! the ghost look, the selection highlight). This module lays each row's
-//! cells out: [`LeftRows::line`] is the producer, from the row and its
-//! `RowCtx`. What only the snapshot and the hand-off can say about a row
-//! (ghost, pending, pin marker) is worked out by the App before the
-//! frame, so laying a row out looks nothing up.
+//! scrollbar), measures and lays out every row's columns by one
+//! narrow-width policy, and gives each row its looks (the hand-off's
+//! pending look, the ghost look, the selection highlight). This module
+//! says what the columns are and what each cell shows ([`columns`]);
+//! [`LeftRows::line`] is the producer. What only the snapshot and the
+//! hand-off can say about a row (ghost, pending, pin marker) is worked
+//! out by the App before the frame, so laying a row out looks nothing
+//! up. The PR, Pinned, History, and Search hit and pane rows still draw
+//! their own cells after the prefix the framework lays out.
+
+mod columns;
 
 use tuikit::selection;
-use tuikit::tree::{RowCtx, RowMark, RowState, TreeView};
+use tuikit::tree::{RowCtx, RowState, TreeColumns, TreeView};
 
 use super::*;
 
 use crate::tui::icons::state;
-use crate::tui::rows::{PinMarker, Row};
+use crate::tui::rows::Row;
+use columns::{Col, LeftColumns, Schemas};
 
 /// Draw the left pane and return the window its tree drew, or `None`
 /// when the tree is empty, so the window it had is kept for when rows
@@ -30,7 +36,8 @@ pub(super) fn draw_left_panel(
     // wide.
     let inner_width = usize::from(area.width.saturating_sub(2));
     let states = app.tree_row_states();
-    let rows = LeftRows::of(app, &states);
+    let columns = LeftColumns::of(app);
+    let rows = LeftRows::of(app, &columns, &states);
     let line = |row: &Row, cx: &RowCtx<'_>| rows.line(row, cx);
     let mut view = TreeView::new(&app.tree().rows, app.tree_state(), line, app.theme())
         .focused(app.focus() == Focus::Left)
@@ -58,42 +65,192 @@ pub(super) fn draw_left_panel(
     view.render(area, frame.buffer_mut())
 }
 
-/// What the left pane's rows are laid out with, worked out once per
-/// frame: each group's counts, and the layout every row shares.
-pub(super) struct LeftRows<'a> {
-    summaries: std::collections::HashMap<RowId, GroupSummary>,
-    layout: RowLayout<'a>,
+impl<'a> LeftColumns<'a> {
+    /// The columns of `app`'s tree for this frame: its theme, the clock
+    /// the ages read against, the hand-off's spinner frame, and each
+    /// group's counts.
+    pub(super) fn of(app: &'a App) -> Self {
+        Self {
+            theme: app.theme(),
+            now: current_unix_epoch_for_render(),
+            spinner: app
+                .handoff()
+                .map(|handoff| spinner_glyph(handoff.started_at)),
+            summaries: compute_group_summaries(app.tree()),
+            schemas: Schemas::new(app.theme()),
+        }
+    }
+}
+
+/// The left pane's rows laid out for one frame: every row measured once
+/// by the framework, and the PR column widths the PR rows still work out
+/// themselves.
+struct LeftRows<'a> {
+    columns: &'a LeftColumns<'a>,
+    tree: TreeColumns<'a, Row, LeftColumns<'a>>,
+    pr: PrAlign,
 }
 
 impl<'a> LeftRows<'a> {
     /// The layout of `app`'s tree, whose rows have the `states` the App
     /// worked out (`App::tree_row_states`).
-    pub(super) fn of(app: &'a App, states: &[RowState]) -> Self {
-        let summaries = compute_group_summaries(app.tree());
-        let align = GroupAlign::of_tree(app, &summaries, states);
+    fn of(app: &'a App, columns: &'a LeftColumns<'a>, states: &[RowState]) -> Self {
+        let rows = &app.tree().rows;
         Self {
-            summaries,
-            layout: RowLayout::of(app, align),
+            columns,
+            tree: TreeColumns::new(columns, rows, app.tree_state(), states, app.theme()),
+            pr: PrAlign::of_tree(app.tree()),
         }
     }
 
     /// The producer the tree draws a row with: its cells at the width
     /// the context gives. The tree applies the row's looks.
-    pub(super) fn line(&self, row: &Row, cx: &RowCtx<'_>) -> Line<'static> {
-        let layout = RowLayout {
-            summary: self.summaries.get(&row.id).copied(),
-            ..self.layout
-        };
-        row_line(row, cx, &layout)
+    fn line(&self, row: &Row, cx: &RowCtx<'_>) -> Line<'static> {
+        let LeftColumns {
+            theme,
+            now,
+            spinner,
+            ..
+        } = *self.columns;
+        // Rows the operator just left in tmux keep their old values,
+        // dimmed, with a spinner where their state goes, until the
+        // background refresh lands (ADR 0108).
+        let spinner = spinner.filter(|_| cx.pending);
+        match &row.kind {
+            RowKind::Group(_) | RowKind::AgentSession(_) => self.tree.line(row, cx),
+            RowKind::MuxSession(mux) => self.tree.line_then(row, cx, |left| {
+                render_mux_session_spans(mux, theme, now, left, spinner)
+            }),
+            RowKind::Pr(pr) => self.tree.line_then(row, cx, |left| {
+                render_pr_spans(pr, theme, self.pr, left, now)
+            }),
+            RowKind::Hit(hit) => self
+                .tree
+                .line_then(row, cx, |left| render_hit_spans(hit, theme, left, now)),
+            RowKind::Pane(pane) => self
+                .tree
+                .line_then(row, cx, |left| render_pane_spans(pane, theme, left, now)),
+            RowKind::PaneHit(hit) => self
+                .tree
+                .line_then(row, cx, |left| render_pane_hit_spans(hit, theme, left, now)),
+            RowKind::Mixed(mixed) => {
+                let widths = self.mixed_widths(row);
+                self.tree.line_then(row, cx, |left| {
+                    render_mixed_spans(mixed, theme, widths, left, now, spinner)
+                })
+            }
+        }
+    }
+
+    /// The column widths a Pinned or History row lays its own cells out
+    /// with, from the one measure pass: the label cell runs from the row's
+    /// indent to a common column, so nested rows line their status up with
+    /// their parents'.
+    fn mixed_widths(&self, row: &Row) -> MixedWidths {
+        let measure = self.tree.measure();
+        MixedWidths {
+            label: measure
+                .widest_with_lead(Col::MixedLabel)
+                .saturating_sub(self.tree.lead(row)),
+            status: measure.widest(Col::MixedStatus),
+            chip: measure.widest(Col::MixedChip),
+        }
     }
 }
 
-/// Whether the Sessions view lists its sessions flat, without groups.
-fn flat_sessions(app: &App) -> bool {
-    matches!(
-        app.grouping(),
-        crate::tui::Grouping::Sessions(SessionsGrouping::None)
-    )
+/// `rows` laid out as the left pane lays out a tree of only them, each at
+/// `width` with no cursor and the pane focused, for a test of the cells a
+/// row draws. `theme` and `now` are what a frame has; with a `spinner`,
+/// every row awaits the hand-off and shows that frame.
+#[cfg(test)]
+pub(super) fn lay_out(
+    rows: &[Row],
+    theme: &Theme,
+    now: i64,
+    width: usize,
+    spinner: Option<&'static str>,
+) -> Vec<Line<'static>> {
+    let tree = crate::tui::rows::RowTree {
+        rows: rows.to_vec(),
+        ..crate::tui::rows::RowTree::default()
+    };
+    let columns = LeftColumns {
+        theme,
+        now,
+        spinner,
+        summaries: compute_group_summaries(&tree),
+        schemas: Schemas::new(theme),
+    };
+    let state = RowState {
+        pending: spinner.is_some(),
+        ..RowState::default()
+    };
+    let states = vec![state; rows.len()];
+    let tree_state = tuikit::tree::TreeState::new();
+    let left = LeftRows {
+        columns: &columns,
+        tree: TreeColumns::new(&columns, rows, &tree_state, &states, theme),
+        pr: PrAlign::of_tree(&tree),
+    };
+    rows.iter()
+        .map(|row| {
+            let cx = RowCtx {
+                selected: false,
+                focused: true,
+                expanded: false,
+                ghost: false,
+                pending: state.pending,
+                mark: state.mark,
+                width,
+                theme,
+            };
+            left.line(row, &cx)
+        })
+        .collect()
+}
+
+/// `row` as the left pane draws it on its own, its looks applied: its
+/// state as `app` works it out, its cells measured alone, at `width`.
+#[cfg(test)]
+pub(super) fn render_left_row(
+    row: &Row,
+    app: &App,
+    is_selected: bool,
+    width: usize,
+) -> Line<'static> {
+    let columns = LeftColumns::of(app);
+    let states = [app.tree_row_state(row)];
+    let rows = std::slice::from_ref(row);
+    let tree_state = tuikit::tree::TreeState::new();
+    let left = LeftRows {
+        columns: &columns,
+        tree: TreeColumns::new(&columns, rows, &tree_state, &states, app.theme()),
+        pr: PrAlign::of_tree(app.tree()),
+    };
+    let cx = RowCtx {
+        selected: is_selected,
+        focused: app.focus() == Focus::Left,
+        expanded: app.is_expanded(&row.id),
+        ghost: states[0].ghost,
+        pending: states[0].pending,
+        mark: states[0].mark,
+        width,
+        theme: app.theme(),
+    };
+    let mut line = left.line(row, &cx);
+    cx.apply_looks(&mut line.spans);
+    line
+}
+
+/// How wide a Pinned or History row's own cells are.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct MixedWidths {
+    /// The label cell, from the end of the row's prefix.
+    pub(super) label: usize,
+    /// The status word.
+    pub(super) status: usize,
+    /// The chip; 0 when no row has one.
+    pub(super) chip: usize,
 }
 
 /// Render the left pane title as a lazydocker-style tab strip
@@ -373,15 +530,14 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
     "No sessions discovered.\nPress `r` to refresh or `q` to quit.".to_string()
 }
 
-/// Per-group aggregates surfaced as right-aligned chips on group
-/// rows (Phase 7). Counts walk the full row tree (not just visible
-/// rows) so a collapsed group still advertises what's inside.
+/// What a group header counts: the sessions beneath it, and how many of
+/// them have an ambiguous mux link. Counts walk the full row tree (not
+/// just the rows that show) so a collapsed group still says what is
+/// inside.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct GroupSummary {
     pub(super) agents: usize,
-    pub(super) attached: usize,
     pub(super) ambiguous: usize,
-    pub(super) unmuxed: usize,
 }
 
 /// Walk the row tree once and compute the [`GroupSummary`] for every
@@ -405,207 +561,14 @@ pub(super) fn compute_group_summaries(
             }
             if let RowKind::AgentSession(session) = &child.kind {
                 summary.agents += 1;
-                match session.mux_state {
-                    MuxIndicator::Attached => summary.attached += 1,
-                    MuxIndicator::Ambiguous { .. } => summary.ambiguous += 1,
-                    MuxIndicator::Unmuxed => summary.unmuxed += 1,
+                if matches!(session.mux_state, MuxIndicator::Ambiguous { .. }) {
+                    summary.ambiguous += 1;
                 }
             }
         }
         out.insert(row.id.clone(), summary);
     }
     out
-}
-
-/// Append the body (label + secondary + cwd marker) spans for a
-/// group row to `spans`. Extracted so the pre-pass that aligns
-/// summary chips across group rows can measure body widths without
-/// rebuilding the spans inside `render_left_row`.
-pub(super) fn append_group_body_spans(
-    spans: &mut Vec<Span<'static>>,
-    group: &crate::tui::rows::GroupRow,
-    theme: &Theme,
-    target_label_width: usize,
-    secondary_max_width: Option<usize>,
-) {
-    let label = compact_path_label(&group.display_path);
-    let label_width = text::width(label.as_str());
-    spans.push(span!(Modifier::BOLD; "{label}"));
-    // Pad the label cell so the secondary content starts at the
-    // same column across every visible group row. Skipped when the
-    // label is already at or past the target.
-    if label_width < target_label_width {
-        spans.push(Span::raw(" ".repeat(target_label_width - label_width)));
-    }
-    let secondary = compact_path_secondary(&group.display_path);
-    if !secondary.is_empty() {
-        // Truncate the dim canonical path with a mid-string ellipsis
-        // when a width budget is supplied and the natural width would
-        // push the trailing summary chip block (count + ambiguity
-        // glyph) past the right edge of the pane.
-        let rendered = match secondary_max_width {
-            Some(budget) if budget < text::width(secondary.as_str()) => {
-                text::truncate_middle(&secondary, budget)
-            }
-            _ => secondary,
-        };
-        spans.push(span!(theme.muted; "  {rendered}"));
-    }
-    if group.is_launch_context {
-        spans.push(span!(
-            Style::default().fg(theme.cwd_mark()).add_modifier(theme.muted);
-            "  (cwd)"
-        ));
-    }
-}
-
-/// Width of the group row body (the row prefix, label, secondary, and
-/// cwd marker), with the label padded to `align.label_width`. Used to
-/// align the summary-chip column across the tree's group rows; it
-/// measures the prefix [`render_left_row`] draws, so the two agree.
-/// Returns 0 for non-group rows so callers can fold every row through
-/// the same width-max.
-pub(super) fn group_row_body_width(
-    row: &Row,
-    prefix: RowPrefix,
-    theme: &Theme,
-    align: &GroupAlign,
-) -> usize {
-    let RowKind::Group(group) = &row.kind else {
-        return 0;
-    };
-    let mut spans = row_prefix_spans(row, prefix, theme, align);
-    append_group_body_spans(&mut spans, group, theme, align.label_width, None);
-    text::spans_width(&spans)
-}
-
-/// Width of just the label cell for a group row (excluding indent,
-/// disclosure, secondary, and cwd marker). Used by the left-pane
-/// pre-pass to compute the label column's max width before bodies
-/// are rendered.
-pub(super) fn group_row_label_width(row: &crate::tui::rows::Row) -> usize {
-    let RowKind::Group(group) = &row.kind else {
-        return 0;
-    };
-    text::width(compact_path_label(&group.display_path).as_str())
-}
-
-/// Append the right-aligned summary chips to a group row's span
-/// list. Renders nothing when the group contains no sessions so
-/// workspace-only ancestors stay quiet.
-///
-/// `count_width` right-pads the `(N)` count chip so single- and
-/// double-digit counts (`(2)` vs `(72)`) anchor on the same column,
-/// keeping any trailing ambiguity glyph aligned across rows.
-///
-/// ADR 0072: per-bucket muxed/unmuxed counts at the group level are
-/// gone — the only secondary signal is a single `▲` (theme `warning`)
-/// when at least one descendant session is in the `Ambiguous`
-/// candidate-set state. The ambiguity catalog lives on the group's
-/// detail pane (ADR 0071).
-pub(super) fn append_group_summary_spans(
-    spans: &mut Vec<Span<'static>>,
-    summary: GroupSummary,
-    theme: &Theme,
-    count_width: usize,
-) {
-    if summary.agents == 0 {
-        return;
-    }
-    let count = format!("({})", summary.agents);
-    spans.push(span!(theme.muted; "  {count:>count_width$}"));
-    if summary.ambiguous > 0 {
-        spans.push(Span::raw("  "));
-        spans.push(span!(
-            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
-            "{}", marks::WARNING
-        ));
-    }
-}
-
-/// Column anchors for the rows of a tree, computed once per render
-/// pass. Padding keys the secondary segment and summary chip block
-/// onto consistent columns so adjacent group rows read like a
-/// table; non-group rows ignore these widths. Every width is measured
-/// over the whole tree, folded groups included (ADR 0131's rule), so
-/// folding or unfolding a group never moves the columns of the others.
-#[derive(Clone, Copy, Default)]
-pub(super) struct GroupAlign {
-    /// Max label width across the tree's group rows. Pads between the
-    /// label and the secondary segment.
-    pub(super) label_width: usize,
-    /// Max body width (label-padded) across the group rows that get a
-    /// summary chip block. Pads between the body and the `(N)` count
-    /// plus optional `▲` ambiguity glyph (ADR 0072).
-    pub(super) body_width: usize,
-    /// Max `(N)` count chip width (including parens) across the group
-    /// rows with sessions. Right-pads the count chip so any trailing
-    /// ambiguity glyph anchors on the same column whether the count is
-    /// `(2)` or `(72)`.
-    pub(super) count_width: usize,
-    /// Column widths for PR rows (ADR 0131).
-    pub(super) pr: PrAlign,
-    /// Column widths for the mixed-kind rows of the Pinned and History
-    /// views.
-    pub(super) mixed: MixedAlign,
-    /// Whether the Sessions, Mux, PRs, and Search rows reserve the pin marker
-    /// cell: once any row in the tree is pinned, every row holds its
-    /// place so the columns don't move.
-    pub(super) native_marker: bool,
-    /// Whether a group header that stands for no entity keeps a blank
-    /// kind glyph cell: once any header in the tree has a glyph, the
-    /// glyph-less ones (`Ungrouped`, a PR remote group) hold its place
-    /// so every header's label starts in the same column.
-    pub(super) group_glyph: bool,
-}
-
-impl GroupAlign {
-    /// The anchors for `app`'s tree, given each group's `summaries` and
-    /// the `states` the App worked out for its rows, index for index.
-    pub(super) fn of_tree(
-        app: &App,
-        summaries: &std::collections::HashMap<RowId, GroupSummary>,
-        states: &[RowState],
-    ) -> Self {
-        let tree = app.tree();
-        let theme = app.theme();
-        let mut align = Self {
-            pr: PrAlign::of_tree(tree),
-            mixed: MixedAlign::of_tree(tree, theme),
-            // Only the native views mark rows (`App::tree_row_state`), so
-            // a mark anywhere reserves their marker cell.
-            native_marker: states.iter().any(|state| state.mark != RowMark::None),
-            group_glyph: tree.rows.iter().any(
-                |row| matches!(&row.kind, RowKind::Group(group) if group.primary_node.is_some()),
-            ),
-            ..Self::default()
-        };
-        align.label_width = tree
-            .rows
-            .iter()
-            .map(group_row_label_width)
-            .max()
-            .unwrap_or(0);
-        // Rows without a summary chip block don't take part, so an idle
-        // workspace header doesn't push everyone else's counts right.
-        for (index, row) in tree.rows.iter().enumerate() {
-            let Some(summary) = summaries.get(&row.id).filter(|summary| summary.agents > 0) else {
-                continue;
-            };
-            let prefix = RowPrefix {
-                expanded: app.is_expanded(&row.id),
-                mark: states.get(index).map_or(RowMark::None, |state| state.mark),
-                flat_sessions: flat_sessions(app),
-            };
-            align.body_width = align
-                .body_width
-                .max(group_row_body_width(row, prefix, theme, &align));
-            align.count_width = align
-                .count_width
-                .max(format!("({})", summary.agents).chars().count());
-        }
-        align
-    }
 }
 
 /// Widest branch name a PR row shows before truncating it, so one long
@@ -635,73 +598,6 @@ impl PrAlign {
         }
         align
     }
-}
-
-/// Widest label a mixed-kind row shows before cutting it.
-const MIXED_LABEL_MAX_WIDTH: usize = 28;
-/// Widest status a mixed-kind row shows.
-const MIXED_STATUS_MAX_WIDTH: usize = 9;
-
-/// Column widths for the mixed-kind rows of a tree (ADR 0131's rule):
-/// label, status, and age pad to the widest value in the whole tree, so
-/// folding a group doesn't shift them. The content takes what is left.
-#[derive(Clone, Copy, Default)]
-pub(super) struct MixedAlign {
-    label: usize,
-    status: usize,
-    /// Width of the pin marker cell, `0` when no row in the tree has a
-    /// marker. Reserved on every row once any has one, so the columns
-    /// hold still.
-    marker: usize,
-    /// Width of the chip cell, `0` when no row has a chip. Rows without
-    /// one pad to it so the content starts in one column.
-    chip: usize,
-}
-
-impl MixedAlign {
-    pub(super) fn of_tree(tree: &crate::tui::rows::RowTree, theme: &Theme) -> Self {
-        use crate::tui::rows::{MixedGrid, PinMarker};
-        let mut align = Self::default();
-        if tree.rows.iter().any(|row| {
-            matches!(&row.kind, RowKind::Mixed(m)
-                if m.grid == MixedGrid::Columns && m.marker != PinMarker::None)
-        }) {
-            align.marker = MARKER_CELL_WIDTH;
-        }
-        for row in &tree.rows {
-            let RowKind::Mixed(mixed) = &row.kind else {
-                continue;
-            };
-            if mixed.grid != MixedGrid::Columns {
-                continue;
-            }
-            // The label cell runs from the row's own indent to a common
-            // column, so nested rows line their status up with their
-            // parents'.
-            let label_width = text::width(mixed.label.as_str()).min(MIXED_LABEL_MAX_WIDTH);
-            align.label = align
-                .label
-                .max(mixed_prefix_width(row.depth, align.marker) + label_width);
-            align.status = align
-                .status
-                .max(text::width(mixed.status.as_str()).min(MIXED_STATUS_MAX_WIDTH));
-            if let Some(chip) = &mixed.chip {
-                align.chip = align
-                    .chip
-                    .max(text::width(mixed_chip_span(chip, theme).content.as_ref()));
-            }
-        }
-        align
-    }
-}
-
-/// Width of the pin marker cell: the glyph and its space.
-const MARKER_CELL_WIDTH: usize = 2;
-
-/// Cells before a mixed-kind row's label: indent, disclosure, the kind
-/// glyph with its space, and the pin marker cell when the tree has one.
-fn mixed_prefix_width(depth: u8, marker: usize) -> usize {
-    usize::from(depth) * 2 + 4 + marker
 }
 
 /// The pin marker cell of a row, the same in every view: the filled pin
@@ -742,17 +638,16 @@ pub(super) fn age_span(
     tuikit::age::cell(age, recency, tuikit::age::CELL_WIDTH, theme)
 }
 
-/// The body of a mixed-kind row after its kind glyph. The Columns grid
-/// is label, status word, age, then the chip and content, which fill
-/// `budget` and are cut with an ellipsis. The Mux grid is the Mux
-/// view's own (name, chip, age, state glyph), so a stopped mux lines up
-/// with the running ones. Stopped, removed, missing, planned, and
-/// unknown rows are dimmed whole.
+/// The body of a mixed-kind row after its prefix. The Columns grid is
+/// label, status word, age, then the chip and content, which fill
+/// `budget` and are cut with an ellipsis, at the `widths` the tree's
+/// measure pass found. The Mux grid is the Mux view's own (name, chip,
+/// age, state glyph), so a stopped mux lines up with the running ones.
+/// Stopped, removed, missing, planned, and unknown rows are dimmed whole.
 pub(super) fn render_mixed_spans(
     mixed: &crate::tui::rows::MixedRow,
     theme: &Theme,
-    align: MixedAlign,
-    prefix_width: usize,
+    widths: MixedWidths,
     budget: usize,
     now: i64,
     handoff_spinner: Option<&'static str>,
@@ -807,17 +702,16 @@ pub(super) fn render_mixed_spans(
             (MixedTone::Normal, Some(status)) => status.mark(theme).1,
             (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached()),
         };
-        let label = text::truncate_end(&mixed.label, MIXED_LABEL_MAX_WIDTH);
-        let label_cell = align.label.saturating_sub(prefix_width);
-        spans.push(span!(Modifier::BOLD; "{}", text::pad(&label, label_cell)));
-        let status = text::truncate_end(status_word, MIXED_STATUS_MAX_WIDTH);
-        spans.push(span!(status_style; "  {}", text::pad(&status, align.status)));
+        let label = text::truncate_end(&mixed.label, columns::MIXED_LABEL_CELLS);
+        spans.push(span!(Modifier::BOLD; "{}", text::pad(&label, widths.label)));
+        let status = text::truncate_end(status_word, columns::MIXED_STATUS_CELLS);
+        spans.push(span!(status_style; "  {}", text::pad(&status, widths.status)));
         spans.push(Span::raw("  "));
         spans.push(age_span(mixed.age.as_deref(), mixed.age_epoch, now, theme));
         // The chip cell has one width in the tree, so the content starts
         // in one column whether or not a row has a chip.
-        if align.chip > 0 {
-            let cell = 2 + align.chip;
+        if widths.chip > 0 {
+            let cell = 2 + widths.chip;
             let fits = budget.saturating_sub(text::spans_width(&spans)) > cell + 2;
             match (&mixed.chip, fits) {
                 (Some(chip), true) => {
@@ -861,342 +755,6 @@ fn mixed_glyph_span(mixed: &crate::tui::rows::MixedRow, theme: &Theme) -> Span<'
         return pr_kind_glyph_span(mixed.pr_status, theme);
     }
     node_kind_glyph_span(mixed.node_kind, theme)
-}
-
-/// What a row's leading cells depend on beside the row: whether it is
-/// expanded, the pin marker the App put on it, and whether the Sessions
-/// view lists its sessions flat.
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct RowPrefix {
-    expanded: bool,
-    mark: RowMark,
-    flat_sessions: bool,
-}
-
-/// The cells every row starts with: indent, disclosure, kind glyph, and
-/// pin marker. The group pre-pass measures headers with it, so it and
-/// [`row_line`] agree on where each header's body starts.
-fn row_prefix_spans(
-    row: &Row,
-    prefix: RowPrefix,
-    theme: &Theme,
-    align: &GroupAlign,
-) -> Vec<Span<'static>> {
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    if !(prefix.flat_sessions && matches!(row.kind, RowKind::AgentSession(_))) {
-        spans.push(Span::raw(row_indent(row.depth)));
-    }
-    spans.push(disclosure_span(row, prefix.expanded, theme));
-
-    // ADR 0073: per-row node-kind glyph between the disclosure and
-    // the row body. A group header for no entity has none, and leaves
-    // the cell blank when a sibling header has one.
-    match row_kind_glyph_span(&row.kind, theme) {
-        Some(glyph) => spans.push(glyph),
-        None if align.group_glyph && matches!(row.kind, RowKind::Group(_)) => {
-            spans.push(Span::raw("  "));
-        }
-        None => {}
-    }
-    // Native views mark a pinned entity where it sits, with the marker
-    // the Pinned view uses. Once any row is pinned the cell is reserved
-    // on every row, so columns hold still.
-    if align.native_marker {
-        spans.push(pin_marker_span(PinMarker::from(prefix.mark), theme));
-    }
-
-    if let RowKind::Mixed(mixed) = &row.kind
-        && mixed.grid == crate::tui::rows::MixedGrid::Columns
-        && align.mixed.marker > 0
-    {
-        spans.push(pin_marker_span(mixed.marker, theme));
-    }
-    spans
-}
-
-/// What a row is laid out with beside the row and its context: the
-/// columns the tree's rows align to, the clock the ages read against,
-/// and the spinner frame a row awaiting the hand-off shows, worked out
-/// once per frame ([`LeftRows`]), and the row's own group counts.
-#[derive(Clone, Copy)]
-struct RowLayout<'a> {
-    theme: &'a Theme,
-    align: GroupAlign,
-    /// The counts a group row shows, when the row is a group.
-    summary: Option<GroupSummary>,
-    now: i64,
-    /// The spinner frame a row awaiting the hand-off shows.
-    spinner: Option<&'static str>,
-    flat_sessions: bool,
-}
-
-impl<'a> RowLayout<'a> {
-    /// The layout `app`'s rows share, aligned to `align`, with no group
-    /// counts.
-    fn of(app: &'a App, align: GroupAlign) -> Self {
-        Self {
-            theme: app.theme(),
-            align,
-            summary: None,
-            now: current_unix_epoch_for_render(),
-            spinner: app
-                .handoff()
-                .map(|handoff| spinner_glyph(handoff.started_at)),
-            flat_sessions: flat_sessions(app),
-        }
-    }
-}
-
-/// One row's cells at the width `cx` gives, before the tree applies its
-/// looks.
-fn row_line(row: &Row, cx: &RowCtx<'_>, layout: &RowLayout<'_>) -> Line<'static> {
-    let RowLayout {
-        theme,
-        align,
-        summary: group_summary,
-        now,
-        ..
-    } = *layout;
-    let width = cx.width;
-    // Rows the operator just left in tmux keep their old values,
-    // dimmed, with a spinner where the attach glyph goes, until the
-    // background refresh lands (ADR 0108).
-    let handoff_spinner = layout.spinner.filter(|_| cx.pending);
-    let prefix = RowPrefix {
-        expanded: cx.expanded,
-        mark: cx.mark,
-        flat_sessions: layout.flat_sessions,
-    };
-    let mut spans = row_prefix_spans(row, prefix, theme, &align);
-
-    match &row.kind {
-        RowKind::Group(group) => {
-            // Reserve fixed space on the right for the summary chip
-            // block (`  (N)` plus optional `  ▲`) so the count and
-            // ambiguity glyph stay visible at narrow widths. The dim
-            // canonical path absorbs the slack via mid-string
-            // truncation in `append_group_body_spans`.
-            let summary_reservation = group_summary
-                .filter(|s| s.agents > 0)
-                .map_or(0, |_| align.count_width + 5);
-            let head_width = text::spans_width(&spans);
-            let label_cell_width = align.label_width.max(group_row_label_width(row));
-            let secondary_budget = width
-                .saturating_sub(head_width)
-                .saturating_sub(label_cell_width)
-                .saturating_sub(2) // "  " separator before the secondary path
-                .saturating_sub(summary_reservation);
-            append_group_body_spans(
-                &mut spans,
-                group,
-                theme,
-                align.label_width,
-                Some(secondary_budget),
-            );
-            if let Some(summary) = group_summary {
-                let body_target = align
-                    .body_width
-                    .min(width.saturating_sub(summary_reservation));
-                let current_width = text::spans_width(&spans);
-                if current_width < body_target {
-                    spans.push(Span::raw(" ".repeat(body_target - current_width)));
-                }
-                append_group_summary_spans(&mut spans, summary, theme, align.count_width);
-            }
-        }
-        RowKind::AgentSession(session) => {
-            spans.extend(render_session_spans(session, theme, now, handoff_spinner));
-            append_session_preview(&mut spans, session, width, theme);
-        }
-        RowKind::MuxSession(mux) => {
-            let remaining = width.saturating_sub(text::spans_width(&spans));
-            spans.extend(render_mux_session_spans(
-                mux,
-                theme,
-                now,
-                remaining,
-                handoff_spinner,
-            ));
-        }
-        RowKind::Pr(pr) => {
-            let budget = width.saturating_sub(text::spans_width(&spans));
-            spans.extend(render_pr_spans(pr, theme, align.pr, budget, now));
-        }
-        RowKind::Hit(hit) => {
-            let budget = width.saturating_sub(text::spans_width(&spans));
-            spans.extend(render_hit_spans(hit, theme, budget, now));
-        }
-        RowKind::Pane(pane) => {
-            let budget = width.saturating_sub(text::spans_width(&spans));
-            spans.extend(render_pane_spans(pane, theme, budget, now));
-        }
-        RowKind::PaneHit(hit) => {
-            let budget = width.saturating_sub(text::spans_width(&spans));
-            spans.extend(render_pane_hit_spans(hit, theme, budget, now));
-        }
-        RowKind::Mixed(mixed) => {
-            let prefix_width = text::spans_width(&spans);
-            let budget = width.saturating_sub(prefix_width);
-            spans.extend(render_mixed_spans(
-                mixed,
-                theme,
-                align.mixed,
-                prefix_width,
-                budget,
-                now,
-                handoff_spinner,
-            ));
-        }
-    }
-
-    // The tree applies the row's looks after this: the pending look for
-    // a row awaiting the hand-off, the ghost look for a non-mixed row
-    // standing for an entity that is gone or unknown (a mixed row dims
-    // its own cells by its tone), and the selection pair, active or
-    // inactive by focus, under which a chip keeps its look. The tree's
-    // rows start with their disclosure and kind columns, so they draw
-    // the highlight without the cursor gutter.
-    Line::from(spans)
-}
-
-/// One row as the tree draws it, its looks applied, for a test that
-/// lays a single row out: the row's state is worked out from `app` as
-/// the frame would.
-#[cfg(test)]
-pub(super) fn render_left_row(
-    row: &Row,
-    app: &App,
-    is_selected: bool,
-    width: usize,
-    now: i64,
-    group_summary: Option<GroupSummary>,
-    align: GroupAlign,
-) -> Line<'static> {
-    let state = app.tree_row_state(row);
-    let cx = RowCtx {
-        selected: is_selected,
-        focused: app.focus() == Focus::Left,
-        expanded: app.is_expanded(&row.id),
-        ghost: state.ghost,
-        pending: state.pending,
-        mark: state.mark,
-        width,
-        theme: app.theme(),
-    };
-    let layout = RowLayout {
-        summary: group_summary,
-        now,
-        ..RowLayout::of(app, align)
-    };
-    let mut line = row_line(row, &cx, &layout);
-    cx.apply_looks(&mut line.spans);
-    line
-}
-
-/// `handoff_spinner` replaces the attach glyph while the row awaits
-/// the refresh that follows a tmux hand-off (ADR 0108).
-pub(super) fn render_session_spans(
-    session: &AgentSessionRow,
-    theme: &Theme,
-    now: i64,
-    handoff_spinner: Option<&'static str>,
-) -> Vec<Span<'static>> {
-    use crate::tui::widgets::badge::harness_badge;
-    const SESSION_ID_COLUMN_WIDTH: usize = 8;
-    const SESSION_DISPLAY_LABEL_WIDTH: usize = 32;
-
-    let mut spans = Vec::new();
-    // Lead with the harness-native session key rather than
-    // Conspectus's internal short node id. Operators recognize the
-    // external session id; the internal id is still accepted by
-    // explicit node lookup commands.
-    let session_id = text::pad(
-        &text::clip(&session.session.session_key, SESSION_ID_COLUMN_WIDTH),
-        SESSION_ID_COLUMN_WIDTH,
-    );
-    let id_style = Style::default().fg(theme.inert);
-    spans.push(span!(id_style; "{session_id}  "));
-    // The badge widget pads internally so every chip is the same
-    // width regardless of label length; no external padding span
-    // needed.
-    spans.push(harness_badge(&session.harness_label, theme));
-    spans.push(Span::raw("  "));
-    spans.push(age_span(
-        session.recency.as_deref(),
-        session.activity_epoch,
-        now,
-        theme,
-    ));
-    spans.push(Span::raw("  "));
-    if let Some(glyph) = handoff_spinner {
-        spans.push(span!(Style::default().fg(theme.inert); "{glyph}"));
-    } else {
-        spans.push(mux_indicator_span(session.mux_state, theme));
-    }
-    // The row's tree label surfaces the operator-chosen
-    // alias unconditionally and the harness-recorded title only when
-    // the builder flagged this row for disambiguation. Right pane,
-    // search index, and status hints still read `display_label`.
-    if let Some(label) = session.tree_label().filter(|label| !label.is_empty()) {
-        let label = text::truncate_end(label, SESSION_DISPLAY_LABEL_WIDTH);
-        let style = if session
-            .alias
-            .as_deref()
-            .is_some_and(|alias| !alias.is_empty())
-        {
-            Style::default().add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        spans.push(span!(style; "  {label}"));
-    }
-    if let Some(mux) = session.gone_mux_name() {
-        // An untitled session is already named after its mux, so the
-        // chip only says that mux is gone.
-        let named_after_it = session.tree_label() == Some(mux);
-        spans.push(crate::tui::widgets::badge::was_in_chip(
-            mux,
-            named_after_it,
-            theme,
-        ));
-    }
-    if let Some(project) = session
-        .project_display
-        .as_deref()
-        .filter(|project| !project.is_empty())
-    {
-        spans.push(span!(
-            Style::default().fg(theme.inert);
-            "  {}",
-            text::fit(project, 16)
-        ));
-    }
-    spans
-}
-
-pub(super) fn append_session_preview(
-    spans: &mut Vec<Span<'static>>,
-    session: &AgentSessionRow,
-    width: usize,
-    theme: &Theme,
-) {
-    if let Some(hit) = &session.content_hit {
-        append_content_hit(spans, hit, width, theme);
-        return;
-    }
-    let Some(preview) = session.preview.as_deref().filter(|p| !p.is_empty()) else {
-        return;
-    };
-    let used = text::spans_width(spans);
-    if width <= used + 8 {
-        return;
-    }
-    spans.push(Span::raw("  "));
-    spans.push(span!(
-        Style::default().fg(theme.inert).add_modifier(Modifier::ITALIC);
-        "{}",
-        text::truncate_end(preview, width - used - 2)
-    ));
 }
 
 /// `handoff_spinner` replaces the attached glyph while the row awaits
@@ -1352,6 +910,7 @@ fn append_content_hit(
     width: usize,
     theme: &Theme,
 ) {
+    spans.push(Span::raw("  "));
     spans.push(crate::tui::widgets::badge::hits_chip(hit.count, theme));
     let used = text::spans_width(spans);
     if width <= used + 8 {
@@ -1631,20 +1190,4 @@ pub(super) fn mux_indicator_span(indicator: MuxIndicator, theme: &Theme) -> Span
             span!(theme.muted; "{}", state::UNLINKED)
         }
     }
-}
-
-pub(super) fn disclosure_span(row: &Row, expanded: bool, theme: &Theme) -> Span<'static> {
-    if !row.expandable {
-        return Span::raw("  ");
-    }
-    let glyph = if expanded {
-        marks::EXPANDED
-    } else {
-        marks::COLLAPSED
-    };
-    span!(Style::default().fg(theme.disclosure); "{glyph} ")
-}
-
-pub(super) fn row_indent(depth: u8) -> String {
-    "  ".repeat(depth as usize)
 }

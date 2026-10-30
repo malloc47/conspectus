@@ -37,7 +37,6 @@ use tuikit::scroll::{Anchor, ScrollGutter, ScrollRegion, ScrollWindow, WrappedRo
 use tuikit::text;
 
 use crate::model::{MuxSessionId, NodeId};
-use crate::tui::SessionsGrouping;
 use crate::tui::Theme;
 use crate::tui::View;
 use crate::tui::actions::{attach_disabled_reason, resolve_attach_target};

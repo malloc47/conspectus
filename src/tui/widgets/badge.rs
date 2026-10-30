@@ -51,27 +51,27 @@ pub fn no_agent_chip(theme: &Theme) -> Span<'static> {
         .span(theme)
 }
 
-/// The note after a row whose session a content search matched: `1 hit`
-/// or `N hits`, receding, two cells after what precedes it.
+/// The note on a row whose session a content search matched: `1 hit` or
+/// `N hits`, receding. The row's column gap sets it apart.
 pub fn hits_chip(count: u32, theme: &Theme) -> Span<'static> {
     let label = if count == 1 {
         "1 hit".to_string()
     } else {
         format!("{count} hits")
     };
-    StatusChip::new(label, Tone::Inert).pad(2, 0).span(theme)
+    StatusChip::new(label, Tone::Inert).span(theme)
 }
 
 /// The note after a session's label when the mux it last ran in is gone:
 /// `was in <mux>`, or `(mux stopped)` when the label already names that
-/// mux. Receding, two cells after the label.
+/// mux. Receding; the row's column gap sets it apart.
 pub fn was_in_chip(mux: &str, named_after_it: bool, theme: &Theme) -> Span<'static> {
     let label: Cow<'static, str> = if named_after_it {
         Cow::Borrowed("(mux stopped)")
     } else {
         Cow::Owned(format!("was in {}", tuikit::text::truncate_end(mux, 20)))
     };
-    StatusChip::new(label, Tone::Inert).pad(2, 0).span(theme)
+    StatusChip::new(label, Tone::Inert).span(theme)
 }
 
 #[cfg(test)]

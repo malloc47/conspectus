@@ -920,27 +920,116 @@ fn group_body_secondary_truncates_mid_string_to_preserve_summary() {
     // visible in narrow panes. Before this, long fixture paths
     // pushed the summary chip off the right edge.
     let theme = Theme::default();
-    let group = crate::tui::rows::GroupRow {
-        display_path: "/fixture/atelier-demo/repo-a".to_string(),
-        primary_node: None,
-        is_launch_context: false,
-    };
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    append_group_body_spans(&mut spans, &group, &theme, 12, Some(14));
-    let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    let rows = vec![
+        group_header("/fixture/atelier-demo/repo-a"),
+        session_under_group("abc"),
+    ];
+    // The prefix (4) and the label (6) leave the path and the count
+    // block 30 cells: the path is cut in the middle to fit beside it.
+    let narrow = lay_out(&rows, &theme, 0, 40, None);
+    let rendered = line_text(&narrow[0]);
     assert!(rendered.contains('…'), "{rendered}");
     assert!(rendered.contains("repo-a"), "tail preserved: {rendered}");
     assert!(rendered.contains("/fixtur"), "head preserved: {rendered}");
+    assert!(
+        rendered.trim_end().ends_with("(1)"),
+        "the count stays: {rendered}"
+    );
 
-    // Wide budget leaves the path untouched.
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    append_group_body_spans(&mut spans, &group, &theme, 12, Some(200));
-    let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    // A wide row leaves the path untouched.
+    let wide = lay_out(&rows, &theme, 0, 200, None);
+    let rendered = line_text(&wide[0]);
     assert!(
         rendered.contains("/fixture/atelier-demo/repo-a"),
         "wide budget keeps full path: {rendered}"
     );
     assert!(!rendered.contains('…'), "{rendered}");
+}
+
+/// A group header for `path`, standing for no entity.
+fn group_header(path: &str) -> crate::tui::rows::Row {
+    crate::tui::rows::Row {
+        id: RowId::Bucket(path.to_string()),
+        depth: 0,
+        expandable: true,
+        kind: RowKind::Group(crate::tui::rows::GroupRow {
+            display_path: path.to_string(),
+            primary_node: None,
+            is_launch_context: false,
+        }),
+    }
+}
+
+/// A session row under a group header, its mux link as `mux_state`.
+fn session_under_group_with(key: &str, mux_state: MuxIndicator) -> crate::tui::rows::Row {
+    let id = AgentSessionId::new("claude-code", "/state", key);
+    crate::tui::rows::Row {
+        id: RowId::AgentSession(NodeId::AgentSession(id.clone())),
+        depth: 1,
+        expandable: false,
+        kind: RowKind::AgentSession(crate::tui::rows::AgentSessionRow {
+            session: id.clone(),
+            short_id: key.into(),
+            harness_label: "claude".into(),
+            cwd_display: None,
+            project_display: None,
+            recency: None,
+            activity_epoch: None,
+            mux_state,
+            preview: None,
+            title: None,
+            alias: None,
+            title_disambiguates: false,
+            mux_host: None,
+            primary_node: NodeId::AgentSession(id),
+            pin_id: None,
+            content_hit: None,
+        }),
+    }
+}
+
+fn session_under_group(key: &str) -> crate::tui::rows::Row {
+    session_under_group_with(key, MuxIndicator::Unmuxed)
+}
+
+/// A laid-out line's text.
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
+/// The spans of `session`'s row after its prefix (the blank disclosure
+/// and the session glyph; an unpinned row reserves no marker), as the
+/// left pane lays it out alone at `width`.
+fn session_spans_at(
+    session: &crate::tui::rows::AgentSessionRow,
+    theme: &Theme,
+    now: i64,
+    width: usize,
+) -> Vec<Span<'static>> {
+    let row = crate::tui::rows::Row {
+        id: RowId::AgentSession(NodeId::AgentSession(session.session.clone())),
+        depth: 0,
+        expandable: false,
+        kind: RowKind::AgentSession(session.clone()),
+    };
+    let mut spans = lay_out(&[row], theme, now, width, None).remove(0).spans;
+    let mut prefix = 4;
+    while prefix > 0 && !spans.is_empty() {
+        prefix -= tuikit::text::width(&spans.remove(0).content);
+    }
+    spans
+}
+
+/// [`session_spans_at`] in a wide pane.
+fn session_spans(
+    session: &crate::tui::rows::AgentSessionRow,
+    theme: &Theme,
+    now: i64,
+) -> Vec<Span<'static>> {
+    session_spans_at(session, theme, now, 200)
 }
 
 #[test]
@@ -951,15 +1040,13 @@ fn group_rows_show_warning_glyph_when_descendant_is_ambiguous() {
     // ambiguous muxes lives on the group's detail pane
     // (ADR 0071); the row glyph is just the flag.
     let theme = Theme::default();
-    let summary = GroupSummary {
-        agents: 2,
-        attached: 0,
-        ambiguous: 2,
-        unmuxed: 0,
-    };
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    append_group_summary_spans(&mut spans, summary, &theme, 3);
-    let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    let ambiguous = MuxIndicator::Ambiguous { candidate_count: 2 };
+    let rows = vec![
+        group_header("~/src/project"),
+        session_under_group_with("a", ambiguous),
+        session_under_group_with("b", ambiguous),
+    ];
+    let rendered = line_text(&lay_out(&rows, &theme, 0, 120, None)[0]);
 
     assert!(rendered.contains("(2)"), "count chip missing: {rendered}");
     assert!(rendered.contains('▲'), "warning glyph missing: {rendered}");
@@ -969,15 +1056,14 @@ fn group_rows_show_warning_glyph_when_descendant_is_ambiguous() {
     );
 
     // The unambiguous case omits the warning glyph entirely.
-    let clean_summary = GroupSummary {
-        agents: 2,
-        attached: 2,
-        ambiguous: 0,
-        unmuxed: 0,
-    };
-    let mut clean_spans: Vec<Span<'static>> = Vec::new();
-    append_group_summary_spans(&mut clean_spans, clean_summary, &theme, 3);
-    let clean_rendered: String = clean_spans.iter().map(|s| s.content.as_ref()).collect();
+    let attached = MuxIndicator::Attached;
+    let clean = vec![
+        group_header("~/src/project"),
+        session_under_group_with("a", attached),
+        session_under_group_with("b", attached),
+    ];
+    let clean_rendered = line_text(&lay_out(&clean, &theme, 0, 120, None)[0]);
+    assert!(clean_rendered.contains("(2)"), "{clean_rendered}");
     assert!(
         !clean_rendered.contains('▲'),
         "warning should be hidden when no descendant is ambiguous: {clean_rendered}",
@@ -1752,7 +1838,7 @@ fn session_harness_span_renders_as_filled_badge() {
         pin_id: None,
         content_hit: None,
     };
-    let spans = render_session_spans(&row, &theme, now, None);
+    let spans = session_spans(&row, &theme, now);
     let badge = spans
         .iter()
         .find(|s| s.content.trim() == "codex")
@@ -1810,7 +1896,7 @@ fn a_pinned_pr_draws_its_kind_glyph_and_word_in_one_style() {
     for (state, draft, _, word, style) in pr_state_cases(&theme) {
         let row = pr_row(Some(PrStatus::of(state, draft)));
         let kind = row_kind_glyph_span(&RowKind::Mixed(row.clone()), &theme).expect("a glyph");
-        let spans = render_mixed_spans(&row, &theme, MixedAlign::default(), 4, 80, 0, None);
+        let spans = render_mixed_spans(&row, &theme, MixedWidths::default(), 80, 0, None);
         let status = &spans[1];
         if status.content.trim() != word || status.style != style || kind.style != style {
             wrong.push(format!(
@@ -1979,7 +2065,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
         content_hit: None,
     };
 
-    let spans = render_session_spans(&row, &theme, now, None);
+    let spans = session_spans(&row, &theme, now);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
         rendered.contains("∘  ingest-refactor"),
@@ -2021,7 +2107,7 @@ fn a_session_last_hosted_by_a_gone_mux_carries_a_was_in_chip() {
         content_hit: None,
     };
     let text = |row: &AgentSessionRow| -> String {
-        render_session_spans(row, &theme, now, None)
+        session_spans(row, &theme, now)
             .iter()
             .map(|span| span.content.as_ref())
             .collect()
@@ -2083,7 +2169,7 @@ fn session_id_is_strictly_truncated_in_left_row() {
         content_hit: None,
     };
 
-    let spans = render_session_spans(&row, &theme, now, None);
+    let spans = session_spans(&row, &theme, now);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
         rendered.starts_with("ffffffff  "),
@@ -2122,7 +2208,7 @@ fn session_display_label_is_truncated_in_left_row() {
         content_hit: None,
     };
 
-    let spans = render_session_spans(&row, &theme, now, None);
+    let spans = session_spans(&row, &theme, now);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     let label = spans
         .iter()
@@ -2235,8 +2321,7 @@ fn session_project_column_renders_before_inline_preview() {
         content_hit: None,
     };
 
-    let mut spans = render_session_spans(&row, &theme, now, None);
-    append_session_preview(&mut spans, &row, 120, &theme);
+    let spans = session_spans_at(&row, &theme, now, 120);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     let project_idx = rendered.find("conspectus").expect("project rendered");
     let preview_idx = rendered
@@ -2263,8 +2348,8 @@ fn session_recency_span_picks_bucket_style_from_theme() {
 
     // Build a minimal AgentSessionRow directly so we can pin the
     // activity_epoch and assert the recency span's style without
-    // staging a full snapshot. The render_session_spans helper is
-    // intentionally cheap to call from the test module.
+    // staging a full snapshot. Laying one row out is
+    // cheap to do from the test module.
     use crate::tui::rows::{AgentSessionRow, MuxIndicator};
     let theme = Theme::default();
     let now: i64 = 1_700_000_000;
@@ -2289,7 +2374,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
     };
 
     let fresh = make_row(Some("1m"), Some(now - 60));
-    let spans = render_session_spans(&fresh, &theme, now, None);
+    let spans = session_spans(&fresh, &theme, now);
     assert_eq!(
         recency_span(&spans, "1m").style,
         theme.recency_fresh.into_style(),
@@ -2297,14 +2382,14 @@ fn session_recency_span_picks_bucket_style_from_theme() {
     );
 
     let cold = make_row(Some("3d"), Some(now - 3 * 24 * 60 * 60));
-    let spans = render_session_spans(&cold, &theme, now, None);
+    let spans = session_spans(&cold, &theme, now);
     assert_eq!(
         recency_span(&spans, "3d").style,
         theme.recency_cold.into_style(),
     );
 
     let unknown = make_row(None, None);
-    let spans = render_session_spans(&unknown, &theme, now, None);
+    let spans = session_spans(&unknown, &theme, now);
     assert_eq!(
         recency_span(&spans, "—").style,
         Style::default().add_modifier(theme.muted),
@@ -3914,17 +3999,7 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
         .find(|row| matches!(row.kind, RowKind::AgentSession(_)))
         .map(|row| (*row).clone())
         .expect("session row");
-    let render = |app: &App| {
-        render_left_row(
-            &session_row,
-            app,
-            false,
-            100,
-            1_700_000_000,
-            None,
-            GroupAlign::default(),
-        )
-    };
+    let render = |app: &App| render_left_row(&session_row, app, false, 100);
 
     let before = render(&app);
     let text: String = before.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -6526,8 +6601,7 @@ fn every_value_of_a_state_has_its_own_glyph() {
         let spans = render_mixed_spans(
             &mux_row(entity),
             &theme,
-            MixedAlign::default(),
-            4,
+            MixedWidths::default(),
             80,
             0,
             None,
@@ -6665,16 +6739,8 @@ fn a_chip_keeps_its_look_on_the_selected_row() {
                 grid: MixedGrid::Columns,
             }),
         };
-        let tree = crate::tui::rows::RowTree {
-            rows: vec![row.clone()],
-            view: crate::tui::rows::ViewLabel::Pinned,
-        };
-        let align = GroupAlign {
-            mixed: MixedAlign::of_tree(&tree, &theme),
-            ..GroupAlign::default()
-        };
         let draw = |selected: bool| {
-            let line = render_left_row(&row, &app, selected, 60, 0, None, align);
+            let line = render_left_row(&row, &app, selected, 60);
             let mut buffer = Buffer::empty(Rect::new(0, 0, 60, 1));
             Paragraph::new(line).render(buffer.area, &mut buffer);
             buffer

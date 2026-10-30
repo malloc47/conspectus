@@ -214,6 +214,36 @@ Sorting by recency uses these same times.
 - **Previews.** The last message of a session (or of the one agent in a
   mux) shows in dim italics at the end of the row, if room remains.
 
+## When a row is too narrow
+
+Group headers and session rows lay their cells out by one rule, in
+every view that lists them. A row's room is the pane's width less the
+row's indent.
+
+1. The cells that line up down the tree (the prefix; a session's key,
+   chip, age, and state; a header's label, path, count, and warning)
+   keep the widths they have on every row: a padded column is as wide as
+   its widest cell in the whole tree, folded groups included. When they
+   do not fit, they give way in a fixed order, the same on every row
+   at that width, so the columns that stay keep their places.
+2. What follows them on a row (a session's label, `was in` note,
+   project, hit count, and preview or snippet) takes the cells that row
+   has left, and gives way in its own order, row by row.
+3. A cell that gives way narrows, cut with `…`, or leaves the row with
+   the gap before it. A cell narrows to no fewer than 8 cells (unless
+   its whole text is shorter); one that would need fewer leaves. A
+   preview or snippet shows only when it gets at least 7 cells, or its
+   whole text.
+4. A row that still does not fit is cut at the pane's edge with `…`. No
+   cell is cut without a mark, and no column moves on one row but not
+   another.
+
+| Row | Gives way first to last | Never gives way |
+|---|---|---|
+| Group header | the path or members (narrowing first) | the label, the count, the warning |
+| Session row, cells that line up | the key, the chip, the age | the state glyph |
+| Session row, the rest | the preview or snippet, the `was in` note, the project (narrowing first), the hit count, the label (narrowing first) | |
+
 ## Sessions view
 
 Reached with `1`. Groupings (`Ctrl-G` cycles): **graph** (default),
@@ -248,8 +278,8 @@ A checkout header adds `(linked · locked · prunable)` for those states.
 | 5 | State | `⊸` linked to a definitive mux, `∘` not | always | 1 cell; a spinner while a refresh is pending |
 | 6 | Label | alias, title, or mux name (see above) | when one applies | cut at 32 cells |
 | 7 | `was in` chip | the session's last mux | only if that mux is stopped | dim |
-| 8 | Project | repo or directory name | only in flat grouping | padded to 16 |
-| 9 | Preview | last message | only if at least 8 cells remain | dim italic |
+| 8 | Project | repo or directory name | only in flat grouping | 16 cells, cut with `…` |
+| 9 | Preview | last message | only if it gets at least 7 cells | dim italic |
 
 While a content filter is active (`--contains TEXT`, or the Content row in
 Controls), the rows are the sessions whose transcripts mention the text, and
@@ -292,7 +322,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │  ●   showcase   claude       1m  ∘  ambiguous mux candidate A  project            │
 │  ●   showcase   claude       1m  ∘  ambiguous mux candidate B  project            │
-│  ●   showcase   claude       1m  ⊸  agent-deck composite launcher  showcase-deck-c│
+│  ●   showcase   claude       1m  ⊸  agent-deck composite launcher  showcase-deck-…│
 │  ●   showcase   claude       1m  ∘  hook-supersession current sessi…  project     │
 │  ● ◉ showcase   claude       1h  ∘  claude-code in project repo  project          │
 │  ●   showcase   pi           2h  ∘  repo-a            Showcase: pi in atelier mem…│
