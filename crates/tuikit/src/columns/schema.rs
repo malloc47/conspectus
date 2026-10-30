@@ -1,6 +1,6 @@
 //! The declaration: columns, their widths, and how each gives way.
 
-use super::GAP;
+use super::{GAP, MIN_FILL};
 
 /// How wide a column is before anything gives way.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,13 +20,36 @@ pub enum Width {
     /// 18)]`). The room counts from the column to the row's end, so the
     /// columns before it are already taken off.
     Steps(&'static [(usize, usize)]),
+    /// The cells of the first step whose width the whole row reaches, its
+    /// lead included: `(from, cells)` pairs, widest first, like
+    /// [`Steps`](Self::Steps), but whatever the columns before it take, so
+    /// the column keeps its width when one of them gives way, and a list
+    /// that counts a cursor gutter or an indent as its lead steps where a
+    /// list without one of that whole width does.
+    RowSteps(&'static [(usize, usize)]),
+    /// `per` of every `of` cells of the whole row, its lead included,
+    /// rounded down and kept between `min` and `max`: a label that grows
+    /// with the row. Two lists of one whole width give the column one
+    /// width, whatever each draws before its schema.
+    Share {
+        /// The cells taken of every `of`.
+        per: usize,
+        /// The cells of the row each `per` is taken of.
+        of: usize,
+        /// The fewest cells the share comes to.
+        min: usize,
+        /// The most cells the share comes to.
+        max: usize,
+    },
     /// As wide as its own cell on each row, at most this many cells, and
     /// never padded. The columns after it follow it on each row instead
     /// of lining up: a label and the notes after it.
     Hug(usize),
-    /// What the other columns leave. A fill shows only while it gets at
-    /// least [`MIN_FILL`](super::MIN_FILL) cells, or its whole text when
-    /// that is shorter; it is cut with `…`.
+    /// What the other columns leave. The others give way while a fill has
+    /// fewer than its minimum, [`MIN_FILL`](super::MIN_FILL) cells unless
+    /// told ([`Column::at_least`]). A fill that drops leaves rather than
+    /// show fewer, unless its whole text is shorter; one with no rule of
+    /// its own narrows last of all. It is cut with `…`.
     Fill,
 }
 
@@ -45,10 +68,12 @@ pub enum Align {
 /// gives way when the row is too narrow.
 ///
 /// A column is built from its width rule ([`fixed`](Self::fixed),
-/// [`cap`](Self::cap), [`steps`](Self::steps), [`hug`](Self::hug), or
-/// [`fill`](Self::fill)) and then told the rest. It keeps its cells unless
-/// it [`drops`](Self::drops) or [`shrinks`](Self::shrinks); both take a
-/// priority, and the lowest gives way first.
+/// [`cap`](Self::cap), [`steps`](Self::steps),
+/// [`row_steps`](Self::row_steps), [`share`](Self::share),
+/// [`hug`](Self::hug), or [`fill`](Self::fill)) and then told the rest. It
+/// keeps its cells unless it [`drops`](Self::drops) or
+/// [`shrinks`](Self::shrinks); both take a priority, and the lowest gives
+/// way first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Column<K> {
     pub(super) key: K,
@@ -60,6 +85,8 @@ pub struct Column<K> {
     pub(super) drop_below: usize,
     pub(super) ragged: bool,
     pub(super) absorbs_lead: bool,
+    /// The cells a fill wants before the others stop giving way.
+    pub(super) fill_min: usize,
 }
 
 impl<K> Column<K> {
@@ -74,6 +101,7 @@ impl<K> Column<K> {
             drop_below: 0,
             ragged: false,
             absorbs_lead: false,
+            fill_min: MIN_FILL,
         }
     }
 
@@ -94,6 +122,37 @@ impl<K> Column<K> {
         Self::of(key, Width::Steps(steps))
     }
 
+    /// A column whose width steps with the whole row's, its lead included
+    /// ([`Width::RowSteps`]).
+    pub const fn row_steps(key: K, steps: &'static [(usize, usize)]) -> Self {
+        Self::of(key, Width::RowSteps(steps))
+    }
+
+    /// A column that takes `per` of every `of` cells of the whole row, its
+    /// lead included, rounded down ([`Width::Share`]). Bound it with
+    /// [`within`](Self::within).
+    pub const fn share(key: K, per: usize, of: usize) -> Self {
+        Self::of(
+            key,
+            Width::Share {
+                per,
+                of,
+                min: 0,
+                max: usize::MAX,
+            },
+        )
+    }
+
+    /// Keeps a [`share`](Self::share) column between `min` and `max`
+    /// cells. Nothing changes for the other width rules.
+    #[must_use]
+    pub const fn within(mut self, min: usize, max: usize) -> Self {
+        if let Width::Share { per, of, .. } = self.width {
+            self.width = Width::Share { per, of, min, max };
+        }
+        self
+    }
+
     /// A column as wide as its own cell on each row, at most `max`, after
     /// which the row flows ([`Width::Hug`]).
     pub const fn hug(key: K, max: usize) -> Self {
@@ -103,6 +162,15 @@ impl<K> Column<K> {
     /// The column that takes what the others leave ([`Width::Fill`]).
     pub const fn fill(key: K) -> Self {
         Self::of(key, Width::Fill)
+    }
+
+    /// Makes a fill want `cells` before the others stop giving way, in
+    /// place of [`MIN_FILL`]: a snippet that is not worth showing in fewer.
+    /// Nothing changes for the other width rules.
+    #[must_use]
+    pub const fn at_least(mut self, cells: usize) -> Self {
+        self.fill_min = cells;
+        self
     }
 
     /// Leaves `cells` blank cells after the column, between it and the

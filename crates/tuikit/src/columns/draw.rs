@@ -4,7 +4,6 @@
 use ratatui::style::Style;
 use ratatui::text::Span;
 
-use super::MIN_FILL;
 use super::cell::Cell;
 use super::measure::{Measure, lookup};
 use super::schema::{Align, Column, ColumnSchema, Width};
@@ -168,6 +167,20 @@ fn step(steps: &[(usize, usize)], left: usize) -> Option<usize> {
         .filter(|cells| *cells > 0)
 }
 
+/// The cells a column whose width follows the whole row's takes in a row
+/// `row` cells wide, its lead included; `None` for the other rules, and
+/// for a share or step that comes to nothing.
+fn of_row(width: Width, row: usize) -> Option<usize> {
+    match width {
+        Width::RowSteps(steps) => step(steps, row),
+        Width::Share { per, of, min, max } => {
+            let share = row.saturating_mul(per).checked_div(of).unwrap_or(0);
+            Some(share.max(min).min(max)).filter(|cells| *cells > 0)
+        }
+        _ => None,
+    }
+}
+
 impl<K: Copy + Eq> ColumnSchema<K> {
     /// The columns that line up, laid out for `room` after a `lead`. When
     /// one of them absorbs the lead, they are laid out as a row with no
@@ -196,9 +209,11 @@ impl<K: Copy + Eq> ColumnSchema<K> {
     /// The columns that line up, laid out for `room` after a `lead` from
     /// the widths in `measure`: each at its width (a capped column at its
     /// widest cell, less the lead when it absorbs it, a stepped one at its
-    /// step, a fill at [`MIN_FILL`] until it takes what is left), then given
-    /// way by the policy until they fit.
+    /// step, a share of the whole row at its share, a fill at its minimum
+    /// until it takes what is left), then given way by the policy until
+    /// they fit.
     fn laid_out(&self, measure: &Measure<K>, lead: usize, room: usize) -> Vec<Item> {
+        let row = lead + room;
         let mut items = Vec::with_capacity(self.split);
         let mut used = 0;
         let mut gap: Option<usize> = None;
@@ -220,7 +235,8 @@ impl<K: Copy + Eq> ColumnSchema<K> {
                         }
                     }),
                     Width::Steps(steps) => step(steps, left),
-                    Width::Fill => measure.any(column.key).then_some(MIN_FILL),
+                    Width::RowSteps(_) | Width::Share { .. } => of_row(column.width, row),
+                    Width::Fill => measure.any(column.key).then_some(column.fill_min),
                     Width::Hug(_) => None,
                 }
             };
@@ -240,13 +256,14 @@ impl<K: Copy + Eq> ColumnSchema<K> {
     }
 
     /// The flowing columns of one row (from the first hugging column on),
-    /// laid out for the `room` the lined-up ones leave after `lead_gap`:
-    /// each at its own cell's width, then given way by the policy, row by
-    /// row. A blank cell takes no cells and no gap.
+    /// laid out for the `room` the lined-up ones leave after `lead_gap`,
+    /// in a row laid out in `whole` cells after its lead and `row` cells
+    /// wide with it: each at its own cell's width, then given way by the
+    /// policy, row by row. A blank cell takes no cells and no gap.
     fn flowing(
         &self,
         cells: &[(K, Cell)],
-        whole: usize,
+        (whole, row): (usize, usize),
         room: usize,
         lead_gap: usize,
     ) -> Vec<Item> {
@@ -265,7 +282,8 @@ impl<K: Copy + Eq> ColumnSchema<K> {
                 Width::Fixed(cells) => Some(cells),
                 Width::Cap(max) | Width::Hug(max) => Some(cell.width().min(max)),
                 Width::Steps(steps) => step(steps, left),
-                Width::Fill => Some(MIN_FILL),
+                Width::RowSteps(_) | Width::Share { .. } => of_row(column.width, row),
+                Width::Fill => Some(column.fill_min),
             };
             let Some(width) = wanted.filter(|width| *width > 0) else {
                 continue;
@@ -284,8 +302,9 @@ impl<K: Copy + Eq> ColumnSchema<K> {
     }
 
     /// The lined-up columns of a row with a `lead` of its own (a tree
-    /// row's indent; 0 for a flat list) laid out for the `room` after it
-    /// from the widths in `measure`: which show, and how wide.
+    /// row's indent, a list's cursor gutter; 0 when the list draws nothing
+    /// before the schema) laid out for the `room` after it from the widths
+    /// in `measure`: which show, and how wide.
     pub fn layout(&self, measure: &Measure<K>, lead: usize, room: usize) -> Layout<K> {
         let items = self.aligned(measure, lead, room);
         Layout {
@@ -298,9 +317,11 @@ impl<K: Copy + Eq> ColumnSchema<K> {
     }
 
     /// One row's spans: its `cells` laid out in the `room` cells after
-    /// its `lead` (a tree row's indent, which the host draws; 0 for a flat
-    /// list) by the schema and the widths in `measure`, cut and padded,
-    /// never wider than `room`.
+    /// its `lead` (a tree row's indent or a list's cursor gutter, which the
+    /// list draws; 0 when it draws nothing before the schema) by the schema
+    /// and the widths in `measure`, cut and padded, never wider than
+    /// `room`. A share and a row-stepped column count the lead in the
+    /// row's width.
     ///
     /// The lined-up columns take the widths every row in `room` takes; a
     /// blank cell among them is padded while a later cell on the row shows,
@@ -402,7 +423,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             .map_or(0, |item| self.columns[item.index].gap);
         let flow = self.flowing(
             cells,
-            room,
+            (room, lead + room),
             room.saturating_sub(lined_up),
             if lined_up > 0 { lead_gap } else { 0 },
         );

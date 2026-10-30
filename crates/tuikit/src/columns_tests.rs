@@ -390,6 +390,99 @@ fn a_fill_with_no_rule_narrows_last_rather_than_push_the_row_over() {
     assert_eq!(schema.layout(&measure, 0, 5).width(Col::Fill), Some(5));
 }
 
+#[test]
+fn a_share_takes_its_part_of_the_whole_row_its_lead_included() {
+    let schema = ColumnSchema::new([
+        Column::fixed(Col::Mark, 7).gap(1).drops(0),
+        Column::share(Col::Name, 1, 5).within(12, 32),
+        Column::fill(Col::Fill),
+    ]);
+    let rows = [vec![(Col::Name, t("name")), (Col::Fill, t("note"))]];
+    let measure = measured(&schema, &rows);
+    let name = |lead: usize, room: usize| schema.layout(&measure, lead, room).width(Col::Name);
+    assert_eq!(name(0, 100), Some(20), "a fifth of the row");
+    assert_eq!(name(0, 40), Some(12), "no fewer than its minimum");
+    assert_eq!(name(0, 200), Some(32), "no more than its maximum");
+    assert_eq!(
+        name(2, 98),
+        Some(20),
+        "a gutter counts: the same as a row of the whole width"
+    );
+    assert_eq!(
+        name(0, 24),
+        Some(12),
+        "the mark gave way, and the share stays what the row gives it"
+    );
+    // A share that comes to nothing takes no cells and no gap.
+    let bare = ColumnSchema::new([Column::share(Col::Name, 1, 10), Column::fixed(Col::Size, 3)]);
+    let layout = bare.layout(&Measure::new(), 0, 9);
+    assert_eq!(
+        (layout.width(Col::Name), layout.width(Col::Size)),
+        (None, Some(3))
+    );
+    // After a hugging column the share is still of the whole row.
+    let flowing = ColumnSchema::new([Column::hug(Col::Label, 10), Column::share(Col::Name, 1, 4)]);
+    let cells = vec![(Col::Label, t("label")), (Col::Name, t("abcdefghijklmnop"))];
+    let measure = measured(&flowing, std::slice::from_ref(&cells));
+    assert_eq!(
+        draw_text(&flowing, &measure, 40, &cells),
+        "label  abcdefghi…"
+    );
+}
+
+#[test]
+fn a_row_stepped_column_steps_with_the_whole_row_whatever_comes_before_it() {
+    const STEPS: &[(usize, usize)] = &[(100, 22), (78, 20), (0, 14)];
+    let schema = ColumnSchema::new([
+        Column::fixed(Col::Mark, 30).drops(0),
+        Column::row_steps(Col::Name, STEPS),
+        Column::fill(Col::Fill).at_least(50),
+    ]);
+    let rows = [vec![(Col::Fill, t("note"))]];
+    let measure = measured(&schema, &rows);
+    let at = |lead: usize, room: usize| {
+        let layout = schema.layout(&measure, lead, room);
+        (layout.width(Col::Mark), layout.width(Col::Name))
+    };
+    assert_eq!(
+        at(0, 100),
+        (None, Some(22)),
+        "the mark left; the step stays"
+    );
+    assert_eq!(at(0, 99), (None, Some(20)));
+    assert_eq!(at(4, 96), (None, Some(22)), "the lead counts");
+    assert_eq!(at(0, 60), (None, Some(14)));
+}
+
+#[test]
+fn a_fill_wants_its_own_minimum() {
+    let schema =
+        |fill: Column<Col>| ColumnSchema::new([Column::fixed(Col::Name, 10).drops(0), fill]);
+    let rows = [vec![(Col::Name, t("n")), (Col::Fill, t("a note"))]];
+    let wide = schema(Column::fill(Col::Fill).at_least(20));
+    let measure = measured(&wide, &rows);
+    let layout = wide.layout(&measure, 0, 32);
+    assert_eq!(
+        (layout.width(Col::Name), layout.width(Col::Fill)),
+        (Some(10), Some(20))
+    );
+    let layout = wide.layout(&measure, 0, 31);
+    assert_eq!(
+        (layout.width(Col::Name), layout.width(Col::Fill)),
+        (None, Some(31)),
+        "the name gives way for the fill's twenty cells"
+    );
+    let plain = schema(Column::fill(Col::Fill));
+    let measure = measured(&plain, &rows);
+    assert_eq!(
+        plain
+            .layout(&measure, 0, 10 + GAP + MIN_FILL)
+            .width(Col::Name),
+        Some(10),
+        "a fill not told wants seven"
+    );
+}
+
 // --- drawing -----------------------------------------------------------------
 
 #[test]
@@ -847,11 +940,16 @@ fn random_schema(rng: &mut Rng) -> ColumnSchema<Col> {
         if rng.below(4) == 0 {
             continue;
         }
-        let mut column = match (key, rng.below(5)) {
+        let mut column = match (key, rng.below(7)) {
+            (Col::Fill, 0) => Column::fill(key).at_least(rng.below(24)),
             (Col::Fill, _) => Column::fill(key),
             (_, 0) => Column::fixed(key, 1 + rng.below(8)),
             (_, 1) => Column::steps(key, STEPS),
             (_, 2) if index > 3 => Column::hug(key, 2 + rng.below(12)),
+            (_, 5) => {
+                Column::share(key, 1, 1 + rng.below(6)).within(rng.below(6), 4 + rng.below(20))
+            }
+            (_, 6) => Column::row_steps(key, STEPS),
             _ => Column::cap(key, 2 + rng.below(16)),
         };
         column = column.gap(rng.below(3));

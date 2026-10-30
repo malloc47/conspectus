@@ -136,7 +136,9 @@ TreeView::new(&rows, &state, |row, cx| columns.line(row, cx), &theme).render(are
 
 | Item | Does | Notes |
 | --- | --- | --- |
-| `Column::fixed`, `cap`, `steps`, `hug`, `fill` | a column by its width rule (`Width`) | `Fixed(n)` always; `Cap(n)` the widest cell in the list, each counting at most `n` and cut to it (a column whose cells are all blank takes nothing); `Steps` by the room left for it; `Hug(n)` its own cell, unpadded, after which the row flows; `Fill` the rest |
+| `Column::fixed`, `cap`, `steps`, `row_steps`, `share`, `hug`, `fill` | a column by its width rule (`Width`) | `Fixed(n)` always; `Cap(n)` the widest cell in the list, each counting at most `n` and cut to it (a column whose cells are all blank takes nothing); `Steps` by the room left for it; `RowSteps` by the whole row's width, its lead included, whatever the columns before it take; `Share` a part of the whole row, its lead included, rounded down; `Hug(n)` its own cell, unpadded, after which the row flows; `Fill` the rest |
+| `.within(min, max)` | bound a share | other rules ignore it |
+| `.at_least(n)` | the cells a fill wants before the others stop giving way | `MIN_FILL` (7) unless told |
 | `.gap(n)` | blank cells after the column | `GAP` (2) unless told; never drawn after a row's last cell |
 | `.right()` | keep cells to the column's end | counts, numbers |
 | `.drops(p)`, `.shrinks(p, floor)` | how the column gives way, at priority `p` (lowest first) | a column may narrow at one priority and leave at a later one |
@@ -162,17 +164,18 @@ TreeView::new(&rows, &state, |row, cx| columns.line(row, cx), &theme).render(are
 
 1. A column whose `drop_below` room is more than the row's is left out.
 2. Every other column takes its width: fixed, capped at its widest cell
-   (less the row's lead when it absorbs it), stepped, hugging its cell,
-   or a fill at `MIN_FILL` (7) cells.
+   (less the row's lead when it absorbs it), stepped by the room or by the
+   whole row, a share of the whole row, hugging its cell, or a fill at its
+   minimum (`MIN_FILL`, 7 cells, unless told).
 3. While the row is wider than its room, columns give way in ascending
    priority (the later of two at one priority first, a narrowing before a
    leaving): a shrinking column narrows no more than needed and not below
    its floor (or its whole text, when that is narrower), cut by its cell's
    rule; a dropping one leaves with its gap. A column that narrowed takes
    back what a later leaving freed.
-4. The fill, if it still shows, takes what is left, cut with `…`. It shows
-   only with `MIN_FILL` cells or its whole text. A fill with no rule of its
-   own gives way last of all, narrowing until it is gone.
+4. The fill, if it still shows, takes what is left, cut with `…`. A fill
+   that drops shows only with its minimum or its whole text. A fill with
+   no rule of its own gives way last of all, narrowing until it is gone.
 5. A row still too wide once nothing more gives way is cut at its edge
    with `…`.
 

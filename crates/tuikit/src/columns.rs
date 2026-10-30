@@ -11,11 +11,12 @@
 //!
 //! - **Columns** ([`Column`]) are keyed by the host's key type `K` and
 //!   have a width rule ([`Width`]): fixed, capped at the widest cell in the
-//!   list, stepped by the room, hugging their own cell, or filling what is
-//!   left. Each keeps its cells to an edge ([`Align`]), leaves a gap after
-//!   it ([`GAP`] cells unless told otherwise), and may drop or shrink at a
-//!   priority when the row is too narrow, or leave every row narrower than
-//!   a room ([`Column::drop_below`]).
+//!   list, stepped by the room or by the whole row, a share of the whole
+//!   row, hugging their own cell, or filling what is left. Each keeps its
+//!   cells to an edge ([`Align`]), leaves a gap after it ([`GAP`] cells
+//!   unless told otherwise), and may drop or shrink at a priority when the
+//!   row is too narrow, or leave every row narrower than a room
+//!   ([`Column::drop_below`]).
 //! - **Cells** ([`Cell`]) are typed by how they cut: text at its end, in
 //!   the middle, or clipped, with a tail kept whole; styled spans and
 //!   chips; a list of chips with a count of the rest; the age cell; a
@@ -36,8 +37,9 @@
 //!    the row's is left out.
 //! 2. Every other column takes its width: a fixed column its cells, a
 //!    capped one its widest cell in the list (none when every cell is
-//!    blank), a stepped one its step, a hugging one its own cell, and a
-//!    fill [`MIN_FILL`] cells.
+//!    blank), a stepped one its step, a share its part of the whole row
+//!    (the row's lead included), a hugging one its own cell, and a fill
+//!    its minimum, [`MIN_FILL`] cells unless told.
 //! 3. While the row is wider than its room, columns give way in ascending
 //!    priority: one that [`shrinks`](Column::shrinks) narrows, no more
 //!    than the row needs and not below its floor, and is cut by its cell's
