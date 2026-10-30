@@ -18,7 +18,10 @@ returns it, and page keys move by it without carrying a height. Amended by
 [ADR 0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md):
 the producer can be `TreeColumns`, which lays each row out from a column
 schema the host names for it; group headers, session rows, and mux rows
-are laid out that way.
+are laid out that way. Amended by
+[ADR 0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md):
+the tree draws the pointer gutter before every row (decision 7), and of
+two copies of an identity only the cursor's is the cursor row.
 
 ## Context
 

@@ -1139,8 +1139,9 @@ it does not, so the unfocused pane still shows its cursor. Chips and field
 fills keep their look inside the highlight. Short choice lists (menus, the
 picker, checklists, Controls, the search lists, a form's fields) wrap at
 their ends; the tree, the explorer, and the Messages log stop. The left
-pane's tree draws the highlight without the gutter until every kind of row
-is on a column schema (backlog `CSP-775`).
+pane's tree draws the gutter before every row, so one row is marked and
+nothing after the gutter moves with the cursor; its column schemas count
+the gutter in each row's lead (ADR 0186).
 
 Keys are the first convention (ADR 0160). Every overlay resolves its keys
 through a table in the framework's `keys` module and generates its footer
@@ -1332,8 +1333,8 @@ and one rebuild routine keeps the selection when the rows are rebuilt (the
 same id, else the same position, else the launch context's row on the
 first load, else the first row). `TreeView` draws the pane (the tab strip
 title, the Search header, the Pinned banner, the placeholder, the
-scrollbar) and each row's pending, ghost, and selection looks over the
-cells `conspectus` lays out; the App works out each row's ghost, pending,
+scrollbar) and each row's pending, ghost, and selection looks and cursor
+gutter around the cells `conspectus` lays out; the App works out each row's ghost, pending,
 and pin-marker state before the frame, so laying a row out looks nothing
 up. `RowKind`, `RowId`, and the row builders stay in `conspectus`. Group
 headers, session rows, mux rows (running and stopped), PR rows, and

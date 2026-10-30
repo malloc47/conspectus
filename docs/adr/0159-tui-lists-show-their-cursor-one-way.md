@@ -7,6 +7,9 @@ Accepted. Applies house rules 1, 2, and 10 of ADR 0151 and extends ADR
 0156 decision 2 left for this module: the menus' hand-rolled clamps are
 gone and the menus wrap. Widens ADR 0032's `selection_active` and
 `selection_inactive` keys from the panes' cursor rows to every list's.
+Amended by
+[ADR 0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md):
+the left pane's tree draws the gutter too (decision 6).
 
 ## Context
 

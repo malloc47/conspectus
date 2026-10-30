@@ -23,7 +23,11 @@ its path, so nested headers line up. Amended by
 [ADR 0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md):
 a column can be a share of the row or step by the row, and a fill can
 want its own minimum, so the palette's plan becomes a schema and the
-Search view's hit, pane, and pane-hit rows are laid out from one.
+Search view's hit, pane, and pane-hit rows are laid out from one. Amended
+by
+[ADR 0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md):
+the tree's cursor gutter is part of each row's lead, and a column that
+absorbs the lead does not absorb a lead every row shares.
 
 ## Context
 

@@ -181,7 +181,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161, 0177, 0182) |
 | [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted |
 | [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted (amended by 0166, 0174) |
-| [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted |
+| [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted (amended by 0186) |
 | [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176, 0177, 0179, 0180) |
 | [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted (amended by 0172, 0176, 0177, 0180) |
 | [0162](0162-tui-help-pages-one-page-generated-from-key-tables.md) | Help Pages Are One Page, Generated From The Key Tables | Accepted (amended by 0177, 0178, 0180) |
@@ -204,10 +204,11 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted |
 | [0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) | The Transcript Viewer Is A Pager Content, And The Viewer Boundary Keeps Only The Transcript | Accepted |
 | [0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md) | Rich Text Is A Framework Feature, And The Preview Scrolls In A Region Counted From An Anchor | Accepted |
-| [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted (amended by 0183) |
-| [0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md) | Rows Come From Column Schemas, And One Rule Decides What Gives Way | Accepted (amended by 0184, 0185) |
+| [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted (amended by 0183, 0186) |
+| [0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md) | Rows Come From Column Schemas, And One Rule Decides What Gives Way | Accepted (amended by 0184, 0185, 0186) |
 | [0184](0184-tui-pr-pinned-and-history-rows-come-from-schemas-and-headers-carry-two-cells.md) | PR, Pinned, And History Rows Come From Schemas, And Group Headers Carry Two Cells | Accepted |
 | [0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md) | A Search Hit Is One Column Schema In The Modal And The Search View | Accepted |
+| [0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md) | The Tree Marks Its Cursor Row In A Gutter Before Every Row | Accepted |
 
 ## Transcript viewer
 

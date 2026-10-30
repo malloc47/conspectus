@@ -117,7 +117,11 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   form's focused row highlights its label around the field's own fill, a
   conflict row in the right pane's Other zone shows its `▲` two cells
   further in, and the checklists cut a long label with `…`. The left
-  pane's look is unchanged.
+  pane's tree marks its cursor row the same way, focused or not, so its
+  rows start two cells further right; each row gives the two cells up
+  from its end (the preview, snippet, or content first, then, in a narrow
+  pane, the next cell its order lets go), the mux names keep their widths,
+  and a row a view lists twice is marked and highlighted once.
 - **A letter in a dialog means the letter, not its chords.** Inside
   menus, prompts, forms, Controls, search, Messages, the help page, the
   value viewer, and the transcript and pane viewers, a letter key fires
