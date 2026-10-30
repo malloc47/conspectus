@@ -34,7 +34,7 @@ moves into the new crate (they would still pass):
 | --- | --- |
 | `tests/test_module_hygiene.rs` | every `.rs` file for inline `mod tests` over 100 lines |
 | `tests/comment_hygiene.rs` | comments for backlog IDs |
-| `tests/overlay_keymap_hygiene.rs` | `src/tui/widgets/**` and `src/tui/runtime/overlay_keys.rs` for hand-matched `KeyCode` and hand-written key hints |
+| `tests/overlay_keymap_hygiene.rs` | `src/tui/widgets/**` and `src/tui/runtime/overlay_keys.rs` for hand-matched `KeyCode` and hand-written key hints; since CSP-759 also the status-line code (`runtime.rs`, `runtime/executor.rs`, `app/overlays.rs`, `ui/header.rs`) for hand-written hints |
 | `tests/capabilities_static.rs` | source for process, socket, signal, and write paths against `docs/capabilities.toml` |
 | `src/tui/consistency_tests/text.rs` | string literals and rendered screens for ADR/backlog/doc-path leaks |
 | `src/tui/consistency_tests/docs.rs` | reads `docs/tui-columns.md` via `CARGO_MANIFEST_DIR` (changes if the tests move) |

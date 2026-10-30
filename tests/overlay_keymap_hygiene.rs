@@ -1,14 +1,16 @@
 //! Overlay keys resolve through key tables (`tuikit::keys` and the
-//! host's `tui::keybindings::overlay`), and overlay footers are generated
-//! from those tables (ADR 0123, ADR 0160). This
-//! guard fails when overlay code matches `KeyCode` by hand or renders a
-//! hand-written key hint, the two ways a footer could drift from what
-//! its handler accepts.
+//! host's `tui::keybindings::overlay`), and overlay footers and the
+//! status bar's hints are generated from those tables (ADR 0123, ADR 0160,
+//! ADR 0191). This guard fails when overlay code matches `KeyCode` by hand
+//! or renders a hand-written key hint, the two ways a footer could drift
+//! from what its handler accepts.
 //!
 //! The guard covers the host's overlay code and every file of the
 //! framework (`crates/tuikit/src`), because overlay controls move there;
-//! `tests/support/source_tree.rs` explains why and how the scans are
-//! guarded against visiting too few files.
+//! the hint scan also covers the code that writes the status line when an
+//! overlay opens and the status bar itself. `tests/support/source_tree.rs`
+//! explains why and how the scans are guarded against visiting too few
+//! files.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,6 +29,20 @@ const TREES: &[Tree] = &[
     Tree::new("src/tui/runtime/overlay_keys.rs", 1),
     Tree::new("src/tui/modal.rs", 1),
     FRAMEWORK_SRC,
+];
+
+/// The code that writes the status line: the runtime's handlers, the
+/// App's openers, and the executor's, which set its text when a key opens
+/// an overlay, and the status bar, which draws the hints. They route keys
+/// and draw the main view, so they may name key codes, but a key hint
+/// they wrote by hand would sit on the status line beside, or instead
+/// of, the generated one. The status scan holds them to the stricter
+/// [`looks_like_status_hint`].
+const STATUS_TREES: &[Tree] = &[
+    Tree::new("src/tui/runtime.rs", 1),
+    Tree::new("src/tui/runtime/executor.rs", 1),
+    Tree::new("src/tui/app/overlays.rs", 1),
+    Tree::new("src/tui/ui/header.rs", 1),
 ];
 
 /// Framework files that may name `KeyCode` outside a test module because
@@ -88,6 +104,61 @@ fn looks_like_key_hint(literal: &str) -> bool {
         })
 }
 
+/// What the status scan flags: a footer-shaped literal, or one whose
+/// ` · `-separated pieces include a hint segment ([`is_hint_segment`]).
+/// Overlay code explains keys in sentences ("Tab completes the path"),
+/// which this would flag, so only the status-line code is held to it.
+fn looks_like_status_hint(literal: &str) -> bool {
+    looks_like_key_hint(literal) || literal.split(" · ").any(is_hint_segment)
+}
+
+/// Keys that are not a single character, as hints write them.
+const NAMED_KEYS: &[&str] = &[
+    "Esc",
+    "Enter",
+    "Tab",
+    "S-Tab",
+    "Backspace",
+    "Space",
+    "PgUp",
+    "PgDn",
+    "Home",
+    "End",
+    "↑",
+    "↓",
+    "←",
+    "→",
+];
+
+/// Whether `token` is keys as a hint writes them, joined with `/`: named
+/// keys, chords (`Ctrl-R`, `Alt-b`, `^R`), and single characters other
+/// than digits (`1 hit` is a count).
+fn is_keys(token: &str) -> bool {
+    !token.is_empty()
+        && token.split('/').all(|key| {
+            NAMED_KEYS.contains(&key)
+                || key.starts_with("Ctrl-")
+                || key.starts_with("Alt-")
+                || (key.starts_with('^') && key.chars().count() == 2)
+                || (key.chars().count() == 1 && !key.chars().all(|c| c.is_ascii_digit()))
+        })
+}
+
+/// Whether `piece` is one hint segment written by hand: keys and a verb
+/// (`Tab focus`, `Enter/a attach {label}`, `^R forges`). A piece that
+/// leads with a single character needs to be exactly a key and a word
+/// (`q quit`), so a sentence that starts with "a" is not one.
+fn is_hint_segment(piece: &str) -> bool {
+    let words: Vec<&str> = piece.split(' ').collect();
+    let [keys, verb, ..] = words.as_slice() else {
+        return false;
+    };
+    let named = keys.split('/').any(|key| key.chars().count() > 1);
+    is_keys(keys)
+        && verb.chars().next().is_some_and(char::is_lowercase)
+        && (named || words.len() == 2)
+}
+
 /// Lines of overlay code under `trees` that match a `KeyCode` by hand, as
 /// `path:line: text` findings.
 fn hand_matched_keys(root: &Path, trees: &[Tree]) -> Vec<String> {
@@ -116,12 +187,22 @@ fn hand_matched_keys(root: &Path, trees: &[Tree]) -> Vec<String> {
 /// Hand-written key hints in overlay code under `trees`, as
 /// `path: "literal"` findings.
 fn hand_written_hints(root: &Path, trees: &[Tree]) -> Vec<String> {
+    hints_by(root, trees, looks_like_key_hint)
+}
+
+/// Hand-written key hints in the status-line code under `trees`.
+fn hand_written_status_hints(root: &Path, trees: &[Tree]) -> Vec<String> {
+    hints_by(root, trees, looks_like_status_hint)
+}
+
+/// The string literals under `trees` that `looks` takes for a key hint.
+fn hints_by(root: &Path, trees: &[Tree], looks: fn(&str) -> bool) -> Vec<String> {
     let mut offenders = Vec::new();
     for path in overlay_sources(root, trees) {
         let text = fs::read_to_string(&path).expect("read overlay source");
         for literal in string_literals(&text) {
             let literal = literal.text;
-            if looks_like_key_hint(&literal) && !ALLOWED_HINT_TEXT.contains(&literal.as_str()) {
+            if looks(&literal) && !ALLOWED_HINT_TEXT.contains(&literal.as_str()) {
                 offenders.push(format!(
                     "{}: {literal:?}",
                     source_tree::relative(root, &path)
@@ -170,6 +251,18 @@ fn overlay_footers_are_generated_from_keymap_tables() {
 }
 
 #[test]
+fn the_status_line_names_no_key_hint_written_by_hand() {
+    let offenders = hand_written_status_hints(source_tree::workspace_root(), STATUS_TREES);
+    assert!(
+        offenders.is_empty(),
+        "status-line code writes a key hint by hand; the status bar generates hints from the \
+         key tables (`tuikit::status_bar::KeyHintBar`), and an overlay names its own keys \
+         (`Overlay::hints`):\n{}",
+        offenders.join("\n")
+    );
+}
+
+#[test]
 fn a_hand_matched_key_is_caught_in_every_tree_the_scan_covers() {
     let violation = "fn f() { let _ = KeyCode::Esc; }\n";
     source_tree::assert_scan_covers_every_tree(TREES, violation, hand_matched_keys);
@@ -179,4 +272,45 @@ fn a_hand_matched_key_is_caught_in_every_tree_the_scan_covers() {
 fn a_hand_written_hint_is_caught_in_every_tree_the_scan_covers() {
     let violation = "fn f() { let _ = \"Esc · Enter close\"; }\n";
     source_tree::assert_scan_covers_every_tree(TREES, violation, hand_written_hints);
+}
+
+#[test]
+fn a_hand_written_status_hint_is_caught_in_every_file_the_status_scan_covers() {
+    let violation = "fn f() { let _ = \"Tab focus\"; }\n";
+    source_tree::assert_scan_covers_every_tree(STATUS_TREES, violation, hand_written_status_hints);
+}
+
+/// The status line's hand-written hints this scan once missed, each of
+/// the shapes it now catches, and text it must leave alone.
+#[test]
+fn a_hint_segment_written_by_hand_is_caught_and_prose_is_not() {
+    for hint in [
+        "worktree: ↑/↓ move · Enter pick · Esc close",
+        "Tab focus",
+        "q quit",
+        "r refresh · ^R forges",
+        "Enter/a attach {label}",
+        "Enter/v view {} · S resume",
+        "Backspace back",
+        "Ctrl-R hard refresh",
+        "←/→ fold",
+    ] {
+        assert!(looks_like_status_hint(hint), "{hint:?} is a key hint");
+    }
+    for prose in [
+        "a status message long enough to wrap",
+        "attach",
+        "worktree: nothing selected",
+        "i: select an agent or mux session row to copy its id",
+        "tmux:off",
+        "(pin, forget, plan, clean up)",
+        "at the match",
+        "1 hit",
+        "",
+    ] {
+        assert!(
+            !looks_like_status_hint(prose),
+            "{prose:?} is not a key hint"
+        );
+    }
 }
