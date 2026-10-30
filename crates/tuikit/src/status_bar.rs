@@ -394,13 +394,14 @@ impl KeyHintBar {
     /// note before any key wherever the footer puts it.
     #[must_use]
     pub fn footer(mut self, footer: &Footer, rank: u32) -> Self {
+        let note_rank = rank.saturating_sub(1);
         self.hints
             .extend(footer.segments().iter().map(|segment| KeyHint {
                 labels: Vec::new(),
                 words: segment.text.clone(),
                 keys: segment.keys.clone(),
                 rank: segment.rank.unwrap_or(if segment.keys.is_empty() {
-                    rank.saturating_sub(1)
+                    note_rank
                 } else {
                     rank
                 }),
