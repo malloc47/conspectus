@@ -431,6 +431,126 @@ fn a_share_takes_its_part_of_the_whole_row_its_lead_included() {
     );
 }
 
+/// A mark, a label that takes 45% of what the mark and the word leave
+/// (16 to 48 cells, narrowing last), a note that is not worth fewer than
+/// 10 cells and hands its cells to the label when it leaves, and a word a
+/// third of the whole row (at most 16) kept to the right edge.
+fn rest_schema() -> ColumnSchema<Col> {
+    ColumnSchema::new([
+        Column::fixed(Col::Mark, 2).gap(0),
+        Column::share_of_rest(Col::Label, 45, 100)
+            .within(16, 48)
+            .shrinks(1, 0),
+        Column::fill(Col::Note)
+            .at_least(10)
+            .drops(0)
+            .gives_to(Col::Label),
+        Column::share(Col::Extra, 1, 3).within(0, 16).right(),
+    ])
+}
+
+#[test]
+fn a_share_of_the_rest_takes_its_part_of_what_the_other_columns_leave() {
+    let schema = rest_schema();
+    let rows = [vec![(Col::Note, t("a note")), (Col::Extra, t("word"))]];
+    let measure = measured(&schema, &rows);
+    let at = |lead: usize, room: usize| {
+        let layout = schema.layout(&measure, lead, room);
+        [Col::Label, Col::Note, Col::Extra].map(|key| layout.width(key))
+    };
+    // 83 cells after a 2-cell gutter: the word is a third of 85, at most
+    // 16; the mark (2), the word, and the gap before it (2) leave 63, and
+    // the label takes 45% of them (28). The gap between the label and the
+    // note is theirs to split.
+    assert_eq!(at(2, 83), [Some(28), Some(33), Some(16)]);
+    // Wide rows cap the label at 48.
+    assert_eq!(at(2, 158)[0], Some(48));
+    // Narrow rows keep the label at 16 while the note keeps its 10.
+    assert_eq!(at(2, 50), [Some(16), Some(12), Some(16)]);
+    // A column that leaves for the room is not one the share counts.
+    let bare = ColumnSchema::new([
+        Column::fixed(Col::Mark, 4).drop_below(30),
+        Column::share_of_rest(Col::Label, 1, 2),
+        Column::fill(Col::Note),
+    ]);
+    let measure = measured(&bare, &rows);
+    assert_eq!(bare.layout(&measure, 0, 40).width(Col::Label), Some(17));
+    assert_eq!(bare.layout(&measure, 0, 20).width(Col::Label), Some(10));
+}
+
+#[test]
+fn a_fill_that_does_not_show_gives_its_cells_to_the_column_it_names() {
+    let schema = rest_schema();
+    let rows = [vec![(Col::Note, t("a note")), (Col::Extra, t("word"))]];
+    let measure = measured(&schema, &rows);
+    let at = |room: usize| {
+        let layout = schema.layout(&measure, 2, room);
+        [Col::Label, Col::Note, Col::Extra].map(|key| layout.width(key))
+    };
+    // At 48 cells the note gets its 10; at 47 it would get 9: it leaves,
+    // and the label takes the row up to the word, past its share.
+    assert_eq!(at(48), [Some(16), Some(10), Some(16)]);
+    assert_eq!(at(47), [Some(27), None, Some(16)]);
+    assert_eq!(at(44), [Some(25), None, Some(15)]);
+    // Narrower still, the label narrows last, below its least.
+    assert_eq!(at(20), [Some(9), None, Some(7)]);
+    // A list with no cell for the note lays every row out without it, and
+    // the label takes the cells instead of leaving them blank.
+    let blank = measured(&schema, &[vec![(Col::Extra, t("word"))]]);
+    let layout = schema.layout(&blank, 2, 83);
+    assert_eq!(
+        (layout.width(Col::Label), layout.width(Col::Note)),
+        (Some(63), None)
+    );
+    let drawn = Cell::plain(&schema.draw(
+        &blank,
+        2,
+        83,
+        &[(Col::Label, t("label")), (Col::Extra, t("word"))],
+        &Theme::default(),
+    ));
+    assert_eq!(
+        text::width(&drawn),
+        83,
+        "the word keeps to the edge: {drawn:?}"
+    );
+    assert!(drawn.ends_with("  word"), "{drawn:?}");
+    // Without one to give them to, a fill that leaves leaves blank cells.
+    let plain = ColumnSchema::new([
+        Column::cap(Col::Label, 20),
+        Column::fill(Col::Note).at_least(10).drops(0),
+    ]);
+    let measure = measured(
+        &plain,
+        &[vec![(Col::Label, t("label")), (Col::Note, t("a note"))]],
+    );
+    let layout = plain.layout(&measure, 0, 14);
+    assert_eq!(
+        (layout.width(Col::Label), layout.width(Col::Note)),
+        (Some(5), None)
+    );
+}
+
+#[test]
+fn a_share_of_the_rest_after_a_hugging_column_splits_what_that_row_leaves() {
+    let schema = ColumnSchema::new([
+        Column::hug(Col::Name, 20),
+        Column::share_of_rest(Col::Label, 1, 2),
+        Column::fill(Col::Note),
+    ]);
+    let cells = vec![
+        (Col::Name, t("name")),
+        (Col::Label, t("abcdefghijklmnopqrstuvwxyz")),
+        (Col::Note, t("the note runs on and on and on")),
+    ];
+    let measure = measured(&schema, std::slice::from_ref(&cells));
+    // 40 cells less the name (4) and its gap (2) leave 34: half is 17.
+    assert_eq!(
+        draw_text(&schema, &measure, 40, &cells),
+        "name  abcdefghijklmnop…  the note runs …"
+    );
+}
+
 #[test]
 fn a_row_stepped_column_steps_with_the_whole_row_whatever_comes_before_it() {
     const STEPS: &[(usize, usize)] = &[(100, 22), (78, 20), (0, 14)];
@@ -1079,10 +1199,15 @@ fn random_schema(rng: &mut Rng) -> ColumnSchema<Col> {
         }
         let mut column = match (key, rng.below(7)) {
             (Col::Fill, 0) => Column::fill(key).at_least(rng.below(24)),
+            (Col::Fill, 1) => Column::fill(key)
+                .at_least(rng.below(16))
+                .gives_to(Col::Name),
             (Col::Fill, _) => Column::fill(key),
             (_, 0) => Column::fixed(key, 1 + rng.below(8)),
             (_, 1) => Column::steps(key, STEPS),
             (_, 2) if index > 3 => Column::hug(key, 2 + rng.below(12)),
+            (_, 3) => Column::share_of_rest(key, 1, 1 + rng.below(4))
+                .within(rng.below(6), 4 + rng.below(30)),
             (_, 5) => {
                 Column::share(key, 1, 1 + rng.below(6)).within(rng.below(6), 4 + rng.below(20))
             }

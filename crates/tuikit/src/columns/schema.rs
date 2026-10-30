@@ -41,6 +41,23 @@ pub enum Width {
         /// The most cells the share comes to.
         max: usize,
     },
+    /// `per` of every `of` cells of what the other columns leave, rounded
+    /// down and kept between `min` and `max`: the row's room less every
+    /// column that shows and is neither a share of what is left nor a
+    /// fill, and less the gaps beside those columns. A label that splits
+    /// the room with the fill after it, whatever the fixed columns take.
+    /// A stepped column counts the room left for it before the share is
+    /// taken.
+    ShareOfRest {
+        /// The cells taken of every `of`.
+        per: usize,
+        /// The cells of what is left each `per` is taken of.
+        of: usize,
+        /// The fewest cells the share comes to.
+        min: usize,
+        /// The most cells the share comes to.
+        max: usize,
+    },
     /// As wide as its own cell on each row, at most this many cells, and
     /// never padded. The columns after it follow it on each row instead
     /// of lining up: a label and the notes after it.
@@ -49,7 +66,9 @@ pub enum Width {
     /// fewer than its minimum, [`MIN_FILL`](super::MIN_FILL) cells unless
     /// told ([`Column::at_least`]). A fill that drops leaves rather than
     /// show fewer, unless its whole text is shorter; one with no rule of
-    /// its own narrows last of all. It is cut with `…`.
+    /// its own narrows last of all. It is cut with `…`. A fill that
+    /// [gives its cells](Column::gives_to) to another column hands that
+    /// column what it would have taken on a row where it does not show.
     Fill,
 }
 
@@ -87,6 +106,8 @@ pub struct Column<K> {
     pub(super) absorbs_lead: bool,
     /// The cells a fill wants before the others stop giving way.
     pub(super) fill_min: usize,
+    /// The column a fill hands its cells to where it does not show.
+    pub(super) gives_to: Option<K>,
 }
 
 impl<K> Column<K> {
@@ -102,6 +123,7 @@ impl<K> Column<K> {
             ragged: false,
             absorbs_lead: false,
             fill_min: MIN_FILL,
+            gives_to: None,
         }
     }
 
@@ -179,12 +201,63 @@ impl<K> Column<K> {
         )
     }
 
-    /// Keeps a [`share`](Self::share) column between `min` and `max`
-    /// cells. Nothing changes for the other width rules.
+    /// A column that takes `per` of every `of` cells of what the other
+    /// columns leave, rounded down ([`Width::ShareOfRest`]): what the row's
+    /// room has after every column that is neither such a share nor a
+    /// fill, and the gaps beside them. Bound it with
+    /// [`within`](Self::within).
+    ///
+    /// ```
+    /// use ratatui::style::Style;
+    /// use tuikit::columns::{Cell, Column, ColumnSchema, Measure};
+    ///
+    /// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    /// enum Col {
+    ///     Mark,
+    ///     Name,
+    ///     Note,
+    ///     Word,
+    /// }
+    ///
+    /// // A mark and a word at the edges, and a name that takes half of
+    /// // what they leave, the note the other half.
+    /// let schema = ColumnSchema::new([
+    ///     Column::fixed(Col::Mark, 2).gap(0),
+    ///     Column::share_of_rest(Col::Name, 1, 2),
+    ///     Column::fill(Col::Note),
+    ///     Column::fixed(Col::Word, 6).right(),
+    /// ]);
+    /// let mut measure = Measure::new();
+    /// measure.add(&schema, 0, &[(Col::Note, Cell::text("a note", Style::default()))]);
+    /// // 40 cells less the mark (2), the word (6), and the gap before it
+    /// // (2) leave 30: the name takes 15, and the note what is left.
+    /// let layout = schema.layout(&measure, 0, 40);
+    /// assert_eq!(layout.width(Col::Name), Some(15));
+    /// assert_eq!(layout.width(Col::Note), Some(13));
+    /// ```
+    pub const fn share_of_rest(key: K, per: usize, of: usize) -> Self {
+        Self::of(
+            key,
+            Width::ShareOfRest {
+                per,
+                of,
+                min: 0,
+                max: usize::MAX,
+            },
+        )
+    }
+
+    /// Keeps a [`share`](Self::share) or a
+    /// [`share_of_rest`](Self::share_of_rest) column between `min` and
+    /// `max` cells. Nothing changes for the other width rules.
     #[must_use]
     pub const fn within(mut self, min: usize, max: usize) -> Self {
-        if let Width::Share { per, of, .. } = self.width {
-            self.width = Width::Share { per, of, min, max };
+        match self.width {
+            Width::Share { per, of, .. } => self.width = Width::Share { per, of, min, max },
+            Width::ShareOfRest { per, of, .. } => {
+                self.width = Width::ShareOfRest { per, of, min, max };
+            }
+            _ => {}
         }
         self
     }
@@ -206,6 +279,49 @@ impl<K> Column<K> {
     #[must_use]
     pub const fn at_least(mut self, cells: usize) -> Self {
         self.fill_min = cells;
+        self
+    }
+
+    /// Makes a fill hand the cells it would have taken to the column
+    /// under `key` on a row where it does not show: where it
+    /// [drops](Self::drops) below its minimum, or where no row of the list
+    /// has a cell for it. The column takes them past its own width rule,
+    /// so a context that is not worth showing gives the row to the label
+    /// before it instead of to blank cells. Nothing changes for the other
+    /// width rules, and a fill after a hugging column hands its cells on
+    /// only where it leaves.
+    ///
+    /// ```
+    /// use ratatui::style::Style;
+    /// use tuikit::columns::{Cell, Column, ColumnSchema, Measure};
+    ///
+    /// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    /// enum Col {
+    ///     Name,
+    ///     Note,
+    /// }
+    ///
+    /// let schema = ColumnSchema::new([
+    ///     Column::share_of_rest(Col::Name, 1, 2).within(8, 30),
+    ///     Column::fill(Col::Note).at_least(10).drops(0).gives_to(Col::Name),
+    /// ]);
+    /// let mut measure = Measure::new();
+    /// measure.add(&schema, 0, &[(Col::Note, Cell::text("a note", Style::default()))]);
+    /// let widths = |room: usize| {
+    ///     let layout = schema.layout(&measure, 0, room);
+    ///     (layout.width(Col::Name), layout.width(Col::Note))
+    /// };
+    /// assert_eq!(widths(40), (Some(20), Some(18)));
+    /// // At 20 cells the note would get 8, fewer than its 10: it leaves and
+    /// // the name takes the row.
+    /// assert_eq!(widths(20), (Some(20), None));
+    /// ```
+    #[must_use]
+    pub const fn gives_to(mut self, key: K) -> Self
+    where
+        K: Copy,
+    {
+        self.gives_to = Some(key);
         self
     }
 

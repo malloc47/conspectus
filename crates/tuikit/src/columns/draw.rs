@@ -202,8 +202,9 @@ fn total<K>(columns: &[Column<K>], items: &[Item], lead_gap: usize) -> usize {
 /// same priority, a narrowing before a leaving), each narrowing no more
 /// than the row needs and leaving whole, until the row fits. A column
 /// that narrowed takes back what a later leaving freed. The fill, if it
-/// still shows, takes what is left.
-fn give_way<K>(columns: &[Column<K>], items: &mut [Item], room: usize, lead_gap: usize) {
+/// still shows, takes what is left; a fill that does not show hands it to
+/// the column it [gives its cells to](Column::gives_to).
+fn give_way<K: Copy + Eq>(columns: &[Column<K>], items: &mut [Item], room: usize, lead_gap: usize) {
     // (priority, position, leaves, floor)
     let mut turns: Vec<(u8, usize, bool, usize)> = Vec::new();
     for (position, item) in items.iter().enumerate() {
@@ -259,11 +260,69 @@ fn give_way<K>(columns: &[Column<K>], items: &mut [Item], room: usize, lead_gap:
         item.width = Some(width + back);
         slack -= back;
     }
-    if let Some(item) = items
-        .iter_mut()
-        .find(|item| item.width.is_some() && matches!(columns[item.index].width, Width::Fill))
-    {
+    let is_fill = |item: &Item| matches!(columns[item.index].width, Width::Fill);
+    let taker = items
+        .iter()
+        .position(|item| item.width.is_some() && is_fill(item))
+        .or_else(|| {
+            let key = items
+                .iter()
+                .filter(|item| item.width.is_none() && is_fill(item))
+                .find_map(|item| columns[item.index].gives_to)?;
+            items
+                .iter()
+                .position(|item| item.width.is_some() && columns[item.index].key == key)
+        });
+    if let Some(position) = taker {
+        let item = &mut items[position];
         item.width = item.width.map(|width| width + slack);
+    }
+}
+
+/// Gives each share of what is left (`pending`, positions in `items`
+/// whose width is still to come) its cells: `per` of every `of` of the
+/// `room` the other shown columns leave, less the gaps beside them and
+/// the `lead_gap` before the first, kept between its bounds. The shares
+/// and the fills are not the other columns: they split what is left, the
+/// gaps between them included.
+fn share_the_rest<K>(
+    columns: &[Column<K>],
+    items: &mut [Item],
+    pending: &[usize],
+    room: usize,
+    lead_gap: usize,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let flexible = |position: usize, items: &[Item]| {
+        pending.contains(&position) || matches!(columns[items[position].index].width, Width::Fill)
+    };
+    let shown: Vec<usize> = (0..items.len())
+        .filter(|position| items[*position].width.is_some() || pending.contains(position))
+        .collect();
+    let mut taken = if shown.is_empty() { 0 } else { lead_gap };
+    for (n, &position) in shown.iter().enumerate() {
+        if !flexible(position, items) {
+            taken += items[position].width.unwrap_or(0);
+        }
+        let apart = shown
+            .get(n + 1)
+            .is_some_and(|&next| !(flexible(position, items) && flexible(next, items)));
+        if apart {
+            taken += columns[items[position].index].gap;
+        }
+    }
+    let rest = room.saturating_sub(taken);
+    for &position in pending {
+        let Width::ShareOfRest { per, of, min, max } = columns[items[position].index].width else {
+            continue;
+        };
+        let share = rest.saturating_mul(per).checked_div(of).unwrap_or(0);
+        let width = Some(share.max(min).min(max)).filter(|cells| *cells > 0);
+        let item = &mut items[position];
+        item.wanted = width.unwrap_or(0);
+        item.width = width;
     }
 }
 
@@ -329,11 +388,15 @@ impl<K: Copy + Eq> ColumnSchema<K> {
     fn laid_out(&self, measure: &Measure<K>, lead: usize, room: Room) -> Vec<Item> {
         let row = lead + room.whole();
         let mut items = Vec::with_capacity(self.split);
+        let mut pending = Vec::new();
         let mut used = 0;
         let mut gap: Option<usize> = None;
         for (index, column) in self.columns[..self.split].iter().enumerate() {
             let left = room.whole().saturating_sub(used + gap.unwrap_or(0));
             let wanted = if column.drop_below > room.whole() {
+                None
+            } else if matches!(column.width, Width::ShareOfRest { .. }) {
+                pending.push(items.len());
                 None
             } else {
                 match column.width {
@@ -351,7 +414,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
                     Width::Steps(steps) => step(steps, left),
                     Width::RowSteps(_) | Width::Share { .. } => of_row(column.width, row),
                     Width::Fill => measure.any(column.key).then_some(column.fill_min),
-                    Width::Hug(_) => None,
+                    Width::Hug(_) | Width::ShareOfRest { .. } => None,
                 }
             };
             if let Some(width) = wanted {
@@ -364,6 +427,10 @@ impl<K: Copy + Eq> ColumnSchema<K> {
                 width: wanted,
                 own: wanted.unwrap_or(0),
             });
+        }
+        share_the_rest(&self.columns, &mut items, &pending, room.whole(), 0);
+        for &position in &pending {
+            items[position].own = items[position].wanted;
         }
         give_way(&self.columns, &mut items, room.cells(), 0);
         items
@@ -382,6 +449,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         lead_gap: usize,
     ) -> Vec<Item> {
         let mut items = Vec::new();
+        let mut pending = Vec::new();
         let mut used = 0;
         let mut gap = lead_gap;
         for (index, column) in self.columns.iter().enumerate().skip(self.split) {
@@ -391,6 +459,16 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             let Some(cell) = lookup(cells, column.key).filter(|cell| !cell.is_empty()) else {
                 continue;
             };
+            if matches!(column.width, Width::ShareOfRest { .. }) {
+                pending.push(items.len());
+                items.push(Item {
+                    index,
+                    wanted: 0,
+                    width: None,
+                    own: cell.width(),
+                });
+                continue;
+            }
             let left = room.whole().saturating_sub(used + gap);
             let wanted = match column.width {
                 Width::Fixed(cells) => Some(cells),
@@ -398,6 +476,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
                 Width::Steps(steps) => step(steps, left),
                 Width::RowSteps(_) | Width::Share { .. } => of_row(column.width, row),
                 Width::Fill => Some(column.fill_min),
+                Width::ShareOfRest { .. } => None,
             };
             let Some(width) = wanted.filter(|width| *width > 0) else {
                 continue;
@@ -410,6 +489,11 @@ impl<K: Copy + Eq> ColumnSchema<K> {
                 width: Some(width),
                 own: cell.width().min(width).max(1),
             });
+        }
+        share_the_rest(&self.columns, &mut items, &pending, room.whole(), lead_gap);
+        for &position in &pending {
+            let item = &mut items[position];
+            item.own = item.own.min(item.wanted).max(1);
         }
         give_way(&self.columns, &mut items, room.cells(), lead_gap);
         items
