@@ -87,6 +87,7 @@
             echo "  cargo test --workspace --all-targets --all-features"
             echo "  cargo nextest run --workspace --all-targets --all-features"
             echo "  RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps"
+            echo "  just tuikit-features  (tuikit alone: clippy and tests with its features off, then with richtext)"
             echo "  git diff --check"
           '';
         };

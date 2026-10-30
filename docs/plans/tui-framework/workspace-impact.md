@@ -21,6 +21,16 @@ changed yet.
   the framework crate's tests go unrun in CI without any failure.
 - `cargo doc --no-deps` with `RUSTDOCFLAGS=-D warnings` also needs
   `--workspace`.
+- Feature unification turns the framework's `richtext` feature on whenever
+  the host is built (the host depends on it with the feature), so the
+  workspace checks never build `tuikit` without it. Since CSP-785,
+  `just tuikit-features` (part of `just check`) and two CI steps build the
+  framework alone: `cargo clippy -p tuikit --no-default-features` lib-only
+  and `--all-targets`, the same with `--features richtext` (all with
+  `-D warnings`), and `cargo test -p tuikit --no-default-features` with and
+  without `--features richtext`. Code outside `tuikit::richtext` that names
+  one of its items, or an item only that module uses left ungated, fails
+  them.
 - `flake.nix` only defines a dev shell (no package build), so the Nix impact
   is the banner text. `rust-toolchain.toml` and `Cargo.lock` stay shared at
   the workspace root.

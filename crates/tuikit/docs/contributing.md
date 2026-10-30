@@ -437,13 +437,25 @@ RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
 git diff --check
 ```
 
-A change to a module behind a feature (`richtext`) also builds the crate
-with its features off, so nothing outside the module comes to need it:
+A workspace build turns `richtext` on, because the host's dependency on the
+crate does, so the workspace checks above cannot see code outside
+`richtext` that comes to need the feature, or an item only that module uses
+left without its `#[cfg(feature = "richtext")]` (it warns as unused when the
+feature is off). The host's `just tuikit-features`, which its `just check`
+and its CI run, builds the crate alone, with its features off and then with
+`richtext` alone:
 
 ```text
-cargo clippy -p tuikit --all-targets -- -D warnings
+cargo clippy -p tuikit --no-default-features -- -D warnings
+cargo clippy -p tuikit --no-default-features --all-targets -- -D warnings
+cargo clippy -p tuikit --no-default-features --features richtext -- -D warnings
+cargo clippy -p tuikit --no-default-features --features richtext --all-targets -- -D warnings
 cargo test -p tuikit --no-default-features
+cargo test -p tuikit --no-default-features --features richtext
 ```
+
+`-p tuikit` keeps the host's features out of the build. The lib-only lints
+also build without `testkit`, which this crate's own tests always turn on.
 
 If a guard fails, fix the design. Add an allowlist entry only through the
 process above.

@@ -23,6 +23,20 @@ diff-check:
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
+# The framework with its cargo features off, then with `richtext` alone.
+# A workspace build turns `richtext` on through the host, so only these
+# builds catch code outside `tuikit::richtext` that comes to need it, or an
+# item only that module uses left ungated. `-p tuikit` keeps the host's
+# features out; the lib-only lints also build without `testkit`, which the
+# crate's own tests always turn on.
+tuikit-features:
+    cargo clippy -p tuikit --no-default-features -- -D warnings
+    cargo clippy -p tuikit --no-default-features --all-targets -- -D warnings
+    cargo clippy -p tuikit --no-default-features --features richtext -- -D warnings
+    cargo clippy -p tuikit --no-default-features --features richtext --all-targets -- -D warnings
+    cargo test -p tuikit --no-default-features
+    cargo test -p tuikit --no-default-features --features richtext
+
 # Regenerate the comprehensive showcase fixture (ADR 0070).
 #
 # Three post-processing steps:
@@ -100,7 +114,7 @@ screenshots:
 demo:
     cargo run --quiet --features snapshot -- tui --fixture tests/fixtures/showcase.json
 
-check: fmt clippy test nextest doc diff-check
+check: fmt clippy test nextest tuikit-features doc diff-check
 
 # Drop into a disposable Conspectus home (private tmux, stub harnesses,
 # a git repo) for manual testing; `just scratch smoke` runs the checks.

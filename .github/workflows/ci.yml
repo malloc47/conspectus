@@ -53,6 +53,22 @@ jobs:
       - name: Run nextest
         run: cargo nextest run --workspace --all-targets --all-features
 
+      # The workspace steps above turn `richtext` on through the host, so
+      # only a build of the framework alone catches code outside
+      # `tuikit::richtext` that comes to need it. Same as `just
+      # tuikit-features`.
+      - name: Lint the framework with its features off and with richtext alone
+        run: |
+          cargo clippy -p tuikit --no-default-features -- -D warnings
+          cargo clippy -p tuikit --no-default-features --all-targets -- -D warnings
+          cargo clippy -p tuikit --no-default-features --features richtext -- -D warnings
+          cargo clippy -p tuikit --no-default-features --features richtext --all-targets -- -D warnings
+
+      - name: Test the framework with its features off and with richtext alone
+        run: |
+          cargo test -p tuikit --no-default-features
+          cargo test -p tuikit --no-default-features --features richtext
+
       - name: Check docs
         run: cargo doc --workspace --no-deps
         env:
