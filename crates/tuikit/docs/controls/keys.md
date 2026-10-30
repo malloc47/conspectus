@@ -115,7 +115,7 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 | Item | Does | Notes |
 | --- | --- | --- |
 | `KeyMatcher::{Char, Exact, AnyModExceptCtrl, AnyMod}` | which key events a row binds | `matches`, `matches_event`, `example` (the plainest event it fires on) |
-| `ch`, `key`, `ctrl`, `alt`, `ctrl_key`, `alt_key` | `const` matcher builders | `key` refuses a character at compile time |
+| `ch`, `key`, `exact`, `ctrl`, `alt`, `ctrl_key`, `alt_key` | `const` matcher builders | `key` and `exact` refuse a character at compile time; `exact` binds a key with no modifier, so its chords stay free (an explorer's `Enter` leaves `Shift-Enter` to the program) |
 | `key_label` | the one notation for a key | `↑` `↓` `←` `→`, `Space`, `S-Tab`, `PgUp`, `PgDn`, `Ctrl-R`, `Alt-b`, `Shift-Enter` |
 | `KeyRow::{Bind, Note, Include}`, `Hint::{Shown, Alias}` | a table's rows | a bound row carries `available` |
 | `shown`, `alias`, `include` | `const` row builders | every bound row starts available |
@@ -196,6 +196,12 @@ reset key (a chord such as `Ctrl-R`) in its own table and the chord stays
 free to mean something else in another overlay. `PagerKey::Copy` is bound
 by a pager whose content can be copied, and `LogListKey::Copy` by a log
 list whose entries can; no standard table binds either.
+
+A pane's table lives with its control: `EXPLORER_KEYS` (`ExplorerKey`)
+is the explorer's, which a host resolves before its program-wide keymap
+while the explorer has focus (see [explorer.md](explorer.md)). A pane
+leaves `q` and `Ctrl-C` to its program, so its table takes `mislabeled`,
+`unresolved`, and `loose_characters` but not `ctrl_c_first`.
 
 ## Theme tokens
 

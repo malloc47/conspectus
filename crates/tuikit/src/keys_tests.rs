@@ -114,6 +114,23 @@ fn key_refuses_a_character() {
 }
 
 #[test]
+fn exact_binds_a_key_with_no_modifier_and_leaves_its_chords_free() {
+    let enter = exact(KeyCode::Enter);
+    assert!(enter.matches(KeyModifiers::NONE, KeyCode::Enter));
+    for modifiers in [
+        KeyModifiers::SHIFT,
+        KeyModifiers::ALT,
+        KeyModifiers::CONTROL,
+    ] {
+        assert!(!enter.matches(modifiers, KeyCode::Enter), "{modifiers:?}");
+    }
+    assert_eq!(key_label(&enter), "Enter");
+    assert!(!enter.ignores_chords_of_a_character());
+    let caught = std::panic::catch_unwind(|| exact(KeyCode::Char('x')));
+    assert!(caught.is_err(), "a character must be bound with `ch`");
+}
+
+#[test]
 fn every_matcher_fires_on_its_own_example() {
     for matcher in [
         ch('j'),

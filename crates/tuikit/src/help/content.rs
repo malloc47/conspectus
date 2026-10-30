@@ -170,6 +170,46 @@ impl HelpSection {
 /// [`with_availability`](crate::keys::with_availability) dims what
 /// cannot act now.
 pub fn sections_for<A: HelpAction>(table: &[KeyRow<A>]) -> Vec<HelpSection> {
+    sections_described(table, |_| None)
+}
+
+/// [`sections_for`] in the host's words: `describe` says what an action
+/// does where the host has a sentence of its own for it, and `None` keeps
+/// the action's [`HelpEntry`] description. The sections, their order,
+/// and the keys of each row are [`sections_for`]'s.
+///
+/// For a table over a framework enum, whose [`HelpAction`] speaks of
+/// rows and sections in general, when the host's page names what its
+/// rows are.
+///
+/// ```
+/// use ratatui::crossterm::event::KeyCode;
+/// use tuikit::help::{HelpAction, HelpEntry, HelpRow, sections_described};
+/// use tuikit::keys::{KeyRow, alias, key};
+///
+/// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// enum Step {
+///     Down,
+/// }
+///
+/// impl HelpAction for Step {
+///     const LISTED: &'static [Self] = &[Step::Down];
+///     fn help(self) -> HelpEntry {
+///         HelpEntry::new("Moving", "Move to the next row")
+///     }
+/// }
+///
+/// const KEYS: &[KeyRow<Step>] = &[alias(key(KeyCode::Down), Step::Down)];
+/// let sections = sections_described(KEYS, |_| Some("Move to the next file"));
+/// assert!(matches!(
+///     &sections[0].rows[0],
+///     HelpRow::Keys { description, .. } if description == "Move to the next file"
+/// ));
+/// ```
+pub fn sections_described<A: HelpAction>(
+    table: &[KeyRow<A>],
+    describe: impl Fn(A) -> Option<&'static str>,
+) -> Vec<HelpSection> {
     let mut sections: Vec<HelpSection> = Vec::new();
     let mut seen: Vec<A> = Vec::new();
     for &action in A::LISTED {
@@ -183,7 +223,7 @@ pub fn sections_for<A: HelpAction>(table: &[KeyRow<A>]) -> Vec<HelpSection> {
         let entry = action.help();
         let row = HelpRow::Keys {
             keys,
-            description: Cow::Borrowed(entry.description),
+            description: Cow::Borrowed(describe(action).unwrap_or(entry.description)),
             available,
         };
         match sections

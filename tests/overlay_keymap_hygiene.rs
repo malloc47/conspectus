@@ -54,6 +54,10 @@ const KEY_MODEL_FILES: &[(&str, &str)] = &[
         "the standard key tables themselves: the rows name the keys they bind",
     ),
     (
+        "crates/tuikit/src/explorer/keys.rs",
+        "the explorer's key table itself: the rows name the keys they bind",
+    ),
+    (
         "crates/tuikit/src/testkit/keys.rs",
         "the test kit's key-script notation: turns key names into key events",
     ),

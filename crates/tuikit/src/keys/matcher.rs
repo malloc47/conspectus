@@ -158,6 +158,25 @@ pub const fn key(code: KeyCode) -> KeyMatcher {
     KeyMatcher::AnyMod(code)
 }
 
+/// A key that is not a character, pressed with no modifier at all:
+/// `exact(KeyCode::Enter)` fires on `Enter` and leaves `Shift-Enter` and
+/// `Alt-Enter` to a binding of their own (a table consulted after this
+/// one, say).
+///
+/// # Panics
+///
+/// When `code` is a character, which binds with [`ch`]. A table is a
+/// `const`, so the mistake fails to compile.
+pub const fn exact(code: KeyCode) -> KeyMatcher {
+    if let KeyCode::Char(_) = code {
+        panic!("bind a character with `ch`, which ignores no chord of it");
+    }
+    KeyMatcher::Exact {
+        modifiers: KeyModifiers::NONE,
+        code,
+    }
+}
+
 /// A character as typed, alone or with Shift: `ch('j')`, `ch('G')`,
 /// `ch('?')`.
 pub const fn ch(c: char) -> KeyMatcher {

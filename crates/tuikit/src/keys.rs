@@ -12,8 +12,9 @@
 //!   The one rule for characters: [`ch`] binds the character as typed,
 //!   alone or with Shift, and never a Control or Alt chord of it; chords
 //!   are spelled out ([`ctrl`], [`alt`], [`ctrl_key`]); keys that are not
-//!   characters ignore their modifiers ([`key`]). So `g` and `G` jump to
-//!   a pager's ends and nothing else does.
+//!   characters ignore their modifiers ([`key`]), or take none at all
+//!   when a chord of them means something else ([`exact`]). So `g` and
+//!   `G` jump to a pager's ends and nothing else does.
 //! - **Rows.** [`shown`] rows appear in the footer as `label verb`,
 //!   [`alias`] rows are bound but left out, [`KeyRow::Note`] adds text
 //!   with no key, and [`include()`] splices in another table of the same
@@ -90,7 +91,7 @@ mod standard;
 mod table;
 
 pub use footer::{Footer, HINT_SEPARATOR, Segment, footer, unavailable_style};
-pub use matcher::{KeyMatcher, alt, alt_key, ch, ctrl, ctrl_key, key, key_label};
+pub use matcher::{KeyMatcher, alt, alt_key, ch, ctrl, ctrl_key, exact, key, key_label};
 pub use role::{Convention, EnterMeans, KeyAction, KeyRole, SpaceMeans, ctrl_c_first};
 pub use standard::{
     CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, EditKey, FIND_KEYS, FORM_KEYS,

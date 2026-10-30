@@ -131,6 +131,7 @@ assert_eq!(lines.len(), 7, "two headings, three rows, two blank lines");
 | `HelpAction` | an action enum a page can be generated for | `LISTED` (the page's order) and `help` (an exhaustive match giving each action its `HelpEntry`) |
 | `HelpEntry::new(section, description)` | where an action is listed and what it does | actions naming one heading share a section |
 | `sections_for(table)` | the page of a key table | one row per listed action the table binds; rows group under their sections in listing order; an unbound action is left out |
+| `sections_described(table, describe)` | the same page in the host's words | `describe` returns the host's sentence for an action, or `None` to keep the action's own; for a table over a framework enum (an explorer's keys) on a host's page |
 | `undescribed(table)` | the keys a table binds that its page would not describe | an action left out of `LISTED`, or one whose entry is empty; a host asserts it is empty for every table it generates a page for |
 | `HelpSection::new(title)`, `keys`, `legend`, `row` | a heading and its rows, built by hand | for prose a table's descriptions cannot hold |
 | `HelpRow::Keys`, `HelpRow::Legend` | a row of keys and what they do; a legend entry | `HelpRow::keys(..).available(false)` dims a row |

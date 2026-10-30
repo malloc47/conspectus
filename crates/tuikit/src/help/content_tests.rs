@@ -126,6 +126,24 @@ fn plain_keys_come_before_chords_whatever_the_table_order() {
 }
 
 #[test]
+fn a_host_can_describe_the_actions_in_its_own_words() {
+    let sections = sections_described(READER_KEYS, |action| match action {
+        Reader::Down => Some("Next paragraph"),
+        _ => None,
+    });
+    assert_eq!(
+        keys_rows(&sections),
+        [
+            ("Moving", "j / ↓ Next paragraph".to_string(), true),
+            ("Moving", "k Scroll one line up".to_string(), true),
+            ("Moving", "g Jump to the start".to_string(), true),
+            ("Leaving", "q / Ctrl-C Close the reader".to_string(), true),
+        ],
+        "the sections and keys are sections_for's; only the words change"
+    );
+}
+
+#[test]
 fn a_row_is_dimmed_only_when_none_of_its_keys_can_act() {
     let rows = with_availability(READER_KEYS, |action| action != Reader::Top);
     let sections = sections_for(&rows);

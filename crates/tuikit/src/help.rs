@@ -24,7 +24,8 @@
 //!   rows group under their sections; a row whose keys cannot act now is
 //!   dimmed. The page cannot disagree with the table, and
 //!   [`undescribed`] finds a key the page would leave out, so a test fails
-//!   when a key has no description.
+//!   when a key has no description. [`sections_described`] is the same
+//!   page in the host's words, for a table over a framework enum.
 //! - **The page.** [`HelpPage`] lays the sections out in cells for the
 //!   width its pager gives, through [`text`](crate::text), and is a
 //!   [`PagerContent`](crate::pager::PagerContent);
@@ -106,7 +107,9 @@
 mod content;
 mod page;
 
-pub use content::{HelpAction, HelpEntry, HelpRow, HelpSection, sections_for, undescribed};
+pub use content::{
+    HelpAction, HelpEntry, HelpRow, HelpSection, sections_described, sections_for, undescribed,
+};
 pub use page::HelpPage;
 
 #[cfg(test)]

@@ -141,8 +141,10 @@ None: the grid handles no keys. Its host maps `Enter` to
 `PropertyGrid::activate` and the key it names with `inspect_key` to
 `PropertyGrid::inspect` on the cursor's row, steps the cursor with
 `selection::Ends::Clamp` (a property list is scrollable content), and
-does what the returned `Intent` asks. A grid's own key table joins it when
-the explorer that owns its cursor moves into the framework.
+does what the returned `Intent` asks. The explorer
+([explorer.md](explorer.md)) is such a host: its table,
+`EXPLORER_KEYS`, binds `Enter`, the inspect key `o`, and the fold keys
+over grid rows, and turns each intent into its outcome.
 
 ## Theme tokens
 
@@ -182,9 +184,9 @@ reader an inspected value opens in follows rule 18).
   as one-line rows do instead of wrapping.
 - **Inspecting a link.** A cut link label could report `Inspect` for its
   whole text; nothing asks for it yet, so only a cut property does.
-- **Keys.** A standard key table for a grid (`Enter`, an inspect key, a
-  fold key on a section header) belongs with the explorer that owns the
-  cursor.
+- **Keys.** The grid stays keyless: the explorer that owns a grid's
+  cursor carries the key table (`EXPLORER_KEYS`). A grid drawn without an
+  explorer binds its host's keys.
 - **Mouse hit testing.** `GridLines::lines` maps one to one onto the
   drawn lines before any wrap; a host maps a click through its wrapped
   rows to a line and then to a row index.

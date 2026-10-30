@@ -74,6 +74,11 @@ schemas), the `property_grid` module (the rows a detail pane lists about
 one thing: properties in a label column with values cut in cells, links
 in a verb column in one of four tones, and section headers that fold,
 each reporting what `Enter` and an inspect key ask its host to do), the
+`explorer` module (a cursor over zones of those rows that its host
+supplies for each call, kept by row key across rebuilds, with sections
+that fold, a drill stack that follows a link and comes back, a two-press
+`Back` that leaves, one key table, and an outcome for every key that
+says what is left for its host), the
 `richtext` module
 behind its feature (ANSI text, captured terminal output fitted in a wrap
 mode, and Markdown with its tables and highlighted code), the `chip` module (filled,

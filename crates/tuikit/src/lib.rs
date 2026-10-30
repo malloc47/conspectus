@@ -22,6 +22,7 @@ pub mod checklist;
 pub mod chip;
 pub mod columns;
 pub mod dialog;
+pub mod explorer;
 pub mod feedback;
 pub mod form;
 pub mod frame;
