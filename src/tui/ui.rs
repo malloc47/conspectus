@@ -33,7 +33,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use tuikit::age::Age;
 use tuikit::chip::{StatusChip, Tone};
 use tuikit::glyphs::marks;
-use tuikit::scroll::{Anchor, ScrollGutter, ScrollRegion, ScrollWindow, WrappedRows, rows_under};
+use tuikit::scroll::{Anchor, ScrollRegion, ScrollWindow, rows_under};
 use tuikit::text;
 
 use crate::model::{MuxSessionId, NodeId};

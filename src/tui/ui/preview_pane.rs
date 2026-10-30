@@ -1,5 +1,7 @@
 //! Preview pane: transcripts, pane captures, and pin diagnostics.
 
+use tuikit::frame::SectionRule;
+
 use super::*;
 use crate::tui::preview::{
     PreviewSource, PreviewSubject, TranscriptPreview, node_source, preview_subject,
@@ -415,9 +417,9 @@ pub(super) fn render_pin_summary(
     Some(text)
 }
 
-/// Build the chip-style divider above the preview body. It sits in the
-/// same right-anchored position as the `Related` divider so the
-/// `Preview` chip lines up below it. It carries no summary.
-pub(super) fn preview_divider_line(_app: &App, width: usize, theme: &Theme) -> Line<'static> {
-    chip_divider_line("Preview", None, width, theme, ChipAnchor::Left)
+/// The `Preview` rule above the preview body. Its chip ends in the same
+/// column as the `Related` rule's, so the two labels line up. It carries
+/// no summary.
+pub(super) fn preview_divider_line(width: usize, theme: &Theme) -> Line<'static> {
+    SectionRule::new("Preview").line(width, theme)
 }

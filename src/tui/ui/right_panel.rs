@@ -1,17 +1,23 @@
 //! Right panel: the graph explorer (ADR 0074) and its title.
 
 use tuikit::breadcrumb::Breadcrumb;
+use tuikit::frame::SectionRule;
+use tuikit::master_detail::StackedMasterDetail;
 use tuikit::property_grid::{GridLines, PropertyGrid, PropertyRow};
 
 use crate::tui::explorer::grid::{self as explorer_grid, field_row};
 
 use super::*;
 
-/// Rows reserved for the Preview zone so a full Related list cannot
-/// collapse it to one or two lines. Below this floor on very small
-/// terminals the layout falls back to a smaller preview (at least two
-/// rows after the divider).
+/// Rows kept for the Preview zone so a full Related list cannot collapse
+/// it to one or two lines. On a pane too short for it beside the
+/// explorer zone's three rows and the divider, the Preview gets what
+/// those leave.
 const MIN_PREVIEW_HEIGHT: u16 = 6;
+
+/// The right pane's stack: the explorer zone, the `Preview` rule, and
+/// the Preview.
+const LAYOUT: StackedMasterDetail = StackedMasterDetail::new().min_detail(MIN_PREVIEW_HEIGHT);
 
 /// Draw the right pane and return the window its explorer zone drew and
 /// the Preview's scroll region as drawn, `None` for a zone the pane did
@@ -40,23 +46,14 @@ pub(super) fn draw_right_panel(
         return (None, None);
     }
 
-    // Render the chip dividers (`Related`, `Other`) at the
-    // narrower content width the scrollbar gutter leaves the
-    // paragraph once it reserves a column for the scrollbar.
-    // Sizing the chip line to `inner.width` instead would force
-    // the divider to overflow by one character at the gutter
-    // boundary: it wraps to the next row and every cursor row
-    // below it lands one line lower than the row count expects,
-    // leaving the cursor visible off the bottom of the viewport.
-    let content_width = inner.width.saturating_sub(1).max(1) as usize;
-    let GridLines {
-        mut lines,
-        mut cursor_line,
-    } = {
+    // The explorer's lines are laid out at the layout's width, a column
+    // short of the pane, so the `Related` rule still fits on one row when
+    // the scrollbar takes that column.
+    let mut list = {
         let state = app.explorer().expect("checked above");
         render_explorer_lines(
             state,
-            content_width,
+            StackedMasterDetail::layout_width(inner),
             app.theme(),
             app.edge_meta_visible(),
             app.focus() == Focus::Right,
@@ -65,59 +62,27 @@ pub(super) fn draw_right_panel(
     // A selected hit row says which turn it is and shows what matched.
     let hit_lines = selected_hit_lines(app);
     if !hit_lines.is_empty() {
-        cursor_line = cursor_line.map(|index| index + hit_lines.len());
-        lines.splice(0..0, hit_lines);
+        list.cursor_line = list.cursor_line.map(|index| index + hit_lines.len());
+        list.lines.splice(0..0, hit_lines);
     }
-    // Wrap every logical line here and draw these rows as they are, so
-    // the header sizing and the cursor-position math count exactly the
-    // rows the paragraph paints. The rows wrap at the full width when
-    // they fit the zone, and at one column less when they overflow it,
-    // since the scrollbar gutter then takes a column.
-    let preview_floor = MIN_PREVIEW_HEIGHT.min(inner.height.saturating_sub(4));
-    let max_header_height = inner
-        .height
-        .saturating_sub(preview_floor.saturating_add(1))
-        .max(3);
-    let rows = WrappedRows::fit(
-        &lines,
-        usize::from(inner.width),
-        usize::from(max_header_height),
-    );
-    let header_height = u16::try_from(rows.len())
-        .unwrap_or(u16::MAX)
-        .min(max_header_height)
-        .max(3);
-    let split = vertical![==header_height, ==1, >=0].split(inner);
-    // The window starts where the last frame left it, is measured again
-    // for the zone, and follows every row the cursor's line took, so a
-    // wrapped cursor line is shown whole; with no cursor, the first row.
-    let mut window = app.explorer_window();
-    window.resize(usize::from(split[0].height), rows.len());
-    window.follow(cursor_line.map_or(0..1, |idx| rows.rows_of(idx)));
-    let gutter = ScrollGutter::layout(split[0], rows.len());
-    frame.render_widget(
-        Paragraph::new(rows.into_rows()).scroll(window.paragraph_scroll()),
-        gutter.content(),
-    );
-    gutter.render(&window, frame.buffer_mut());
-    frame.render_widget(
-        Paragraph::new(preview_divider_line(
-            app,
-            split[1].width as usize,
-            app.theme(),
-        )),
-        split[1],
+    // The zone's window starts where the last frame left it.
+    let stacked = LAYOUT.render(
+        inner,
+        frame.buffer_mut(),
+        list,
+        preview_divider_line(usize::from(inner.width), app.theme()),
+        app.explorer_window(),
     );
     // A transcript preview leaves a column for its scrollbar.
-    app.prepare_preview(split[2].width.saturating_sub(1).max(1));
+    app.prepare_preview(stacked.detail.width.saturating_sub(1).max(1));
     let state = app.explorer().expect("checked above");
-    let preview = draw_explorer_preview(app, state, frame, split[2]);
+    let preview = draw_explorer_preview(app, state, frame, stacked.detail);
     // A Preview still waiting for its content draws a placeholder, not
     // the rows its offset counts, so it keeps the offset until the
     // content has loaded and a frame shows it.
     let loaded = crate::tui::preview::preview_source(app)
         .is_none_or(|source| app.previews().get(&source).is_some());
-    (Some(window), loaded.then_some(preview))
+    (Some(stacked.window), loaded.then_some(preview))
 }
 
 /// Render the right pane title with the kind of node currently
@@ -192,64 +157,6 @@ pub(super) fn right_panel_kind_label(app: &App) -> &'static str {
     }
 }
 
-/// Where a zone divider puts its summary relative to its chip. The line
-/// is a rule, then the chip and summary, then a short closing rule.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(super) enum ChipAnchor {
-    /// The summary follows the chip. Preview has no summary, so its chip
-    /// ends the line.
-    Left,
-    /// The summary precedes the chip, which sits flush against the
-    /// closing rule. That keeps the bold zone label easy to scan
-    /// vertically as the summary changes length.
-    Right,
-}
-
-/// A zone divider: a dim rule that fills the width, a filled-chip label
-/// (`" label "`, accent colour with the badge modifier), an optional dim
-/// summary beside the chip, and a two-cell closing rule. When the chip
-/// and summary leave no room, the leading rule drops out.
-pub(super) fn chip_divider_line(
-    label: &str,
-    suffix: Option<&str>,
-    width: usize,
-    theme: &Theme,
-    anchor: ChipAnchor,
-) -> Line<'static> {
-    let chip_text = format!(" {label} ");
-    let chip_width = text::width(&chip_text);
-    let suffix_text = suffix.map(|s| format!(" {s} ")).unwrap_or_default();
-    let suffix_width = text::width(&suffix_text);
-    let trailing_rule = 2;
-    let leading_rule = width.saturating_sub(chip_width + suffix_width + trailing_rule);
-    let chip_span = span!(
-        Style::default().fg(theme.accent).add_modifier(theme.badge);
-        "{chip_text}"
-    );
-    let suffix_span =
-        (suffix_width > 0).then(|| span!(Style::default().fg(theme.inert); "{suffix_text}"));
-    let mut spans = Vec::with_capacity(4);
-    if leading_rule > 0 {
-        spans.push(span!(theme.muted; "{}", marks::RULE.repeat(leading_rule)));
-    }
-    match anchor {
-        ChipAnchor::Left => {
-            spans.push(chip_span);
-            if let Some(span) = suffix_span {
-                spans.push(span);
-            }
-        }
-        ChipAnchor::Right => {
-            if let Some(span) = suffix_span {
-                spans.push(span);
-            }
-            spans.push(chip_span);
-        }
-    }
-    spans.push(span!(theme.muted; "{}", marks::RULE.repeat(trailing_rule)));
-    Line::from(spans)
-}
-
 /// Render the related-entities layout (ADR 0074) as a property grid: the
 /// focused node's fields, then, when it has neighbors, the `Related`
 /// rule and one link row per neighbor. Validated rows (resolver winners)
@@ -286,7 +193,9 @@ pub(super) fn render_explorer_lines(
 }
 
 /// The `Related` rule over the link rows, its summary counting the
-/// validated rows and what the Other zone holds (ADR 0074 §5).
+/// validated rows and what the Other zone holds (ADR 0074 §5). The
+/// summary comes first, so the chip stays in the `Preview` chip's column
+/// however long the counts grow.
 fn related_rule(
     view: &crate::tui::explorer::NodeView,
     width: usize,
@@ -303,7 +212,10 @@ fn related_rule(
             summary.push_str(&format!(" · {} {}", counts.unresolved, marks::NO_VALUE));
         }
     }
-    chip_divider_line("Related", Some(&summary), width, theme, ChipAnchor::Right)
+    SectionRule::new("Related")
+        .summary(summary)
+        .summary_first()
+        .line(width, theme)
 }
 
 /// Render the Preview zone body for the currently-selected explorer
