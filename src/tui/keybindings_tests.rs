@@ -254,13 +254,40 @@ fn a_message_names_the_key_its_binding_takes() {
         ("row.default", "Enter"),
         ("refresh", "r"),
         ("value.inspect", "o"),
+        // The left pane's empty states, the Search view's paging hint,
+        // and the Preview's notes.
+        ("search.contents", "s"),
+        ("search.older", "<"),
+        ("search.newer", ">"),
+        ("filters.clear", "F"),
+        ("controls", "f"),
+        ("row.menu", "."),
+        ("refresh.hard", "Ctrl-R"),
+        ("quit", "q"),
     ] {
         assert_eq!(key_name(id), label, "{id}");
     }
+}
+
+/// A message that offers a binding's other keys names them in the order
+/// the binding lists them, the first being [`key_name`]'s: the content
+/// search's empty state offers `Ctrl-/` beside `s`.
+#[test]
+fn a_message_names_a_bindings_other_keys_in_order() {
+    let keys = key_names("search.contents");
+    assert_eq!(keys[0], key_name("search.contents"));
+    assert_eq!(keys[..2], ["s", "Ctrl-/"]);
+    assert_eq!(key_names("refresh"), ["r"]);
 }
 
 #[test]
 #[should_panic(expected = "the keymap binds no `no.such-key`")]
 fn a_message_cannot_name_a_key_the_keymap_does_not_bind() {
     key_name("no.such-key");
+}
+
+#[test]
+#[should_panic(expected = "the keymap binds no `no.such-key`")]
+fn a_message_cannot_name_the_keys_of_a_binding_the_keymap_lacks() {
+    key_names("no.such-key");
 }

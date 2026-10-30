@@ -4,6 +4,7 @@ use tuikit::empty_state::EmptyState;
 use tuikit::frame::SectionRule;
 
 use super::*;
+use crate::tui::keybindings::key_name;
 use crate::tui::preview::{
     PreviewSource, PreviewSubject, TranscriptPreview, node_source, preview_subject,
 };
@@ -251,7 +252,12 @@ fn sourceless_preview(
         app.snapshot_handle()
             .and_then(|handle| render_pin_summary(handle.snapshot(), pin_id))
             .map_or_else(
-                || Text::raw("pin unavailable — try `r` to refresh"),
+                || {
+                    Text::raw(format!(
+                        "pin unavailable — try `{}` to refresh",
+                        key_name("refresh")
+                    ))
+                },
                 Text::raw,
             )
     };
@@ -395,7 +401,10 @@ pub(super) fn format_preview_for_mux(
                     Text::from(rows[start..].to_vec())
                 }
             }
-            PreviewContent::NoTarget => Text::raw("tmux target not found — try `r` to refresh"),
+            PreviewContent::NoTarget => Text::raw(format!(
+                "tmux target not found — try `{}` to refresh",
+                key_name("refresh")
+            )),
             PreviewContent::Unavailable(reason) => Text::raw(format!("tmux unavailable: {reason}")),
             PreviewContent::Failed(message) => Text::raw(message.clone()),
             PreviewContent::Unsupported => {

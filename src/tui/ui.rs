@@ -233,3 +233,7 @@ pub fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
 #[cfg(test)]
 #[path = "ui_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ui/hint_keys_tests.rs"]
+mod hint_keys_tests;

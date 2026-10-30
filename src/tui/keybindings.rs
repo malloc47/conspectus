@@ -597,6 +597,20 @@ pub fn key_name(id: &str) -> String {
         )
 }
 
+/// Every key of the binding `id`, as hints write them, in the order the
+/// binding lists them: the first is [`key_name`]'s. A message that offers
+/// another way to press it (`` `s` (or Ctrl-/) ``) names the next one.
+///
+/// # Panics
+///
+/// When the keymap has no binding `id`, as [`key_name`] does.
+pub fn key_names(id: &str) -> Vec<String> {
+    keymap().get(id).map_or_else(
+        || panic!("the keymap binds no `{id}`"),
+        |binding| binding.keys().iter().map(tuikit::keys::key_label).collect(),
+    )
+}
+
 #[cfg(test)]
 #[path = "keybindings_tests.rs"]
 mod tests;

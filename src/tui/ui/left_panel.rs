@@ -23,6 +23,7 @@ use tuikit::tree::{RowCtx, RowState, TreeColumns, TreeView};
 use super::*;
 
 use crate::tui::icons::state;
+use crate::tui::keybindings::{key_name, key_names};
 use crate::tui::rows::Row;
 use columns::{Col, LeftColumns, Schemas};
 
@@ -278,9 +279,13 @@ pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
         spans.push(span!(Style::default().fg(theme.accent); "{filtering}"));
     }
     if total > 1 {
-        let hint = "< older  > newer";
+        let hint = format!(
+            "{} older  {} newer",
+            key_name("search.older"),
+            key_name("search.newer")
+        );
         let used = text::spans_width(&spans);
-        let gap = width.saturating_sub(used + text::width(hint));
+        let gap = width.saturating_sub(used + text::width(&hint));
         if gap >= 2 {
             spans.push(Span::raw(" ".repeat(gap)));
             spans.push(span!(dim; "{hint}"));
@@ -292,7 +297,7 @@ pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
 /// What the left pane says when its tree has no rows: why it is empty
 /// (still loading, a search that found nothing, a filter that hides
 /// everything, a view with nothing in it) and, on the hint's row, what
-/// would fill it.
+/// would fill it. Each key it names comes from the binding that takes it.
 pub(super) fn empty_left_panel(app: &App) -> EmptyState {
     if app.snapshot_handle().is_none() {
         return EmptyState::new("Loading discovery…");
@@ -305,11 +310,16 @@ pub(super) fn empty_left_panel(app: &App) -> EmptyState {
             ));
         }
         if app.viewed_search().is_none() {
-            return EmptyState::new(
-                "Press `s` (or Ctrl-/) to search the contents of sessions and mux panes.",
-            );
+            // The binding's first key, and the chord it also takes.
+            let search = key_names("search.contents");
+            return EmptyState::new(format!(
+                "Press `{}` (or {}) to search the contents of sessions and mux panes.",
+                search[0], search[1]
+            ));
         }
     }
+    let search = || key_name("search.contents");
+    let clear = || key_name("filters.clear");
     let shown = if app.active_view() == crate::tui::View::Search {
         app.viewed_search()
     } else {
@@ -332,18 +342,26 @@ pub(super) fn empty_left_panel(app: &App) -> EmptyState {
             } else if reading {
                 EmptyState::new(reading_text)
             } else {
-                EmptyState::new(format!("Nothing matches \"{}\".", content.text))
-                    .hint("Press `s` to search again, `<` for an earlier search.")
+                EmptyState::new(format!("Nothing matches \"{}\".", content.text)).hint(format!(
+                    "Press `{}` to search again, `{}` for an earlier search.",
+                    search(),
+                    key_name("search.older")
+                ))
             };
         }
         return if running {
-            EmptyState::new(searching)
-                .hint("Sessions that match appear as they are found. Press `F` to clear.")
+            EmptyState::new(searching).hint(format!(
+                "Sessions that match appear as they are found. Press `{}` to clear.",
+                clear()
+            ))
         } else if reading {
-            EmptyState::new(reading_text).hint("Press `F` to clear.")
+            EmptyState::new(reading_text).hint(format!("Press `{}` to clear.", clear()))
         } else {
-            EmptyState::new(format!("No sessions match \"{}\".", content.text))
-                .hint("Press `s` to search again, `F` to clear.")
+            EmptyState::new(format!("No sessions match \"{}\".", content.text)).hint(format!(
+                "Press `{}` to search again, `{}` to clear.",
+                search(),
+                clear()
+            ))
         };
     }
     if !app.filter().is_empty() {
@@ -352,8 +370,11 @@ pub(super) fn empty_left_panel(app: &App) -> EmptyState {
         // "no sessions discovered" so the operator knows their
         // filter — not the world — is the reason.
         let chips = render_filter_chips(app.filter());
-        return EmptyState::new(format!("No rows match `{chips}`."))
-            .hint("Press `F` to clear filters, `f` to edit.");
+        return EmptyState::new(format!("No rows match `{chips}`.")).hint(format!(
+            "Press `{}` to clear filters, `{}` to edit.",
+            clear(),
+            key_name("controls")
+        ));
     }
     if app.active_view() == crate::tui::View::Pinned {
         return EmptyState::new("No pins yet.").hint(format!(
@@ -375,20 +396,32 @@ pub(super) fn empty_left_panel(app: &App) -> EmptyState {
             return EmptyState::new(format!(
                 "Every stopped or removed record is pinned ({pinned_gone}), so it is in the Pinned view."
             ))
-            .hint("Clear `Unpinned only` in Controls (`f`) to list them here.");
+            .hint(format!(
+                "Clear `Unpinned only` in Controls (`{}`) to list them here.",
+                key_name("controls")
+            ));
         }
         return EmptyState::new(
             "Nothing has stopped. Entities Conspectus has seen stop or vanish are listed here.",
         )
-        .hint("Press `.` for the menu (Clean up…).");
+        .hint(format!(
+            "Press `{}` for the menu (Clean up…).",
+            key_name("row.menu")
+        ));
     }
+    let quit = key_name("quit");
     if app.active_view() == crate::tui::View::Prs {
-        // Forge listings are reused for the forge interval, so `r`
-        // alone won't show a PR opened a minute ago.
-        return EmptyState::new("No pull requests discovered.")
-            .hint("Press `Ctrl-R` to ask the forges again or `q` to quit.");
+        // Forge listings are reused for the forge interval, so a plain
+        // refresh won't show a PR opened a minute ago.
+        return EmptyState::new("No pull requests discovered.").hint(format!(
+            "Press `{}` to ask the forges again or `{quit}` to quit.",
+            key_name("refresh.hard")
+        ));
     }
-    EmptyState::new("No sessions discovered.").hint("Press `r` to refresh or `q` to quit.")
+    EmptyState::new("No sessions discovered.").hint(format!(
+        "Press `{}` to refresh or `{quit}` to quit.",
+        key_name("refresh")
+    ))
 }
 
 /// What a group header counts: the sessions beneath it, and how many of

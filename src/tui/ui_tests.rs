@@ -79,7 +79,7 @@ fn seeded_app() -> App {
     app
 }
 
-fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
+pub(super) fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
     muxed_app_with_links(native_id, capture, Vec::new())
 }
 
@@ -208,7 +208,7 @@ fn ingest_slot(target: Option<NodeId>) -> crate::model::PinSlot {
     }
 }
 
-fn pinned_app(target: Option<NodeId>) -> App {
+pub(super) fn pinned_app(target: Option<NodeId>) -> App {
     pinned_app_with(target, |_| {})
 }
 
@@ -5220,11 +5220,15 @@ fn an_empty_prs_view_points_at_the_hard_refresh() {
     });
     let frame = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 200, 30)));
     assert!(frame.contains("No pull requests discovered."), "{frame}");
+    let hard_refresh = crate::tui::keybindings::key_name("refresh.hard");
     assert!(
-        frame.contains("Press `Ctrl-R` to ask the forges again"),
+        frame.contains(&format!("Press `{hard_refresh}` to ask the forges again")),
         "{frame}"
     );
-    assert!(frame.contains("Ctrl-R hard refresh"), "{frame}");
+    assert!(
+        frame.contains(&format!("{hard_refresh} hard refresh")),
+        "{frame}"
+    );
 }
 
 /// Select PR `#number` and render the frame.
@@ -6074,7 +6078,7 @@ fn the_detail_pane_shows_where_each_slot_field_came_from() {
 /// and a gone worktree among its records), grouped as asked.
 ///
 /// [`fixture_world`]: crate::tui::rows::pinned::fixture_world
-fn history_app_over(
+pub(super) fn history_app_over(
     snapshot: &GraphSnapshot,
     grouping: crate::tui::HistoryGrouping,
     config: RunConfig,
