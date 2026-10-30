@@ -256,7 +256,7 @@ assert_eq!(chip_end(&preview, "Preview"), width - SectionRule::CLOSING);
 | `.stacks(area)`, `.areas(area)` | whether the panes stack on `area`; the two panes' areas | first then second, halves, the odd cell to the first |
 | `SectionRule::new(label)` | the rule of the section named `label` | no summary |
 | `.summary(text)`, `.summary_first()` | show a summary beside the chip, after it or before it | an empty summary shows nothing |
-| `.line(width, &theme)` | the rule `width` cells wide | wider only when the chip, the summary, and the closing rule alone are |
+| `.line(width, &theme)` | the rule `width` cells wide | never wider: the summary, then the label, give way |
 | `SectionRule::CLOSING` | the closing rule's cells | 2 |
 
 ### Sizing policies
@@ -440,11 +440,29 @@ A section rule is one line, laid out for the width it is drawn in:
   measured in terminal cells, and drops out when they leave nothing.
 - Both rules are in `muted`.
 
-Nothing else gives way: at a width below the chip, the summary, and the
-closing rule, the line is wider than asked, and a paragraph clips it at
-its area's edge or a wrap folds it onto a second row. Lay a rule out at
-the width it is drawn in; in a list that may scroll, that is the width the
-scrollbar leaves (see
+The line is never wider than its width. Below the width of the chip, the
+summary, and the closing rule, the pieces give way in turn, and the
+closing rule stays:
+
+1. The summary is cut with `…` (a cut that ends at a space drops it, so
+   the mark follows the last word kept, and the leading rule takes the
+   cell), and leaves with its spaces once not one character would show
+   before the mark.
+2. Then the label is cut the same way, the chip keeping its spaces.
+3. Then the chip leaves, and the line is a plain rule of its width in
+   `muted` (no rule at all at width 0).
+
+```text
+──────────── 3 shown · 1 more  Links ──   the whole width
+─ 3 shown…  Links ──                       20 cells: the summary is cut
+─ Links ──                                 10 cells: the summary has left
+ Li… ──                                     7 cells: the label is cut
+───                                         3 cells: a plain rule
+```
+
+So a rule never folds onto a second row or runs under a pane's border.
+Lay a rule out at the width it is drawn in; in a list that may scroll,
+that is the width the scrollbar leaves (see
 [master_detail.md](master_detail.md#laying-the-list-out)).
 
 ## Key table
@@ -479,7 +497,7 @@ look.
 | 8 | Footers and hints | The frame draws no hint of its own; a modal's footer, generated from its key table, is drawn by `ModalFooter` in one look and fitted by one rule, in its body or on its bottom border |
 | 9 | Focus cue | A focused pane's border and title marker take `panel_focus_accent`; an unfocused pane keeps the plain border and a blank where the marker goes, so its title stays in place |
 | 13 | Theme | A modal's border and background come from `accent` and `surface`, a focused pane's border and marker from `panel_focus_accent`, a section rule's pieces from `muted`, `accent`, `badge`, and `inert`; nothing names a color |
-| 14 | Width | A body is laid out for the inner width the policy gives in cells, so nothing is laid out for one width and drawn at another; a pane's title is laid out for `title_width`, in cells; a section rule measures its chip and summary in cells and fills the width it is given |
+| 14 | Width | A body is laid out for the inner width the policy gives in cells, so nothing is laid out for one width and drawn at another; a pane's title is laid out for `title_width`, in cells; a section rule measures its chip and summary in cells, fills the width it is given, and cuts its summary and then its label with `…` so it never runs past it |
 
 Not applicable: 1 to 7, 10 to 12, and 15 to 18 govern how lists move,
 and how modals confirm, close, edit, and page. The frames only place and
@@ -500,10 +518,6 @@ line; the modals, panes, and lists inside them follow those rules.
   nothing more.
 - **A pane's background.** A pane does not paint `surface`; a host that
   wants panes on a colored ground would read a pane token here.
-- **A section rule that gives way.** Below the width of its chip, summary,
-  and closing rule a section rule runs past its width. Cutting the summary
-  first (with `…`) and then the label, by `text::elide`, would keep it in
-  its room.
 - **Mouse hit testing.** `rect(area, rows)` is the rect the frame drew
   for the same rows, which a click on or outside the modal would be
   tested against; a split's `areas` are the rects a click picks a pane

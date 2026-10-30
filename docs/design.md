@@ -1414,7 +1414,9 @@ rows and the `Preview` rule leave (the Preview's six give way first on
 a short pane), laid out a column short of the pane so a rule never
 wraps when the zone's scrollbar appears; the `Related` and `Preview`
 rules are `tuikit::frame::SectionRule`s, their chips ending in one
-column, and their words are `conspectus`'s.
+column, and their words are `conspectus`'s. A rule too narrow for its
+chip and summary cuts the summary with `…`, then the label, so it stays
+on one row.
 
 The screen is framed by the framework too (ADR 0189). `ui::draw` is
 `tuikit::app_frame::AppFrame`: a header row, the body, and the status

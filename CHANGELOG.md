@@ -498,6 +498,11 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   row lists its command first and its hit count before its age. In the
   modal the ages are tinted by how recent they are and the snippets are
   gray italics, as in the lists.
+- **The `Related` rule stays on one row.** On a narrow right pane (40
+  columns) the rule over the related rows cuts its counts with `…`
+  (`2 validated · 2 other ·…  Related ──`) instead of folding onto a
+  second row with its closing `──` stranded under it; the Preview gets the
+  row back.
 - **Rows hold still as a list grows past the pane.** When a left-pane list
   overflows and its scrollbar appears, its rows keep the columns they had:
   the Search view's hit names and `turn N · kind` tags keep their widths

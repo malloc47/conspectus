@@ -60,6 +60,16 @@ nothing, where the host drew two spaces. The rule does not give way
 below its own width, as before (the `Related` rule wraps onto a second
 row at 40 columns); CSP-794 follows that up.
 
+CSP-794 made the rule give way: a `SectionRule` line is never wider than
+its width. Below its chip, summary, and closing rule the summary is cut
+with `…` (`text::truncate_end`, a space before the mark dropped) and
+leaves once no character would show, then the label is cut the same way,
+then the chip leaves and the line is a plain rule; the closing rule stays
+while the width holds it. The summary is cut rather than dropped whole by
+`text::elide`'s ranks, because its first words (the validated count) say
+the most. At 40 columns the `Related` rule stays on one row
+(`2 validated · 2 other ·…  Related ──`), and the Preview gains the row.
+
 CSP-756 landed decisions 2 to 5. `tuikit::explorer` holds
 `ExplorerModel`, `ExplorerSource`, `Zone` and `Entry` (public fields,
 with `Zone::new(..).heading(..).lands()` and `Entry::new(..).under(..)`
