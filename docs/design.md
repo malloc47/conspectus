@@ -1356,6 +1356,21 @@ hit columns and cells (ADR 0185), so a search hit reads the same in the
 modal and in the view and gives way in one order; its session rows stay
 the Sessions view's.
 
+The right pane's explorer is to become a framework control (ADR 0188,
+`docs/plans/tui-framework/explorer-design.md`), staged over CSP-789,
+CSP-790, CSP-791, and CSP-756. `tuikit::explorer` will keep the cursor
+by each row's stable key, the open section and the all-fields switch,
+the drill frames, the armed `Backspace`, and the zone's window; it reads
+the graph only through a source `conspectus` builds for each call (load
+a node's view, its zones of rows, where a link leads, the breadcrumb
+tag, the left-pane selection a frame saves), and answers each key with
+an outcome whose effects (the copy, the value modal, the left-pane
+mirror, the focus change) and words stay in `conspectus`. A refresh
+keeps the drill while the left selection is unchanged. The right pane's
+keys will be one table resolved before the global keymap when it has
+focus; the breadcrumb, the tab strip, and the status bar share one rule
+for what gives way on a narrow line.
+
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
 argv someone types (the forms, `pin edit --set`) is refused when it ends
