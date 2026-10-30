@@ -182,6 +182,9 @@ pub(crate) enum HitShape {
     /// Every column: a list of hits from sessions and panes side by side,
     /// with nothing else to tell them apart (the contents modal).
     Sourced,
+    /// Every column but the source word: a tree row, whose kind glyph,
+    /// chip, and tag already say what it is.
+    Named,
     /// The tag, the age, and the snippet: a hit under the row that names
     /// its session or pane.
     Nested,
@@ -201,7 +204,7 @@ pub(super) const MIN_SNIPPET: usize = 20;
 const TAG_STEPS: &[(usize, usize)] = &[(100, 22), (78, 20), (0, 14)];
 /// Characters a one-line snippet drops: Markdown code ticks only add
 /// noise to a preview.
-pub(crate) const MARKDOWN_TICKS: &[char] = &['`'];
+const MARKDOWN_TICKS: &[char] = &['`'];
 
 /// A hit's columns, each under `key`'s key for it, with a harness chip
 /// `chip` cells wide (its footprint in the theme): the source word, the
@@ -258,7 +261,9 @@ pub(crate) enum HitChip<'a> {
 pub(crate) struct Hit<'a> {
     /// `session` or `pane`.
     pub source: &'static str,
-    pub chip: HitChip<'a>,
+    /// The chip, or `None` for a hit under the row that shows it.
+    pub chip: Option<HitChip<'a>>,
+    /// The name, or empty for a hit under the row that shows it.
     pub label: &'a str,
     /// The hit count, or the turn or line ([`hits_tag`], [`turn_tag`],
     /// [`line_tag`]).
@@ -279,8 +284,9 @@ impl Hit<'_> {
     pub(crate) fn cells<K>(&self, key: impl Fn(HitCol) -> K, theme: &Theme) -> Cells<K> {
         let muted = Style::default().add_modifier(theme.muted);
         let chip = match self.chip {
-            HitChip::Harness(harness) => Cell::chip(harness_badge(harness, theme)),
-            HitChip::Command(command) => Cell::text(command, muted),
+            Some(HitChip::Harness(harness)) => Cell::chip(harness_badge(harness, theme)),
+            Some(HitChip::Command(command)) => Cell::text(command, muted),
+            None => Cell::empty(),
         };
         vec![
             (key(HitCol::Source), Cell::text(self.source, muted)),
@@ -334,10 +340,10 @@ impl ContentRow {
     fn hit(&self) -> Hit<'_> {
         Hit {
             source: self.target.source_word(),
-            chip: match self.target {
+            chip: Some(match self.target {
                 ContentTarget::Session { .. } => HitChip::Harness(&self.chip),
                 ContentTarget::Pane { .. } => HitChip::Command(&self.chip),
-            },
+            }),
             label: &self.label,
             tag: self.turn.clone().unwrap_or_else(|| hits_tag(self.hits)),
             age: Some(&self.age),

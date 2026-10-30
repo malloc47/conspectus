@@ -165,7 +165,8 @@ reads `closed` or `merged`.
 ## Age
 
 The age cell is four cells wide, right-aligned, in every view and every
-row kind, the Search view's match and pane rows included. It reads
+row kind, the Search view's match and pane rows and the contents
+search's results included. It reads
 `Ns`, `Nm`, `Nh`, or `Nd` (days, with no larger unit), or `—` when no
 time applies; an age too wide for the cell is cut with `…`. Where an age
 is shown, it is colored by how recent it is: under five minutes is bright
@@ -221,18 +222,19 @@ Sorting by recency uses these same times.
 ## When a row is too narrow
 
 Group headers, session rows, mux rows (running and stopped), PR rows,
-and Pinned and History rows lay their cells out by one rule, in every
-view that lists them. A row's room is the pane's width less the row's
-indent.
+Pinned and History rows, and the Search view's hit, pane, and pane hit
+rows lay their cells out by one rule, in every view that lists them. A
+row's room is the pane's width less the row's indent.
 
 1. The cells that line up down the tree (the prefix; a session's key,
    chip, age, and state; a mux's name, chips, age, and state; a PR's
    label, tracking mark, age, and state; every cell of a Pinned or
-   History row; a header's label, path, count, and warning)
-   keep the widths they have on every row: a padded column is as wide as
-   its widest cell in the whole tree, folded groups included. When they
-   do not fit, they give way in a fixed order, the same on every row
-   at that width, so the columns that stay keep their places. Rows whose
+   History row; a header's label, path, count, and warning; every cell
+   of a hit, pane, or pane hit row) keep the widths they have on every
+   row: a padded column is as wide as its widest cell in the whole tree,
+   folded groups included. When they do not fit, they give way in a fixed
+   order, the same on every row at that width, so the columns that stay
+   keep their places. Rows whose
    label ends in one column at every depth (headers, Pinned and History
    rows) give way alike at every depth too.
 2. What follows them on a row (a session's label, `was in` note,
@@ -248,6 +250,8 @@ indent.
    narrows its `owner/repo` and keeps its `#N` whole. A preview, snippet,
    PR title, the content of a Pinned or History row, or a stopped mux's
    directory shows only when it gets at least 7 cells, or its whole text.
+   A hit's snippet keeps 20 cells while anything before it can give way,
+   and narrows last.
 4. A row that still does not fit is cut at the pane's edge with `…`. No
    cell is cut without a mark, and no column moves on one row but not
    another.
@@ -262,6 +266,7 @@ indent.
 | PR row, cells that line up | the label narrows (its number stays whole), the age, the tracking mark | the label, the state glyph |
 | PR row, the rest | the title, the branch (narrowing first) | |
 | Pinned or History row | the chip, the content, the label narrows, the age | the label, the state word |
+| Hit, pane, or pane hit row | the chip or command, the age, the name narrows, the snippet narrows | the name, the turn, line, or hit count |
 
 A Pinned row in a narrow pane keeps its name and its state word:
 
@@ -697,7 +702,7 @@ session's last activity, as everywhere else, not the time of the match.
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
-│  ▣ ◉ project           0.0    zsh         0s  2 hits  …they…  │
+│  ▣ ◉ project 0.0   2 hits            0s ready once they pass. │
 │  ● ◉ showcase   claude       1h  ∘  project           2 hits  │
 │  ●   showcase   pi           2h  ∘  repo-a            2 hits  │
 ```
@@ -707,7 +712,7 @@ session's last activity, as everywhere else, not the time of the match.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
 │▼   Mux panes                                                  │
-│    ▣ ◉ project           0.0    zsh         0s  2 hits        │
+│    ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
 │▼   project    (1)  ▲                                          │
 │    ● ◉ showcase   claude       1h  ∘  project           2 hits│
 │▼   repo-a     (1)                                             │
@@ -716,28 +721,30 @@ session's last activity, as everywhere else, not the time of the match.
 
 ### Hit row
 
-A match in the Messages listing. It has no kind glyph. There is no
-session row above it, so the hit row is prefixed with an origin: the harness badge and the session's label
-(truncated, padded to 12), then the cells below.
+A match in the Messages listing. It has no kind glyph. The hit, pane,
+and pane hit rows take the columns of the contents search's results
+(which put a `session` or `pane` word first), so a match reads the same
+in the modal and in the view at one width. There is no session row above
+a hit row, so it names its session first.
 
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
-| 1 | Turn | `turn N`, counting from 1 | always | dim |
-| 2 | Role | `you`, `ai`, or `system`, as in the transcript viewer's gutter | always | dim, padded to 6 |
-| 3 | Kind | `message`, `summary`, `tool call`, `tool output`, or `thinking` | always | dim, padded to 11 so the age and snippet line up |
-| 4 | Age | time since the turn was written, or a dash | always | see [Age](#age) |
-| 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries; the match in the theme's match style (bold, underlined) | when room remains | dim italic |
+| 1 | Chip | the session's harness chip | gives way first | see [Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings) |
+| 2 | Name | the session's alias, title, or mux name, or the start of its id | always; narrows to 8 cells when the row is narrow | a fifth of the row's width, 12 to 32 cells |
+| 3 | Turn | `turn N · kind`, counting from 1; the kind is `message`, `summary`, `tool call`, `tool output`, or `thinking` | always | dim; 22 cells in a row of 100 or more, 20 from 78, else 14 |
+| 4 | Age | time since the turn was written, or a dash | gives way after the chip | see [Age](#age) |
+| 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries; the match in the theme's match style (bold, underlined) | always: the cells before it give way so it keeps 20 cells | dim italic |
 
 <!-- frame: keys="6sthe<BackTab><C-f>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
-│  project 0.0       line 17       0s  ready once they pass.    │
-│  project 0.0       line 6        0s  …Expand the notes into a…│
-│   claude    claude-code…  turn 3     you     message      107d│
-│   claude    claude-code…  turn 4     ai      message      107d│
-│   pi        pi in ateli…  turn 1     you     message      107d│
-│   pi        pi in ateli…  turn 2     ai      message      107d│
+│  project 0.0   line 17           0s ready once they pass.     │
+│  project 0.0   line 6            0s …Expand the notes into a… │
+│  claude-code…  turn 3 · mess…  107d Expand the notes into a…  │
+│  claude-code…  turn 4 · mess…  107d …since the last release…  │
+│  pi in ateli…  turn 1 · mess…  107d …cover the fork index…    │
+│  pi in ateli…  turn 2 · mess…  107d …the empty index,…        │
 ```
 
 <!-- frame: keys="6sthe<C-f>f<Up><Space><Esc>" width=150 height=20 -->
@@ -758,48 +765,50 @@ and its panes are one entity, so the row wears the mux glyph and acts on
 the mux (`a` attaches). Hits the pane's own session already contains are
 left out, so a pane that mirrors an agent does not repeat it.
 
+It takes the [hit row](#hit-row)'s columns after the mux glyph.
+
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
 | 1 | Prefix | indent, disclosure | always | |
 | 2 | Kind | the mux glyph `▣` | always | mux color |
-| 3 | Mux | the mux's name, padded to 16 | always | bold |
-| 4 | Place | `window.pane`, such as `0.1` | always | dim, padded to 5 |
-| 5 | Command | what the pane was running | when it is known | dim, padded to 8 |
-| 6 | Age | time since the scrollback was read | always | see [Age](#age) |
-| 7 | Hits | `N hits` | always | dim |
-| 8 | Snippet | the newest matching line, cropped around the match | when room remains | dim italic, match in the match style |
+| 3 | Command | what the pane was running, in the chip's column | when it is known; gives way first | dim |
+| 4 | Name | the mux's name and the pane's `window.pane`, such as `work 0.1` | always; narrows to 8 cells | as the hit row's |
+| 5 | Hits | `N hits` | always | dim, as the hit row's turn |
+| 6 | Age | time since the scrollback was read | gives way after the command | see [Age](#age) |
+| 7 | Snippet | the newest matching line, cropped around the match | always, at least 20 cells while anything else can give way | dim italic, match in the match style |
 
 <!-- frame: keys="2<C-/>feature<C-s>" width=130 height=12 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
-│  ▣ ◉ project           0.0    zsh         0s  4 hits  feature…│
+│  ▣ ◉ project 0.0   4 hits            0s from feature/extra…   │
 │  ● ◉ showcase   claude       1h  ∘  project           4 hits  │
 ```
 
 ### Pane hit row
 
-A pane's match in the Messages listing. It has no kind glyph. It is
-prefixed with the mux's name and the pane's place, padded to 16.
+A pane's match in the Messages listing. It has no kind glyph. It takes
+the [hit row](#hit-row)'s columns: what the pane runs in the chip's
+column, then the mux's name and the pane's place, then:
 
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
-| 1 | Line | `line N`, counting from 1 in the scrollback, newest (lowest) first | always | dim, padded to 5 |
-| 2 | Age | time since the scrollback was read | always | see [Age](#age) |
-| 3 | Snippet | the line, cropped around the match | when room remains | dim italic, match in the match style |
+| 1 | Line | `line N`, counting from 1 in the scrollback, newest (lowest) first | always | dim, as the hit row's turn |
+| 2 | Age | time since the scrollback was read | gives way after the command | see [Age](#age) |
+| 3 | Snippet | the line, cropped around the match | always, at least 20 cells while anything else can give way | dim italic, match in the match style |
 
 <!-- frame: keys="2<C-/>feature<BackTab><C-s>" width=130 height=14 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
-│  project 0.0       line 16       0s  from feature/extra into… │
-│  project 0.0       line 7        0s  feature/extra.           │
-│  project 0.0       line 3        0s  …feature notes,…         │
-│  project 0.0       line 1        0s  …on feature/extra that…  │
-│   claude    claude-code…  turn 1     you     message      107d│
-│   claude    claude-code…  turn 2     ai      message      107d│
-│   claude    claude-code…  turn 3     you     message      107d│
-│   claude    claude-code…  turn 4     ai      message      107d│
+│  project 0.0   line 16           0s from feature/extra into…  │
+│  project 0.0   line 7            0s feature/extra.            │
+│  project 0.0   line 3            0s …feature notes,…          │
+│  project 0.0   line 1            0s …on feature/extra that…   │
+│  claude-code…  turn 1 · mess…  107d …on feature/extra that…   │
+│  claude-code…  turn 2 · mess…  107d …feature notes,…          │
+│  claude-code…  turn 3 · mess…  107d …a PR from feature/extra. │
+│  claude-code…  turn 4 · mess…  107d …from feature/extra into… │
 ```
 
 ### Paging
@@ -808,7 +817,7 @@ prefixed with the mux's name and the pane's place, padded to 16.
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/2 "the" · All · 2 sessions · 1 pane · 4 skipped · sca…│
-│  ▣ ◉ project           0.0    zsh         0s  2 hits  …they…  │
+│  ▣ ◉ project 0.0   2 hits            0s ready once they pass. │
 │  ● ◉ showcase   claude       1h  ∘  project           2 hits  │
 │  ●   showcase   pi           2h  ∘  repo-a            2 hits  │
 ```

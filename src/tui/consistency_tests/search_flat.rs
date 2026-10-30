@@ -400,19 +400,54 @@ fn the_columns_line_up_down_the_list() {
         .filter(|line| line.contains("turn "))
         .collect();
     assert_eq!(rows.len(), 3, "{text}");
+    // The column a row's first `turn ` starts in, counted in characters:
+    // a label cut with `…` on one row and whole on another takes the same
+    // cells but not the same bytes.
     let columns: Vec<usize> = rows
         .iter()
-        .map(|line| {
-            line.chars()
-                .position(|c| c == 't')
-                .and_then(|_| line.find("turn "))
-                .unwrap()
-        })
+        .map(|line| line[..line.find("turn ").unwrap()].chars().count())
         .collect();
     assert!(
         columns.windows(2).all(|w| w[0] == w[1]),
         "the turn column starts in one place on every row: {rows:#?}"
     );
+}
+
+#[test]
+fn the_hit_columns_line_up_and_are_never_cut_without_a_mark_at_any_width() {
+    let (a, b) = two();
+    let mut app = flat(
+        &[(&a, summary(2, 4, 1_000)), (&b, summary(1, 0, 900))],
+        vec![
+            (&a, vec![hit(4, Some(1_000)), hit(10, Some(950))]),
+            (&b, vec![hit(0, Some(900))]),
+        ],
+    );
+    for width in [60, 80, 110, 160] {
+        let buffer = buffer_of(&mut app, width, 40);
+        let rows: Vec<String> = super::columns::left_pane(&buffer)
+            .into_iter()
+            .filter(|line| line.contains("turn "))
+            .collect();
+        assert_eq!(rows.len(), 3, "at {width}: {rows:#?}");
+        let turns: Vec<usize> = rows
+            .iter()
+            .map(|line| line[..line.find("turn ").unwrap()].chars().count())
+            .collect();
+        assert!(
+            turns.windows(2).all(|pair| pair[0] == pair[1]),
+            "at {width}, the turn column moves: {rows:#?}"
+        );
+        // A row ends in its whole snippet (`… at turn N`) or in a cell cut
+        // with `…`; none stops at the pane's edge mid-word.
+        for row in &rows {
+            let end = row.trim_end().chars().last().unwrap();
+            assert!(
+                end == '…' || end.is_ascii_digit(),
+                "at {width}, a row is cut without a mark: {row:?}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -322,12 +322,14 @@ fn content_search_reads_pane_scrollback_and_tab_widens_it() {
     );
     assert!(all.contains("sessions and panes searched"), "{all}");
 
-    // The Search view lists the pane as a row of its own.
+    // The Search view lists the pane as a row of its own, named by its mux
+    // and its place. (What the pane runs is the first cell to give way, and
+    // this pane is a cell too narrow to keep it.)
     let view = frame(scratch.path(), "2<C-/>feature<C-s>");
     assert!(view.contains("search 1/1 \"feature\""), "{view}");
     assert!(
         view.lines()
-            .any(|l| l.contains("project") && l.contains("0.0") && l.contains("zsh")),
+            .any(|l| l.contains('▣') && l.contains("project 0.0") && l.contains("4 hits")),
         "{view}"
     );
 }

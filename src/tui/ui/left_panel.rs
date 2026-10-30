@@ -10,8 +10,8 @@
 //! [`LeftRows::line`] is the producer. What only the snapshot and the
 //! hand-off can say about a row (ghost, pending, pin marker) is worked
 //! out by the App before the frame, so laying a row out looks nothing
-//! up. The Search view's hit and pane rows still draw their own cells
-//! after the prefix the framework lays out.
+//! up. The Search view's hit, pane, and pane-hit rows are laid out from
+//! the search modal's hit columns, so a hit reads alike in both.
 
 mod columns;
 
@@ -103,12 +103,8 @@ impl<'a> LeftRows<'a> {
     /// The producer the tree draws a row with: its cells at the width
     /// the context gives. The tree applies the row's looks.
     fn line(&self, row: &Row, cx: &RowCtx<'_>) -> Line<'static> {
-        let LeftColumns { theme, now, .. } = *self.columns;
+        let theme = self.columns.theme;
         match &row.kind {
-            RowKind::Group(_)
-            | RowKind::AgentSession(_)
-            | RowKind::MuxSession(_)
-            | RowKind::Pr(_) => self.tree.line(row, cx),
             RowKind::Mixed(mixed) if columns::stopped_mux(mixed) => self.tree.line(row, cx),
             // A Pinned or History row for something stopped, removed,
             // missing, planned, or unknown dims its cells from the label
@@ -117,16 +113,7 @@ impl<'a> LeftRows<'a> {
             RowKind::Mixed(mixed) if mixed.tone == crate::tui::rows::MixedTone::Dim => self
                 .tree
                 .line_with_look(row, cx, Col::MixedLabel, |spans| ghostify(spans, theme)),
-            RowKind::Mixed(_) => self.tree.line(row, cx),
-            RowKind::Hit(hit) => self
-                .tree
-                .line_then(row, cx, |left| render_hit_spans(hit, theme, left, now)),
-            RowKind::Pane(pane) => self
-                .tree
-                .line_then(row, cx, |left| render_pane_spans(pane, theme, left, now)),
-            RowKind::PaneHit(hit) => self
-                .tree
-                .line_then(row, cx, |left| render_pane_hit_spans(hit, theme, left, now)),
+            _ => self.tree.line(row, cx),
         }
     }
 }
@@ -555,20 +542,6 @@ fn mixed_chip_span(chip: &crate::tui::rows::MixedChip, theme: &Theme) -> Span<'s
     }
 }
 
-/// The age cell every row draws: the framework's age cell, four cells
-/// right-aligned, `—` when the age is unknown, and tinted by how recent
-/// `epoch` is at `now`, so a fresh row reads fresh wherever it appears.
-/// The label was written when the row was built.
-pub(super) fn age_span(
-    age: Option<&str>,
-    epoch: Option<i64>,
-    now: i64,
-    theme: &Theme,
-) -> Span<'static> {
-    let recency = Age::of(epoch, Some(now)).map(Age::recency);
-    tuikit::age::cell(age, recency, tuikit::age::CELL_WIDTH, theme)
-}
-
 /// The ghost style: the theme's `inert` color in italics. Gone entities
 /// and pins that aren't running share it in every view.
 pub(super) fn ghost_style(theme: &Theme) -> Style {
@@ -587,158 +560,6 @@ fn mixed_glyph_span(mixed: &crate::tui::rows::MixedRow, theme: &Theme) -> Span<'
         return pr_kind_glyph_span(mixed.pr_status, theme);
     }
     node_kind_glyph_span(mixed.node_kind, theme)
-}
-
-/// What a content search found in a row's session, in the slot a
-/// message preview would take: a dim `3 hits` chip, then the best
-/// snippet with the match picked out.
-fn append_content_hit(
-    spans: &mut Vec<Span<'static>>,
-    hit: &crate::tui::rows::ContentHitCell,
-    width: usize,
-    theme: &Theme,
-) {
-    spans.push(Span::raw("  "));
-    spans.push(crate::tui::widgets::badge::hits_chip(hit.count, theme));
-    let used = text::spans_width(spans);
-    if width <= used + 8 {
-        return;
-    }
-    spans.push(Span::raw("  "));
-    append_snippet(spans, &hit.snippet, &hit.highlight, width - used - 2, theme);
-}
-
-/// How many cells a flat row gives the session's name.
-const FLAT_LABEL_WIDTH: usize = 12;
-
-/// The columns of a matching turn under its session: who said it, what
-/// kind of turn it is, when, and the snippet with the match picked out.
-fn render_hit_spans(
-    hit: &crate::tui::rows::HitRow,
-    theme: &Theme,
-    budget: usize,
-    now: i64,
-) -> Vec<Span<'static>> {
-    let secondary = Style::default().fg(theme.inert);
-    let mut spans = Vec::new();
-    if let Some(origin) = &hit.origin {
-        // A flat row names its session: the harness chip and the name,
-        // padded so the columns after them line up down the list.
-        spans.push(crate::tui::widgets::badge::harness_badge(
-            &origin.harness_label,
-            theme,
-        ));
-        let name = text::fit(&origin.label, FLAT_LABEL_WIDTH);
-        spans.push(span!(Modifier::BOLD; " {name}  "));
-    }
-    spans.extend([
-        span!(secondary; "turn {:<4}", hit.turn_index + 1),
-        span!(secondary; "  {:<6}", hit.role),
-        span!(theme.muted; "  {:<11}", hit.kind),
-        Span::raw("  "),
-        age_span(Some(&hit.age), hit.age_epoch, now, theme),
-    ]);
-    let used = text::spans_width(&spans);
-    if budget > used + 8 {
-        spans.push(Span::raw("  "));
-        append_snippet(
-            &mut spans,
-            &hit.snippet,
-            &hit.highlight,
-            budget - used - 2,
-            theme,
-        );
-    }
-    spans
-}
-
-/// How many cells a pane row gives the mux's name.
-const PANE_LABEL_WIDTH: usize = 16;
-
-/// A pane whose scrollback matched, where a session row would be: the
-/// mux's name, the pane's place in it, what it runs, how long ago it was
-/// read, then the hit count and the newest matching line.
-fn render_pane_spans(
-    pane: &crate::tui::rows::PaneRow,
-    theme: &Theme,
-    budget: usize,
-    now: i64,
-) -> Vec<Span<'static>> {
-    let secondary = Style::default().fg(theme.inert);
-    let name = text::fit(&pane.mux_label, PANE_LABEL_WIDTH);
-    let command = text::fit(pane.command.as_deref().unwrap_or(""), 8);
-    let mut spans = vec![
-        span!(Modifier::BOLD; "{name}"),
-        span!(secondary; "  {:<5}", pane.location),
-        span!(theme.muted; "  {command}"),
-        Span::raw("  "),
-        age_span(Some(&pane.age), pane.age_epoch, now, theme),
-    ];
-    let cell = crate::tui::rows::ContentHitCell {
-        count: u32::try_from(pane.count).unwrap_or(u32::MAX),
-        snippet: pane.snippet.clone(),
-        highlight: pane.highlight.clone(),
-    };
-    append_content_hit(&mut spans, &cell, budget, theme);
-    spans
-}
-
-/// A matching line of a pane's scrollback: its line number, how long ago
-/// the scrollback was read, and the line with the match picked out. In
-/// the flat listing it is prefixed with the mux's name and the pane's
-/// place, padded so the cells after line up.
-fn render_pane_hit_spans(
-    hit: &crate::tui::rows::PaneHitRow,
-    theme: &Theme,
-    budget: usize,
-    now: i64,
-) -> Vec<Span<'static>> {
-    let secondary = Style::default().fg(theme.inert);
-    let mut spans = Vec::new();
-    if let Some(origin) = &hit.origin {
-        let name = text::fit(origin, PANE_LABEL_WIDTH);
-        spans.push(span!(Modifier::BOLD; "{name}  "));
-    }
-    spans.extend([
-        span!(secondary; "line {:<5}", hit.line),
-        Span::raw("  "),
-        age_span(Some(&hit.age), hit.age_epoch, now, theme),
-    ]);
-    let used = text::spans_width(&spans);
-    if budget > used + 8 {
-        spans.push(Span::raw("  "));
-        append_snippet(
-            &mut spans,
-            &hit.snippet,
-            &hit.highlight,
-            budget - used - 2,
-            theme,
-        );
-    }
-    spans
-}
-
-/// `text` in the preview style with the byte range `highlight` picked
-/// out in the theme's match style, cropped around the match to `budget`
-/// cells so the match is always on screen.
-fn append_snippet(
-    spans: &mut Vec<Span<'static>>,
-    text: &str,
-    highlight: &std::ops::Range<usize>,
-    budget: usize,
-    theme: &Theme,
-) {
-    let ticks = crate::tui::widgets::search::MARKDOWN_TICKS;
-    let fitted = text::fit_snippet(text, highlight.clone(), budget, ticks);
-    let plain = Style::default()
-        .fg(theme.inert)
-        .add_modifier(Modifier::ITALIC);
-    let painted = text::paint(
-        &[Span::styled(fitted.text, plain)],
-        fitted.highlight,
-        |_| theme.match_style(),
-    );
-    spans.extend(painted.into_iter().filter(|span| !span.content.is_empty()));
 }
 
 /// Per-row node-kind glyph span (ADR 0073). Renders the slate glyph
@@ -824,3 +645,7 @@ pub(super) fn mux_indicator_span(indicator: MuxIndicator, theme: &Theme) -> Span
         }
     }
 }
+
+#[cfg(test)]
+#[path = "left_panel/hits_tests.rs"]
+mod hits_tests;

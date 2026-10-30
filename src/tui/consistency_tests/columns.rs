@@ -61,7 +61,7 @@ fn world_with_a_shared_mux() -> GraphSnapshot {
 
 /// The inner rows of the left pane: the bordered pane whose title is the
 /// tab strip, wherever the layout put it.
-fn left_pane(buffer: &Buffer) -> Vec<String> {
+pub(super) fn left_pane(buffer: &Buffer) -> Vec<String> {
     let lines = rows(buffer);
     let top = lines
         .iter()

@@ -39,7 +39,9 @@ use crate::viewer::search::{ContentKinds, Grouping};
 mod rows;
 
 use rows::{ContentGrid, QuickRow};
-pub(crate) use rows::{MARKDOWN_TICKS, line_tag, snippet_cell, turn_tag};
+pub(crate) use rows::{
+    Hit, HitChip, HitCol, HitShape, hit_columns, hits_tag, line_tag, snippet_cell, turn_tag,
+};
 
 /// How long the query rests before a contents scan starts, so typing a
 /// word does not start a scan per letter.

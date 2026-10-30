@@ -16,11 +16,15 @@ use tuikit::columns::{Cell, Cells, Column, ColumnSchema};
 use tuikit::tree::{self, RowColumns, RowCtx, RowMark};
 
 use super::*;
-use crate::tui::rows::{EntityState, MixedRow, MixedTone, PinMarker, Row};
+use crate::tui::rows::{
+    EntityState, HitRow, MixedRow, MixedTone, PaneHitRow, PaneRow, PinMarker, Row,
+};
 use crate::tui::widgets::badge::{
     command_badge, harness_badge, hits_chip, no_agent_chip, was_in_chip,
 };
-use crate::tui::widgets::search::snippet_cell;
+use crate::tui::widgets::search::{
+    Hit, HitChip, HitCol, HitShape, hit_columns, hits_tag, line_tag, snippet_cell, turn_tag,
+};
 
 /// The key of a left-pane column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,6 +105,9 @@ pub(super) enum Col {
     MixedChip,
     /// What a Pinned or History row says after its chip.
     MixedContent,
+    /// A column of the Search view's matching turns, panes, and pane
+    /// lines: the search modal's hit columns.
+    Hit(HitCol),
 }
 
 /// The widest label a session row shows.
@@ -149,13 +156,16 @@ pub(super) struct Schemas {
     /// A mux row, running or stopped.
     mux: ColumnSchema<Col>,
     pr: ColumnSchema<Col>,
-    /// The prefix alone, for a row whose body is drawn on its own.
-    entity: ColumnSchema<Col>,
-    /// The prefix alone for a row with no kind glyph (a matching turn,
-    /// a matching pane line).
-    unglyphed: ColumnSchema<Col>,
     /// A Pinned or History row.
     mixed: ColumnSchema<Col>,
+    /// A pane whose scrollback matched, where a session row would be.
+    pane: ColumnSchema<Col>,
+    /// A matching turn or pane line that names its session or pane (the
+    /// Messages listing), with no kind glyph.
+    hit: ColumnSchema<Col>,
+    /// A matching turn or pane line under the row that names its session
+    /// or pane.
+    nested_hit: ColumnSchema<Col>,
 }
 
 impl Schemas {
@@ -239,14 +249,25 @@ impl Schemas {
             Column::cap(Col::MixedChip, usize::MAX).drops(0),
             Column::fill(Col::MixedContent).drops(1),
         ]);
+        // A search hit is laid out as the search modal lays its results out:
+        // the chip or command, the name, the hit count or position, the
+        // age, and the snippet, with the modal's widths and the order they
+        // give way in. The row's kind glyph and place say whether it is a
+        // session's or a pane's, so it has no source word.
+        let hit = |prefix: Vec<Column<Col>>, shape| {
+            let mut columns = prefix;
+            columns.extend(hit_columns(Col::Hit, chip, shape));
+            ColumnSchema::new(columns)
+        };
         Self {
             header: ColumnSchema::new(header),
             session: ColumnSchema::new(session),
             mux: ColumnSchema::new(mux),
             pr: ColumnSchema::new(pr),
-            entity: ColumnSchema::new(prefix(Some(Col::Glyph), Col::Marker)),
-            unglyphed: ColumnSchema::new(prefix(None, Col::Marker)),
             mixed: ColumnSchema::new(mixed),
+            pane: hit(prefix(Some(Col::Glyph), Col::Marker), HitShape::Named),
+            hit: hit(prefix(None, Col::Marker), HitShape::Named),
+            nested_hit: hit(prefix(None, Col::Marker), HitShape::Nested),
         }
     }
 }
@@ -274,8 +295,14 @@ impl RowColumns<Row> for LeftColumns<'_> {
             RowKind::Mixed(mixed) if stopped_mux(mixed) => &self.schemas.mux,
             RowKind::Mixed(_) => &self.schemas.mixed,
             RowKind::Pr(_) => &self.schemas.pr,
-            RowKind::Hit(_) | RowKind::PaneHit(_) => &self.schemas.unglyphed,
-            RowKind::Pane(_) => &self.schemas.entity,
+            RowKind::Pane(_) => &self.schemas.pane,
+            RowKind::Hit(HitRow {
+                origin: Some(_), ..
+            })
+            | RowKind::PaneHit(PaneHitRow {
+                origin: Some(_), ..
+            }) => &self.schemas.hit,
+            RowKind::Hit(_) | RowKind::PaneHit(_) => &self.schemas.nested_hit,
         }
     }
 
@@ -328,14 +355,87 @@ impl RowColumns<Row> for LeftColumns<'_> {
                 cells.push((Col::MixedMarker, mixed_marker_cell(mixed, theme)));
                 cells.extend(self.mixed_cells(mixed, cx.pending));
             }
-            kind => {
-                if let Some(glyph) = row_kind_glyph_span(kind, theme) {
+            RowKind::Pane(pane) => {
+                // A pane is a part of a mux and wears its glyph.
+                if let Some(glyph) = row_kind_glyph_span(&row.kind, theme) {
                     cells.push((Col::Glyph, Cell::spans(vec![glyph])));
                 }
                 cells.push((Col::Marker, marker_cell(cx.mark, theme)));
+                cells.extend(self.pane_cells(pane));
+            }
+            // A matching turn or pane line is drawn without a kind glyph.
+            RowKind::Hit(hit) => {
+                cells.push((Col::Marker, marker_cell(cx.mark, theme)));
+                cells.extend(self.hit_cells(hit));
+            }
+            RowKind::PaneHit(hit) => {
+                cells.push((Col::Marker, marker_cell(cx.mark, theme)));
+                cells.extend(self.pane_hit_cells(hit));
             }
         }
         cells
+    }
+}
+
+impl LeftColumns<'_> {
+    /// How recent an age that counts from `epoch` is now, which tints it.
+    fn recency(&self, epoch: Option<i64>) -> Option<tuikit::age::Recency> {
+        Age::of(epoch, Some(self.now)).map(Age::recency)
+    }
+
+    /// A matching turn's cells after its prefix: the turn and its kind,
+    /// when it was said, and the snippet; on a row of the Messages listing,
+    /// first the session's chip and name.
+    fn hit_cells(&self, hit: &HitRow) -> Cells<Col> {
+        let origin = hit.origin.as_ref();
+        Hit {
+            source: "session",
+            chip: origin.map(|origin| HitChip::Harness(&origin.harness_label)),
+            label: origin.map_or("", |origin| origin.label.as_str()),
+            tag: turn_tag(hit.turn_index, hit.kind),
+            age: Some(&hit.age),
+            recency: self.recency(hit.age_epoch),
+            snippet: &hit.snippet,
+            highlight: hit.highlight.clone(),
+        }
+        .cells(Col::Hit, self.theme)
+    }
+
+    /// A pane row's cells after its prefix: what the pane runs, the mux's
+    /// name and the pane's place in it, the hit count, how long ago the
+    /// scrollback was read, and the newest matching line.
+    fn pane_cells(&self, pane: &PaneRow) -> Cells<Col> {
+        let label = format!("{} {}", pane.mux_label, pane.location);
+        Hit {
+            source: "pane",
+            chip: Some(HitChip::Command(pane.command.as_deref().unwrap_or(""))),
+            label: &label,
+            tag: hits_tag(pane.count),
+            age: Some(&pane.age),
+            recency: self.recency(pane.age_epoch),
+            snippet: &pane.snippet,
+            highlight: pane.highlight.clone(),
+        }
+        .cells(Col::Hit, self.theme)
+    }
+
+    /// A matching pane line's cells after its prefix: its line, how long
+    /// ago the scrollback was read, and the line; on a row of the Messages
+    /// listing, first what the pane runs and the mux's name and the pane's
+    /// place.
+    fn pane_hit_cells(&self, hit: &PaneHitRow) -> Cells<Col> {
+        let origin = hit.origin.as_deref();
+        Hit {
+            source: "pane",
+            chip: origin.map(|_| HitChip::Command(hit.pane.command.as_deref().unwrap_or(""))),
+            label: origin.unwrap_or(""),
+            tag: line_tag(hit.line),
+            age: Some(&hit.age),
+            recency: self.recency(hit.age_epoch),
+            snippet: &hit.snippet,
+            highlight: hit.highlight.clone(),
+        }
+        .cells(Col::Hit, self.theme)
     }
 }
 
