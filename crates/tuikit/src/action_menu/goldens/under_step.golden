@@ -1,0 +1,38 @@
+frame 64x16
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |  ┌ notes.txt ───────────────────────────────────────────────┐  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │► o  Open                                                 │  |
+style |  abbbbbbbbb                                                 a  |
+text  |  │        show the file                                     │  |
+style |  a                                                          a  |
+text  |  │     Rename…                                              │  |
+style |  a                                                          a  |
+text  |  │        give the file another name                        │  |
+style |  a                                                          a  |
+text  |  │     Copy                                                 │  |
+style |  a  c  cccc                                                 a  |
+text  |  │        nothing to copy to                                │  |
+style |  a                                                          a  |
+text  |  │  x  Remove                                               │  |
+style |  a                                                          a  |
+text  |  │        delete the file                                   │  |
+style |  a                                                          a  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │↑/↓ move · Enter pick · Esc close                         │  |
+style |  addddddddddddddddddddddddddddddddd                         a  |
+text  |  └──────────────────────────────────────────────────────────┘  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |                                                                |
+style |                                                                |
+legend
+  a  fg Cyan
+  b  bold
+  c  fg DarkGray, dim
+  d  dim

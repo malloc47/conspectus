@@ -41,10 +41,13 @@ pub fn confirm_note() -> String {
 }
 
 /// What the layout reads from the menu: its entries, the cursor, the
-/// armed entry, and the theme.
+/// armed entry, whether the menu has the keys, and the theme.
 pub(super) struct View<'a, M> {
     pub entries: &'a [Entry<M>],
     pub cursor: usize,
+    /// Whether the menu has the keys: `false` under a step of its own,
+    /// where the cursor row takes the inactive selection look.
+    pub focused: bool,
     pub armed: Option<usize>,
     pub theme: &'a Theme,
 }
@@ -118,7 +121,7 @@ impl<M> View<'_, M> {
                 row.push(Span::raw(" ".repeat(KEY_GAP)));
             }
             row.push(Span::styled(text::truncate_end(&label, label_width), style));
-            let cursor = Cursor::of(index == self.cursor && entry.enabled, true);
+            let cursor = Cursor::of(index == self.cursor && entry.enabled, self.focused);
             labels.push(lines.len());
             lines.push(selection::row(row, cursor, theme));
             if let Some(detail) = &entry.detail {

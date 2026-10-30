@@ -30,7 +30,9 @@
 //!   step](Entry::opens_step): picking it reports its message and the
 //!   menu stays open under the step the host opens
 //!   ([`ModalStack::push_step`](crate::overlay::ModalStack::push_step)),
-//!   so `Esc` there comes back to the menu.
+//!   so `Esc` there comes back to the menu. While the step has the keys,
+//!   the menu under it draws its cursor row in the inactive selection
+//!   look, its marker kept ([`ActionMenu::draw_under_step`]).
 //! - **Scrolling with a fixed footer.** The menu is the menu-sized modal
 //!   frame, as tall as its rows. On a screen too short for them the
 //!   footer keeps the bottom rows and the entries scroll in a window the
@@ -268,15 +270,29 @@ impl<M> ActionMenu<M> {
     }
 
     /// Draws the menu over `area`: the frame, the entries, and the
-    /// footer, and keeps the window it showed. A host whose overlay holds
-    /// the menu as one of its levels draws it with this; on a stack,
+    /// footer, with the cursor row in the active selection look, and
+    /// keeps the window it showed. A host whose overlay holds the menu as
+    /// one of its levels draws it with this; on a stack,
     /// [`Overlay::render`] does.
     pub fn draw(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        self.paint(area, buf, theme, true);
+    }
+
+    /// Draws the menu as [`draw`](Self::draw) does, with the cursor row
+    /// in the inactive selection look and its marker kept: how it shows
+    /// under a step of its own (the dialog or prompt a pick opened), which
+    /// has the keys. On a stack, [`Overlay::render_under_step`] does this.
+    pub fn draw_under_step(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+        self.paint(area, buf, theme, false);
+    }
+
+    fn paint(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme, focused: bool) {
         let frame = ModalFrame::new(theme, MENU_SIZE).title(self.title.as_str());
         let body = Body {
             view: View {
                 entries: &self.entries,
                 cursor: self.cursor,
+                focused,
                 armed: self.armed,
                 theme,
             },
@@ -368,6 +384,10 @@ impl<M: Clone, Cx: ?Sized> Overlay<M, Cx> for ActionMenu<M> {
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, _cx: &Cx, theme: &Theme) {
         self.draw(area, buf, theme);
+    }
+
+    fn render_under_step(&mut self, area: Rect, buf: &mut Buffer, _cx: &Cx, theme: &Theme) {
+        self.draw_under_step(area, buf, theme);
     }
 
     /// The standard menu table's footer.

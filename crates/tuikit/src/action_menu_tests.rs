@@ -528,6 +528,66 @@ fn the_menu_looks_as_its_goldens_say() {
     assert_golden(&golden_path("narrow.golden"), &narrow, |path, text| {
         std::fs::write(path, text)
     });
+    let mut under = Buffer::empty(Rect::new(0, 0, 64, 16));
+    menu().draw_under_step(under.area, &mut under, &Theme::default());
+    assert_golden(&golden_path("under_step.golden"), &under, |path, text| {
+        std::fs::write(path, text)
+    });
+}
+
+/// A step that draws nothing, so the menu under it shows whole.
+struct Blank;
+
+impl Overlay<Msg, ()> for Blank {
+    fn handle(&mut self, _key: KeyEvent, (): &()) -> Outcome<Msg> {
+        Outcome::Consumed
+    }
+
+    fn render(&mut self, _area: Rect, _buf: &mut Buffer, (): &(), _theme: &Theme) {}
+}
+
+#[test]
+fn under_a_step_the_cursor_row_takes_the_inactive_look() {
+    let theme = Theme::default();
+    let mut menu = menu();
+    down(&mut menu);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 64, 16));
+    menu.draw_under_step(buf.area, &mut buf, &theme);
+    assert_eq!(marked(&buf).len(), 1, "the marker stays");
+    assert!(marked(&buf)[0].contains("Rename…"), "{:?}", marked(&buf));
+    let row = style_at(&buf, "Rename…").expect("the cursor's row");
+    assert!(
+        row.add_modifier.contains(theme.selection_inactive),
+        "{row:?}"
+    );
+    assert!(
+        !row.add_modifier.contains(theme.selection_active),
+        "{row:?}"
+    );
+    // On a stack, the menu under a step of its own draws that way, and
+    // under an overlay opened on its own it draws as it does alone.
+    let cursor_row = |step: bool| {
+        let mut stack: ModalStack<Box<dyn Overlay<Msg, ()>>> = ModalStack::new();
+        stack.push(Box::new(menu.clone()));
+        if step {
+            stack.push_step(Box::new(Blank));
+        } else {
+            stack.push(Box::new(Blank));
+        }
+        let mut both = Buffer::empty(Rect::new(0, 0, 64, 16));
+        stack.draw(both.area, &mut both, &(), &theme);
+        style_at(&both, "Rename…").expect("the menu's cursor row")
+    };
+    assert!(
+        cursor_row(true)
+            .add_modifier
+            .contains(theme.selection_inactive)
+    );
+    assert!(
+        cursor_row(false)
+            .add_modifier
+            .contains(theme.selection_active)
+    );
 }
 
 // ---- the conventions -----------------------------------------------------
