@@ -8,7 +8,8 @@
 //! The guard covers the host's overlay code and every file of the
 //! framework (`crates/tuikit/src`), because overlay controls move there;
 //! the hint scan also covers the code that writes the status line when an
-//! overlay opens and the status bar itself. `tests/support/source_tree.rs`
+//! overlay opens, and the main view's drawing: the status bar itself, the
+//! left pane's empty states, and the Preview's notes. `tests/support/source_tree.rs`
 //! explains why and how the scans are guarded against visiting too few
 //! files.
 
@@ -31,13 +32,15 @@ const TREES: &[Tree] = &[
     FRAMEWORK_SRC,
 ];
 
-/// The code that writes the status line: the runtime's handlers, the
-/// App's reducer and its parts, and the executor's, which set its text
-/// when a key opens an overlay or is refused, the actions that word a
-/// refusal or a row's state (`actions.rs`), and the status bar, which
-/// draws the hints. They route keys and draw the main view, so they may
-/// name key codes, but a key hint they wrote by hand would sit on the
-/// status line beside, or instead of, the generated one, and a key a
+/// The code that writes the status line and the main view's own notes:
+/// the runtime's handlers, the App's reducer and its parts, and the
+/// executor's, which set its text when a key opens an overlay or is
+/// refused, the actions that word a refusal or a row's state
+/// (`actions.rs`), and the main view's drawing (`ui/`): the status bar,
+/// which draws the hints, the left pane's empty states and the Search
+/// view's header, and the Preview's notes. They route keys and draw the
+/// main view, so they may name key codes, but a key hint they wrote by
+/// hand would sit beside, or instead of, the generated one, and a key a
 /// message names by hand can drift from the keymap (they name it with
 /// `keybindings::key_name`). The status scan holds them to the stricter
 /// [`looks_like_status_hint`].
@@ -47,7 +50,7 @@ const STATUS_TREES: &[Tree] = &[
     Tree::new("src/tui/app.rs", 1),
     Tree::new("src/tui/app", 10),
     Tree::new("src/tui/actions.rs", 1),
-    Tree::new("src/tui/ui/header.rs", 1),
+    Tree::new("src/tui/ui", 5),
 ];
 
 /// Framework files that may name `KeyCode` outside a test module because
@@ -109,37 +112,44 @@ fn looks_like_key_hint(literal: &str) -> bool {
         })
 }
 
-/// What the status scan flags: a footer-shaped literal, one whose
-/// ` · `-separated pieces include a hint segment ([`is_hint_segment`]),
-/// or a message that names a key in its prose ([`names_a_key_in_prose`]).
+/// What the status scan flags: a footer-shaped literal, one whose pieces
+/// (split at ` · `, or at a double space as a strip of hints spaces them,
+/// `< older  > newer`) include a hint segment ([`is_hint_segment`]), or a
+/// message that names a key in its prose ([`names_a_key_in_prose`]).
 /// Overlay code explains keys in sentences ("Tab completes the path"),
 /// which this would flag, so only the status-line code is held to it.
 fn looks_like_status_hint(literal: &str) -> bool {
     looks_like_key_hint(literal)
-        || literal.split(" · ").any(is_hint_segment)
+        || literal
+            .split(" · ")
+            .flat_map(|piece| piece.split("  "))
+            .any(is_hint_segment)
         || names_a_key_in_prose(literal)
 }
 
-/// Whether a message names a key the way a refusal tells the operator
-/// what to press: a piece that leads with keys and a colon
-/// (`Backspace: no reveal…`, `i: select…`), a single character in
-/// backticks (``try `r` to refresh``), or "press" before a named key
-/// (`press Backspace again`). Such a message names the key from its
-/// binding (`keybindings::key_name`) instead, through a placeholder.
+/// Whether a message names a key the way a refusal or an empty pane tells
+/// the operator what to press: a piece that leads with keys and a colon
+/// (`Backspace: no reveal…`, `i: select…`), a single character or keys in
+/// backticks (``try `r` to refresh``, ``Press `Ctrl-R` to…``), or "press"
+/// before a named key (`press Backspace again`). Such a message names the
+/// key from its binding (`keybindings::key_name`) instead, through a
+/// placeholder.
 fn names_a_key_in_prose(literal: &str) -> bool {
     let leads_with_keys = literal.split(" · ").any(|piece| {
         piece
             .split_once(": ")
             .is_some_and(|(keys, _)| is_keys(keys))
     });
-    let backticked_character = literal.split('`').enumerate().any(|(index, part)| {
-        index % 2 == 1 && part.chars().count() == 1 && !part.starts_with(['{', '}'])
+    let backticked_key = literal.split('`').enumerate().any(|(index, part)| {
+        index % 2 == 1
+            && !part.starts_with(['{', '}'])
+            && (part.chars().count() == 1 || is_keys(part))
     });
     let words: Vec<&str> = literal.split(' ').collect();
     let pressed = words
         .windows(2)
         .any(|pair| pair[0].eq_ignore_ascii_case("press") && NAMED_KEYS.contains(&pair[1]));
-    leads_with_keys || backticked_character || pressed
+    leads_with_keys || backticked_key || pressed
 }
 
 /// Keys that are not a single character, as hints write them.
@@ -329,6 +339,11 @@ fn a_hint_segment_written_by_hand_is_caught_and_prose_is_not() {
         "Backspace: no reveal to return from",
         "mux node missing from snapshot — try `r` to refresh",
         "explorer: no drill history — press Backspace again to return to the left pane",
+        // Keys the left pane's empty states and the Search view's header
+        // named by hand.
+        "Press `Ctrl-R` to ask the forges again.",
+        "Clear `Unpinned only` in Controls (`f`) to list them here.",
+        "< older  > newer",
     ] {
         assert!(looks_like_status_hint(hint), "{hint:?} is a key hint");
     }
@@ -340,6 +355,10 @@ fn a_hint_segment_written_by_hand_is_caught_and_prose_is_not() {
         "attach: 2 ambiguous muxes here — select a session to see its candidates",
         "pin `{pin_id}` is {} · {enter} runs `{rebuild}` to bring it back",
         "select the `Other` header",
+        "Clear `Unpinned only` in Controls (`{}`) to list them here.",
+        "Press `{}` (or {}) to search the contents of sessions and mux panes.",
+        "{older} older  {newer} newer",
+        "Pin something with `{} pin add <target>`.",
         "tmux:off",
         "(pin, forget, plan, clean up)",
         "at the match",

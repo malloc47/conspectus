@@ -30,7 +30,11 @@ status scan was widened by CSP-796: it also covers `app.rs`, `app/`,
 and `actions.rs`, and flags a key named in a message's prose (a key
 before a colon, a single character in backticks, "press" before a
 named key); a status or refusal message names its key from the binding
-that takes it (`keybindings::key_name`).
+that takes it (`keybindings::key_name`). CSP-798 widened it again: it
+covers all of `ui/` (the left pane's empty states, the Search view's
+paging hint, the Preview's notes, which now name their keys the same
+way), and also flags keys in backticks (`` `Ctrl-R` ``) and hint
+segments a double space separates (`< older  > newer`).
 
 ## Context
 
