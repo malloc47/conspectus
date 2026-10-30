@@ -108,7 +108,8 @@ impl<R, M, Cx: ?Sized> ModalBody for Body<'_, '_, R, M, Cx> {
     }
 }
 
-/// An empty log: the host's note, wrapped, over the footer.
+/// An empty log: the host's empty state, wrapped and muted, over the
+/// footer.
 fn empty<R, M, Cx: ?Sized>(
     list: &mut LogList<R, M, Cx>,
     area: Rect,
@@ -126,13 +127,8 @@ fn empty<R, M, Cx: ?Sized>(
     } = ModalFooter::new(list.footer(), theme)
         .fit(width, usize::from(area.height).saturating_sub(1));
     let kept = footer.len();
-    let note: Vec<Line<'static>> = list
-        .empty
-        .lines()
-        .flat_map(|line| text::wrap(line, width))
-        .map(|row| Line::from(row.trim_end().to_string()))
-        .chain(spill)
-        .collect();
+    let mut note = list.empty.lines(width, theme);
+    note.extend(spill);
     let footer_height = u16::try_from(kept).unwrap_or(area.height);
     let note_area = Rect {
         height: area.height - footer_height,

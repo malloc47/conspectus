@@ -756,6 +756,34 @@ fn an_empty_list_says_why() {
 }
 
 #[test]
+fn an_empty_list_is_an_empty_state_wrapped_with_the_hosts_hint() {
+    let mut shelf: Rows = Palette::new("Shelf", Vec::new(), |row: &Item<&'static str>| {
+        Outcome::Commit(Msg::Pick(row.value))
+    })
+    .empty_note(EmptyState::new("(the shelf is bare)").hint("Add a book to fill it."));
+    let buf = drawn(&mut shelf, 80, 16);
+    let all = rows(&buf);
+    let note = all
+        .iter()
+        .position(|row| row.contains("(the shelf is bare)"))
+        .expect("the note");
+    assert!(all[note + 1].contains("Add a book to fill it."), "{all:#?}");
+    let hint = style_at(&buf, "Add a book").expect("the hint");
+    assert!(hint.add_modifier.contains(Theme::default().muted));
+    // A note wider than the list wraps at word edges instead of being cut.
+    let long = "(nothing of this kind is left to point at; try another kind)";
+    let mut narrow: Rows = Palette::new("Narrow", Vec::new(), |row: &Item<&'static str>| {
+        Outcome::Commit(Msg::Pick(row.value))
+    })
+    .empty_note(long);
+    let shown = text(&drawn(&mut narrow, 40, 16));
+    assert!(!shown.contains(marks::ELLIPSIS), "{shown}");
+    for word in long.split(' ') {
+        assert!(shown.contains(word), "{word:?} in {shown}");
+    }
+}
+
+#[test]
 fn the_status_row_sits_under_the_query_and_recedes() {
     let mut palette = three();
     palette.set_status(Some("3 rooms · 2 floors".into()));

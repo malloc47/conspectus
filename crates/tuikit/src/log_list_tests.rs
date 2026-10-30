@@ -494,6 +494,29 @@ fn an_empty_log_says_so_over_the_footer() {
 }
 
 #[test]
+fn an_empty_log_is_an_empty_state_with_the_hosts_hint() {
+    let events = Events::of(0);
+    let mut list = list().empty(
+        EmptyState::new("Nothing has happened yet.")
+            .hint("Run something and every outcome of it is listed here."),
+    );
+    let buf = draw(&mut list, &events, 40, 10);
+    let all = rows(&buf);
+    assert!(all[1].contains("Nothing has happened yet."), "{all:#?}");
+    // The hint is wrapped at the frame's width on rows of its own.
+    assert!(
+        all[2].contains("Run something and every outcome of it"),
+        "{all:#?}"
+    );
+    assert!(all[3].contains("is listed here."), "{all:#?}");
+    let muted = Theme::default().muted;
+    for text in ["Nothing has", "Run something", "listed here."] {
+        let at = find(&buf, text).expect(text);
+        assert!(buf[at].modifier.contains(muted), "{text} recedes");
+    }
+}
+
+#[test]
 fn a_narrow_footer_wraps_between_its_segments() {
     let events = Events::of(3);
     let mut list = list();

@@ -30,12 +30,12 @@
 //! toggles hide. Per ADR 0052 the renderer never branches on harness; it
 //! consumes only the normalized model.
 
-use std::borrow::Cow;
 use std::ops::Range;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tuikit::chip::{ToggleChip, Tone};
+use tuikit::empty_state::EmptyState;
 use tuikit::keys::{KeyRow, PagerKey};
 use tuikit::pager::{Find, PagerContent, PagerEffect};
 use tuikit::theme::Theme;
@@ -152,8 +152,8 @@ impl<M> PagerContent for Transcript<M> {
         crate::viewer::help::describe(key)
     }
 
-    fn empty(&self) -> Cow<'_, str> {
-        Cow::Borrowed(if self.document.is_empty() {
+    fn empty(&self) -> EmptyState {
+        EmptyState::new(if self.document.is_empty() {
             "transcript unavailable"
         } else {
             "every turn here is hidden"

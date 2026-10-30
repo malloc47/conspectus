@@ -12,12 +12,12 @@
 //! it can scroll and find without touching tmux again. Opening it from a
 //! search result lands on the matching line with that text picked out.
 
-use std::borrow::Cow;
 use std::ops::Range;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tuikit::chip::{ToggleChip, Tone};
+use tuikit::empty_state::EmptyState;
 use tuikit::feedback::Feedback;
 use tuikit::help::{HelpAction, HelpEntry};
 use tuikit::keys::{KeyRow, PagerKey};
@@ -171,8 +171,8 @@ impl PagerContent for PaneScrollback {
         }
     }
 
-    fn empty(&self) -> Cow<'_, str> {
-        Cow::Borrowed("the pane has no scrollback")
+    fn empty(&self) -> EmptyState {
+        EmptyState::new("the pane has no scrollback")
     }
 
     fn apply(&mut self, key: PaneKey) -> PagerEffect<Msg> {

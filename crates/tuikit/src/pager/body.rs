@@ -203,11 +203,10 @@ fn draw_body<C: PagerContent>(
     pager.scroll.keep(window);
     let target = bar.map_or(area, |bar| bar.content());
     if rows == 0 {
-        let empty = Line::from(Span::styled(
-            pager.content.empty().into_owned(),
-            Style::default().add_modifier(theme.muted),
-        ));
-        let mut shown = text::wrap_line(&empty, usize::from(target.width), 0);
+        let mut shown = pager
+            .content
+            .empty()
+            .lines(usize::from(target.width), theme);
         shown.extend(tail.iter().cloned());
         Paragraph::new(shown).render(target, buf);
         return;

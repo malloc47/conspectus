@@ -1,12 +1,12 @@
 //! What a pager shows: the content trait, what acting on the content
 //! asks of the pager, and the action set of content with no keys.
 
-use std::borrow::Cow;
 use std::ops::Range;
 
 use ratatui::text::{Line, Span};
 
 use super::Find;
+use crate::empty_state::EmptyState;
 use crate::help::{HelpAction, HelpEntry};
 use crate::keys::{KeyAction, KeyRole, KeyRow, PagerKey};
 use crate::theme::Theme;
@@ -100,9 +100,11 @@ pub trait PagerContent {
         None
     }
 
-    /// What the body says when there are no rows.
-    fn empty(&self) -> Cow<'_, str> {
-        Cow::Borrowed("nothing to show")
+    /// What the body says when there are no rows: an [`EmptyState`] (a
+    /// message and an optional hint; a string converts to the message),
+    /// wrapped to the body's width in its muted look.
+    fn empty(&self) -> EmptyState {
+        EmptyState::new("nothing to show")
     }
 
     /// Acts on one of the content's keys.

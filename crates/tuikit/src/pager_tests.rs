@@ -161,8 +161,8 @@ impl PagerContent for Doc {
         (key == PagerKey::Bottom).then_some("Jump to the newest row")
     }
 
-    fn empty(&self) -> std::borrow::Cow<'_, str> {
-        "nothing here".into()
+    fn empty(&self) -> crate::empty_state::EmptyState {
+        crate::empty_state::EmptyState::new("nothing here").hint("press + to add a line")
     }
 
     fn apply(&mut self, action: DocKey) -> PagerEffect<String> {
@@ -857,7 +857,20 @@ fn an_empty_content_says_so() {
     let mut pager = Pager::new(Doc::new(Vec::new()));
     let shown = draw(&mut pager, 40, 8);
     assert_eq!(shown[2].trim_end(), "nothing here");
+    assert_eq!(
+        shown[3].trim_end(),
+        "press + to add a line",
+        "the content's hint"
+    );
     assert!(shown[7].starts_with("[ 1/1 ]"));
+    // Both are the empty state's rows, in its muted look.
+    let area = Rect::new(0, 0, 40, 8);
+    let mut buf = Buffer::empty(area);
+    pager.draw(area, &mut buf, &theme());
+    for text in ["nothing here", "press +"] {
+        let style = style_at(&buf, text).expect(text);
+        assert!(style.add_modifier.contains(theme().muted), "{text} recedes");
+    }
 }
 
 #[test]

@@ -9,6 +9,7 @@ use ratatui::widgets::{Paragraph, Widget};
 
 use super::options::Options;
 use super::row::RowContext;
+use crate::empty_state::EmptyState;
 use crate::frame::{ModalBody, ModalFooter};
 use crate::keys::Footer;
 use crate::scroll::{ScrollGutter, ScrollWindow};
@@ -26,7 +27,7 @@ pub(super) struct View<'a, R> {
     pub ranked: &'a [usize],
     pub cursor: usize,
     /// What the list says when it is empty.
-    pub note: &'a str,
+    pub note: &'a EmptyState,
     /// The options pane, while it is open.
     pub options: Option<&'a Options>,
     pub footer: Footer,
@@ -50,11 +51,13 @@ impl<R> View<'_, R> {
         ModalFooter::new(self.footer.clone(), self.theme)
     }
 
-    /// The rows the list shows: the options, the results, or the note.
-    fn list_rows(&self) -> usize {
+    /// The rows the list shows `width` cells wide: the options, the
+    /// results, or the note's wrapped rows.
+    fn list_rows(&self, width: usize) -> usize {
         match self.options {
             Some(options) => options.len(),
-            None => self.ranked.len().max(1),
+            None if self.ranked.is_empty() => self.note.rows(width).len(),
+            None => self.ranked.len(),
         }
     }
 
@@ -103,7 +106,9 @@ impl<R> ModalBody for Body<'_, R> {
     /// and the footer. The named palette size fills its extent instead.
     fn measure(&mut self, width: u16) -> u16 {
         let view = &self.view;
-        let rows = view.lead() + view.list_rows() + view.footer().height(usize::from(width));
+        let rows = view.lead()
+            + view.list_rows(usize::from(width))
+            + view.footer().height(usize::from(width));
         u16::try_from(rows).unwrap_or(u16::MAX)
     }
 
@@ -134,7 +139,9 @@ impl<R> ModalBody for Body<'_, R> {
             height: area.height - lead_rows,
             ..area
         };
-        let mut fit = view.footer().fit_beside(below, 1, |_| view.list_rows());
+        let mut fit = view
+            .footer()
+            .fit_beside(below, 1, |width| view.list_rows(usize::from(width)));
         let [list, footer_area] = fit.split(below);
         let list_rows = usize::from(list.height);
         let spill = std::mem::take(&mut fit.spill);
@@ -149,8 +156,9 @@ impl<R> ModalBody for Body<'_, R> {
         }
         if view.ranked.is_empty() {
             window.resize(list_rows, 0);
-            let note = Line::from(Span::styled(text::truncate_end(view.note, width), muted));
-            Paragraph::new([note].into_iter().chain(spill).collect::<Vec<_>>()).render(list, buf);
+            let mut lines = view.note.lines(width, theme);
+            lines.extend(spill);
+            Paragraph::new(lines).render(list, buf);
             return window;
         }
         // Results that overflow give the list's last column to the shared

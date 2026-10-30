@@ -119,6 +119,7 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 
+use crate::empty_state::EmptyState;
 use crate::feedback::{Entry, Log};
 use crate::frame::{ModalFrame, ModalSize};
 use crate::glyphs::marks;
@@ -195,7 +196,7 @@ type CopyOf<R, M> = Arc<dyn Fn(&Entry<R>) -> Option<M> + Send + Sync>;
 /// ```
 pub struct LogList<R, M, Cx: ?Sized> {
     title: String,
-    empty: String,
+    empty: EmptyState,
     keys: &'static [KeyRow<LogListKey>],
     source: Source<R, Cx>,
     clock: Clock<Cx>,
@@ -226,7 +227,7 @@ impl<R, M, Cx: ?Sized> LogList<R, M, Cx> {
     {
         Self {
             title: title.into(),
-            empty: EMPTY_NOTE.to_string(),
+            empty: EmptyState::new(EMPTY_NOTE),
             keys: LOG_LIST_KEYS,
             source: Arc::new(source),
             clock: Arc::new(clock),
@@ -269,9 +270,11 @@ impl<R, M, Cx: ?Sized> LogList<R, M, Cx> {
     }
 
     /// Sets what the list says while the log is empty: what will be
-    /// logged there. Each line of `note` is wrapped at the frame's width.
+    /// logged there, as an [`EmptyState`] (a message and an optional
+    /// hint, or a plain string as the message), drawn in its muted look
+    /// and wrapped at the frame's width, a line break ending a row.
     #[must_use]
-    pub fn empty(mut self, note: impl Into<String>) -> Self {
+    pub fn empty(mut self, note: impl Into<EmptyState>) -> Self {
         self.empty = note.into();
         self
     }

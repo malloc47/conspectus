@@ -135,6 +135,7 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 
 use crate::chip::SegmentedTitle;
+use crate::empty_state::EmptyState;
 use crate::frame::{ModalFrame, ModalSize};
 use crate::keys::{
     Footer, KeyAction, KeyRow, PALETTE_KEYS, PALETTE_OPTION_KEYS, PaletteKey, PaletteOptionKey,
@@ -272,8 +273,8 @@ pub struct Palette<R, M, A: 'static = PaletteKey> {
     cursor: usize,
     window: ScrollWindow,
     status: Option<String>,
-    empty_note: String,
-    no_match_note: String,
+    empty_note: EmptyState,
+    no_match_note: EmptyState,
     keys: &'static [KeyRow<A>],
     size: ModalSize,
     /// Whether the results keep the scrollbar's column while they fit.
@@ -309,8 +310,8 @@ impl<R, M> Palette<R, M> {
             cursor: 0,
             window: ScrollWindow::default(),
             status: None,
-            empty_note: EMPTY_NOTE.to_string(),
-            no_match_note: NO_MATCH_NOTE.to_string(),
+            empty_note: EmptyState::new(EMPTY_NOTE),
+            no_match_note: EmptyState::new(NO_MATCH_NOTE),
             keys: PALETTE_KEYS,
             size: PALETTE_SIZE,
             reserve_scrollbar: false,
@@ -404,16 +405,19 @@ impl<R, M, A: PaletteAction> Palette<R, M, A> {
         self
     }
 
-    /// Sets what the empty list says while nothing is typed.
+    /// Sets what the empty list says while nothing is typed: an
+    /// [`EmptyState`] (a message and an optional hint, or a plain string
+    /// as the message), wrapped to the list's width in its muted look.
     #[must_use]
-    pub fn empty_note(mut self, note: impl Into<String>) -> Self {
+    pub fn empty_note(mut self, note: impl Into<EmptyState>) -> Self {
         self.empty_note = note.into();
         self
     }
 
-    /// Sets what the empty list says when the query matches nothing.
+    /// Sets what the empty list says when the query matches nothing, as
+    /// [`empty_note`](Self::empty_note) does.
     #[must_use]
-    pub fn no_match_note(mut self, note: impl Into<String>) -> Self {
+    pub fn no_match_note(mut self, note: impl Into<EmptyState>) -> Self {
         self.no_match_note = note.into();
         self
     }
@@ -603,13 +607,15 @@ impl<R, M, A: PaletteAction> Palette<R, M, A> {
         self.status = status;
     }
 
-    /// Sets what the empty list says while nothing is typed.
-    pub fn set_empty_note(&mut self, note: impl Into<String>) {
+    /// Sets what the empty list says while nothing is typed
+    /// ([`empty_note`](Self::empty_note)).
+    pub fn set_empty_note(&mut self, note: impl Into<EmptyState>) {
         self.empty_note = note.into();
     }
 
-    /// Sets what the empty list says when the query matches nothing.
-    pub fn set_no_match_note(&mut self, note: impl Into<String>) {
+    /// Sets what the empty list says when the query matches nothing
+    /// ([`no_match_note`](Self::no_match_note)).
+    pub fn set_no_match_note(&mut self, note: impl Into<EmptyState>) {
         self.no_match_note = note.into();
     }
 
@@ -815,7 +821,7 @@ impl<R, M, A: PaletteAction> Palette<R, M, A> {
         cells: impl Fn(&R, &RowContext<'_>) -> Vec<Span<'static>>,
     ) {
         let frame = ModalFrame::new(theme, self.size).title(self.title_line(theme));
-        let note = if self.query.is_empty() {
+        let note: &EmptyState = if self.query.is_empty() {
             &self.empty_note
         } else {
             &self.no_match_note
