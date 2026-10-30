@@ -91,6 +91,7 @@ assert_eq!(painted.iter().filter(|span| span.style == bold).count(), 3);
 | `wrap_line`, `wrap_line_chars` | the styled forms of `wrap` and `wrap_chars` | `wrap_line` takes a hanging indent for continuation rows |
 | `fit_snippet` | crop an excerpt around a match to a budget | favors the text after the match; drops the characters you name first |
 | `elide` | keep the pieces of a line that fit by rank, mark what gave way | rules below; `Piece`, `MarkAt`, `Elided`, `Item` |
+| `elide_filled` | `elide`, then fill the room back with pieces that still fit | for a line whose pieces stand alone, such as a status line |
 | `find_ci`, `find_all_ci` | find matches, ASCII letters without case | offsets stay valid for highlighting |
 | `paint` | restyle byte ranges of a span list | the one match painter |
 | `paint_matches` | patch every occurrence of a query in a row, after a gutter it skips | `find_all_ci` and `paint` together, for a reader's rows |
@@ -148,7 +149,10 @@ names of a tab strip, the hints of a status line) fits its room by one
 rule, `elide(pieces, separator, mark, room, at)`. The caller measures each
 piece in cells and gives it a rank (`Piece::ranked`) or none
 (`Piece::unranked`); `separator` is the cells between two items and `mark`
-the cells of one mark, with any spacing it carries.
+the cells of one mark, with any spacing it carries. A piece may have a gap
+of its own (`.gap(cells)`), taken in place of the separator before it when
+an item precedes it, for a line whose pieces are not all joined alike; a
+mark in a gap takes the separator.
 
 - Start from every piece. While the line is wider than the room and a
   ranked piece is kept, the lowest-ranked one gives way; of two with one
@@ -189,6 +193,39 @@ assert_eq!(line.width(&steps, 3, 1), 17);
 The `columns` module has a narrow-width policy of its own for the cells of
 a row, which narrow as well as drop; a line whose pieces only stay or go
 uses `elide`.
+
+### Filling the room back
+
+`elide` gives way strictly by rank, so once a wide piece has gone, a
+narrower one of lower rank that would fit beside the kept pieces has gone
+too. That is right for a line whose pieces read in sequence (a path, a
+strip of names), where showing a later piece past a gap would put it
+where the mark does not say. A line whose pieces stand alone, each worth
+showing whatever else shows (a status line's hints and settings), wants
+every cell used. `elide_filled` takes the same arguments, applies `elide`,
+and then brings back each piece that gave way, highest rank first, when
+the line still fits with it:
+
+- Pieces of one rank come back in order, the earlier first, and once one
+  of them does not fit, the later ones of that rank stay out. The pieces
+  kept of each rank are therefore always its first ones, as `elide` leaves
+  them, so a group given one rank never shows a later member without the
+  earlier.
+- With every rank different, the result is packing by priority: in order
+  of importance, keep each piece that fits beside those kept, then, when
+  any was left out, make room for the mark.
+- The marks follow what is kept. When `elide` had to drop its marks or
+  cut its last piece, there is no room to fill, and nothing comes back.
+
+```rust
+use tuikit::text::{MarkAt, Piece, elide, elide_filled};
+
+// A narrow hint of low rank after a wide one of higher rank.
+let hints = [Piece::unranked(6), Piece::ranked(20, 5), Piece::ranked(9, 2)];
+// 6 + 3 + 9 and the two-cell mark: 20 cells.
+assert_eq!(elide(&hints, 3, 2, 24, MarkAt::End).kept, [0]);
+assert_eq!(elide_filled(&hints, 3, 2, 24, MarkAt::End).kept, [0, 2]);
+```
 
 ### Finding and painting
 
@@ -241,8 +278,3 @@ that draw it follow those rules.
   read.
 - **Grapheme cursor motion.** An editor's left and right keys could move by
   the same graphemes the cuts use; today the edit engine has its own rule.
-- **Filling the room back.** `elide` gives way strictly by rank, so a
-  low-ranked piece narrow enough to fit beside the kept ones is not brought
-  back once a wider piece of higher rank has gone. A line that wants every
-  cell used (a status line packing what fits) would add a pass after the
-  loop that restores dropped pieces, highest rank first, while they fit.

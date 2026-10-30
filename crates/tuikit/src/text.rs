@@ -76,7 +76,7 @@ mod snippet;
 mod wrap;
 
 pub use cut::{clip, clip_start, fit, fit_spans, pad, pad_start, truncate_end, truncate_middle};
-pub use elide::{Elided, Item, MarkAt, Piece, elide};
+pub use elide::{Elided, Item, MarkAt, Piece, elide, elide_filled};
 pub use escape::strip_ansi;
 pub use find::{FindAll, find_all_ci, find_ci, paint, paint_matches};
 pub use measure::{spans_width, width};

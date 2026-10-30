@@ -7,7 +7,9 @@
 //! caller measures each piece in cells and ranks it; the rule says which
 //! pieces to keep, where the marks stand, and, when even the pieces that
 //! never give way do not fit, how many cells the last of them may take.
-//! The caller draws the line from that.
+//! The caller draws the line from that. [`elide_filled`] is the same rule
+//! with a second pass that fills the room back, for a line whose pieces
+//! stand alone.
 
 use std::cmp::Reverse;
 
@@ -16,8 +18,9 @@ use std::cmp::Reverse;
 /// ```
 /// use tuikit::text::Piece;
 ///
-/// assert_eq!(Piece::ranked(5, 2), Piece { width: 5, rank: Some(2) });
-/// assert_eq!(Piece::unranked(5), Piece { width: 5, rank: None });
+/// assert_eq!(Piece::ranked(5, 2), Piece { width: 5, rank: Some(2), gap: None });
+/// assert_eq!(Piece::unranked(5), Piece { width: 5, rank: None, gap: None });
+/// assert_eq!(Piece::ranked(5, 2).gap(1).gap, Some(1));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Piece {
@@ -27,6 +30,10 @@ pub struct Piece {
     /// way lowest rank first, and of two pieces with one rank, the later
     /// one first.
     pub rank: Option<u32>,
+    /// The cells before the piece when an item precedes it, in place of
+    /// the line's separator; `None` takes the separator. The first item
+    /// of a line has nothing before it.
+    pub gap: Option<usize>,
 }
 
 impl Piece {
@@ -35,13 +42,27 @@ impl Piece {
         Self {
             width,
             rank: Some(rank),
+            gap: None,
         }
     }
 
     /// A piece `width` cells wide that never gives way. When nothing else
     /// can go, the last such piece is cut.
     pub const fn unranked(width: usize) -> Self {
-        Self { width, rank: None }
+        Self {
+            width,
+            rank: None,
+            gap: None,
+        }
+    }
+
+    /// The piece with `cells` before it in place of the line's separator,
+    /// for a line whose pieces are not all joined alike (a wider gap
+    /// before a group of pieces, a narrower one inside it).
+    #[must_use]
+    pub const fn gap(mut self, cells: usize) -> Self {
+        self.gap = Some(cells);
+        self
     }
 }
 
@@ -85,7 +106,8 @@ pub enum Item {
 
 impl Elided {
     /// The items of the line in order, the kept pieces and the marks in
-    /// their gaps; a separator goes between each two. The end mark
+    /// their gaps; a separator goes between each two (a piece's own gap
+    /// before a piece that has one). The end mark
     /// ([`end_mark`](Self::end_mark)) is not an item: it follows the last
     /// one with no separator.
     ///
@@ -113,25 +135,38 @@ impl Elided {
     }
 
     /// The cells the line takes when drawn from `pieces` with `separator`
-    /// cells between each two items and `mark` cells for each mark, the
+    /// cells between each two items (a piece's own [`gap`](Piece::gap)
+    /// before a piece that has one) and `mark` cells for each mark, the
     /// cut piece counted at the cells it may take.
     pub fn width(&self, pieces: &[Piece], separator: usize, mark: usize) -> usize {
-        let mut cells: usize = self.kept.iter().map(|&index| pieces[index].width).sum();
-        if let (Some(cut), Some(&last)) = (self.cut, self.kept.last()) {
-            cells = cells - pieces[last].width + cut;
+        let last = self.kept.last().copied();
+        let mut cells = 0;
+        for (position, item) in self.items().into_iter().enumerate() {
+            let (own, before) = match item {
+                Item::Piece(index) => {
+                    let piece = pieces[index];
+                    let own = match self.cut {
+                        Some(cut) if Some(index) == last => cut,
+                        _ => piece.width,
+                    };
+                    (own, piece.gap.unwrap_or(separator))
+                }
+                Item::Mark => (mark, separator),
+            };
+            cells += own;
+            if position > 0 {
+                cells += before;
+            }
         }
-        let items = self.kept.len() + self.marks.len();
-        cells
-            + mark * self.marks.len()
-            + separator * items.saturating_sub(1)
-            + if self.end_mark { mark } else { 0 }
+        cells + if self.end_mark { mark } else { 0 }
     }
 }
 
 /// Fit `pieces` into `room` cells: keep what fits by rank and mark what
 /// gave way.
 ///
-/// `separator` is the cells between each two items of the line, and
+/// `separator` is the cells between each two items of the line (a piece
+/// with a [`gap`](Piece::gap) of its own has that before it instead), and
 /// `mark` the cells of one mark (with any spacing it carries, for
 /// [`MarkAt::End`]). Widths are terminal cells (measure them with
 /// [`width`](super::width) or [`spans_width`](super::spans_width)).
@@ -192,6 +227,77 @@ pub fn elide(pieces: &[Piece], separator: usize, mark: usize, room: usize, at: M
     {
         let others = width - pieces[last].width;
         line.cut = Some(room.saturating_sub(others));
+    }
+    line
+}
+
+/// Fit `pieces` into `room` cells by [`elide`], then fill the room back.
+///
+/// `elide` gives way strictly by rank, so once a wide piece has gone, a
+/// narrower one of lower rank that would fit beside the kept pieces has
+/// gone too. A line whose pieces stand alone, each worth showing for
+/// itself whatever else shows (the hints and settings of a status line),
+/// wants every cell used: after the rule, each piece that gave way comes
+/// back while the line still fits with it, highest rank first. Pieces of
+/// one rank come back in order, the earlier first, and once one of them
+/// does not fit the later ones stay out, so the pieces kept of each rank
+/// are always its first ones, as `elide` leaves them. The marks follow
+/// what is kept.
+///
+/// A line whose pieces read in sequence (the steps of a path, a strip of
+/// names) uses `elide` alone: filling would show a later piece after a
+/// gap the mark does not place.
+///
+/// When `elide` had to drop its marks or cut the last piece, nothing
+/// comes back.
+///
+/// ```
+/// use tuikit::text::{MarkAt, Piece, elide, elide_filled};
+///
+/// // A wide piece that matters more, and a narrow one that matters less.
+/// let pieces = [Piece::unranked(4), Piece::ranked(10, 2), Piece::ranked(2, 1)];
+/// // Strictly, the narrow piece gives way first and then the wide one,
+/// // which leaves `aaaa …`; the narrow one fits back: `aaaa · cc …`.
+/// let strict = elide(&pieces, 3, 2, 12, MarkAt::End);
+/// assert_eq!(strict.kept, [0]);
+/// let filled = elide_filled(&pieces, 3, 2, 12, MarkAt::End);
+/// assert_eq!(filled.kept, [0, 2]);
+/// assert!(filled.end_mark);
+/// assert_eq!(filled.width(&pieces, 3, 2), 11);
+/// ```
+pub fn elide_filled(
+    pieces: &[Piece],
+    separator: usize,
+    mark: usize,
+    room: usize,
+    at: MarkAt,
+) -> Elided {
+    let mut line = elide(pieces, separator, mark, room, at);
+    let marked = !line.marks.is_empty() || line.end_mark;
+    if line.kept.len() == pieces.len() || !marked {
+        return line;
+    }
+    let mut shown = vec![false; pieces.len()];
+    for &index in &line.kept {
+        shown[index] = true;
+    }
+    // Only ranked pieces give way, so every piece out has a rank.
+    let mut out: Vec<usize> = (0..pieces.len()).filter(|&index| !shown[index]).collect();
+    out.sort_by_key(|&index| (Reverse(pieces[index].rank), index));
+    let mut closed = None;
+    for index in out {
+        let rank = pieces[index].rank;
+        if closed == Some(rank) {
+            continue;
+        }
+        shown[index] = true;
+        let trial = layout(&shown, at);
+        if trial.width(pieces, separator, mark) <= room {
+            line = trial;
+        } else {
+            shown[index] = false;
+            closed = Some(rank);
+        }
     }
     line
 }

@@ -203,6 +203,146 @@ fn a_line_of_ranked_pieces_alone_narrows_to_its_mark_and_then_to_nothing() {
 }
 
 #[test]
+fn a_piece_with_a_gap_of_its_own_takes_it_in_place_of_the_separator() {
+    // aaaa · bb  ·  cc  dd: a wider gap before a group, a narrow one in it.
+    let pieces = [
+        Piece::unranked(4),
+        Piece::ranked(2, 4),
+        Piece::ranked(2, 2).gap(5),
+        Piece::ranked(2, 1).gap(2),
+    ];
+    let line = elide(&pieces, 3, 2, 80, MarkAt::End);
+    assert_eq!(line.width(&pieces, 3, 2), 4 + 3 + 2 + 5 + 2 + 2 + 2);
+    // Without `dd`, its gap goes with it; the end mark takes none.
+    let line = elide(&pieces, 3, 2, 19, MarkAt::End);
+    assert_eq!(line.kept, [0, 1, 2]);
+    assert_eq!(line.width(&pieces, 3, 2), 4 + 3 + 2 + 5 + 2 + 2);
+    // The first item has nothing before it, whichever it is.
+    let first = [Piece::ranked(2, 1).gap(5), Piece::unranked(3).gap(4)];
+    let line = elide(&first, 3, 1, 9, MarkAt::Gap);
+    assert_eq!(line.kept, [0, 1]);
+    assert_eq!(line.width(&first, 3, 1), 2 + 4 + 3);
+    let line = elide(&first, 3, 1, 8, MarkAt::Gap);
+    assert_eq!(line.items(), [Item::Mark, Item::Piece(1)]);
+    assert_eq!(line.width(&first, 3, 1), 1 + 4 + 3);
+    let line = elide(&first, 3, 1, 3, MarkAt::Gap);
+    assert_eq!(line.items(), [Item::Piece(1)]);
+    assert_eq!(line.width(&first, 3, 1), 3);
+    // A mark in a gap takes the separator; the piece after it its own gap.
+    let marked = [
+        Piece::unranked(2),
+        Piece::ranked(2, 1).gap(5),
+        Piece::unranked(3).gap(4),
+    ];
+    for room in 11..16 {
+        let line = elide(&marked, 1, 1, room, MarkAt::Gap);
+        assert_eq!(line.items(), [Item::Piece(0), Item::Mark, Item::Piece(2)]);
+        assert_eq!(line.width(&marked, 1, 1), 2 + 1 + 1 + 4 + 3, "room {room}");
+    }
+    assert_eq!(elide(&marked, 1, 1, 16, MarkAt::Gap).kept, [0, 1, 2]);
+}
+
+#[test]
+fn a_cut_leaves_the_last_piece_what_the_others_and_its_gap_leave() {
+    let pieces = [
+        Piece::unranked(4),
+        Piece::ranked(3, 1),
+        Piece::unranked(9).gap(1),
+    ];
+    let line = elide(&pieces, 3, 2, 10, MarkAt::End);
+    assert_eq!(line.kept, [0, 2]);
+    assert_eq!(line.cut, Some(10 - 4 - 1));
+    assert_eq!(line.width(&pieces, 3, 2), 10);
+}
+
+#[test]
+fn filling_brings_back_a_narrow_piece_after_a_wider_one_went() {
+    // a · bbbbbbbb · c · dd: b matters most, then c, then d.
+    let pieces = [
+        Piece::unranked(1),
+        Piece::ranked(8, 3),
+        Piece::ranked(1, 2),
+        Piece::ranked(2, 1),
+    ];
+    // Strictly at 12 cells: d, c, and b go (a …); filling brings c and d
+    // back (a · c · dd …, 12 cells), and b stays out.
+    let strict = elide(&pieces, 3, 2, 12, MarkAt::End);
+    assert_eq!(strict.kept, [0]);
+    let filled = elide_filled(&pieces, 3, 2, 12, MarkAt::End);
+    assert_eq!(filled.kept, [0, 2, 3]);
+    assert!(filled.end_mark);
+    assert_eq!(filled.width(&pieces, 3, 2), 12);
+    // A line that fits needs no filling, and with room enough nothing is
+    // left out.
+    let all = elide_filled(&pieces, 3, 2, 80, MarkAt::End);
+    assert_eq!(all, elide(&pieces, 3, 2, 80, MarkAt::End));
+    assert_eq!(all.kept, [0, 1, 2, 3]);
+}
+
+#[test]
+fn filling_brings_back_the_higher_rank_first() {
+    // Both fit back alone; only one fits: the higher rank wins.
+    let pieces = [
+        Piece::unranked(1),
+        Piece::ranked(9, 5),
+        Piece::ranked(3, 1),
+        Piece::ranked(3, 2),
+    ];
+    let filled = elide_filled(&pieces, 1, 1, 7, MarkAt::End);
+    assert_eq!(filled.kept, [0, 3]);
+}
+
+#[test]
+fn pieces_of_one_rank_come_back_in_order() {
+    // Three of one rank: the second is too wide, so the third, which
+    // would fit, stays out behind it.
+    let pieces = [
+        Piece::unranked(1),
+        Piece::ranked(1, 1),
+        Piece::ranked(6, 1),
+        Piece::ranked(1, 1),
+        Piece::ranked(9, 2),
+    ];
+    let filled = elide_filled(&pieces, 1, 1, 6, MarkAt::End);
+    assert_eq!(filled.kept, [0, 1]);
+    assert!(filled.end_mark);
+}
+
+#[test]
+fn filling_keeps_one_mark_for_each_run_in_the_gaps() {
+    // a b c d e: c (wide, rank 3) goes after b and d; b and d come back.
+    let pieces = [
+        Piece::unranked(1),
+        Piece::ranked(1, 1),
+        Piece::ranked(7, 3),
+        Piece::ranked(1, 2),
+        Piece::unranked(1),
+    ];
+    let filled = elide_filled(&pieces, 1, 1, 9, MarkAt::Gap);
+    assert_eq!(filled.kept, [0, 1, 3, 4]);
+    assert_eq!(
+        filled.items(),
+        [
+            Item::Piece(0),
+            Item::Piece(1),
+            Item::Mark,
+            Item::Piece(3),
+            Item::Piece(4)
+        ]
+    );
+    assert_eq!(filled.width(&pieces, 1, 1), 9);
+}
+
+#[test]
+fn nothing_comes_back_after_the_last_resort() {
+    let pieces = [Piece::ranked(1, 1), Piece::unranked(8)];
+    let line = elide_filled(&pieces, 1, 1, 5, MarkAt::End);
+    assert_eq!(line.kept, [1]);
+    assert_eq!(line.cut, Some(5));
+    assert!(!line.end_mark);
+}
+
+#[test]
 fn widths_are_the_cells_the_caller_measured() {
     // Two characters, four cells: a piece measured in characters would
     // claim to fit a room of two.
@@ -232,15 +372,21 @@ impl Gen {
     }
 
     /// Up to eight pieces, a few cells each; about one in four unranked,
-    /// and ranks from a small pool so ties are common.
+    /// ranks from a small pool so ties are common, and about one in three
+    /// with a gap of its own.
     fn pieces(&mut self) -> Vec<Piece> {
         (0..self.below(9))
             .map(|_| {
                 let width = self.below(9);
-                if self.below(4) == 0 {
+                let piece = if self.below(4) == 0 {
                     Piece::unranked(width)
                 } else {
                     Piece::ranked(width, u32::try_from(self.below(5)).unwrap_or(0))
+                };
+                if self.below(3) == 0 {
+                    piece.gap(self.below(6))
+                } else {
+                    piece
                 }
             })
             .collect()
@@ -265,7 +411,89 @@ fn drawn_width(line: &Elided, pieces: &[Piece], separator: usize, mark: usize) -
             Item::Mark => mark,
         })
         .sum();
-    cells + separator * items.len().saturating_sub(1) + if line.end_mark { mark } else { 0 }
+    let gaps: usize = items
+        .iter()
+        .skip(1)
+        .map(|item| match *item {
+            Item::Piece(index) => pieces[index].gap.unwrap_or(separator),
+            Item::Mark => separator,
+        })
+        .sum();
+    cells + gaps + if line.end_mark { mark } else { 0 }
+}
+
+/// The kept pieces of each rank are its first ones.
+fn kept_of_each_rank_lead(line: &Elided, pieces: &[Piece]) -> bool {
+    (0..pieces.len()).all(|index| {
+        !line.kept.contains(&index)
+            || pieces[index].rank.is_none()
+            || (0..index)
+                .filter(|&earlier| pieces[earlier].rank == pieces[index].rank)
+                .all(|earlier| line.kept.contains(&earlier))
+    })
+}
+
+#[test]
+fn generated_filled_lines_keep_the_rule_and_use_the_room() {
+    let mut generator = Gen(0x0f11_ed11_5eed_0002);
+    for case in 0..20_000 {
+        let pieces = generator.pieces();
+        let separator = generator.below(4);
+        let mark = generator.below(3);
+        let at = if generator.below(2) == 0 {
+            MarkAt::Gap
+        } else {
+            MarkAt::End
+        };
+        let room = generator.below(60);
+        let strict = elide(&pieces, separator, mark, room, at);
+        let line = elide_filled(&pieces, separator, mark, room, at);
+        let why = format!("case {case}: {pieces:?} sep {separator} mark {mark} {at:?} room {room}");
+
+        // Filling only adds to what the rule kept, in order, and the
+        // reported width is the drawn width.
+        assert!(
+            strict.kept.iter().all(|index| line.kept.contains(index)),
+            "{why}"
+        );
+        assert!(line.kept.windows(2).all(|w| w[0] < w[1]), "{why}");
+        assert_eq!(
+            line.width(&pieces, separator, mark),
+            drawn_width(&line, &pieces, separator, mark),
+            "{why}"
+        );
+        assert!(kept_of_each_rank_lead(&strict, &pieces), "{why}");
+        assert!(kept_of_each_rank_lead(&line, &pieces), "{why}");
+
+        let marked = !strict.marks.is_empty() || strict.end_mark;
+        if !marked || strict.kept.len() == pieces.len() {
+            // A line that fit, or the last resort: nothing comes back.
+            assert_eq!(line, strict, "{why}");
+            continue;
+        }
+        assert!(line.width(&pieces, separator, mark) <= room, "{why}");
+        assert!(line.cut.is_none(), "{why}");
+        // At the end, the line uses the room: the next piece of each rank
+        // that is out would not fit beside what is kept.
+        if at == MarkAt::End {
+            for index in 0..pieces.len() {
+                let next_of_rank = !line.kept.contains(&index)
+                    && (0..index)
+                        .filter(|&earlier| pieces[earlier].rank == pieces[index].rank)
+                        .all(|earlier| line.kept.contains(&earlier));
+                if next_of_rank {
+                    let mut shown = vec![false; pieces.len()];
+                    for &kept in line.kept.iter().chain([&index]) {
+                        shown[kept] = true;
+                    }
+                    assert!(
+                        layout(&shown, at).width(&pieces, separator, mark) > room,
+                        "{why}: {index} would fit back"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

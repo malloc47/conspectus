@@ -158,9 +158,12 @@ impl<'a> Breadcrumb<'a> {
         let pieces: Vec<Piece> = drawn
             .iter()
             .enumerate()
-            .map(|(index, spans)| Piece {
-                width: text::spans_width(spans),
-                rank: rank(index, self.hops.len()),
+            .map(|(index, spans)| {
+                let width = text::spans_width(spans);
+                match rank(index, self.hops.len()) {
+                    Some(rank) => Piece::ranked(width, rank),
+                    None => Piece::unranked(width),
+                }
             })
             .collect();
         let fit = text::elide(
