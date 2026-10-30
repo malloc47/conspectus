@@ -504,6 +504,15 @@ impl SearchOverlayState {
         &self.matches
     }
 
+    /// The footer the overlay draws: its palette's, the options pane's
+    /// while that is open.
+    pub fn footer(&self) -> tuikit::keys::Footer {
+        match &self.palette {
+            Palettes::Quick(palette) => palette.footer(),
+            Palettes::Content(palette) => palette.footer(),
+        }
+    }
+
     pub fn cursor(&self) -> usize {
         match &self.palette {
             Palettes::Quick(palette) => palette.cursor(),

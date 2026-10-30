@@ -1,6 +1,6 @@
 ---
 source: src/tui/ui_tests.rs
-assertion_line: 5114
+assertion_line: 5192
 expression: "pr_frame(&mut app, 2, Some(fetched_pr(\"CLOSED\", false, \"[]\", \"\")))"
 ---
 updated 0s ago · 0 sessions · 0 mux                                                                                               
@@ -32,4 +32,4 @@ updated 0s ago · 0 sessions · 0 mux
 │                                                               ││                                                               │
 │                                                               ││                                                               │
 └───────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
-[left] group:checkout · filter:all · sort:hierarchy · attach: selected row has no mux to attach to · Tab focus · q quit …
+[left] group:checkout · filter:all · sort:hierarchy · a attach: selected row has no mux to attach to · ↑/↓ move · q quit …

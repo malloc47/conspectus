@@ -319,7 +319,16 @@ fn tab_then_a_name_then_enter_opens_an_entity_from_another_view() {
 #[test]
 fn the_search_hint_names_the_tab_keys() {
     let mut app = app_on_session();
-    let hint = app.open_search_entry().text;
+    app.update(Msg::SetStatus(Some(tuikit::feedback::Feedback::success(
+        "filters cleared",
+    ))));
+    app.open_search_entry();
+    assert_eq!(
+        app.status(),
+        None,
+        "opening says nothing; the bar names its keys"
+    );
+    let hint = app.top_modal_hints().expect("quick select is open").text();
     assert!(hint.contains("Tab search current/all"), "{hint}");
     assert!(!hint.contains("search contents"), "{hint}");
 }

@@ -1,6 +1,6 @@
 ---
 source: src/tui/ui_tests.rs
-assertion_line: 5951
+assertion_line: 6029
 expression: "pinned_frame(&mut app, 110)"
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                           
@@ -26,4 +26,4 @@ updated 0s ago · 1 sessions · 1 mux
 │                                                     ││                                                     │
 │                                                     ││                                                     │
 └─────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
-[left] group:project · filter:all · sort:hierarchy · Enter/l expand · h collapse · Tab focus · q quit …
+[left] group:project · filter:all · sort:hierarchy · Enter/←/→ fold · ↑/↓ move · Tab focus · q quit …

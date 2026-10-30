@@ -307,7 +307,9 @@ fn the_quick_select_title_shows_both_reaches_and_does_not_shift_when_toggled() {
 
 /// A stacked pair draws as its two halves: over any modal, a prompt
 /// draws exactly as it does alone (it clears its own frame), and outside
-/// the prompt the modal under it draws exactly as it does alone.
+/// the prompt the modal under it draws exactly as it does alone, but for
+/// the status bar, which names the keys of the entry on top: the
+/// prompt's, as with the prompt alone.
 #[test]
 fn a_modal_over_another_draws_over_it_and_leaves_the_rest_alone() {
     let prompt = || {
@@ -329,10 +331,11 @@ fn a_modal_over_another_draws_over_it_and_leaves_the_rest_alone() {
             let top = buffer_of(&mut app, width, height);
             let (x0, y0, x1, y1) =
                 modal_rect(&top, &bare).unwrap_or_else(|| panic!("{label}: no prompt frame"));
+            let status = status_row(both.area);
             for y in 0..both.area.height {
                 for x in 0..both.area.width {
                     let inside = (x0..=x1).contains(&x) && (y0..=y1).contains(&y);
-                    let expected = if inside { &top } else { &lower };
+                    let expected = if inside || y == status { &top } else { &lower };
                     assert_eq!(
                         both[(x, y)],
                         expected[(x, y)],

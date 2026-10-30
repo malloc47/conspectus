@@ -1,6 +1,6 @@
 ---
 source: src/tui/ui_tests.rs
-assertion_line: 5106
+assertion_line: 5183
 expression: "pr_frame(&mut app, 1, None)"
 ---
 updated 0s ago · 0 sessions · 0 mux                                                                                               
@@ -32,4 +32,4 @@ updated 0s ago · 0 sessions · 0 mux
 │                                                               ││                                                               │
 │                                                               ││                                                               │
 └───────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
-[left] group:checkout · filter:all · sort:hierarchy · attach: selected row has no mux to attach to · Tab focus · q quit …
+[left] group:checkout · filter:all · sort:hierarchy · a attach: selected row has no mux to attach to · ↑/↓ move · q quit …

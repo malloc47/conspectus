@@ -318,7 +318,8 @@ fn quick_select_reopens_on_current_whatever_it_was_left_on() {
 fn content_search_is_refused_while_live_preview_is_off() {
     let mut app = app_with(&[("a", "alpha")]);
     app.config_mut().live_preview_enabled = false;
-    let hint = app.open_content_search_entry();
+    app.open_content_search_entry();
+    let hint = app.status().expect("the refusal is on the status line");
     assert!(hint.text.contains("live preview"), "{hint:?}");
     assert_eq!(hint.severity, tuikit::feedback::Severity::Warning);
     assert!(app.search_overlay().is_none());

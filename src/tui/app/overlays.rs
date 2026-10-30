@@ -89,6 +89,16 @@ impl App {
         self.modal_stack.top().map(Modal::name)
     }
 
+    /// The keys the modal on top takes now, as its footer names them
+    /// (`Overlay::hints`), for the status bar to show while it is open;
+    /// `None` when no modal is open.
+    pub fn top_modal_hints(&self) -> Option<tuikit::keys::Footer> {
+        use tuikit::overlay::Overlay;
+        self.modal_stack
+            .top()
+            .map(Overlay::<crate::tui::Msg, App>::hints)
+    }
+
     /// Whether the overlay on top is typing into a text field: a prompt,
     /// a form row that takes text, a filter editor, a query, or a find
     /// prompt. A paste goes only there; in a menu, a list, or a choice
@@ -696,32 +706,26 @@ impl App {
         }
     }
 
-    /// What `/` opens: quick select, on the current view's rows. Returns
-    /// the status hint to show.
-    pub fn open_search_entry(&mut self) -> Feedback {
-        use crate::tui::keybindings::overlay::SEARCH_KEYS;
-        use tuikit::keys::footer;
+    /// What `/` opens: quick select, on the current view's rows. The
+    /// status bar names its keys, so a message from before goes.
+    pub fn open_search_entry(&mut self) {
         self.open_search_overlay();
-        Feedback::info(format!(
-            "quick select: type to find · {}",
-            footer(SEARCH_KEYS)
-        ))
+        self.status_message = None;
     }
 
     /// What `s` opens: content search, with the query filled in when a
-    /// search is active. Returns the status hint to show, or why it did
-    /// not open.
-    pub fn open_content_search_entry(&mut self) -> Feedback {
-        use crate::tui::keybindings::overlay::SEARCH_CONTENT_KEYS;
-        use tuikit::keys::footer;
+    /// search is active. The status bar names its keys, so a message from
+    /// before goes; with live preview off it does not open and the status
+    /// line says why.
+    pub fn open_content_search_entry(&mut self) {
         if !self.config.live_preview_enabled {
-            return Feedback::warning(crate::tui::widgets::search::CONTENT_SEARCH_OFF);
+            self.status_message = Some(Feedback::warning(
+                crate::tui::widgets::search::CONTENT_SEARCH_OFF,
+            ));
+            return;
         }
         self.open_content_search_overlay();
-        Feedback::info(format!(
-            "search contents: type a query · {}",
-            footer(SEARCH_CONTENT_KEYS)
-        ))
+        self.status_message = None;
     }
 
     /// Push a quick-select overlay onto the modal stack, on the current

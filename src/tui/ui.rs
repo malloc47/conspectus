@@ -42,7 +42,7 @@ use tuikit::text;
 use crate::model::{MuxSessionId, NodeId};
 use crate::tui::Theme;
 use crate::tui::View;
-use crate::tui::actions::{attach_disabled_reason, resolve_attach_target};
+use crate::tui::actions::resolve_attach_target;
 use crate::tui::app::{App, Focus, SnapshotHandle, ViewportReport};
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::preview::PreviewContent;
@@ -57,6 +57,9 @@ mod preview_pane;
 mod right_panel;
 
 use compact::*;
+// The consistency suite checks every key the status bar names.
+#[cfg(test)]
+pub(crate) use header::status_hints;
 use header::*;
 use left_panel::*;
 use preview_pane::*;

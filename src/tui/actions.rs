@@ -1021,33 +1021,39 @@ pub(crate) fn preferred_mux_for_session(
     snapshot.preferred_mux_for(session)
 }
 
-/// Human-readable reason text for [`AttachDisabled`]. The runtime
-/// pipes this into the status bar.
+/// Human-readable reason text for [`AttachDisabled`]: `attach:` and
+/// [`attach_disabled_why`]. The runtime posts it when attaching is
+/// refused.
 pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
+    format!("attach: {}", attach_disabled_why(reason))
+}
+
+/// Why attaching is refused, in a few words: what the status bar puts
+/// after a dimmed `a attach`, and what [`attach_disabled_reason`] says
+/// after `attach:`.
+pub fn attach_disabled_why(reason: &AttachDisabled) -> String {
     match reason {
-        AttachDisabled::NoSelection => "attach: no row selected".to_string(),
-        AttachDisabled::UnsupportedRow => {
-            "attach: selected row has no mux to attach to".to_string()
-        }
-        AttachDisabled::UnmuxedSession => "attach: session is not attached to any mux".to_string(),
+        AttachDisabled::NoSelection => "no row selected".to_string(),
+        AttachDisabled::UnsupportedRow => "selected row has no mux to attach to".to_string(),
+        AttachDisabled::UnmuxedSession => "session is not attached to any mux".to_string(),
         AttachDisabled::MuxNodeMissing => {
-            "attach: mux node missing from snapshot — try `r` to refresh".to_string()
+            "mux node missing from snapshot — try `r` to refresh".to_string()
         }
         AttachDisabled::UnsupportedBackend(name) => {
             // Report the registered backend set
             // instead of a hardcoded "only tmux."
             let registered = crate::discovery::tmux::KNOWN_MUX_BACKENDS.join(", ");
-            format!("attach: mux backend `{name}` not registered (available: {registered})")
+            format!("mux backend `{name}` not registered (available: {registered})")
         }
         AttachDisabled::CurrentTmuxSession(name) => {
-            format!("attach: refusing to attach current tmux session `{name}`")
+            format!("refusing to attach current tmux session `{name}`")
         }
         AttachDisabled::AmbiguousGroupMuxes(n) => {
-            format!("attach: {n} ambiguous muxes here — pick one in the detail pane")
+            format!("{n} ambiguous muxes here — pick one in the detail pane")
         }
         AttachDisabled::MuxGone(name) => {
             format!(
-                "attach: `{name}` isn't running · `{} rebuild {name}` brings it back",
+                "`{name}` isn't running · `{} rebuild {name}` brings it back",
                 crate::invocation::invoked_name()
             )
         }

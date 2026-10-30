@@ -1,8 +1,12 @@
 //! Header line and status bar: counts, chips, and contextual hints (ADR 0078).
 
+use tuikit::keys::Footer;
 use tuikit::priority_line::{PriorityLine, Segment};
+use tuikit::status_bar::{Annotation, KeyHintBar, StatusBar};
 
 use super::*;
+use crate::tui::keybindings::{MAIN_VIEW_KEYS, MainKey, RIGHT_PANE_KEYS, status_rank};
+use crate::tui::keymap::{SelectedDefault, selected_default_action};
 
 /// How long each part of the header holds on as the screen narrows, the
 /// highest longest; the session count has no rank and never gives way.
@@ -233,59 +237,75 @@ pub(super) fn header_freshness(app: &App) -> Option<String> {
 }
 
 pub(super) fn draw_status_bar(app: &App, buf: &mut Buffer, area: Rect) {
+    status_bar(app).render(area, buf);
+}
+
+/// The status bar as the framework's [`StatusBar`] (ADR 0078): a message
+/// in its severity's color, or the view's settings and the keys of the
+/// scope that has them, generated from their key tables. The unseen and
+/// busy chips lead it either way; the scope tag (the focused pane, while
+/// no overlay has the keys) and the stale mark lead the keys, and the
+/// provider chips follow them. The settings and the keys give way by rank
+/// to fit the cells those leave.
+pub(super) fn status_bar(app: &App) -> StatusBar<'_> {
     let theme = app.theme();
-    if let Some(status) = app.status() {
-        let mut spans = Vec::new();
-        push_unseen_messages_chip(app, theme, &mut spans);
-        push_in_flight_chips(app, theme, &mut spans);
-        // In its severity's color: a hint, a confirmation, a refusal,
-        // and a failure each look like what they are.
-        spans.push(status.span(theme));
-        Paragraph::new(Line::from(spans)).render(area, buf);
-        return;
+    let mut lead = Vec::new();
+    push_unseen_messages_chip(app, theme, &mut lead);
+    push_in_flight_chips(app, theme, &mut lead);
+    let bar = StatusBar::new(theme).lead(lead).message(app.status());
+    if bar.shows_message() {
+        return bar;
     }
 
-    let stale = app.refresh_failure().is_some();
-
-    let scope = match app.focus() {
-        Focus::Left => "[left]",
-        Focus::Right => "[right]",
-    };
-
-    let mut spans = Vec::new();
-    push_unseen_messages_chip(app, theme, &mut spans);
-    push_in_flight_chips(app, theme, &mut spans);
-    spans.push(span!(theme.muted; "{scope} "));
-    if stale {
-        // Reserved up front so the stale mark is never the thing that
-        // gets pushed off the end.
-        spans.push(
+    let mut scope = Vec::new();
+    if !app.has_modal() {
+        let tag = match app.focus() {
+            Focus::Left => "[left]",
+            Focus::Right => "[right]",
+        };
+        scope.push(span!(theme.muted; "{tag} "));
+    }
+    if app.refresh_failure().is_some() {
+        // Kept outside the line, so the stale mark is never the thing
+        // that gets pushed off the end.
+        scope.push(
             StatusChip::new("stale", Tone::Warning)
                 .bold()
                 .pad(0, 2)
                 .span(theme),
         );
     }
-    let mut provider_spans = Vec::new();
-    push_provider_chips(app, theme, &mut provider_spans);
-    let reserved = text::spans_width(&spans) + text::spans_width(&provider_spans);
-    let room = usize::from(area.width).saturating_sub(reserved);
-    spans.extend(status_segments(app, theme).spans(room));
-    spans.extend(provider_spans);
+    let mut trail = Vec::new();
+    push_provider_chips(app, theme, &mut trail);
 
-    Paragraph::new(Line::from(spans)).render(area, buf);
+    let settings = Style::default().fg(theme.cwd_mark());
+    let mut bar = bar.scope(scope);
+    for (rank, text) in view_state_segments(app) {
+        bar = bar.segment(Segment::new(Span::styled(text, settings)).rank(rank));
+    }
+    bar.hints(&status_hints(app)).trail(trail)
 }
 
 /// ADR 0105: warnings and errors the operator hasn't opened the
 /// Messages overlay for stay flagged after their status message is
-/// cleared. Leads the bar so long hints can't push it off screen.
+/// cleared. Leads the bar so long hints can't push it off screen. It
+/// names the key that opens the log, except while an overlay has the
+/// keys and the key would not reach it.
 pub(super) fn push_unseen_messages_chip(app: &App, theme: &Theme, spans: &mut Vec<Span<'static>>) {
     let unseen = app.messages().unseen();
     if unseen == 0 {
         return;
     }
+    let text = if app.has_modal() {
+        unseen.to_string()
+    } else {
+        format!(
+            "{unseen} · {}",
+            crate::tui::keybindings::messages_hint("messages")
+        )
+    };
     spans.push(
-        StatusChip::new(format!("{unseen} · ! messages"), Tone::Error)
+        StatusChip::new(text, Tone::Error)
             .mark(marks::WARNING)
             .bold()
             .pad(0, 2)
@@ -344,26 +364,6 @@ pub(super) fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span
         let reason = reason.strip_prefix("gh ").unwrap_or(reason);
         push_chip(format!("gh:{reason}"), Tone::Warning);
     }
-}
-
-/// How long each piece of the status bar holds on as the bar narrows, the
-/// highest longest. No two share a rank, so the bar packs what fits in
-/// this order: what a narrowed view is narrowed by, the way back, and the
-/// way out first; the refresh hint last.
-mod status_rank {
-    pub(super) const FIND: u32 = 11;
-    pub(super) const BACK: u32 = 10;
-    pub(super) const QUIT: u32 = 9;
-    pub(super) const FILTER: u32 = 8;
-    /// The right pane's keys, with the right pane focused: they matter
-    /// more than the action hint, which describes the left pane's row.
-    pub(super) const RIGHT_PANE_KEYS: u32 = 7;
-    pub(super) const DEFAULT_ACTION: u32 = 6;
-    pub(super) const GROUP: u32 = 5;
-    pub(super) const SORT: u32 = 4;
-    pub(super) const LEFT_PANE_KEYS: u32 = 3;
-    pub(super) const FOCUS: u32 = 2;
-    pub(super) const REFRESH: u32 = 1;
 }
 
 /// The active view state in a compact, always-visible form so grouping,
@@ -531,137 +531,236 @@ pub(super) fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize)
     (agents, mux)
 }
 
-/// The key hints as separately droppable pieces with the rank each keeps
-/// on a narrow bar.
-fn contextual_status_segments(app: &App) -> Vec<(u32, String)> {
-    let (focus_rank, focus_hint) = match app.focus() {
-        Focus::Left => (
-            status_rank::LEFT_PANE_KEYS,
-            "j/k move · h/l fold · Enter default".to_string(),
-        ),
-        // With the right pane focused, its own table's hint: moving,
-        // Enter with what it does on the cursor's row (copy a field,
-        // follow a link, fold the Other zone), folding, and going back.
-        Focus::Right => (status_rank::RIGHT_PANE_KEYS, right_pane_hint(app)),
-    };
-    let refresh_hint = if app.active_view() == crate::tui::View::Prs {
-        "r refresh · ^R forges"
-    } else {
-        "r refresh"
-    };
-    let mut segments = vec![
-        (status_rank::DEFAULT_ACTION, default_action_status_hint(app)),
-        (focus_rank, focus_hint),
-        (status_rank::FOCUS, "Tab focus".to_string()),
-        (status_rank::REFRESH, refresh_hint.to_string()),
-        (status_rank::QUIT, "q quit".to_string()),
-    ];
-    if app.focus() == Focus::Left && app.can_nav_back() {
-        segments.push((status_rank::BACK, "Backspace back".to_string()));
+/// The keys the status bar names: those of the scope that has them,
+/// generated from its key tables. With an overlay on top, its own keys
+/// (`Overlay::hints`). On the left pane, the main view's table, each row
+/// worded for the selection. On the right pane, `a` when the right pane's
+/// entity attaches, the right pane's table (with `Enter`'s verb from the
+/// cursor's row), and the program's keys.
+pub(crate) fn status_hints(app: &App) -> KeyHintBar {
+    if let Some(hints) = app.top_modal_hints() {
+        return KeyHintBar::new().footer(&hints, status_rank::OVERLAY_KEYS);
     }
-    segments
+    let selection = selection_keys(app);
+    let program = |key: &MainKey| match key {
+        MainKey::Focus => Some(match app.focus() {
+            Focus::Left => selection.tab.clone().unwrap_or_default(),
+            Focus::Right => Annotation::new(),
+        }),
+        MainKey::Refresh | MainKey::Quit => Some(Annotation::new()),
+        // A hard refresh asks the forges again, which only the PRs view
+        // shows.
+        MainKey::HardRefresh => (app.active_view() == View::Prs).then(Annotation::new),
+        _ => None,
+    };
+    match app.focus() {
+        Focus::Left => {
+            KeyHintBar::new().annotated(MAIN_VIEW_KEYS, status_rank::LEFT_PANE_KEYS, |key| {
+                match key {
+                    MainKey::Default => selection.enter.clone(),
+                    MainKey::Attach => selection.attach.clone(),
+                    MainKey::View => selection.view.clone(),
+                    MainKey::Resume => selection.resume.then(Annotation::new),
+                    MainKey::Menu => selection.menu.clone(),
+                    MainKey::Up | MainKey::Down | MainKey::Collapse | MainKey::Expand => {
+                        Some(Annotation::new())
+                    }
+                    MainKey::Back => app.can_nav_back().then(Annotation::new),
+                    // The unseen-messages chip names it.
+                    MainKey::Messages => None,
+                    other => program(other),
+                }
+            })
+        }
+        Focus::Right => KeyHintBar::new()
+            .annotated(
+                MAIN_VIEW_KEYS,
+                status_rank::DEFAULT_ACTION,
+                |key| match key {
+                    MainKey::Attach => selection.attach.clone().filter(Annotation::is_available),
+                    _ => None,
+                },
+            )
+            .footer(&right_pane_footer(app), status_rank::RIGHT_PANE_KEYS)
+            .annotated(MAIN_VIEW_KEYS, status_rank::LEFT_PANE_KEYS, program),
+    }
 }
 
-/// The right pane's keys as the status bar names them, generated from
-/// the table it resolves: the explorer's footer, whose `Enter` verb is
-/// the cursor row's, or the table's hint with no explorer to read.
-fn right_pane_hint(app: &App) -> String {
-    use crate::tui::keybindings::RIGHT_PANE_KEYS;
+/// The right pane's keys as the status bar names them, generated from the
+/// table it resolves: the explorer's footer, whose `Enter` verb is the
+/// cursor row's, or the table's hint with no explorer to read.
+fn right_pane_footer(app: &App) -> Footer {
     match (app.explorer(), app.graph_source()) {
-        (Some(explorer), Some(source)) => explorer.footer(RIGHT_PANE_KEYS, &source).text(),
-        _ => tuikit::explorer::hint(RIGHT_PANE_KEYS).text(),
+        (Some(explorer), Some(source)) => explorer.footer(RIGHT_PANE_KEYS, &source),
+        _ => tuikit::explorer::hint(RIGHT_PANE_KEYS),
     }
 }
 
-/// The status bar's settings chips and key hints as the framework's
-/// [`PriorityLine`]: in the room the bar's fixed parts leave, pieces drop
-/// by rank (the least important first), the room is filled back with
-/// whatever still fits, a `…` marks that some were dropped, and nothing
-/// is cut mid-word. The settings take the `cwd_mark` color, the hints
-/// recede.
-fn status_segments(app: &App, theme: &Theme) -> PriorityLine {
-    let settings = Style::default().fg(theme.cwd_mark());
-    let hints = Style::default().add_modifier(theme.muted);
-    let mut line = PriorityLine::new(theme);
-    for (rank, text) in view_state_segments(app) {
-        line.push(Segment::new(Span::styled(text, settings)).rank(rank));
-    }
-    for (rank, text) in contextual_status_segments(app) {
-        line.push(Segment::new(Span::styled(text, hints)).rank(rank));
-    }
-    line
+/// What the keys that act on the selection do, as the status bar words
+/// them: each an annotation on its row of [`MAIN_VIEW_KEYS`], or `None`
+/// when the key does nothing worth naming here.
+#[derive(Debug, Default)]
+pub(super) struct SelectionKeys {
+    /// `Enter` on the left pane: the row's default action.
+    pub(super) enter: Option<Annotation>,
+    /// `a`: attach, or why it cannot.
+    pub(super) attach: Option<Annotation>,
+    /// `v`: open the transcript, where `Enter` does too.
+    pub(super) view: Option<Annotation>,
+    /// `S`: resume the un-muxed session.
+    pub(super) resume: bool,
+    /// `.`: the row's menu.
+    pub(super) menu: Option<Annotation>,
+    /// `Tab`, when going to the right pane is what the selection needs:
+    /// its competing mux candidates.
+    pub(super) tab: Option<Annotation>,
 }
 
-/// Status-bar action hint that advertises `Enter` as the primary
-/// default action on the selected row, with the legacy
-/// single-key accelerator (`a` / `v`) listed alongside. Falls back
-/// to the attach-disabled reason for rows that have neither a mux
-/// target nor a viewable transcript so the operator still sees a
-/// one-line "disabled because …" cue.
-pub(super) fn default_action_status_hint(app: &App) -> String {
-    let Some(selection) = app.selection() else {
-        return attach_disabled_reason(&crate::tui::actions::AttachDisabled::NoSelection);
+/// What the selection's keys do: `Enter` by the dispatcher's own
+/// classification of the row ([`selected_default_action`]), the others by
+/// the resolvers their keys run. A group row folds; a search hit opens
+/// the viewer at the match; a history record rebuilds; a pin whose state
+/// decides says so; a row that attaches names its mux (the preferred one
+/// of several, pointing `Tab` at the candidates); an un-muxed session
+/// names itself for the viewer and offers `S` when it can resume; any
+/// other row says why `a` cannot attach.
+pub(super) fn selection_keys(app: &App) -> SelectionKeys {
+    let mut keys = SelectionKeys::default();
+    let attach = resolve_attach_target(app);
+    let row = app
+        .selection()
+        .and_then(|selection| app.tree().rows.iter().find(|row| &row.id == selection));
+    let Some(row) = row else {
+        keys.attach = attach.err().map(|reason| refused_attach(&reason));
+        return keys;
     };
-    let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
-        return attach_disabled_reason(&crate::tui::actions::AttachDisabled::NoSelection);
-    };
-    // Group rows: Enter expands/collapses; h/l explicitly fold.
     if matches!(row.kind, RowKind::Group(_)) {
-        return "Enter/l expand · h collapse".to_string();
+        keys.enter = Some(Annotation::new().verb("fold"));
+        return keys;
     }
     if crate::tui::actions::viewer_open_target(app).is_some() {
-        return "Enter/v open at the match · . menu".to_string();
+        let open = Annotation::new().verb("open").detail("at the match");
+        keys.enter = Some(open.clone());
+        keys.view = Some(open);
+        keys.menu = Some(Annotation::new());
+        return keys;
     }
     if crate::tui::actions::selected_record(app).is_some() {
-        return "Enter rebuild · . menu (pin, forget, plan, clean up)".to_string();
+        keys.enter = Some(Annotation::new().verb("rebuild"));
+        keys.menu = Some(Annotation::new().detail("(pin, forget, plan, clean up)"));
+        return keys;
     }
-    let selected_pin_id = match (&row.id, &row.kind) {
+    let pin = match (&row.id, &row.kind) {
         (RowId::Pin { pin_id }, _) => Some(pin_id.as_str()),
         (_, RowKind::AgentSession(session)) => session.pin_id.as_deref(),
         (_, RowKind::MuxSession(mux)) => mux.pin_id.as_deref(),
         _ => None,
     };
-    if let Some(pin_id) = selected_pin_id
-        && let Some(handle) = app.snapshot_handle()
-        && let Some(hint) = crate::tui::actions::pin_status_hint(handle.snapshot(), pin_id)
+    if let Some(enter) = pin
+        .zip(app.snapshot_handle())
+        .and_then(|(pin, handle)| pin_enter(handle.snapshot(), pin))
     {
-        return hint;
+        keys.enter = Some(enter);
+        return keys;
     }
-    match resolve_attach_target(app) {
+    let default = selected_default_action(app);
+    let other_enter = |keys: &mut SelectionKeys| match default {
+        SelectedDefault::ToggleExpand if row.expandable => {
+            keys.enter = Some(Annotation::new().verb("fold"));
+        }
+        SelectedDefault::Scrollback => {
+            keys.enter = Some(Annotation::new().verb("open").detail("scrollback"));
+        }
+        _ => {}
+    };
+    match attach {
         Ok(target) => {
             let label = target.label();
-            match selected_mux_state(app) {
-                Some(MuxIndicator::Ambiguous { .. }) => {
-                    format!("Enter/a attach preferred {label} · Tab inspect candidates")
-                }
-                _ => format!("Enter/a attach {}", compact_mux_label(&label)),
+            let ambiguous = matches!(
+                selected_mux_state(app),
+                Some(MuxIndicator::Ambiguous { .. })
+            );
+            let detail = if ambiguous {
+                keys.tab = Some(
+                    Annotation::new()
+                        .verb("inspect candidates")
+                        .rank(status_rank::DEFAULT_ACTION),
+                );
+                format!("preferred {label}")
+            } else {
+                compact_mux_label(&label)
+            };
+            let attaches = Annotation::new().verb("attach").detail(detail);
+            if default == SelectedDefault::Attach {
+                keys.enter = Some(attaches.clone());
+            } else {
+                other_enter(&mut keys);
             }
+            keys.attach = Some(attaches);
         }
         Err(reason) => {
-            // Un-muxed agent session rows still have a viewer-based
-            // default action — `Enter` opens the transcript, `v`
-            // does the same. Advertise that primary action instead
-            // of the attach-disabled reason.
+            // An un-muxed agent session opens in the viewer instead,
+            // with `Enter` as with `v`.
             if let RowKind::AgentSession(session) = &row.kind
                 && matches!(session.mux_state, MuxIndicator::Unmuxed)
             {
-                let resume = app.snapshot_handle().map(|handle| {
-                    crate::tui::resume::resolve_resume_target_in(
-                        handle.snapshot(),
-                        &session.session,
+                let view = Annotation::new()
+                    .verb("view")
+                    .detail(compact_session_label(session));
+                keys.enter = Some(view.clone());
+                keys.view = Some(view);
+                keys.resume = app.snapshot_handle().is_some_and(|handle| {
+                    matches!(
+                        crate::tui::resume::resolve_resume_target_in(
+                            handle.snapshot(),
+                            &session.session
+                        ),
+                        crate::tui::resume::ResumeTarget::Launch { .. }
                     )
                 });
-                if matches!(
-                    resume,
-                    Some(crate::tui::resume::ResumeTarget::Launch { .. })
-                ) {
-                    return format!("Enter/v view {} · S resume", compact_session_label(session));
-                }
-                return format!("Enter/v view {}", compact_session_label(session));
+                return keys;
             }
-            attach_disabled_reason(&reason)
+            let refused = refused_attach(&reason);
+            if default == SelectedDefault::Attach {
+                keys.enter = Some(refused.clone());
+            } else {
+                other_enter(&mut keys);
+            }
+            keys.attach = Some(refused);
         }
     }
+    keys
+}
+
+/// `a attach`, dimmed, with why attaching is refused.
+fn refused_attach(reason: &crate::tui::actions::AttachDisabled) -> Annotation {
+    Annotation::new()
+        .verb("attach")
+        .because(crate::tui::actions::attach_disabled_why(reason))
+}
+
+/// What `Enter` does on a row that is, or carries, the pin `pin_id`, when
+/// the pin's state decides it, as `default_effect` does: a live pull
+/// request shows its URL; a pin whose target is gone, missing, or not
+/// built yet rebuilds; one whose target could not be checked, or a live
+/// one with nothing to rebuild, cannot. `None` for a live pin to a mux or
+/// a session, whose row attaches or opens as any other does.
+fn pin_enter(snapshot: &crate::model::GraphSnapshot, pin_id: &str) -> Option<Annotation> {
+    use crate::model::{PinKind, SlotStatus};
+    let pin = crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == pin_id)?;
+    let rebuild = Annotation::new().verb("rebuild");
+    Some(match (pin.status, pin.kind) {
+        (SlotStatus::Live, PinKind::Mux | PinKind::Session) => return None,
+        (SlotStatus::Live, PinKind::Pr) => Annotation::new().verb("show URL"),
+        (SlotStatus::Unknown, _) => rebuild.because("couldn't check whether its target exists"),
+        (
+            SlotStatus::Gone | SlotStatus::Missing | SlotStatus::Planned,
+            PinKind::Mux | PinKind::Session | PinKind::Checkout | PinKind::Repo,
+        ) => rebuild,
+        _ => rebuild.unavailable(),
+    })
 }
 
 /// Compact label for an agent session row used in the status hint.

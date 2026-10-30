@@ -1189,7 +1189,11 @@ impl App {
             Msg::Copy { text, done } => effects.push(Effect::Copy { text, done }),
             Msg::Report(entry) => {
                 let text = if entry.severity.needs_attention() {
-                    format!("{} · ! details", entry.summary)
+                    format!(
+                        "{} · {}",
+                        entry.summary,
+                        crate::tui::keybindings::messages_hint("details")
+                    )
                 } else {
                     entry.summary.clone()
                 };

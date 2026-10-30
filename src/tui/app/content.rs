@@ -1085,10 +1085,7 @@ impl App {
                 };
                 return self.reduce_content(Msg::SetContentGroup(next));
             }
-            Msg::OpenContentSearchModal => {
-                let hint = self.open_content_search_entry();
-                self.status_message = Some(hint);
-            }
+            Msg::OpenContentSearchModal => self.open_content_search_entry(),
             Msg::OpenSearchHistory => {
                 if self.search_history.is_empty() {
                     effects.push(Effect::Toast(Feedback::warning("No searches yet")));

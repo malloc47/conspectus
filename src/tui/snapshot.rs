@@ -424,13 +424,9 @@ fn apply_action(
         Action::ClearFilters => {
             dispatch(app, Msg::ClearFilters);
         }
-        Action::OpenControls => app.open_controls_overlay(),
-        Action::OpenSearch => {
-            app.open_search_entry();
-        }
-        Action::OpenContentSearch => {
-            app.open_content_search_entry();
-        }
+        Action::OpenControls => runtime::open_controls(app),
+        Action::OpenSearch => app.open_search_entry(),
+        Action::OpenContentSearch => app.open_content_search_entry(),
         Action::OpenHelp => app.open_help_overlay(),
         Action::OpenMessages => app.open_messages_overlay(),
         Action::OpenWorktreeMenu => runtime::open_worktree_menu_action(app),

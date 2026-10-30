@@ -236,6 +236,11 @@ pub(super) fn app_listing_all(view: View) -> App {
     app_over_filtered(view, &world(), filter)
 }
 
+/// The row the status bar takes on a screen of `area`.
+pub(super) fn status_row(area: Rect) -> u16 {
+    crate::tui::ui::screen_areas(area, 0).status.y
+}
+
 pub(super) fn buffer_of(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
     render_to_buffer(app, Rect::new(0, 0, width, height))
 }

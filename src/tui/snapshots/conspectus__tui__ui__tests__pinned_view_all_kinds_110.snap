@@ -1,6 +1,6 @@
 ---
 source: src/tui/ui_tests.rs
-assertion_line: 5607
+assertion_line: 5685
 expression: all_kinds_frame(width)
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                           
@@ -32,4 +32,4 @@ updated 0s ago · 1 sessions · 1 mux
 │                                                     ││                                                     │
 │                                                     ││                                                     │
 └─────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
-[left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:main · Tab focus · r refresh · q quit …
+[left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:main · ↑/↓ move · ←/→ fold · q quit …

@@ -1,6 +1,6 @@
 ---
 source: src/tui/ui_tests.rs
-assertion_line: 5539
+assertion_line: 5617
 expression: "pinned_frame(&mut app, 120)"
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                                     
@@ -26,4 +26,4 @@ updated 0s ago · 1 sessions · 1 mux
 │1 legacy pin is still read from config files (old-api);   ││                                                          │
 │run `conspectus pin migrate` to convert it                ││                                                          │
 └──────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────┘
-[left] group:kind · filter:all · sort:hierarchy · Enter/l expand · h collapse · Tab focus · r refresh · q quit …
+[left] group:kind · filter:all · sort:hierarchy · Enter/←/→ fold · ↑/↓ move · Tab focus · r refresh · q quit

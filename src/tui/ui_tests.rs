@@ -249,23 +249,26 @@ fn pinned_app_with(target: Option<NodeId>, extend: impl FnOnce(&mut GraphSnapsho
 #[test]
 fn status_hint_for_a_planned_pin_points_at_rebuild() {
     let app = pinned_app(None);
-    let hint = default_action_status_hint(&app);
+    let hint = status_hints(&app).text();
     assert!(
-        hint.contains("rebuild ingest") && hint.contains("isn't built yet"),
+        hint.starts_with("Enter rebuild · "),
         "unexpected hint for planned pin: {hint}"
     );
 }
 
 #[test]
-fn status_hint_for_a_pin_with_a_missing_target_names_the_fixes() {
+fn status_hint_for_a_pin_with_a_missing_target_points_at_rebuild() {
     let app = pinned_app(Some(NodeId::MuxSession(crate::model::MuxSessionId::new(
         "tmux:gone",
     ))));
-    let hint = default_action_status_hint(&app);
+    let hint = status_hints(&app).text();
     assert!(
-        hint.contains("target not found") && hint.contains("pin retarget ingest"),
+        hint.starts_with("Enter rebuild · "),
         "unexpected hint for missing target: {hint}"
     );
+    // The Preview keeps the pin's own words, with the fixes.
+    let preview = preview_text_for_selection(&app, 120, 10).to_string();
+    assert!(preview.contains("pin retarget ingest"), "{preview}");
 }
 
 #[test]
@@ -2967,8 +2970,8 @@ fn contextual_status_offers_ambiguous_attach_hint_with_inspect_affordance() {
 
 #[test]
 fn contextual_status_for_group_row_advertises_expand_collapse_folding() {
-    // A group-row selection should surface the
-    // expand/collapse fold bindings, not an attach hint.
+    // A group-row selection should surface the fold keys, `Enter` among
+    // them, not an attach hint.
     let mut app = seeded_app();
     // Auto-selection lands on the project group row, which is
     // exactly what we want to assert against.
@@ -2976,13 +2979,10 @@ fn contextual_status_for_group_row_advertises_expand_collapse_folding() {
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert!(
-        text.contains("Enter/l expand"),
-        "group row should advertise expand: {text}"
+        text.contains("Enter/←/→ fold"),
+        "group row should advertise folding: {text}"
     );
-    assert!(
-        text.contains("h collapse"),
-        "group row should advertise collapse: {text}"
-    );
+    assert!(!text.contains("attach"), "{text}");
 }
 
 #[test]
@@ -3103,13 +3103,18 @@ fn contextual_status_surfaces_disabled_attach_reason_for_current_tmux_session() 
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert!(
-        text.contains("refusing to attach current tmux session `editor`"),
+        text.contains("Enter/a attach: refusing to attach current tmux session `editor`"),
         "current-tmux row should surface the disabled-attach reason: {text}"
     );
-    assert!(
-        !text.contains("Enter/a attach"),
-        "Enter/a attach hint must not render when attach is disabled: {text}"
-    );
+    // The keys are named with why they cannot attach, dimmed: never as
+    // a hint that attaches.
+    let hints = status_hints(&app);
+    let attach = hints
+        .hints()
+        .iter()
+        .find(|hint| hint.text().starts_with("Enter/a attach"))
+        .expect("the attach keys are named");
+    assert!(!attach.is_available(), "{}", attach.text());
 }
 
 #[test]
@@ -3768,7 +3773,7 @@ fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
     let border_glyphs = ["─", "│", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼"];
 
     let mut scrollbar_glyph_rows = 0;
-    for y in 0..buffer.area.height {
+    for y in left_pane.y..left_pane.bottom() {
         let symbol = buffer[(bar_col, y)].symbol();
         if symbol.is_empty()
             || symbol == " "
@@ -5131,7 +5136,7 @@ fn an_empty_prs_view_points_at_the_hard_refresh() {
         frame.contains("Press `Ctrl-R` to ask the forges again"),
         "{frame}"
     );
-    assert!(frame.contains("^R forges"), "{frame}");
+    assert!(frame.contains("Ctrl-R hard refresh"), "{frame}");
 }
 
 /// Select PR `#number` and render the frame.

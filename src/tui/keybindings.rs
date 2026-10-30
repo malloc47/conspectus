@@ -21,7 +21,8 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 pub mod overlay;
 
 use tuikit::explorer::{EXPLORER_KEYS, ExplorerKey};
-use tuikit::keys::{KeyMatcher, KeyRow, include};
+use tuikit::glyphs::marks;
+use tuikit::keys::{KeyAction, KeyMatcher, KeyRole, KeyRow, ch, ctrl, exact, include, key, shown};
 
 use crate::tui::View;
 use crate::tui::keymap::Action;
@@ -83,6 +84,140 @@ pub const UNDO_KEY: char = 'u';
 /// | `e` | nothing | fold `Other` on its header |
 /// | `o` | open the right pane's cursor value | the same |
 pub const RIGHT_PANE_KEYS: &[KeyRow<ExplorerKey>] = &[include(EXPLORER_KEYS)];
+
+/// How long each piece of the status bar holds on as the bar narrows, the
+/// highest longest, so the bar packs what fits in this order: an
+/// overlay's keys, what a narrowed view is narrowed by, the way back, and
+/// the way out first; the refresh keys last. The rows of
+/// [`MAIN_VIEW_KEYS`] carry theirs; the right pane's keys and an
+/// overlay's take one rank each, and among them the earlier hint holds on
+/// longer.
+pub mod status_rank {
+    /// The keys of the overlay on top, which the bar names instead of the
+    /// main view's: they outlast the view's settings, which the overlay
+    /// covers or shows itself.
+    pub const OVERLAY_KEYS: u32 = 12;
+    pub const FIND: u32 = 11;
+    pub const BACK: u32 = 10;
+    pub const QUIT: u32 = 9;
+    pub const FILTER: u32 = 8;
+    /// The right pane's keys, with the right pane focused: they matter
+    /// more than what the selection's keys do.
+    pub const RIGHT_PANE_KEYS: u32 = 7;
+    /// What the selection's keys do: its default action and the
+    /// accelerators beside it.
+    pub const DEFAULT_ACTION: u32 = 6;
+    pub const GROUP: u32 = 5;
+    pub const SORT: u32 = 4;
+    pub const LEFT_PANE_KEYS: u32 = 3;
+    pub const FOCUS: u32 = 2;
+    pub const REFRESH: u32 = 1;
+}
+
+/// The main view's keys as the status bar names them: the keys
+/// [`KEYBINDINGS`] gives the left pane's tree and the program, with no
+/// modal open. The status bar shows the rows that act now, each worded
+/// for the selection (what `Enter` does on this row, what `a` attaches
+/// to), so a hint names only a key that does what it says; with the
+/// right pane focused it leaves out the tree's rows, whose keys the right
+/// pane's table takes. The program-wide keymap resolves the keys; a test
+/// routes every row's key through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MainKey {
+    /// `Enter`: the selected row's default action.
+    Default,
+    /// `a`: attach the selection's mux.
+    Attach,
+    /// `v`: open the selection's transcript.
+    View,
+    /// `S`: resume an un-muxed session.
+    Resume,
+    /// `.`: the selection's action menu.
+    Menu,
+    Up,
+    Down,
+    /// `←`: fold the selected row.
+    Collapse,
+    /// `→`: unfold the selected row.
+    Expand,
+    /// `Tab`: the other pane.
+    Focus,
+    Refresh,
+    /// `Ctrl-R`: refresh and ask the forges again.
+    HardRefresh,
+    Quit,
+    /// `Backspace`: return from a reveal.
+    Back,
+    /// `!`: the Messages log. Named by the status bar's unseen-messages
+    /// chip and a failure's status message ([`messages_hint`]), not among
+    /// the hints.
+    Messages,
+}
+
+impl KeyAction for MainKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Default => KeyRole::Apply,
+            Self::Up | Self::Down => KeyRole::Move,
+            Self::Collapse | Self::Expand => KeyRole::Change,
+            Self::Quit | Self::Back => KeyRole::Leave,
+            Self::Attach
+            | Self::View
+            | Self::Resume
+            | Self::Menu
+            | Self::Focus
+            | Self::Refresh
+            | Self::HardRefresh
+            | Self::Messages => KeyRole::Other,
+        }
+    }
+}
+
+/// The main view's status bar keys ([`MainKey`]), in the order the bar
+/// shows them, each with its [`status_rank`].
+pub const MAIN_VIEW_KEYS: &[KeyRow<MainKey>] = &[
+    shown(exact(KeyCode::Enter), MainKey::Default, "Enter", "open")
+        .rank(status_rank::DEFAULT_ACTION),
+    shown(ch('a'), MainKey::Attach, "a", "attach").rank(status_rank::DEFAULT_ACTION),
+    shown(ch('v'), MainKey::View, "v", "view").rank(status_rank::DEFAULT_ACTION),
+    shown(ch('S'), MainKey::Resume, "S", "resume").rank(status_rank::DEFAULT_ACTION),
+    shown(ch('.'), MainKey::Menu, ".", "menu").rank(status_rank::DEFAULT_ACTION),
+    shown(key(KeyCode::Up), MainKey::Up, marks::ARROW_UP, "move").rank(status_rank::LEFT_PANE_KEYS),
+    shown(key(KeyCode::Down), MainKey::Down, marks::ARROW_DOWN, "move")
+        .rank(status_rank::LEFT_PANE_KEYS),
+    shown(
+        key(KeyCode::Left),
+        MainKey::Collapse,
+        marks::ARROW_LEFT,
+        "fold",
+    )
+    .rank(status_rank::LEFT_PANE_KEYS),
+    shown(
+        key(KeyCode::Right),
+        MainKey::Expand,
+        marks::ARROW_RIGHT,
+        "fold",
+    )
+    .rank(status_rank::LEFT_PANE_KEYS),
+    shown(key(KeyCode::Tab), MainKey::Focus, "Tab", "focus").rank(status_rank::FOCUS),
+    shown(ch('r'), MainKey::Refresh, "r", "refresh").rank(status_rank::REFRESH),
+    shown(ctrl('r'), MainKey::HardRefresh, "Ctrl-R", "hard refresh").rank(status_rank::REFRESH),
+    shown(ch('q'), MainKey::Quit, "q", "quit").rank(status_rank::QUIT),
+    shown(key(KeyCode::Backspace), MainKey::Back, "Backspace", "back").rank(status_rank::BACK),
+    shown(ch('!'), MainKey::Messages, "!", "messages"),
+];
+
+/// The key that opens the Messages log with `verb` (`! details`), from its
+/// row of [`MAIN_VIEW_KEYS`]: what the unseen-messages chip and a failure's
+/// status message say, so they name the key the keymap binds.
+pub fn messages_hint(verb: &str) -> String {
+    use tuikit::status_bar::{Annotation, KeyHintBar};
+    KeyHintBar::new()
+        .annotated(MAIN_VIEW_KEYS, 0, |key| {
+            (*key == MainKey::Messages).then(|| Annotation::new().verb(verb))
+        })
+        .text()
+}
 
 /// Wave 1 pilot: view switching bindings. Each entry produces
 /// a parameterized `Action::SwitchView` or `Action::CycleView`.

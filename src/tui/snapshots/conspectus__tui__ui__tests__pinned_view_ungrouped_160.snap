@@ -1,6 +1,6 @@
 ---
 source: src/tui/ui_tests.rs
-assertion_line: 5527
+assertion_line: 5605
 expression: "pinned_frame(&mut app, width)"
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                                                                             
@@ -26,4 +26,4 @@ updated 0s ago · 1 sessions · 1 mux
 │1 legacy pin is still read from config files (old-api); run `conspectus pin   ││                                                                              │
 │migrate` to convert it                                                        ││                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────┘
-[left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:conspectus-main · j/k move · h/l fold · Enter default · Tab focus · r refresh · q quit
+[left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:conspectus-main · ↑/↓ move · ←/→ fold · Tab focus · r refresh · q quit

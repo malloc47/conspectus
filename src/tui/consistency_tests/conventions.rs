@@ -72,6 +72,15 @@ impl Rig for Host {
         app.update(Msg::SetStatus(Some(Feedback::info(text))));
     }
 
+    /// The status bar, which names the keys of the modal on top.
+    fn status_rows(&self, area: Rect) -> Vec<Rect> {
+        vec![Rect::new(area.x, status_row(area), area.width, 1)]
+    }
+
+    fn hints(&self, app: &App) -> Vec<tuikit::keys::KeyMatcher> {
+        crate::tui::ui::status_hints(app).keys().collect()
+    }
+
     fn theme(&self) -> &tuikit::theme::Theme {
         &self.theme
     }
@@ -319,6 +328,11 @@ fn every_modal_keeps_the_key_convention_by_role() {
 #[test]
 fn every_modal_draws_the_footer_its_table_generates() {
     conformance::assert_conventions_of(&registry(), &[Check::Footer]);
+}
+
+#[test]
+fn the_status_bar_names_only_keys_the_modal_on_top_takes() {
+    conformance::assert_conventions_of(&registry(), &[Check::Hints]);
 }
 
 #[test]

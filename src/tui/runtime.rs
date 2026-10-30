@@ -532,13 +532,7 @@ impl LoopMode for LiveMode {
             Some(Action::OpenWorktreeCloseDown) => open_worktree_close_down_action(app),
             Some(Action::OpenNewMuxForm) => open_new_mux_form_action(app),
             Some(Action::OpenMuxMenu) => open_mux_menu_action(app),
-            Some(Action::OpenControls) => {
-                app.open_controls_overlay();
-                app.update(Msg::SetStatus(Some(Feedback::info(format!(
-                    "controls: {}",
-                    tuikit::keys::footer(tuikit::keys::SETTINGS_KEYS)
-                )))));
-            }
+            Some(Action::OpenControls) => open_controls(app),
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
                 let next = cycle_view(app.active_view(), delta);
@@ -556,14 +550,8 @@ impl LoopMode for LiveMode {
                 dispatch(app, Msg::ClearFilters);
                 app.update(Msg::SetStatus(Some(Feedback::success("filters cleared"))));
             }
-            Some(Action::OpenSearch) => {
-                let hint = app.open_search_entry();
-                app.update(Msg::SetStatus(Some(hint)));
-            }
-            Some(Action::OpenContentSearch) => {
-                let hint = app.open_content_search_entry();
-                app.update(Msg::SetStatus(Some(hint)));
-            }
+            Some(Action::OpenSearch) => app.open_search_entry(),
+            Some(Action::OpenContentSearch) => app.open_content_search_entry(),
             Some(Action::OpenHelp) => {
                 app.open_help_overlay();
             }
@@ -631,21 +619,9 @@ impl StaticMode {
             Some(Action::ModalKey(key)) => modal_key(app, key, &mut dispatch),
             Some(Action::OpenHelp) => app.open_help_overlay(),
             Some(Action::OpenMessages) => app.open_messages_overlay(),
-            Some(Action::OpenSearch) => {
-                let hint = app.open_search_entry();
-                app.update(Msg::SetStatus(Some(hint)));
-            }
-            Some(Action::OpenContentSearch) => {
-                let hint = app.open_content_search_entry();
-                app.update(Msg::SetStatus(Some(hint)));
-            }
-            Some(Action::OpenControls) => {
-                app.open_controls_overlay();
-                app.update(Msg::SetStatus(Some(Feedback::info(format!(
-                    "controls: {}",
-                    tuikit::keys::footer(tuikit::keys::SETTINGS_KEYS)
-                )))));
-            }
+            Some(Action::OpenSearch) => app.open_search_entry(),
+            Some(Action::OpenContentSearch) => app.open_content_search_entry(),
+            Some(Action::OpenControls) => open_controls(app),
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
                 let next = cycle_view(app.active_view(), delta);
@@ -1453,9 +1429,9 @@ pub(super) fn open_worktree_menu_action(app: &mut App) {
     };
     if let Some(menu) = worktree_menu(&ctx) {
         app.open_worktree_menu(menu);
-        app.update(Msg::SetStatus(Some(Feedback::info(
-            "worktree: ↑/↓ move · Enter pick · Esc close",
-        ))));
+        // The status bar names the menu's keys; a message from before
+        // goes.
+        app.update(Msg::SetStatus(None));
     } else {
         let hint = if can_mutate {
             "worktree: no actions for this selection"
@@ -1723,12 +1699,18 @@ fn derive_new_mux_name(_app: &App) -> String {
 }
 
 /// Open the Mux action menu (`m`). Context-free — the menu itself
-/// derives per-entry defaults when its selection commits.
+/// derives per-entry defaults when its selection commits. The status bar
+/// names the menu's keys; a message from before goes.
 pub(super) fn open_mux_menu_action(app: &mut App) {
     app.open_mux_menu(crate::tui::actions::mux_menu());
-    app.update(Msg::SetStatus(Some(Feedback::info(
-        "mux: ↑/↓ move · Enter pick · Esc close",
-    ))));
+    app.update(Msg::SetStatus(None));
+}
+
+/// Open Controls (`f`). The status bar names the panel's keys; a message
+/// from before goes.
+pub(super) fn open_controls(app: &mut App) {
+    app.open_controls_overlay();
+    app.update(Msg::SetStatus(None));
 }
 
 /// Append an informational advisory when the rename target is a

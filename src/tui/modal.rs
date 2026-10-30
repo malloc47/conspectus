@@ -111,6 +111,12 @@ macro_rules! modals {
                     $(Self::$variant(entry) => Overlay::<Msg, App>::takes_text(entry),)*
                 }
             }
+
+            fn hints(&self) -> tuikit::keys::Footer {
+                match self {
+                    $(Self::$variant(entry) => Overlay::<Msg, App>::hints(entry),)*
+                }
+            }
         }
     };
 }

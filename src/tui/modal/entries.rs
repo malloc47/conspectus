@@ -90,6 +90,10 @@ impl Overlay<Msg, App> for SearchOverlayState {
     fn takes_text(&self) -> bool {
         self.options_cursor().is_none()
     }
+
+    fn hints(&self) -> tuikit::keys::Footer {
+        self.footer()
+    }
 }
 
 impl Overlay<Msg, App> for MuxLaunchForm {
@@ -104,6 +108,10 @@ impl Overlay<Msg, App> for MuxLaunchForm {
     fn takes_text(&self) -> bool {
         MuxLaunchForm::takes_text(self)
     }
+
+    fn hints(&self) -> tuikit::keys::Footer {
+        Overlay::<Msg, App>::hints(self.form())
+    }
 }
 
 impl Overlay<Msg, App> for PinEditForm {
@@ -117,5 +125,9 @@ impl Overlay<Msg, App> for PinEditForm {
 
     fn takes_text(&self) -> bool {
         PinEditForm::takes_text(self)
+    }
+
+    fn hints(&self) -> tuikit::keys::Footer {
+        Overlay::<Msg, App>::hints(self.form())
     }
 }
