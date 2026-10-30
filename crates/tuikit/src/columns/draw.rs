@@ -10,6 +10,115 @@ use super::schema::{Align, Column, ColumnSchema, Width};
 use crate::text;
 use crate::theme::Theme;
 
+/// The cells a row is laid out in after its lead: the cells its columns'
+/// width rules count, and the cells its cells fit in.
+///
+/// The two are one number for most rows: a `usize` room converts to a
+/// `Room` of that many cells. They part for a list that gives the end of
+/// its rows to something only some of the time, such as a scrollbar's
+/// column carved from a list only while its rows overflow:
+/// [`Room::new(width).beside(1)`](Self::beside) lays such a row out by
+/// its width rules over the whole width (a column's steps, its share of
+/// the row, the rooms a column leaves below), so no column moves when the
+/// bar comes or goes, and then fits the row's cells into the width less
+/// the bar's column by the one narrow-width policy: the fill gives its
+/// last cell first, and where it is at its minimum the policy's next
+/// column gives way.
+///
+/// ```
+/// use ratatui::style::Style;
+/// use tuikit::columns::{Cell, Column, ColumnSchema, Measure, Room};
+/// use tuikit::theme::Theme;
+///
+/// #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// enum Col {
+///     Name,
+///     Note,
+/// }
+///
+/// // A name that takes a quarter of the row and a note in the rest.
+/// let schema = ColumnSchema::new([
+///     Column::share(Col::Name, 1, 4).within(4, 20),
+///     Column::fill(Col::Note),
+/// ]);
+/// let cells = vec![
+///     (Col::Name, Cell::text("alphabetical", Style::default())),
+///     (Col::Note, Cell::text("a note that runs on and on past the end", Style::default())),
+/// ];
+/// let mut measure = Measure::new();
+/// measure.add(&schema, 0, &cells);
+/// let theme = Theme::default();
+/// let row = |room: Room| Cell::plain(&schema.draw(&measure, 0, room, &cells, &theme));
+///
+/// // Laid out in 40 cells, the name takes ten; in 39 it takes nine.
+/// assert_eq!(row(Room::new(40)), "alphabeti…  a note that runs on and on …");
+/// assert_eq!(row(Room::new(39)), "alphabet…  a note that runs on and on …");
+/// // Beside a bar's column the name keeps the ten of 40 cells, and the
+/// // note gives the bar its cell.
+/// let beside = Room::new(40).beside(1);
+/// assert_eq!(beside.cells(), 39);
+/// assert_eq!(row(beside), "alphabeti…  a note that runs on and on…");
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Room {
+    whole: usize,
+    beside: usize,
+}
+
+impl Room {
+    /// A room of `cells`: the width rules count them and the cells fit in
+    /// them.
+    pub const fn new(cells: usize) -> Self {
+        Self {
+            whole: cells,
+            beside: 0,
+        }
+    }
+
+    /// The room with its last `cells` given to something drawn beside the
+    /// row (a scrollbar's column): the width rules still count them, the
+    /// row's cells no longer fit in them.
+    #[must_use]
+    pub const fn beside(self, cells: usize) -> Self {
+        Self {
+            whole: self.whole,
+            beside: self.beside + cells,
+        }
+    }
+
+    /// The cells the row's cells fit in.
+    pub const fn cells(&self) -> usize {
+        self.whole.saturating_sub(self.beside)
+    }
+
+    /// The cells the width rules count, those beside the row included.
+    pub const fn whole(&self) -> usize {
+        self.whole
+    }
+
+    /// The room less `cells` at its start, on both counts.
+    const fn after(self, cells: usize) -> Self {
+        Self {
+            whole: self.whole.saturating_sub(cells),
+            beside: self.beside,
+        }
+    }
+
+    /// The room with `cells` more at its start, on both counts.
+    const fn widened(self, cells: usize) -> Self {
+        Self {
+            whole: self.whole + cells,
+            beside: self.beside,
+        }
+    }
+}
+
+impl From<usize> for Room {
+    fn from(cells: usize) -> Self {
+        Self::new(cells)
+    }
+}
+
 /// A schema laid out for one room: the columns that line up across rows,
 /// each shown at a width or left out.
 ///
@@ -190,7 +299,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
     /// depth then give way alike, at the same widths, and the columns
     /// after it stay in one place, though a deeper row's cell may narrow
     /// below its floor.
-    fn aligned(&self, measure: &Measure<K>, lead: usize, room: usize) -> Vec<Item> {
+    fn aligned(&self, measure: &Measure<K>, lead: usize, room: Room) -> Vec<Item> {
         let absorbs =
             |column: &Column<K>| column.absorbs_lead && matches!(column.width, Width::Cap(_));
         let shared = measure.least_lead().min(lead);
@@ -198,7 +307,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             return self.laid_out(measure, lead, room);
         }
         let own = lead - shared;
-        let mut items = self.laid_out(measure, shared, own + room);
+        let mut items = self.laid_out(measure, shared, room.widened(own));
         for item in items
             .iter_mut()
             .filter(|item| absorbs(&self.columns[item.index]))
@@ -215,15 +324,16 @@ impl<K: Copy + Eq> ColumnSchema<K> {
     /// widest cell, less the lead when it absorbs it, a stepped one at its
     /// step, a share of the whole row at its share, a fill at its minimum
     /// until it takes what is left), then given way by the policy until
-    /// they fit.
-    fn laid_out(&self, measure: &Measure<K>, lead: usize, room: usize) -> Vec<Item> {
-        let row = lead + room;
+    /// they fit. The width rules count the room's whole width; the columns
+    /// fit in its cells.
+    fn laid_out(&self, measure: &Measure<K>, lead: usize, room: Room) -> Vec<Item> {
+        let row = lead + room.whole();
         let mut items = Vec::with_capacity(self.split);
         let mut used = 0;
         let mut gap: Option<usize> = None;
         for (index, column) in self.columns[..self.split].iter().enumerate() {
-            let left = room.saturating_sub(used + gap.unwrap_or(0));
-            let wanted = if column.drop_below > room {
+            let left = room.whole().saturating_sub(used + gap.unwrap_or(0));
+            let wanted = if column.drop_below > room.whole() {
                 None
             } else {
                 match column.width {
@@ -255,7 +365,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
                 own: wanted.unwrap_or(0),
             });
         }
-        give_way(&self.columns, &mut items, room, 0);
+        give_way(&self.columns, &mut items, room.cells(), 0);
         items
     }
 
@@ -268,7 +378,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         &self,
         cells: &[(K, Cell)],
         (whole, row): (usize, usize),
-        room: usize,
+        room: Room,
         lead_gap: usize,
     ) -> Vec<Item> {
         let mut items = Vec::new();
@@ -281,7 +391,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             let Some(cell) = lookup(cells, column.key).filter(|cell| !cell.is_empty()) else {
                 continue;
             };
-            let left = room.saturating_sub(used + gap);
+            let left = room.whole().saturating_sub(used + gap);
             let wanted = match column.width {
                 Width::Fixed(cells) => Some(cells),
                 Width::Cap(max) | Width::Hug(max) => Some(cell.width().min(max)),
@@ -301,18 +411,20 @@ impl<K: Copy + Eq> ColumnSchema<K> {
                 own: cell.width().min(width).max(1),
             });
         }
-        give_way(&self.columns, &mut items, room, lead_gap);
+        give_way(&self.columns, &mut items, room.cells(), lead_gap);
         items
     }
 
     /// The lined-up columns of a row with a `lead` of its own (a tree
     /// row's indent, a list's cursor gutter; 0 when the list draws nothing
     /// before the schema) laid out for the `room` after it from the widths
-    /// in `measure`: which show, and how wide.
-    pub fn layout(&self, measure: &Measure<K>, lead: usize, room: usize) -> Layout<K> {
+    /// in `measure`: which show, and how wide. The room is a number of
+    /// cells, or a [`Room`] whose width rules count cells beside the row.
+    pub fn layout(&self, measure: &Measure<K>, lead: usize, room: impl Into<Room>) -> Layout<K> {
+        let room = room.into();
         let items = self.aligned(measure, lead, room);
         Layout {
-            room,
+            room: room.cells(),
             columns: items
                 .iter()
                 .map(|item| (self.columns[item.index].key, item.width))
@@ -337,14 +449,15 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         &self,
         measure: &Measure<K>,
         lead: usize,
-        room: usize,
+        room: impl Into<Room>,
         cells: &[(K, Cell)],
         theme: &Theme,
     ) -> Vec<Span<'static>> {
+        let room = room.into();
         let (spans, used, _) =
             self.draw_row(measure, (lead, room), cells, theme, Ends::AtLastCell(None));
-        if used > room {
-            text::fit_spans(spans, room)
+        if used > room.cells() {
+            text::fit_spans(spans, room.cells())
         } else {
             spans
         }
@@ -362,11 +475,12 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         &self,
         measure: &Measure<K>,
         lead: usize,
-        room: usize,
+        room: impl Into<Room>,
         cells: &[(K, Cell)],
         theme: &Theme,
         at: K,
     ) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
+        let room = room.into();
         let from = self.index_of(at).unwrap_or(self.columns.len());
         let (spans, used, split) = self.draw_row(
             measure,
@@ -375,8 +489,8 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             theme,
             Ends::AtLastCell(Some(from)),
         );
-        let mut spans = if used > room {
-            text::fit_spans(spans, room)
+        let mut spans = if used > room.cells() {
+            text::fit_spans(spans, room.cells())
         } else {
             spans
         };
@@ -394,12 +508,13 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         &self,
         measure: &Measure<K>,
         lead: usize,
-        room: usize,
+        room: impl Into<Room>,
         cells: &[(K, Cell)],
         theme: &Theme,
     ) -> (Vec<Span<'static>>, usize) {
+        let room = room.into();
         let (spans, used, _) = self.draw_row(measure, (lead, room), cells, theme, Ends::Continued);
-        (spans, room.saturating_sub(used))
+        (spans, room.cells().saturating_sub(used))
     }
 
     /// The row's spans, the cells they take, and the index of the first
@@ -408,7 +523,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
     fn draw_row(
         &self,
         measure: &Measure<K>,
-        place: (usize, usize),
+        place: (usize, Room),
         cells: &[(K, Cell)],
         theme: &Theme,
         ends: Ends,
@@ -427,8 +542,8 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             .map_or(0, |item| self.columns[item.index].gap);
         let flow = self.flowing(
             cells,
-            (room, lead + room),
-            room.saturating_sub(lined_up),
+            (room.whole(), lead + room.whole()),
+            room.after(lined_up),
             if lined_up > 0 { lead_gap } else { 0 },
         );
         if !continued && !flow.iter().any(|item| item.width.is_some()) {
@@ -475,7 +590,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             let (cut_to, padded) = match column.width {
                 Width::Hug(_) => (width, false),
                 Width::Fill => (width, !ends),
-                _ if column.ragged && ends => (room.saturating_sub(used).min(cap), false),
+                _ if column.ragged && ends => (room.cells().saturating_sub(used).min(cap), false),
                 _ => (width.min(cap), true),
             };
             let mut body = cell.render(cut_to, theme);
@@ -511,7 +626,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
     /// on a row where it is the last cell that shows: nothing after it
     /// needs it out of the way, so it runs on into the room the row has
     /// left, when that holds its floor (or its whole text, when shorter).
-    fn keep_ragged_end(&self, aligned: &mut [Item], cells: &[(K, Cell)], room: usize) {
+    fn keep_ragged_end(&self, aligned: &mut [Item], cells: &[(K, Cell)], room: Room) {
         let cell_of = |item: &Item| {
             lookup(cells, self.columns[item.index].key).filter(|cell| !cell.is_empty())
         };
@@ -520,7 +635,7 @@ impl<K: Copy + Eq> ColumnSchema<K> {
         };
         let item = aligned[position];
         let column = &self.columns[item.index];
-        if item.width.is_some() || !column.ragged || column.drop_below > room {
+        if item.width.is_some() || !column.ragged || column.drop_below > room.whole() {
             return;
         }
         let own = cell_of(&item).map_or(0, Cell::width);
@@ -530,7 +645,9 @@ impl<K: Copy + Eq> ColumnSchema<K> {
             .rev()
             .find(|item| item.width.is_some())
             .map_or(0, |item| self.columns[item.index].gap);
-        let left = room.saturating_sub(total(&self.columns, before, 0) + gap);
+        let left = room
+            .cells()
+            .saturating_sub(total(&self.columns, before, 0) + gap);
         let floor = column.shrink.map_or(1, |(_, floor)| floor).min(own).max(1);
         if left >= floor {
             aligned[position].width = Some(0);

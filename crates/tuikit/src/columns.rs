@@ -53,6 +53,14 @@
 //! 5. A row that is still too wide once nothing more gives way is cut at
 //!    its edge with `…`.
 //!
+//! A list that gives the end of its rows to something only some of the
+//! time (a scrollbar's column, carved only while the rows overflow) lays
+//! them out in a [`Room`] that is wider than the cells they fit in
+//! ([`Room::beside`]): steps 1 and 2 count the whole width, so the shares,
+//! the steps, and the rooms a column leaves below do not move when the bar
+//! comes or goes, and steps 3 to 5 fit the cells left, so the fill gives
+//! the bar its cells first.
+//!
 //! The columns before the first hugging column line up: they give way
 //! for the room by the widths measured over the whole list, so every row
 //! drawn in the same room loses the same ones and keeps the rest in one
@@ -116,7 +124,7 @@ mod measure;
 mod schema;
 
 pub use cell::{Cell, Cut};
-pub use draw::Layout;
+pub use draw::{Layout, Room};
 pub use measure::Measure;
 pub use schema::{Align, Column, ColumnSchema, Width};
 

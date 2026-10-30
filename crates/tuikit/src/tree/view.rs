@@ -72,6 +72,14 @@ pub struct RowCtx<'a> {
     /// ([`GUTTER_WIDTH`](crate::selection::GUTTER_WIDTH)), and less the
     /// scrollbar gutter when the rows overflow.
     pub width: usize,
+    /// The cells the scrollbar's gutter takes from the end of the row: 1
+    /// while the rows overflow the pane and the gutter is carved, 0 while
+    /// they fit. [`width`](Self::width) is already less them. A producer
+    /// whose columns step with the row's width or take a share of it
+    /// counts them in, so a row is laid out alike whether or not its list
+    /// overflows and only its last cells give the bar its column;
+    /// [`TreeColumns`](super::TreeColumns) does.
+    pub scrollbar: usize,
     /// The theme the tree draws with.
     pub theme: &'a Theme,
 }
@@ -108,6 +116,7 @@ impl RowCtx<'_> {
     ///     pending: false,
     ///     mark: RowMark::None,
     ///     width: 10,
+    ///     scrollbar: 0,
     ///     theme: &theme,
     /// };
     /// let row = cx.row(Line::from("apple"));
@@ -293,9 +302,11 @@ where
 
         // The scrollbar's gutter is carved out of the body when the rows
         // overflow, and every row starts with the cursor gutter, so rows
-        // are laid out at the width that is left.
+        // are laid out at the width that is left; the producer is told the
+        // cells the bar took, so a row keeps its layout when it comes.
         let gutter = ScrollGutter::layout(inner, shown.len());
         let width = usize::from(gutter.content().width).saturating_sub(GUTTER_WIDTH);
+        let scrollbar = usize::from(inner.width - gutter.content().width);
         let window = self
             .state
             .window_over(self.rows, &shown, usize::from(inner.height));
@@ -306,7 +317,9 @@ where
         let lines: Vec<Line<'static>> = shown[visible.clone()]
             .iter()
             .zip(visible)
-            .map(|(&index, position)| self.row_line(index, cursor == Some(position), width))
+            .map(|(&index, position)| {
+                self.row_line(index, cursor == Some(position), (width, scrollbar))
+            })
             .collect();
         Paragraph::new(lines).render(gutter.content(), buf);
         gutter.render(&window, buf);
@@ -314,9 +327,11 @@ where
     }
 
     /// The line of the row at `index` in the rows, the cursor's row when
-    /// `cursor` says so, laid out by the producer at `width`, given its
-    /// looks, and led by the cursor gutter.
-    fn row_line(&self, index: usize, cursor: bool, width: usize) -> Line<'static> {
+    /// `cursor` says so, laid out by the producer at the width `room`
+    /// names beside the cells the scrollbar took, given its looks, and led
+    /// by the cursor gutter.
+    fn row_line(&self, index: usize, cursor: bool, room: (usize, usize)) -> Line<'static> {
+        let (width, scrollbar) = room;
         let row = &self.rows[index];
         let state = self.states.get(index).copied().unwrap_or_default();
         let cx = RowCtx {
@@ -327,6 +342,7 @@ where
             pending: state.pending,
             mark: state.mark,
             width,
+            scrollbar,
             theme: self.theme,
         };
         cx.row((self.line)(row, &cx))

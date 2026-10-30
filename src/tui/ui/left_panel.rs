@@ -161,6 +161,7 @@ pub(super) fn lay_out(
                 pending: state.pending,
                 mark: state.mark,
                 width,
+                scrollbar: 0,
                 theme,
             };
             left.line(row, &cx)
@@ -194,6 +195,7 @@ pub(super) fn render_left_row(
         pending: states[0].pending,
         mark: states[0].mark,
         width: width.saturating_sub(selection::GUTTER_WIDTH),
+        scrollbar: 0,
         theme: app.theme(),
     };
     cx.row(left.line(row, &cx))

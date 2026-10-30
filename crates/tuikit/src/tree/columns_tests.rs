@@ -91,6 +91,7 @@ fn cx(theme: &Theme, width: usize) -> RowCtx<'_> {
         pending: false,
         mark: RowMark::None,
         width,
+        scrollbar: 0,
         theme,
     }
 }
@@ -291,4 +292,47 @@ fn a_share_of_the_row_counts_the_cursor_gutter() {
         .schema
         .draw(&list, GUTTER_WIDTH, 20 - GUTTER_WIDTH, &cells, &theme);
     assert_eq!(Cell::plain(&listed), text(&line));
+}
+
+#[test]
+fn a_row_keeps_its_layout_when_its_list_overflows() {
+    // A share of the row is laid out over the whole width whether or not
+    // the scrollbar takes the last column: only the fill gives it.
+    let halves = Halves {
+        schema: ColumnSchema::new([
+            Column::share(Half::Name, 1, 2).gap(0),
+            Column::fill(Half::Rest),
+        ]),
+    };
+    let theme = Theme::default();
+    let first_row = |count: u32| {
+        let rows: Vec<Item> = (1..=count).map(|id| item(id, 0, false, "name")).collect();
+        let state = TreeState::new();
+        let columns = TreeColumns::new(&halves, &rows, &state, &[], &theme);
+        let told = std::cell::Cell::new(None);
+        let area = ratatui::layout::Rect::new(0, 0, 22, 7);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        crate::tree::TreeView::new(
+            &rows,
+            &state,
+            |row, cx| {
+                told.set(Some((cx.width, cx.scrollbar)));
+                columns.line(row, cx)
+            },
+            &theme,
+        )
+        .render(area, &mut buf);
+        (crate::testkit::buffer::rows(&buf)[1].clone(), told.get())
+    };
+    let (fits, fits_told) = first_row(3);
+    let (overflows, overflows_told) = first_row(12);
+    assert_eq!(fits_told, Some((18, 0)));
+    assert_eq!(
+        overflows_told,
+        Some((17, 1)),
+        "the producer is told the bar's cell"
+    );
+    let name_and_gap = format!("name{}rest", " ".repeat(10 - 4));
+    assert!(fits.contains(&name_and_gap), "{fits:?}");
+    assert!(overflows.contains(&name_and_gap), "{overflows:?}");
 }

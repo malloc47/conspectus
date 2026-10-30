@@ -455,6 +455,101 @@ fn a_row_stepped_column_steps_with_the_whole_row_whatever_comes_before_it() {
     assert_eq!(at(0, 60), (None, Some(14)));
 }
 
+// --- a room beside a bar -----------------------------------------------------
+
+#[test]
+fn a_number_of_cells_is_a_room_of_them() {
+    let room = Room::from(30);
+    assert_eq!(room, Room::new(30));
+    assert_eq!((room.cells(), room.whole()), (30, 30));
+    let beside = Room::new(30).beside(1);
+    assert_eq!((beside.cells(), beside.whole()), (29, 30));
+    assert_eq!(Room::new(0).beside(1).cells(), 0);
+}
+
+#[test]
+fn beside_a_bar_the_width_rules_count_the_whole_room_and_the_fill_gives_the_cell() {
+    const STEPS: &[(usize, usize)] = &[(60, 24), (30, 16), (0, 8)];
+    const ROW: &[(usize, usize)] = &[(78, 20), (0, 14)];
+    let schema = ColumnSchema::new([
+        Column::steps(Col::Name, STEPS),
+        Column::row_steps(Col::Label, ROW),
+        Column::share(Col::Note, 1, 13).within(2, 10),
+        Column::fixed(Col::Size, 3).drop_below(78),
+        Column::fill(Col::Fill),
+    ]);
+    let rows = [vec![
+        (Col::Name, t("name")),
+        (Col::Label, t("label")),
+        (Col::Note, t("note")),
+        (Col::Size, t("9")),
+        (
+            Col::Fill,
+            t("a long note that runs on past the end of every row"),
+        ),
+    ]];
+    let measure = measured(&schema, &rows);
+    let widths = |room: Room| {
+        let layout = schema.layout(&measure, 0, room);
+        [Col::Name, Col::Label, Col::Note, Col::Size, Col::Fill].map(|key| layout.width(key))
+    };
+    let whole = widths(Room::new(78));
+    assert_eq!(&whole[..4], [Some(24), Some(20), Some(6), Some(3)]);
+    // One cell narrower, every rule steps down: the name's room left, the
+    // label's row, the note's share, and the size's room below.
+    assert_eq!(
+        &widths(Room::new(77))[..4],
+        [Some(24), Some(14), Some(5), None]
+    );
+    // Beside a bar's column, every rule sees the whole room and the fill
+    // gives the bar its cell.
+    let beside = widths(Room::new(78).beside(1));
+    assert_eq!(beside[..4], whole[..4]);
+    assert_eq!(beside[4], whole[4].map(|fill| fill - 1));
+    let drawn =
+        |room: Room| Cell::plain(&schema.draw(&measure, 0, room, &rows[0], &Theme::default()));
+    let (wide, narrow) = (drawn(Room::new(78)), drawn(Room::new(78).beside(1)));
+    assert_eq!(text::width(&wide), 78);
+    assert_eq!(text::width(&narrow), 77);
+    assert_eq!(wide[..40], narrow[..40], "{wide:?} vs {narrow:?}");
+}
+
+#[test]
+fn beside_a_bar_a_fill_at_its_minimum_gives_way_by_the_policy() {
+    let schema = ColumnSchema::new([
+        Column::cap(Col::Name, 20),
+        Column::fixed(Col::Size, 4).right().drops(1),
+        Column::fill(Col::Fill).drops(0),
+    ]);
+    let rows = [vec![
+        (Col::Name, t("alpha")),
+        (Col::Size, t("12k")),
+        (Col::Fill, t("a note too long for the row")),
+    ]];
+    let measure = measured(&schema, &rows);
+    // Five, two, four, two, and the fill's seven: 20 cells.
+    let shown = |room: Room| {
+        let layout = schema.layout(&measure, 0, room);
+        (layout.is_shown(Col::Size), layout.is_shown(Col::Fill))
+    };
+    assert_eq!(shown(Room::new(20)), (true, true));
+    assert_eq!(
+        shown(Room::new(20).beside(1)),
+        (true, false),
+        "the fill cannot give a cell below its minimum, so it leaves first"
+    );
+    // A row with no fill gives the bar its cell by the policy too.
+    let bare = ColumnSchema::new([
+        Column::cap(Col::Name, 20).shrinks(0, 3),
+        Column::fixed(Col::Size, 4).right(),
+    ]);
+    let rows = [vec![(Col::Name, t("alpha")), (Col::Size, t("12k"))]];
+    let measure = measured(&bare, &rows);
+    let row = |room: Room| Cell::plain(&bare.draw(&measure, 0, room, &rows[0], &Theme::default()));
+    assert_eq!(row(Room::new(11)), "alpha   12k");
+    assert_eq!(row(Room::new(11).beside(1)), "alp…   12k");
+}
+
 #[test]
 fn a_fill_wants_its_own_minimum() {
     let schema =
@@ -1044,6 +1139,14 @@ fn no_row_is_ever_wider_than_its_room() {
                     head.extend(rest);
                     assert_eq!(head, spans, "seed {seed}, room {room}, parted at {at:?}");
                 }
+                // Beside a bar's column, the row fits the cells it leaves.
+                let beside = Room::new(room + 1).beside(1);
+                let spans = schema.draw(&measure, 0, beside, cells, &theme);
+                assert!(
+                    text::spans_width(&spans) <= room,
+                    "seed {seed}, room {room} beside a bar: {:?}\n{schema:?}",
+                    Cell::plain(&spans)
+                );
             }
         }
     }
@@ -1107,4 +1210,50 @@ fn lined_up_columns_start_in_one_place_on_every_row_of_a_room() {
             }
         }
     }
+}
+
+#[test]
+fn beside_a_bar_the_lined_up_columns_keep_their_widths_while_the_fill_has_a_cell_to_give() {
+    let mut checked = 0;
+    for seed in 1..=300u64 {
+        let mut rng = Rng(seed.wrapping_mul(0xA24B_AED4_963E_E407));
+        let schema = random_schema(&mut rng);
+        let rows: Vec<Cells<Col>> = (0..6).map(|_| random_cells(&mut rng, &schema)).collect();
+        let measure = measured(&schema, &rows);
+        let Some(fill) = schema.column(Col::Fill).filter(|column| {
+            schema.columns()[..schema.split]
+                .iter()
+                .any(|lined| lined.key() == column.key())
+        }) else {
+            continue;
+        };
+        for room in 2..60 {
+            let whole = schema.layout(&measure, 0, room);
+            let beside = schema.layout(&measure, 0, Room::new(room).beside(1));
+            let Some(width) = whole
+                .width(Col::Fill)
+                .filter(|width| *width > fill.fill_min)
+            else {
+                continue;
+            };
+            checked += 1;
+            for column in &schema.columns()[..schema.split] {
+                let key = column.key();
+                let expected = if key == Col::Fill {
+                    Some(width - 1)
+                } else {
+                    whole.width(key)
+                };
+                assert_eq!(
+                    beside.width(key),
+                    expected,
+                    "seed {seed}, room {room}, {key:?}\n{schema:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        checked > 100,
+        "only {checked} rooms had a fill to give a cell"
+    );
 }

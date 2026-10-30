@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use super::TreeRow;
 use super::state::TreeState;
 use super::view::{RowCtx, RowState};
-use crate::columns::{Cell, Cells, ColumnSchema, Measure};
+use crate::columns::{Cell, Cells, ColumnSchema, Measure, Room};
 use crate::glyphs::marks;
 use crate::selection::GUTTER_WIDTH;
 use crate::theme::Theme;
@@ -148,6 +148,7 @@ where
                 pending: row_state.pending,
                 mark: row_state.mark,
                 width: 0,
+                scrollbar: 0,
                 theme,
             };
             let cells = columns.cells(row, &cx);
@@ -181,10 +182,13 @@ where
     }
 
     /// `row` laid out at the width `cx` gives (the cells after the
-    /// cursor gutter): its indent, then its cells.
+    /// cursor gutter): its indent, then its cells. The width rules count
+    /// the cells the scrollbar took ([`RowCtx::scrollbar`]), so the row's
+    /// columns sit where they do while the list fits, and its cells fit
+    /// beside the bar by the one narrow-width policy.
     pub fn line(&self, row: &R, cx: &RowCtx<'_>) -> Line<'static> {
         let indent = self.indent(row);
-        let room = cx.width.saturating_sub(indent);
+        let room = room_of(cx, indent);
         let cells = self.columns.cells(row, cx);
         let mut spans = indent_spans(indent);
         spans.extend(self.columns.schema(row).draw(
@@ -210,7 +214,7 @@ where
         look: impl FnOnce(&mut [Span<'static>]),
     ) -> Line<'static> {
         let indent = self.indent(row);
-        let room = cx.width.saturating_sub(indent);
+        let room = room_of(cx, indent);
         let cells = self.columns.cells(row, cx);
         let (head, mut rest) = self.columns.schema(row).draw_split(
             &self.measure,
@@ -238,7 +242,7 @@ where
         rest: impl FnOnce(usize) -> Vec<Span<'static>>,
     ) -> Line<'static> {
         let indent = self.indent(row);
-        let room = cx.width.saturating_sub(indent);
+        let room = room_of(cx, indent);
         let cells = self.columns.cells(row, cx);
         let (drawn, left) = self.columns.schema(row).draw_then(
             &self.measure,
@@ -252,6 +256,12 @@ where
         spans.extend(rest(left));
         Line::from(spans)
     }
+}
+
+/// The room a row's cells are laid out in after its `indent`: the width
+/// the context gives, with the scrollbar's cells beside it.
+fn room_of(cx: &RowCtx<'_>, indent: usize) -> Room {
+    Room::new((cx.width + cx.scrollbar).saturating_sub(indent)).beside(cx.scrollbar)
 }
 
 /// The cells `row`'s indent takes at `per` cells a level.
