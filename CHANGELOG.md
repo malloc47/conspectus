@@ -498,6 +498,11 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   row lists its command first and its hit count before its age. In the
   modal the ages are tinted by how recent they are and the snippets are
   gray italics, as in the lists.
+- **Rows hold still as a list grows past the pane.** When a left-pane list
+  overflows and its scrollbar appears, its rows keep the columns they had:
+  the Search view's hit names and `turn N · kind` tags keep their widths
+  as results stream in (at 160 columns a tag no longer drops to
+  `turn 46 · mes…`), and the preview or snippet gives the bar its cell.
 - **Nested group headers line up with their parents.** A checkout header
   under its repo (the Sessions view's checkout grouping) starts its path
   in the repo header's column; it was two cells further right for each

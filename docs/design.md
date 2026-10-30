@@ -1380,7 +1380,10 @@ header carries its name and what follows it as two cells, not one string.
 The Search view's hit, pane, and pane-hit rows take the contents modal's
 hit columns and cells (ADR 0185), so a search hit reads the same in the
 modal and in the view and gives way in one order; its session rows stay
-the Sessions view's.
+the Sessions view's. When a list overflows the pane, its rows are laid
+out as though the scrollbar's column were still theirs and the preview or
+snippet gives the bar its cell (ADR 0195), so no stepped or shared column
+moves as the list grows past the pane.
 
 The right pane's explorer is a framework control (ADR 0188,
 `docs/plans/tui-framework/explorer-design.md`), landed over CSP-789,

@@ -139,6 +139,18 @@ page). A share and row steps count the lead in the row's width, so one
 schema drawn in a palette and in a tree of the same whole width gives
 those columns the same cells, and a row reads alike in both.
 
+A list that gives the end of its rows to something only some of the time
+lays them out in a `Room` wider than the cells they fit in. The tree
+carves the scrollbar's column only while its rows overflow, so
+`TreeColumns` lays each row out in `Room::new(width + 1).beside(1)` on
+those frames (the tree tells it the bar's cells as `RowCtx::scrollbar`):
+the width rules (steps, steps by the row, shares, `drop_below`) count the
+whole width, so no column moves when the bar comes or goes, and the
+policy fits the cells into the width the bar leaves, the fill giving the
+bar its cell while it is above its minimum. A palette reserves its
+scrollbar's column instead, so its rows always end a cell before the
+frame; a `usize` room is a `Room` of that many cells.
+
 ### The API
 
 | Item | Does | Notes |
@@ -162,7 +174,8 @@ those columns the same cells, and a row reads alike in both.
 | `Measure::widest`, `widest_with_lead`, `any` | what the pass found under a key | |
 | `Measure::least_lead` | the least lead a measured row had | the lead every row shares, such as a cursor gutter |
 | `ColumnSchema::layout(measure, lead, room)` | which lined-up columns show at a room, and how wide | the decision every row at that room shares |
-| `ColumnSchema::draw(measure, lead, room, cells, theme)` | one row's spans, never wider than the room | the policy below |
+| `ColumnSchema::draw(measure, lead, room, cells, theme)` | one row's spans, never wider than the room's cells | the policy below; `room` is a `usize` or a `Room` |
+| `Room::new(cells)`, `.beside(cells)`, `cells()`, `whole()` | a room whose last cells something beside the row takes | the width rules count `whole()`, the cells fit in `cells()`; `From<usize>` |
 | `ColumnSchema::draw_split(..., at)` | one row's spans parted where the column under `at` starts (or the next that shows) | for a look on part of a row; joined, the parts are what `draw` returns |
 | `ColumnSchema::draw_then(...)` | the columns drawn, padded, and the cells left | for a row whose last part the host draws |
 | `tree::RowColumns`, `TreeColumns::new`, `line`, `line_with_look`, `line_then`, `measure`, `indent`, `lead` | a tree's rows from schemas | indents by `tree::INDENT` cells a level after the tree's cursor gutter, and gives the schema both as the row's lead; `line_with_look(row, cx, from, look)` applies `look` to the spans from a column on, before the tree's own looks |
@@ -174,7 +187,9 @@ those columns the same cells, and a row reads alike in both.
 2. Every other column takes its width: fixed, capped at its widest cell
    (less the row's lead when it absorbs it), stepped by the room or by the
    whole row, a share of the whole row, hugging its cell, or a fill at its
-   minimum (`MIN_FILL`, 7 cells, unless told).
+   minimum (`MIN_FILL`, 7 cells, unless told). In a `Room` with cells
+   beside the row, steps 1 and 2 count its whole width and steps 3 to 5
+   fit its cells.
 3. While the row is wider than its room, columns give way in ascending
    priority (the later of two at one priority first, a narrowing before a
    leaving): a shrinking column narrows no more than needed and not below

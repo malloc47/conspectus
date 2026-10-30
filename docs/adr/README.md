@@ -204,8 +204,8 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted (amended by 0193) |
 | [0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) | The Transcript Viewer Is A Pager Content, And The Viewer Boundary Keeps Only The Transcript | Accepted |
 | [0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md) | Rich Text Is A Framework Feature, And The Preview Scrolls In A Region Counted From An Anchor | Accepted |
-| [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted (amended by 0183, 0186) |
-| [0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md) | Rows Come From Column Schemas, And One Rule Decides What Gives Way | Accepted (amended by 0184, 0185, 0186) |
+| [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted (amended by 0183, 0186, 0195) |
+| [0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md) | Rows Come From Column Schemas, And One Rule Decides What Gives Way | Accepted (amended by 0184, 0185, 0186, 0195) |
 | [0184](0184-tui-pr-pinned-and-history-rows-come-from-schemas-and-headers-carry-two-cells.md) | PR, Pinned, And History Rows Come From Schemas, And Group Headers Carry Two Cells | Accepted |
 | [0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md) | A Search Hit Is One Column Schema In The Modal And The Search View | Accepted |
 | [0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md) | The Tree Marks Its Cursor Row In A Gutter Before Every Row | Accepted |
@@ -217,6 +217,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0192](0192-tui-the-main-screens-keys-are-one-scoped-keymap-and-the-help-page-is-generated-from-it.md) | The Main Screen's Keys Are One Scoped Keymap, And The Help Page Is Generated From It | Accepted |
 | [0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) | Every Modal Footer Is One Footer: One Look Under A Blank Row, And One Fit That Keeps The Keys That Leave | Accepted |
 | [0194](0194-tui-a-step-drawn-exactly-over-its-entry-is-found-by-what-changed-inside-its-frame.md) | A Step Drawn Exactly Over Its Entry Is Found By What Changed Inside Its Frame | Accepted |
+| [0195](0195-tui-a-tree-row-keeps-its-layout-when-its-list-overflows.md) | A Tree Row Keeps Its Layout When Its List Overflows | Accepted |
 
 ## Transcript viewer
 

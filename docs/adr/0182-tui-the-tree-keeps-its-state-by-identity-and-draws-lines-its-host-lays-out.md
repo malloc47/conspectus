@@ -21,7 +21,11 @@ schema the host names for it; group headers, session rows, and mux rows
 are laid out that way. Amended by
 [ADR 0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md):
 the tree draws the pointer gutter before every row (decision 7), and of
-two copies of an identity only the cursor's is the cursor row.
+two copies of an identity only the cursor's is the cursor row. Amended by
+[ADR 0195](0195-tui-a-tree-row-keeps-its-layout-when-its-list-overflows.md):
+the producer is told the cells the scrollbar took (`RowCtx::scrollbar`),
+and `TreeColumns` counts them in a row's width rules, so a row keeps its
+layout when its list overflows.
 
 ## Context
 

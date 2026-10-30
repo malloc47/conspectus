@@ -230,7 +230,13 @@ Group headers, session rows, mux rows (running and stopped), PR rows,
 Pinned and History rows, and the Search view's hit, pane, and pane hit
 rows lay their cells out by one rule, in every view that lists them. A
 row's room is the pane's width less the cursor gutter and the row's
-indent.
+indent. When the rows overflow the pane, the scrollbar takes its last
+column, and every row is laid out as though the pane were still that
+column wider: the cells that step with the width or take a share of it
+(a mux name, a hit's name and tag) keep the widths they have while the
+rows fit, and the preview, snippet, PR title, content, or directory
+gives the bar its column; where that cell is already at its least, the
+row gives the column up by the steps below.
 
 1. The cells that line up down the tree (the prefix; a session's key,
    chip, age, and state; a mux's name, chips, age, and state; a PR's

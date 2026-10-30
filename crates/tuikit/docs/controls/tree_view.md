@@ -134,7 +134,7 @@ assert_eq!(state.selected().map(String::as_str), Some("fruit/plum"));
 | `TreeView::new(rows, state, line, theme)` | a pane over the rows, each laid out by `line` | focused, with no title, header, footer, placeholder, or states until set |
 | `focused`, `states`, `title`, `header`, `footer`, `empty` | the pane's focus and slots | below |
 | `TreeView::render(area, buf)` | draw the pane | returns the window it drew, or `None` when no row shows |
-| `RowCtx` (`selected`, `focused`, `expanded`, `ghost`, `pending`, `mark`, `width`, `theme`), `cursor()`, `row(line)` | what the producer is told about a row | `row` draws a producer's line as the tree draws every row: its looks and the cursor gutter before it |
+| `RowCtx` (`selected`, `focused`, `expanded`, `ghost`, `pending`, `mark`, `width`, `scrollbar`, `theme`), `cursor()`, `row(line)` | what the producer is told about a row | `row` draws a producer's line as the tree draws every row: its looks and the cursor gutter before it |
 | `RowState` (`ghost`, `pending`, `mark`), `RowMark` (`None`, `On`, `Off`) | what the host knows about a row, index for index with the rows | worked out before the frame |
 | `RowColumns<R>` (`schema`, `cells`), `TreeColumns::new(columns, rows, state, states, theme)`, `line`, `line_then`, `indent`, `lead` | a producer that lays each row out from the column schema the host names for it, after the row's indent (`INDENT` cells a level), every row of the tree measured once | the cells do not depend on the row's width or cursor; the schema's lead is the cursor gutter and the indent; see [columns.md](columns.md) |
 | `disclosure(expandable, expanded, theme)` | the disclosure arrow as a column cell | blank for a row without children |
@@ -161,11 +161,16 @@ With no rows showing, nothing is selected.
 | title | always, when set | on the top border after the pane frame's focus marker, as the host laid it out for `PaneFrame::title_width` of the pane's width |
 | footer banner | when the pane has more than four rows inside its border | at its foot: the host's lines wrapped to the width, at most three rows, in the host's style |
 | header line | when what is left has more than three rows | above the rows |
-| rows | when any row shows | the showing rows in the window, one row each, each after the 2-cell cursor gutter, with a 1-column scrollbar gutter carved from the right edge when they overflow |
+| rows | when any row shows | the showing rows in the window, one row each, each after the 2-cell cursor gutter, with a 1-column scrollbar gutter carved from the right edge when they overflow (and the pane is tall enough for the bar); a row is laid out alike either way, its last cells giving the bar its column |
 | placeholder | when no row shows | the host's `EmptyState` (or a string, its message): its message and hint wrapped to the width, in the `muted` look ([empty_state.md](empty_state.md)) |
 
 The producer is called for the rows the window shows only, at the width
-left after the cursor gutter and beside the scrollbar's gutter. The tree
+left after the cursor gutter and beside the scrollbar's gutter, and is
+told the cells the bar took (`RowCtx::scrollbar`, 1 while the rows
+overflow). `TreeColumns` counts them in the row's width rules
+(`columns::Room`), so a stepped or shared column keeps its width when the
+list grows past the pane and only the fill gives the bar its cell; a
+producer of its own may do the same. The tree
 then applies, in order, the pending look (`selection::pending`) to a row
 whose state says so and the ghost look (`selection::ghost`) to a ghost
 row, and draws the row through `selection::row`: the cursor gutter before
@@ -219,7 +224,7 @@ advice in `warning`). Every color in a row is the producer's.
 | 10 | Unfocused cursor | an unfocused tree keeps its pointer and highlights its cursor row in `selection_inactive` |
 | 12 | Paging | a page is the rows the last frame showed; `home` and `end`; the window is clamped inside the showing rows on every frame, so collapsing near the end leaves no blank rows below the content |
 | 13 | Theme | the looks come from the theme; the control names no color |
-| 14 | Width | the producer is told the cells it may take, the cursor gutter and the scrollbar's column already taken off |
+| 14 | Width | the producer is told the cells it may take, the cursor gutter and the scrollbar's column already taken off, and the cells the bar took, so a row keeps one layout whether or not its list overflows |
 
 Not applicable: 3 to 8, 11, and 15 to 18 govern confirmation, closing,
 forms, errors, footers, feedback, editing, paths, labels, and pagers. The

@@ -27,7 +27,11 @@ Search view's hit, pane, and pane-hit rows are laid out from one. Amended
 by
 [ADR 0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md):
 the tree's cursor gutter is part of each row's lead, and a column that
-absorbs the lead does not absorb a lead every row shares.
+absorbs the lead does not absorb a lead every row shares. Amended by
+[ADR 0195](0195-tui-a-tree-row-keeps-its-layout-when-its-list-overflows.md):
+a row's room (`columns::Room`) can count cells beside the row that its
+cells do not fit in, the width rules counting the whole and the policy
+fitting the cells.
 
 ## Context
 
