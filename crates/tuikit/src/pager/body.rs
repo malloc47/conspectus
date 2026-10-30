@@ -130,8 +130,9 @@ impl<C: PagerContent> ModalBody for Framed<'_, '_, C> {
 /// prompt (or the find chip and the note) stays, the keys keep their last
 /// rows, the keys that leave, and their first rows, the keys that scroll,
 /// go after the content's last row and scroll with it, so no key is lost.
-/// When the body overflows, the footer is laid out a cell narrower, beside
-/// the scrollbar's column.
+/// When the body overflows and gives a column to the scrollbar
+/// ([`ScrollGutter::carves`]), the footer is laid out a cell narrower,
+/// beside it.
 fn fit<C: PagerContent>(pager: &mut Pager<C>, area: Rect, theme: &Theme) -> FooterFit {
     let room = usize::from(area.height).saturating_sub(1);
     let at = |pager: &Pager<C>, width: u16| {
@@ -139,7 +140,8 @@ fn fit<C: PagerContent>(pager: &mut Pager<C>, area: Rect, theme: &Theme) -> Foot
     };
     let fit = at(pager, area.width);
     let rows = pager.content.layout(area.width, theme) + fit.spill.len();
-    if rows <= usize::from(area.height) - fit.kept.len() || area.width < 2 {
+    let body = area.height - fit.height().min(area.height);
+    if !ScrollGutter::carves(area.width, body, rows) {
         return fit;
     }
     at(pager, area.width - 1)

@@ -486,6 +486,30 @@ fn an_overflowing_menu_shows_the_scrollbar_and_one_that_fits_does_not() {
     // once the entries have five rows; on a 40x10 screen they have four.
     assert!(bar(&mut long(14), 60, 16), "a long menu on a short screen");
     assert!(!bar(&mut long(3), 80, 24), "a short menu that fits");
+    assert!(!bar(&mut long(14), 40, 10), "entries too short for a track");
+}
+
+#[test]
+fn entries_too_short_for_the_bar_keep_its_column() {
+    // A 40x10 screen gives the entries four rows, too few for the bar's
+    // track, so a label as wide as the frame's inside after the cursor
+    // gutter shows whole on its row.
+    let label = "L".repeat(36);
+    let mut menu = ActionMenu::new(
+        "Many",
+        (0..14)
+            .map(|n| Entry::new(label.clone(), Msg::Item(n)).detail(format!("detail {n}")))
+            .collect(),
+    );
+    let buf = drawn(&mut menu, 40, 10);
+    let shown = marked(&buf);
+    assert!(
+        shown
+            .iter()
+            .any(|row| row.contains(&format!("{} {label}│", marks::POINTER))),
+        "{}",
+        rows(&buf).join("\n")
+    );
 }
 
 #[test]

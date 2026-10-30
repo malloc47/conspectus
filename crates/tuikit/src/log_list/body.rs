@@ -210,7 +210,8 @@ fn entry_row<R>(
 /// rows (the footer's last, the keys that leave), and the first rows that
 /// do not fit, which scroll after the detail's last row. Rows that scroll
 /// there sit beside the detail's scrollbar, so they are laid out a cell
-/// narrower.
+/// narrower, unless the detail is too short for the bar
+/// ([`ScrollGutter::MIN_HEIGHT`]) and keeps its column.
 fn fit_footer<R, M, Cx: ?Sized>(
     list: &LogList<R, M, Cx>,
     width: usize,
@@ -219,7 +220,8 @@ fn fit_footer<R, M, Cx: ?Sized>(
 ) -> FooterFit {
     let footer = ModalFooter::new(list.footer(), theme);
     let fit = footer.fit(width, room.saturating_sub(1));
-    if fit.spill.is_empty() || width < 2 {
+    let detail = room.saturating_sub(fit.kept.len());
+    if fit.spill.is_empty() || width < 2 || detail < usize::from(ScrollGutter::MIN_HEIGHT) {
         return fit;
     }
     footer.fit(width - 1, room.saturating_sub(1))

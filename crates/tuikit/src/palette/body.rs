@@ -124,20 +124,18 @@ impl<R> ModalBody for Body<'_, R> {
             buf.set_line(area.x, area.y + 1, &line, area.width);
         }
 
-        // The footer keeps the frame's last rows, leaving the query, the
-        // status row, and one row of the list above it; a list that
+        // The footer keeps the frame's last rows under the query and the
+        // status row, leaving one row of the list above it; a list that
         // overflows gives a column to the scrollbar, so the footer is laid
         // out a cell narrower beside it.
-        let mut fit = view
-            .footer()
-            .fit_beside(area, lead + 1, |_| lead + view.list_rows());
-        let [above, footer_area] = fit.split(area);
-        let top = area.y + u16::try_from(lead).unwrap_or(area.height);
-        let list = Rect {
-            y: top,
-            height: above.height.saturating_sub(top - area.y),
+        let lead_rows = u16::try_from(lead).unwrap_or(area.height);
+        let below = Rect {
+            y: area.y + lead_rows,
+            height: area.height - lead_rows,
             ..area
         };
+        let mut fit = view.footer().fit_beside(below, 1, |_| view.list_rows());
+        let [list, footer_area] = fit.split(below);
         let list_rows = usize::from(list.height);
         let spill = std::mem::take(&mut fit.spill);
         fit.render(footer_area, buf);

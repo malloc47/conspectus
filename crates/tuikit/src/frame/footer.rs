@@ -8,6 +8,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 
 use crate::keys::Footer;
+use crate::scroll::ScrollGutter;
 use crate::theme::Theme;
 
 /// Frames this narrow, or narrower, keep a footer on one row, cut at the
@@ -172,10 +173,11 @@ impl<'a> ModalFooter<'a> {
     /// The footer is [fitted](Self::fit) to the rows the body leaves, at
     /// the area's width. When the body's rows at that width
     /// (`body_rows(width)`) and the spilled rows do not fit the rows left
-    /// above the footer, a scrollbar takes the body's last column, so the
-    /// footer is fitted again a cell narrower and the body is laid out at
-    /// [`FooterFit::width`] beside it: the spilled rows scroll beside the
-    /// bar, and the kept rows line up with them.
+    /// above the footer and those rows are tall enough for the bar
+    /// ([`ScrollGutter::carves`]), a scrollbar takes the body's last
+    /// column, so the footer is fitted again a cell narrower and the body
+    /// is laid out at [`FooterFit::width`] beside it: the spilled rows
+    /// scroll beside the bar, and the kept rows line up with them.
     pub fn fit_beside(
         &self,
         area: Rect,
@@ -185,8 +187,9 @@ impl<'a> ModalFooter<'a> {
         let height = usize::from(area.height);
         let room = height.saturating_sub(keep);
         let fit = self.fit(usize::from(area.width), room);
-        let left = height - fit.kept.len();
-        if area.width < 2 || body_rows(area.width) + fit.spill.len() <= left {
+        let left = u16::try_from(height - fit.kept.len()).unwrap_or(u16::MAX);
+        let rows = body_rows(area.width) + fit.spill.len();
+        if !ScrollGutter::carves(area.width, left, rows) {
             return fit;
         }
         self.fit(usize::from(area.width - 1), room)

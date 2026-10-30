@@ -53,16 +53,20 @@ fn rows_keep_their_styles() {
 #[test]
 fn fitting_narrows_only_when_the_rows_overflow() {
     // Exactly ten cells: one row at 10, two at 9.
-    let lines = [Line::from("abcde fghi"), Line::from("x")];
-    let fits = WrappedRows::fit(&lines, 10, 2);
-    assert_eq!(fits.len(), 2);
-    let overflows = WrappedRows::fit(&lines, 10, 1);
-    assert_eq!(texts(&overflows), ["abcde ", "fghi", "x"]);
+    let mut lines = vec![Line::from("abcde fghi")];
+    lines.extend((0..5).map(|_| Line::from("x")));
+    let fits = WrappedRows::fit(&lines, 10, 6);
+    assert_eq!(fits.len(), 6);
+    let overflows = WrappedRows::fit(&lines, 10, 5);
+    assert_eq!(texts(&overflows)[..3], ["abcde ", "fghi", "x"]);
     // Too narrow for a gutter: nothing to narrow to.
     assert_eq!(
-        WrappedRows::fit(&lines, 1, 1).len(),
+        WrappedRows::fit(&lines, 1, 5).len(),
         WrappedRows::new(&lines, 1).len()
     );
+    // Too short for the bar's track: the rows keep every column.
+    let short = WrappedRows::fit(&lines, 10, 4);
+    assert_eq!(texts(&short)[0], "abcde fghi");
 }
 
 #[test]

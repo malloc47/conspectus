@@ -552,9 +552,20 @@ fn the_producer_is_told_the_width_left_by_the_gutter() {
     draw(
         TreeView::new(&tree, &open(&[1, 5]), &producer, &theme),
         12,
-        6,
+        7,
     );
     assert_eq!(widths.get(), (7, 7), "eight rows overflow: one column less");
+    widths.set((usize::MAX, 0));
+    draw(
+        TreeView::new(&tree, &open(&[1, 5]), &producer, &theme),
+        12,
+        6,
+    );
+    assert_eq!(
+        widths.get(),
+        (8, 8),
+        "four rows inside the border are too few for the bar: every column"
+    );
 }
 
 #[test]

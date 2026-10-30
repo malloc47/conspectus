@@ -44,6 +44,47 @@ fn an_area_narrower_than_two_columns_has_no_gutter() {
 }
 
 #[test]
+fn an_area_too_short_for_the_track_has_no_gutter() {
+    // The track keeps a row clear above and below and puts an arrow at
+    // each end, so the first height with a cell of track is five.
+    assert_eq!(ScrollGutter::MIN_HEIGHT, 5);
+    for height in 3..=6_u16 {
+        let area = Rect::new(2, 1, 20, height);
+        let gutter = ScrollGutter::layout(area, 40);
+        let carved = height >= ScrollGutter::MIN_HEIGHT;
+        assert_eq!(gutter.bar().is_some(), carved, "height {height}");
+        assert_eq!(
+            ScrollGutter::carves(20, height, 40),
+            carved,
+            "height {height}"
+        );
+        let width = if carved { 19 } else { 20 };
+        assert_eq!(gutter.content(), Rect { width, ..area }, "height {height}");
+    }
+}
+
+#[test]
+fn every_gutter_carved_draws_a_bar() {
+    for height in 3..=6_u16 {
+        let area = Rect::new(0, 0, 6, height);
+        let window = ScrollWindow::new(usize::from(height), 40).at(10);
+        let bar = column(&drawn(area, window), 5);
+        let carved = ScrollGutter::layout(area, 40).bar().is_some();
+        assert_eq!(
+            bar.iter().any(|cell| cell == THUMB),
+            carved,
+            "height {height}: {bar:?}"
+        );
+        if !carved {
+            assert!(
+                bar.iter().all(|cell| cell == " "),
+                "height {height}: {bar:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_bar_draws_only_in_the_gutter_inside_its_margins() {
     let area = Rect::new(0, 0, 10, 8);
     let buf = drawn(area, ScrollWindow::new(8, 30).at(11));

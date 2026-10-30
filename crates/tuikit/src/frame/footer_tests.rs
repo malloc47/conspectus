@@ -149,13 +149,18 @@ fn beside_a_body_that_overflows_the_footer_is_laid_out_a_cell_narrower() {
             .collect(),
         &theme,
     );
-    let area = Rect::new(0, 0, 21, 6);
+    let area = Rect::new(0, 0, 21, 7);
     let fits = footer.fit_beside(area, 1, |_| 3);
     assert_eq!(fits.width, 21);
     assert_eq!(text(&fits.kept), ["", "↑/↓ move · Enter pick"]);
     let overflows = footer.fit_beside(area, 1, |_| 10);
     assert_eq!(overflows.width, 20);
     assert_eq!(text(&overflows.kept), ["", "↑/↓ move", "Enter pick"]);
+    // Four rows above the footer are too few for the bar's track, so the
+    // body keeps its column and the footer its width.
+    let short = footer.fit_beside(Rect { height: 6, ..area }, 1, |_| 10);
+    assert_eq!(short.width, 21);
+    assert_eq!(text(&short.kept), ["", "↑/↓ move · Enter pick"]);
 }
 
 #[test]

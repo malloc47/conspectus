@@ -4,6 +4,7 @@ use std::ops::Range;
 
 use ratatui::text::Line;
 
+use super::ScrollGutter;
 use crate::text::{fit_spans, wrap_line};
 
 /// Lines wrapped to a width, with the rows each line took.
@@ -69,13 +70,16 @@ impl WrappedRows {
     }
 
     /// `lines` wrapped to fit an area `width` cells wide and `height` rows
-    /// tall: at the full width when they fit, and one cell narrower when
-    /// they overflow and [`ScrollGutter::layout`](super::ScrollGutter::layout)
-    /// gives that column to the scrollbar. Lay the area out with the
-    /// returned row count; its content area is then as wide as the rows.
+    /// tall: one cell narrower when they overflow and
+    /// [`ScrollGutter::layout`](super::ScrollGutter::layout) gives that
+    /// column to the scrollbar ([`ScrollGutter::carves`]), and otherwise
+    /// at the full width, including an area too short for the bar. Lay
+    /// the area out with the returned row count; its content area is then
+    /// as wide as the rows.
     pub fn fit(lines: &[Line<'_>], width: usize, height: usize) -> Self {
         let rows = Self::new(lines, width);
-        if rows.len() > height && width >= 2 {
+        let cells = |n: usize| u16::try_from(n).unwrap_or(u16::MAX);
+        if ScrollGutter::carves(cells(width), cells(height), rows.len()) {
             Self::new(lines, width - 1)
         } else {
             rows

@@ -11,24 +11,49 @@ use super::ScrollWindow;
 /// rows overflow, the 1-column gutter on the right edge for the
 /// scrollbar.
 ///
-/// The gutter fades on fit: rows that fit the area, or an area narrower
-/// than two columns, get no gutter and keep every column. Carving the
-/// gutter out of the body, instead of drawing the bar over its last
-/// column, keeps the two apart, so a highlighted row never runs under
-/// the bar. Lay the rows out at [`content`](Self::content)'s width;
-/// [`WrappedRows::fit`](super::WrappedRows::fit) wraps them to it.
+/// The gutter fades where it would show nothing: rows that fit the area,
+/// an area narrower than two columns, or one shorter than
+/// [`MIN_HEIGHT`](Self::MIN_HEIGHT), where the bar has no room for its
+/// track, get no gutter and keep every column. Carving the gutter out of
+/// the body, instead of drawing the bar over its last column, keeps the
+/// two apart, so a highlighted row never runs under the bar. Lay the rows
+/// out at [`content`](Self::content)'s width;
+/// [`WrappedRows::fit`](super::WrappedRows::fit) wraps them to it, and
+/// [`carves`](Self::carves) says beforehand whether the column goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScrollGutter {
     content: Rect,
     bar: Option<Rect>,
 }
 
+/// The rows the track keeps clear above it and below it.
+const MARGIN: u16 = 1;
+/// The rows the bar's two arrows take, at the track's ends.
+const ARROWS: u16 = 2;
+
 impl ScrollGutter {
-    /// Split `area` for a body of `rows` rows: all of it when they fit,
-    /// and otherwise the area less its right column, with that column as
-    /// the gutter.
+    /// The fewest rows a gutter is carved for: the clear row above and
+    /// below the track, its two arrows, and one cell of track between
+    /// them, where the thumb shows. A shorter body overflows with no bar
+    /// (ratatui draws none without a track cell), so it keeps its column.
+    pub const MIN_HEIGHT: u16 = 2 * MARGIN + ARROWS + 1;
+
+    /// Whether a body of `rows` rows in an area `width` cells wide and
+    /// `height` rows tall gives its right column to the scrollbar: the
+    /// rows overflow and the area is at least two columns wide and
+    /// [`MIN_HEIGHT`](Self::MIN_HEIGHT) rows tall. A body that lays its
+    /// rows out before it draws (a footer beside the bar, rows wrapped to
+    /// the width left) asks this, so it agrees with
+    /// [`layout`](Self::layout).
+    pub const fn carves(width: u16, height: u16, rows: usize) -> bool {
+        rows > height as usize && width >= 2 && height >= Self::MIN_HEIGHT
+    }
+
+    /// Split `area` for a body of `rows` rows: the area less its right
+    /// column, with that column as the gutter, when the body
+    /// [`carves`](Self::carves) one, and otherwise all of it.
     pub fn layout(area: Rect, rows: usize) -> Self {
-        if rows == 0 || rows <= usize::from(area.height) || area.width < 2 {
+        if !Self::carves(area.width, area.height, rows) {
             return Self {
                 content: area,
                 bar: None,
@@ -86,7 +111,7 @@ impl ScrollGutter {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().remove_modifier(Modifier::REVERSED));
         let track = bar.inner(Margin {
-            vertical: 1,
+            vertical: MARGIN,
             horizontal: 0,
         });
         scrollbar.render(track, buf, &mut state);
