@@ -596,6 +596,25 @@ pub fn messages_hint(app: &App, verb: &str) -> String {
         .text()
 }
 
+/// The key of the binding `id`, as hints write it (`Backspace`, `Ctrl-F`,
+/// `r`): the binding's first key, the one its hint names. A status or
+/// refusal message that tells the operator which key to press names it
+/// from here, so the message names the key the keymap binds.
+///
+/// # Panics
+///
+/// When the keymap has no binding `id`; each message's test reaches its
+/// ids, so a renamed binding fails them first.
+pub fn key_name(id: &str) -> String {
+    keymap()
+        .get(id)
+        .and_then(|binding| binding.keys().first())
+        .map_or_else(
+            || panic!("the keymap binds no `{id}`"),
+            tuikit::keys::key_label,
+        )
+}
+
 #[cfg(test)]
 #[path = "keybindings_tests.rs"]
 mod tests;

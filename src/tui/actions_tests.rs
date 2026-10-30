@@ -453,8 +453,34 @@ fn pin_status_hint_is_silent_for_a_live_slot() {
 fn pin_status_hint_points_a_gone_slot_at_rebuild() {
     let snapshot = pin_snapshot(crate::model::SlotStatus::Gone, None);
     let hint = pin_status_hint(&snapshot, "ingest").expect("status hint produced");
-    assert!(hint.contains("is stopped"), "hint: {hint}");
-    assert!(hint.contains("rebuild ingest"), "hint: {hint}");
+    // The key is the row's own `Enter`, named from its binding.
+    let enter = crate::tui::keybindings::key_name("row.default");
+    assert_eq!(
+        hint,
+        format!(
+            "pin `ingest` is stopped · {enter} runs `conspectus rebuild ingest` to bring it back"
+        )
+    );
+    assert_eq!(
+        pin_status_hint(
+            &pin_snapshot(crate::model::SlotStatus::Planned, None),
+            "ingest"
+        ),
+        Some(format!(
+            "pin `ingest` isn't built yet · {enter} runs `conspectus rebuild ingest`"
+        ))
+    );
+}
+
+#[test]
+fn a_missing_mux_node_says_which_key_refreshes() {
+    assert_eq!(
+        attach_disabled_reason(&AttachDisabled::MuxNodeMissing),
+        format!(
+            "attach: mux node missing from snapshot — try `{}` to refresh",
+            crate::tui::keybindings::key_name("refresh")
+        )
+    );
 }
 
 #[test]

@@ -105,6 +105,22 @@ fn translate_i_requests_copy_session_id() {
     );
 }
 
+#[test]
+fn copying_an_id_with_no_session_selected_names_the_key_from_its_binding() {
+    let mut app = App::new(RunConfig::defaults());
+    copy_session_id_action(&mut app);
+    assert_eq!(
+        app.status_message(),
+        Some(
+            format!(
+                "{}: select an agent or mux session row to copy its id",
+                crate::tui::keybindings::key_name("row.copy-id")
+            )
+            .as_str()
+        )
+    );
+}
+
 /// What `event` does with `focus` on that pane and no modal open, as every
 /// loop resolves it (`action_for_event`).
 fn resolved(focus: crate::tui::app::Focus, event: KeyEvent) -> Option<Action> {

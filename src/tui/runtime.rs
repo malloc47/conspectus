@@ -2217,9 +2217,10 @@ fn copy_session_id_action(app: &mut App) {
     match app.selected_session_id() {
         Some((label, value)) => copy_and_toast(app, label, value),
         None => {
-            app.update(Msg::SetStatus(Some(Feedback::warning(
-                "i: select an agent or mux session row to copy its id",
-            ))));
+            app.update(Msg::SetStatus(Some(Feedback::warning(format!(
+                "{}: select an agent or mux session row to copy its id",
+                crate::tui::keybindings::key_name("row.copy-id")
+            )))));
         }
     }
 }

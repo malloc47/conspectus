@@ -13,6 +13,7 @@ use tuikit::explorer::{ExplorerKey, Outcome, Refreshed, Refusal};
 use super::tree::row_matches;
 use super::*;
 use crate::tui::explorer::Graph;
+use crate::tui::keybindings::key_name;
 
 impl App {
     /// Lend the explorer and a source over the rest of the app to `act`,
@@ -123,9 +124,10 @@ impl App {
     pub(super) fn explorer_key(&mut self, key: ExplorerKey) -> Vec<crate::tui::Effect> {
         if self.explorer.is_none() {
             if key == ExplorerKey::Inspect {
-                self.status_message = Some(Feedback::warning(
-                    "explorer: nothing to open here — `o` opens long values on the cursor row",
-                ));
+                self.status_message = Some(Feedback::warning(format!(
+                    "explorer: nothing to open here — `{}` opens long values on the cursor row",
+                    key_name("value.inspect")
+                )));
             }
             return Vec::new();
         }
@@ -180,9 +182,10 @@ impl App {
                 self.explorer_reflects = self.tree_state.selected().cloned();
             }
             Outcome::Armed => {
-                self.status_message = Some(Feedback::info(
-                    "explorer: no drill history — press Backspace again to return to the left pane",
-                ));
+                self.status_message = Some(Feedback::info(format!(
+                    "explorer: no drill history — press {} again to return to the left pane",
+                    key_name("explorer.back")
+                )));
             }
             Outcome::Leave => {
                 self.focus = Focus::Left;
@@ -241,10 +244,14 @@ impl App {
             .explorer
             .as_ref()
             .is_some_and(|explorer| !explorer.frames().is_empty());
+        let back = key_name("reveal.back");
         self.status_message = Some(Feedback::warning(if drilled {
-            "Backspace: no reveal to return from · Tab to the right pane to back out of its drill"
+            format!(
+                "{back}: no reveal to return from · {} to the right pane to back out of its drill",
+                key_name("focus.cycle")
+            )
         } else {
-            "Backspace: no reveal to return from"
+            format!("{back}: no reveal to return from")
         }));
     }
 

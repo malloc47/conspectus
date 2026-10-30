@@ -729,8 +729,10 @@ pub fn row_menu_for(app: &App) -> Option<ActionMenu<crate::tui::Msg>> {
         let offer = rebuild_offer(kind, status);
         if offer == RebuildOffer::Full {
             entries.push(
-                Entry::new("Rebuild", Msg::RebuildReference(reference.clone()))
-                    .detail("bring it back without attaching (Enter also attaches)"),
+                Entry::new("Rebuild", Msg::RebuildReference(reference.clone())).detail(format!(
+                    "bring it back without attaching ({} also attaches)",
+                    crate::tui::keybindings::key_name("row.default")
+                )),
             );
         }
         if offer != RebuildOffer::Nothing {
@@ -955,29 +957,31 @@ pub fn pin_status_hint(snapshot: &GraphSnapshot, pin_id: &str) -> Option<String>
         .find(|pin| pin.id.id == pin_id)?;
     let name = crate::invocation::invoked_name();
     let rebuild = format!("{name} rebuild {pin_id}");
+    // What the row's own `Enter` does to it, named from its binding.
+    let enter = crate::tui::keybindings::key_name("row.default");
     match pin.status {
         crate::model::SlotStatus::Live => match pin.kind {
             crate::model::PinKind::Mux | crate::model::PinKind::Session => None,
-            crate::model::PinKind::Pr => {
-                Some(format!("pin `{pin_id}` is a live PR · Enter shows its URL"))
-            }
+            crate::model::PinKind::Pr => Some(format!(
+                "pin `{pin_id}` is a live PR · {enter} shows its URL"
+            )),
             kind => Some(format!(
                 "pin `{pin_id}` is a live {} · nothing to rebuild",
                 kind.as_str()
             )),
         },
         crate::model::SlotStatus::Gone => Some(format!(
-            "pin `{pin_id}` is {} · Enter runs `{rebuild}` to bring it back",
+            "pin `{pin_id}` is {} · {enter} runs `{rebuild}` to bring it back",
             crate::model::SlotStatus::Gone.label_for(pin.kind)
         )),
         crate::model::SlotStatus::Unknown => Some(format!(
             "pin `{pin_id}`: couldn't check whether its target exists"
         )),
         crate::model::SlotStatus::Missing => Some(format!(
-            "pin `{pin_id}`: target not found · `{name} pin retarget {pin_id} <target>`, or Enter runs `{rebuild}`"
+            "pin `{pin_id}`: target not found · `{name} pin retarget {pin_id} <target>`, or {enter} runs `{rebuild}`"
         )),
         crate::model::SlotStatus::Planned => Some(format!(
-            "pin `{pin_id}` isn't built yet · Enter runs `{rebuild}`"
+            "pin `{pin_id}` isn't built yet · {enter} runs `{rebuild}`"
         )),
     }
 }
@@ -1036,9 +1040,10 @@ pub fn attach_disabled_why(reason: &AttachDisabled) -> String {
         AttachDisabled::NoSelection => "no row selected".to_string(),
         AttachDisabled::UnsupportedRow => "selected row has no mux to attach to".to_string(),
         AttachDisabled::UnmuxedSession => "session is not attached to any mux".to_string(),
-        AttachDisabled::MuxNodeMissing => {
-            "mux node missing from snapshot — try `r` to refresh".to_string()
-        }
+        AttachDisabled::MuxNodeMissing => format!(
+            "mux node missing from snapshot — try `{}` to refresh",
+            crate::tui::keybindings::key_name("refresh")
+        ),
         AttachDisabled::UnsupportedBackend(name) => {
             // Report the registered backend set
             // instead of a hardcoded "only tmux."

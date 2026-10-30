@@ -7,8 +7,15 @@ use crate::model::{
 };
 use crate::resolve::resolve_snapshot;
 use crate::tui::SessionsGrouping;
+use crate::tui::keybindings::key_name;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use tuikit::explorer::ExplorerKey;
+
+/// What the right pane says when `Back` arms with no drill to back out
+/// of, its key named from the keymap.
+fn armed_back_hint() -> String {
+    format!("press {} again", key_name("explorer.back"))
+}
 
 fn make_snapshot_with(sessions: &[(&str, &str, &str)]) -> GraphSnapshot {
     let mut snap = GraphSnapshot::empty();
@@ -1166,12 +1173,29 @@ fn explorer_back_with_no_breadcrumb_and_left_focus_surfaces_status_hint() {
     let mut app = app_for_explorer();
     assert_eq!(app.focus(), Focus::Left);
     app.update(Msg::NavBack);
-    assert!(
-        app.status_message()
-            .is_some_and(|s| s.contains("no reveal to return from"))
+    assert_eq!(
+        app.status_message(),
+        Some(format!("{}: no reveal to return from", key_name("reveal.back")).as_str())
     );
     // Focus stays put when there's nothing to back out of.
     assert_eq!(app.focus(), Focus::Left);
+}
+
+#[test]
+fn the_inspect_key_with_no_explorer_says_what_it_opens() {
+    let mut app = App::new(RunConfig::defaults());
+    assert!(app.explorer().is_none());
+    app.update(Msg::Explorer(ExplorerKey::Inspect));
+    assert_eq!(
+        app.status_message(),
+        Some(
+            format!(
+                "explorer: nothing to open here — `{}` opens long values on the cursor row",
+                key_name("value.inspect")
+            )
+            .as_str()
+        )
+    );
 }
 
 #[test]
@@ -1231,7 +1255,14 @@ fn backspace_on_the_left_pane_leaves_the_right_panes_drill_alone() {
     assert_eq!(state.frames().len(), 1);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("no reveal to return from") && s.contains("right pane")),
+            == Some(
+                format!(
+                    "{}: no reveal to return from · {} to the right pane to back out of its drill",
+                    key_name("reveal.back"),
+                    key_name("focus.cycle")
+                )
+                .as_str()
+            ),
         "{:?}",
         app.status_message()
     );
@@ -1252,7 +1283,7 @@ fn explorer_back_with_no_breadcrumb_and_right_focus_arms_then_shifts_focus_on_se
     assert_eq!(app.focus(), Focus::Right);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again")),
+            .is_some_and(|s| s.contains(&armed_back_hint())),
         "first backspace should surface the confirmation hint; got: {:?}",
         app.status_message()
     );
@@ -1275,7 +1306,7 @@ fn explorer_back_armed_state_clears_on_intervening_message() {
     app.update(Msg::Explorer(ExplorerKey::Back));
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again"))
+            .is_some_and(|s| s.contains(&armed_back_hint()))
     );
     // Intervening navigation cancels the arming.
     app.update(Msg::Explorer(ExplorerKey::Down));
@@ -1284,7 +1315,7 @@ fn explorer_back_armed_state_clears_on_intervening_message() {
     assert_eq!(app.focus(), Focus::Right);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again"))
+            .is_some_and(|s| s.contains(&armed_back_hint()))
     );
 }
 
@@ -1304,7 +1335,7 @@ fn explorer_back_arm_survives_the_frames_between_presses() {
     assert_eq!(app.focus(), Focus::Right);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again"))
+            .is_some_and(|s| s.contains(&armed_back_hint()))
     );
     // Frames are drawn between the presses, and their windows kept.
     // They must leave the arm intact.
@@ -1350,7 +1381,7 @@ fn explorer_back_unwinds_drill_then_arms_then_shifts_focus() {
     assert_eq!(app.focus(), Focus::Right);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again"))
+            .is_some_and(|s| s.contains(&armed_back_hint()))
     );
     // Third backspace shifts focus to the left pane.
     app.update(Msg::Explorer(ExplorerKey::Back));
@@ -2286,7 +2317,7 @@ fn backspace_with_every_frame_gone_says_so_and_keeps_the_pane() {
     app.update(Msg::Explorer(ExplorerKey::Back));
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again"))
+            .is_some_and(|s| s.contains(&armed_back_hint()))
     );
 }
 

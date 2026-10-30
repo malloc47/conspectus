@@ -25,7 +25,12 @@ four hand-written hints did not. Amended by
 [ADR 0192](0192-tui-the-main-screens-keys-are-one-scoped-keymap-and-the-help-page-is-generated-from-it.md)
 (decisions 5 and 6): `MAIN_VIEW_KEYS` and the test that kept it in step
 with the keymap are gone; the bar names the scoped keymap's bindings
-(`KeyHintBar::keymap`) in the same groups and order.
+(`KeyHintBar::keymap`) in the same groups and order. Decision 8's
+status scan was widened by CSP-796: it also covers `app.rs`, `app/`,
+and `actions.rs`, and flags a key named in a message's prose (a key
+before a colon, a single character in backticks, "press" before a
+named key); a status or refusal message names its key from the binding
+that takes it (`keybindings::key_name`).
 
 ## Context
 

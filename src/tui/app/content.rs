@@ -1117,9 +1117,11 @@ impl App {
                 ));
             }
             Msg::ApplySearchEntry if self.active_view != View::Search => {
-                effects.push(Effect::Toast(Feedback::warning(
-                    "Ctrl-F filters by the search the Search view shows (6)",
-                )));
+                effects.push(Effect::Toast(Feedback::warning(format!(
+                    "{} filters by the search the Search view shows ({})",
+                    crate::tui::keybindings::key_name("search.keep"),
+                    crate::tui::keybindings::key_name("view.search"),
+                ))));
             }
             Msg::ApplySearchEntry => {
                 let Some(viewed) = self.viewed_search().cloned() else {

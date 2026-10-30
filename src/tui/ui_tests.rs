@@ -6202,6 +6202,17 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
         entry("Unpin config-agent3").outcome,
         Msg::Unpin("config-agent3".into())
     );
+    // Rebuild names the row's own key, which rebuilds and attaches.
+    assert_eq!(
+        entry("Rebuild").detail.as_deref(),
+        Some(
+            format!(
+                "bring it back without attaching ({} also attaches)",
+                crate::tui::keybindings::key_name("row.default")
+            )
+            .as_str()
+        )
+    );
     insta::assert_snapshot!("history_row_menu", trimmed(pinned_frame(&mut app, 100)));
 }
 

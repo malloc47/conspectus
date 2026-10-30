@@ -427,7 +427,19 @@ fn applying_outside_the_search_view_only_explains() {
     });
     app.update(Msg::ClearContentSearch);
     let effects = app.update(Msg::ApplySearchEntry);
-    assert!(matches!(effects.as_slice(), [Effect::Toast(_)]));
+    let [Effect::Toast(toast)] = effects.as_slice() else {
+        panic!("one toast: {effects:?}");
+    };
+    // It names the key it was pressed with and the Search view's key,
+    // from their bindings.
+    assert_eq!(
+        toast.text,
+        format!(
+            "{} filters by the search the Search view shows ({})",
+            crate::tui::keybindings::key_name("search.keep"),
+            crate::tui::keybindings::key_name("view.search")
+        )
+    );
     assert!(app.content().is_none());
 }
 

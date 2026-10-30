@@ -32,16 +32,21 @@ const TREES: &[Tree] = &[
 ];
 
 /// The code that writes the status line: the runtime's handlers, the
-/// App's openers, and the executor's, which set its text when a key opens
-/// an overlay, and the status bar, which draws the hints. They route keys
-/// and draw the main view, so they may name key codes, but a key hint
-/// they wrote by hand would sit on the status line beside, or instead
-/// of, the generated one. The status scan holds them to the stricter
+/// App's reducer and its parts, and the executor's, which set its text
+/// when a key opens an overlay or is refused, the actions that word a
+/// refusal or a row's state (`actions.rs`), and the status bar, which
+/// draws the hints. They route keys and draw the main view, so they may
+/// name key codes, but a key hint they wrote by hand would sit on the
+/// status line beside, or instead of, the generated one, and a key a
+/// message names by hand can drift from the keymap (they name it with
+/// `keybindings::key_name`). The status scan holds them to the stricter
 /// [`looks_like_status_hint`].
 const STATUS_TREES: &[Tree] = &[
     Tree::new("src/tui/runtime.rs", 1),
     Tree::new("src/tui/runtime/executor.rs", 1),
-    Tree::new("src/tui/app/overlays.rs", 1),
+    Tree::new("src/tui/app.rs", 1),
+    Tree::new("src/tui/app", 10),
+    Tree::new("src/tui/actions.rs", 1),
     Tree::new("src/tui/ui/header.rs", 1),
 ];
 
@@ -104,12 +109,37 @@ fn looks_like_key_hint(literal: &str) -> bool {
         })
 }
 
-/// What the status scan flags: a footer-shaped literal, or one whose
-/// ` · `-separated pieces include a hint segment ([`is_hint_segment`]).
+/// What the status scan flags: a footer-shaped literal, one whose
+/// ` · `-separated pieces include a hint segment ([`is_hint_segment`]),
+/// or a message that names a key in its prose ([`names_a_key_in_prose`]).
 /// Overlay code explains keys in sentences ("Tab completes the path"),
 /// which this would flag, so only the status-line code is held to it.
 fn looks_like_status_hint(literal: &str) -> bool {
-    looks_like_key_hint(literal) || literal.split(" · ").any(is_hint_segment)
+    looks_like_key_hint(literal)
+        || literal.split(" · ").any(is_hint_segment)
+        || names_a_key_in_prose(literal)
+}
+
+/// Whether a message names a key the way a refusal tells the operator
+/// what to press: a piece that leads with keys and a colon
+/// (`Backspace: no reveal…`, `i: select…`), a single character in
+/// backticks (``try `r` to refresh``), or "press" before a named key
+/// (`press Backspace again`). Such a message names the key from its
+/// binding (`keybindings::key_name`) instead, through a placeholder.
+fn names_a_key_in_prose(literal: &str) -> bool {
+    let leads_with_keys = literal.split(" · ").any(|piece| {
+        piece
+            .split_once(": ")
+            .is_some_and(|(keys, _)| is_keys(keys))
+    });
+    let backticked_character = literal.split('`').enumerate().any(|(index, part)| {
+        index % 2 == 1 && part.chars().count() == 1 && !part.starts_with(['{', '}'])
+    });
+    let words: Vec<&str> = literal.split(' ').collect();
+    let pressed = words
+        .windows(2)
+        .any(|pair| pair[0].eq_ignore_ascii_case("press") && NAMED_KEYS.contains(&pair[1]));
+    leads_with_keys || backticked_character || pressed
 }
 
 /// Keys that are not a single character, as hints write them.
@@ -294,6 +324,11 @@ fn a_hint_segment_written_by_hand_is_caught_and_prose_is_not() {
         "Backspace back",
         "Ctrl-R hard refresh",
         "←/→ fold",
+        // Keys named in a message's prose, as refusals named them.
+        "i: select an agent or mux session row to copy its id",
+        "Backspace: no reveal to return from",
+        "mux node missing from snapshot — try `r` to refresh",
+        "explorer: no drill history — press Backspace again to return to the left pane",
     ] {
         assert!(looks_like_status_hint(hint), "{hint:?} is a key hint");
     }
@@ -301,7 +336,10 @@ fn a_hint_segment_written_by_hand_is_caught_and_prose_is_not() {
         "a status message long enough to wrap",
         "attach",
         "worktree: nothing selected",
-        "i: select an agent or mux session row to copy its id",
+        "{}: select an agent or mux session row to copy its id",
+        "attach: 2 ambiguous muxes here — select a session to see its candidates",
+        "pin `{pin_id}` is {} · {enter} runs `{rebuild}` to bring it back",
+        "select the `Other` header",
         "tmux:off",
         "(pin, forget, plan, clean up)",
         "at the match",

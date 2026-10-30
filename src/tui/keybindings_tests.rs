@@ -137,3 +137,28 @@ fn the_messages_hint_names_the_messages_key() {
     let app = App::new(crate::tui::RunConfig::defaults());
     assert_eq!(messages_hint(&app, "details"), "! details");
 }
+
+/// A message names a key as hints write it, from the binding that takes
+/// it: the words the messages wrote by hand before, in one notation.
+#[test]
+fn a_message_names_the_key_its_binding_takes() {
+    for (id, label) in [
+        ("reveal.back", "Backspace"),
+        ("explorer.back", "Backspace"),
+        ("focus.cycle", "Tab"),
+        ("search.keep", "Ctrl-F"),
+        ("view.search", "6"),
+        ("row.copy-id", "i"),
+        ("row.default", "Enter"),
+        ("refresh", "r"),
+        ("value.inspect", "o"),
+    ] {
+        assert_eq!(key_name(id), label, "{id}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "the keymap binds no `no.such-key`")]
+fn a_message_cannot_name_a_key_the_keymap_does_not_bind() {
+    key_name("no.such-key");
+}
