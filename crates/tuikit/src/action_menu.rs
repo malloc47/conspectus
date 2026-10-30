@@ -102,7 +102,7 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 
 use crate::frame::{ModalFrame, ModalSize};
-use crate::keys::{MENU_KEYS, MenuKey, key_label, resolve};
+use crate::keys::{Footer, MENU_KEYS, MenuKey, key_label, resolve};
 use crate::overlay::{Outcome, Overlay};
 use crate::scroll::ScrollWindow;
 use crate::selection::Ends;
@@ -371,6 +371,11 @@ impl<M: Clone, Cx: ?Sized> Overlay<M, Cx> for ActionMenu<M> {
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, _cx: &Cx, theme: &Theme) {
         self.draw(area, buf, theme);
+    }
+
+    /// The standard menu table's footer.
+    fn hints(&self) -> Footer {
+        Footer::new(MENU_KEYS)
     }
 }
 

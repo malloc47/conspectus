@@ -201,6 +201,7 @@ assert!(stack.is_empty());
 | `Overlay::render_under_step(&mut self, area, buf, &cx, &theme)` | draws the overlay while a step of its own is open over it | `render` by default; a list draws its cursor with the inactive selection pair |
 | `Overlay::fills_screen(&self)` | whether the overlay covers the whole screen | `false` by default; nothing under it is drawn |
 | `Overlay::takes_text(&self)` | whether a text field in the overlay has the keys now | `false` by default; a host types a paste only into an overlay that says so |
+| `Overlay::hints(&self)` | the keys the overlay takes now, as the footer of the table it resolves them with | empty by default; every framework control returns the footer it draws at its level, so a [status bar](status_bar.md) names the top overlay's keys instead of the screen's |
 | `impl Overlay for Box<T>` | a boxed overlay is an overlay | so `ModalStack<Box<dyn Overlay<M, Cx>>>` works |
 | `Outcome::{Consumed, Close, Dismiss, Commit(M), Back(M), Stay(M)}` | what the key asks the host to do | `map`, `closes`, `message` |
 | `ModalStack::new`, `push`, `push_step`, `pop`, `pop_if`, `close_flow`, `close_all` | open and close entries | `push_step` opens an entry as a step of the one on top (on an empty stack, as `push` does); `pop_if` closes one kind of overlay only when it is on top; `close_flow` closes the top entry and every entry it is a step of; `close_flow` and `close_all` return the entries top first |

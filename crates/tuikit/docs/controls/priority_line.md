@@ -148,13 +148,13 @@ Not applicable: 1, 2, and 10 (no list or cursor), 3 to 7, 12, 15, 16, and
 18 (no keys of its own, no overlay, no editing, no paging), 9 (no pane),
 11 (the segments carry their severity's style; the line only places them),
 17 (the words are the host's), and 8 (a line of hints generated from key
-tables is the status bar built on this line).
+tables is [`StatusBar`](status_bar.md), built on this line).
 
 ## Seams left open
 
-- **Hints from key tables.** A status bar whose hints are generated from
-  the key tables, each row a segment with its rank, is a control built on
-  this line; the ranks would travel with the table rows.
+- **Hints from key tables.** Built: [`StatusBar`](status_bar.md) puts a
+  `KeyHintBar` of hints generated from key tables on this line, each a
+  segment with its row's rank.
 - **Clicking a segment.** `fit` reports which segments are kept and each
   segment's width is known before drawing, which is what a mouse hit test
   would map a click through.

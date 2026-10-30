@@ -685,6 +685,11 @@ impl<C: PagerContent, Cx: ?Sized> Overlay<C::Message, Cx> for Pager<C> {
     fn takes_text(&self) -> bool {
         Pager::takes_text(self)
     }
+
+    /// The footer the pager draws at its level ([`Pager::footer`]).
+    fn hints(&self) -> Footer {
+        self.footer()
+    }
 }
 
 impl HelpAction for PagerKey {

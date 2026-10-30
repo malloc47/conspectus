@@ -128,7 +128,7 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 
 use crate::frame::{ModalFrame, ModalSize};
-use crate::keys::{SETTINGS_KEYS, SettingsKey, resolve};
+use crate::keys::{Footer, SETTINGS_KEYS, SettingsKey, resolve};
 use crate::overlay::{Outcome, Overlay};
 use crate::scroll::ScrollWindow;
 use crate::selection::Ends;
@@ -492,6 +492,11 @@ impl<Id: Clone + PartialEq, M, Cx: ?Sized> Overlay<M, Cx> for SettingsPanel<Id, 
 
     fn render_under_step(&mut self, area: Rect, buf: &mut Buffer, cx: &Cx, theme: &Theme) {
         self.draw_under_step(area, buf, cx, theme);
+    }
+
+    /// The standard settings table's footer.
+    fn hints(&self) -> Footer {
+        Footer::new(SETTINGS_KEYS)
     }
 }
 

@@ -43,12 +43,21 @@ fn size_label((width, height): (u16, u16)) -> String {
 }
 
 /// The screen with the case's modal open, and the same screen with it
-/// closed.
+/// closed. The host's status rows, which it redraws for whatever is on
+/// top, are the same in both: they are the host's, not the modal's.
 fn with_and_without<R: Rig>(rig: &R, case: &Case<R::State>, size: (u16, u16)) -> (Buffer, Buffer) {
     let mut state = case.open();
     let with = rig.render(&mut state, area(size));
     rig.close_top(&mut state);
-    let without = rig.render(&mut state, area(size));
+    let mut without = rig.render(&mut state, area(size));
+    for rect in rig.status_rows(area(size)) {
+        let rect = rect.intersection(with.area);
+        for y in rect.top()..rect.bottom() {
+            for x in rect.left()..rect.right() {
+                without[(x, y)] = with[(x, y)].clone();
+            }
+        }
+    }
     (with, without)
 }
 
@@ -367,6 +376,38 @@ pub(super) fn footer<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
                 "draws no `{}`, which its table's footer has, so its footer is not the generated one\n{}",
                 segment.text,
                 buffer::text(&with)
+            )
+        })
+        .collect()
+}
+
+pub(super) fn hints<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
+    let state = case.open();
+    let named = rig.hints(&state);
+    let takes = |key: &crate::keys::KeyMatcher| match &case.footer {
+        Some(footer) => footer
+            .segments()
+            .iter()
+            .any(|segment| segment.keys.contains(key)),
+        None => case.levels.first().is_some_and(|level| {
+            level
+                .tables
+                .iter()
+                .any(|table| (table.role)(key.example()).is_some())
+        }),
+    };
+    let whose = if case.footer.is_some() {
+        "its footer names"
+    } else {
+        "its tables bind"
+    };
+    named
+        .iter()
+        .filter(|key| !takes(key))
+        .map(|key| {
+            format!(
+                "the status line names `{}`, which is not a key {whose}",
+                crate::keys::key_label(key)
             )
         })
         .collect()

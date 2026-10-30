@@ -153,6 +153,10 @@ impl Overlay<String, ()> for Menu {
             Lines::new(lines).following(self.cursor..self.cursor + 1),
         );
     }
+
+    fn hints(&self) -> Footer {
+        Footer::new(MENU_KEYS)
+    }
 }
 
 /// A one-line prompt that keeps the conventions: its level types, so `q`
@@ -186,6 +190,10 @@ impl Overlay<String, ()> for Prompt {
 
     fn takes_text(&self) -> bool {
         true
+    }
+
+    fn hints(&self) -> Footer {
+        Footer::new(TEXT_INPUT_KEYS)
     }
 }
 
@@ -295,7 +303,12 @@ fn menu_convention() -> Convention {
 }
 
 fn sound() -> Registry<Host> {
-    Registry::new(host())
+    sound_cases(Registry::new(host()))
+}
+
+/// The two well-behaved modals, for any rig over the tiny host's screen.
+fn sound_cases<R: Rig<State = Screen>>(registry: Registry<R>) -> Registry<R> {
+    registry
         .case(
             Case::new("Menu", open(Menu::boxed))
                 .moves()
@@ -539,5 +552,116 @@ fn same_chrome_compares_the_frame_and_not_the_body() {
     assert!(
         !differ.is_empty() && differ[0].starts_with('('),
         "{differ:?}"
+    );
+}
+
+/// The screen's own keys, which its status line names while no modal is
+/// open.
+const SCREEN_KEYS: &[KeyRow<()>] = &[shown(crate::keys::ch('x'), (), "x", "exit")];
+
+/// The tiny host with a status line on its last row that names keys: the
+/// top modal's ([`Overlay::hints`]) when `follows`, else always the
+/// screen's own. `masks` says whether the rig tells the suite which row
+/// that is.
+struct Hinting {
+    host: Host,
+    follows: bool,
+    masks: bool,
+}
+
+impl Hinting {
+    fn footer(&self, screen: &Screen) -> Footer {
+        match screen.stack.top() {
+            Some(top) if self.follows => Overlay::<String, ()>::hints(top.as_ref()),
+            _ => Footer::new(SCREEN_KEYS),
+        }
+    }
+}
+
+impl Rig for Hinting {
+    type State = Screen;
+
+    fn render(&self, screen: &mut Screen, area: Rect) -> Buffer {
+        let mut buf = self.host.render(screen, area);
+        let last = Rect::new(area.x, area.bottom() - 1, area.width, 1);
+        Clear.render(last, &mut buf);
+        Paragraph::new(self.footer(screen).text()).render(last, &mut buf);
+        buf
+    }
+
+    fn close_top(&self, screen: &mut Screen) {
+        self.host.close_top(screen);
+    }
+
+    fn press(&self, screen: &mut Screen, key: KeyEvent) {
+        self.host.press(screen, key);
+    }
+
+    fn depth(&self, screen: &Screen) -> usize {
+        self.host.depth(screen)
+    }
+
+    fn status_rows(&self, area: Rect) -> Vec<Rect> {
+        if self.masks {
+            vec![Rect::new(area.x, area.bottom() - 1, area.width, 1)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn hints(&self, screen: &Screen) -> Vec<crate::keys::KeyMatcher> {
+        self.footer(screen)
+            .segments()
+            .iter()
+            .flat_map(|segment| segment.keys.iter().copied())
+            .collect()
+    }
+
+    fn theme(&self) -> &Theme {
+        self.host.theme()
+    }
+}
+
+fn hinting(follows: bool, masks: bool) -> Registry<Hinting> {
+    sound_cases(Registry::new(Hinting {
+        host: host(),
+        follows,
+        masks,
+    }))
+}
+
+#[test]
+fn a_status_line_that_names_the_top_modals_keys_passes_when_its_rows_are_named() {
+    let failures = check_conventions(&hinting(true, true));
+    assert!(
+        failures.is_empty(),
+        "{}",
+        failures
+            .iter()
+            .map(Failure::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    // Unnamed, the row it redraws reads as the modal escaping its frame.
+    let failures = check_conventions_of(&hinting(true, false), &[Check::Contained]);
+    let contained = failed(&failures, Check::Contained);
+    assert!(
+        contained
+            .iter()
+            .any(|message| message.contains("outside the frame")),
+        "{contained:?}"
+    );
+}
+
+#[test]
+fn a_status_line_that_names_the_screens_keys_over_a_modal_fails_hints() {
+    let failures = check_conventions_of(&hinting(false, true), &[Check::Hints]);
+    let hints = failed(&failures, Check::Hints);
+    assert_eq!(hints.len(), 2, "both modals: {hints:?}");
+    assert!(
+        hints
+            .iter()
+            .all(|message| message.contains("names `x`, which is not a key its footer names")),
+        "{hints:?}"
     );
 }

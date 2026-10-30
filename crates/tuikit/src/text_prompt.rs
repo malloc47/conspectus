@@ -285,6 +285,11 @@ impl<M, Cx: ?Sized> Overlay<M, Cx> for TextPrompt<M> {
     fn takes_text(&self) -> bool {
         true
     }
+
+    /// The text input table's footer, the one on its bottom border.
+    fn hints(&self) -> Footer {
+        Footer::new(TEXT_INPUT_KEYS)
+    }
 }
 
 /// The prompt's rows: its field, and its error line while it has one.

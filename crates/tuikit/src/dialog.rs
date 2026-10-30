@@ -277,20 +277,21 @@ impl<M> Dialog<M> {
                 verbs
                     .iter()
                     .map(|verb| Segment {
-                        text: format!("{} {}", key_label(&verb.key), verb.verb),
-                        available: true,
+                        keys: vec![verb.key],
+                        ..Segment::note(format!("{} {}", key_label(&verb.key), verb.verb))
                     })
                     .chain(cancel.segments().iter().cloned())
                     .collect()
             }
             Kind::Notice => {
-                let labels: Vec<&str> = [DialogKey::Confirm, DialogKey::Cancel]
-                    .into_iter()
-                    .filter_map(first_label)
-                    .collect();
+                let (labels, keys): (Vec<&str>, Vec<KeyMatcher>) =
+                    [DialogKey::Confirm, DialogKey::Cancel]
+                        .into_iter()
+                        .filter_map(first_row)
+                        .unzip();
                 std::iter::once(Segment {
-                    text: format!("{} {NOTICE_VERB}", labels.join("/")),
-                    available: true,
+                    keys,
+                    ..Segment::note(format!("{} {NOTICE_VERB}", labels.join("/")))
                 })
                 .collect()
             }
@@ -341,14 +342,16 @@ impl<M> Dialog<M> {
     }
 }
 
-/// The label of the first row of [`DIALOG_KEYS`] that shows `action`.
-fn first_label(action: DialogKey) -> Option<&'static str> {
+/// The label and the key of the first row of [`DIALOG_KEYS`] that shows
+/// `action`.
+fn first_row(action: DialogKey) -> Option<(&'static str, KeyMatcher)> {
     rows(DIALOG_KEYS).find_map(|row| match row {
         KeyRow::Bind {
+            key,
             action: bound,
             hint: Hint::Shown { label, .. },
             ..
-        } if *bound == action => Some(*label),
+        } if *bound == action => Some((*label, *key)),
         _ => None,
     })
 }
@@ -390,6 +393,11 @@ impl<M: Clone, Cx: ?Sized> Overlay<M, Cx> for Dialog<M> {
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, _cx: &Cx, theme: &Theme) {
         self.draw(area, buf, theme);
+    }
+
+    /// The footer of the dialog's form ([`Dialog::footer`]).
+    fn hints(&self) -> Footer {
+        self.footer()
     }
 }
 

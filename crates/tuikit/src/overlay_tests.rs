@@ -493,3 +493,28 @@ fn only_the_top_entry_says_whether_a_paste_goes_in() {
         "false unless said"
     );
 }
+
+#[test]
+fn an_overlay_names_no_keys_unless_it_says_so_and_a_box_names_its_contents() {
+    use crate::keys::{Footer, MENU_KEYS};
+    struct Quiet;
+    impl Overlay<(), ()> for Quiet {
+        fn handle(&mut self, _key: KeyEvent, _cx: &()) -> Outcome<()> {
+            Outcome::Consumed
+        }
+        fn render(&mut self, _area: Rect, _buf: &mut Buffer, _cx: &(), _theme: &Theme) {}
+    }
+    struct Menu;
+    impl Overlay<(), ()> for Menu {
+        fn handle(&mut self, _key: KeyEvent, _cx: &()) -> Outcome<()> {
+            Outcome::Consumed
+        }
+        fn render(&mut self, _area: Rect, _buf: &mut Buffer, _cx: &(), _theme: &Theme) {}
+        fn hints(&self) -> Footer {
+            Footer::new(MENU_KEYS)
+        }
+    }
+    assert!(Overlay::<(), ()>::hints(&Quiet).is_empty());
+    let boxed: Box<dyn Overlay<(), ()>> = Box::new(Menu);
+    assert_eq!(boxed.hints(), Footer::new(MENU_KEYS));
+}

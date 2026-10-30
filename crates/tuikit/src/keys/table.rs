@@ -45,6 +45,11 @@ pub enum KeyRow<A: 'static> {
         /// The key still resolves, so the control can say why nothing
         /// happened instead of letting the key fall through.
         available: bool,
+        /// How long the row's hint holds on in a line of hints too narrow
+        /// for all of them, the higher the longer ([`KeyRow::rank`] sets
+        /// it); `None` leaves it to the line. A footer, which wraps
+        /// instead, ignores it.
+        rank: Option<u32>,
     },
     /// Footer text with no key of its own, such as "type to filter".
     Note(&'static str),
@@ -65,6 +70,7 @@ pub const fn shown<A>(
         action,
         hint: Hint::Shown { label, verb },
         available: true,
+        rank: None,
     }
 }
 
@@ -75,6 +81,51 @@ pub const fn alias<A>(key: KeyMatcher, action: A) -> KeyRow<A> {
         action,
         hint: Hint::Alias,
         available: true,
+        rank: None,
+    }
+}
+
+// `Copy` actions have no destructor, which a `const fn` that takes the
+// row by value needs; every action enum is `Copy`.
+impl<A: Copy> KeyRow<A> {
+    /// The row with its hint ranked `rank` in a line of hints that gives
+    /// way by priority (a status line): the lower the rank, the sooner the
+    /// hint goes when the line is too narrow. A note or an included table
+    /// has no hint of its own to rank and is returned as it is.
+    ///
+    /// ```
+    /// use ratatui::crossterm::event::KeyCode;
+    /// use tuikit::keys::{KeyRow, key, shown};
+    ///
+    /// const QUIT: KeyRow<()> = shown(key(KeyCode::Esc), (), "Esc", "quit").rank(9);
+    /// assert_eq!(QUIT.rank_of(), Some(9));
+    /// ```
+    #[must_use]
+    pub const fn rank(self, rank: u32) -> Self {
+        match self {
+            KeyRow::Bind {
+                key,
+                action,
+                hint,
+                available,
+                rank: _,
+            } => KeyRow::Bind {
+                key,
+                action,
+                hint,
+                available,
+                rank: Some(rank),
+            },
+            other => other,
+        }
+    }
+
+    /// The row's rank in a line of hints, `None` when it has none.
+    pub const fn rank_of(&self) -> Option<u32> {
+        match self {
+            KeyRow::Bind { rank, .. } => *rank,
+            _ => None,
+        }
     }
 }
 
@@ -149,11 +200,13 @@ pub fn with_availability<A: Copy>(
                 action,
                 hint,
                 available: was,
+                rank,
             } => KeyRow::Bind {
                 key,
                 action,
                 hint,
                 available: was && available(action),
+                rank,
             },
             other => other,
         })

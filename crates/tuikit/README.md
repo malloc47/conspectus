@@ -46,7 +46,10 @@ a detail area, the list scrolled in a window its host keeps), the
 and a footer, then the overlays, then the toasts), the `tab_bar` module
 (the names of a pane's views, the active one kept, which give way tab by
 tab), the `priority_line` module (a line of ranked segments that drop
-lowest first to fit and fill the room back), the `empty_state` module
+lowest first to fit and fill the room back), the `status_bar` module (the
+bottom row of a screen: a message in its severity's style, or the keys
+that act now, generated from key tables and fitted by priority beside the
+host's segments), the `empty_state` module
 (what a slot says when it has nothing to show, one look for every such
 message), the
 `text_edit` module (the line editor every text field edits with and the

@@ -45,6 +45,7 @@ pub mod richtext;
 pub mod scroll;
 pub mod selection;
 pub mod settings_panel;
+pub mod status_bar;
 pub mod tab_bar;
 pub mod text;
 pub mod text_edit;

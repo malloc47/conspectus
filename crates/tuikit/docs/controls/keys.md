@@ -117,12 +117,13 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 | `KeyMatcher::{Char, Exact, AnyModExceptCtrl, AnyMod}` | which key events a row binds | `matches`, `matches_event`, `example` (the plainest event it fires on) |
 | `ch`, `key`, `exact`, `ctrl`, `alt`, `ctrl_key`, `alt_key` | `const` matcher builders | `key` and `exact` refuse a character at compile time; `exact` binds a key with no modifier, so its chords stay free (an explorer's `Enter` leaves `Shift-Enter` to the program) |
 | `key_label` | the one notation for a key | `↑` `↓` `←` `→`, `Space`, `S-Tab`, `PgUp`, `PgDn`, `Ctrl-R`, `Alt-b`, `Shift-Enter` |
-| `KeyRow::{Bind, Note, Include}`, `Hint::{Shown, Alias}` | a table's rows | a bound row carries `available` |
-| `shown`, `alias`, `include` | `const` row builders | every bound row starts available |
+| `KeyRow::{Bind, Note, Include}`, `Hint::{Shown, Alias}` | a table's rows | a bound row carries `available` and a `rank` |
+| `shown`, `alias`, `include` | `const` row builders | every bound row starts available, with no rank |
+| `KeyRow::rank(n)`, `rank_of` | how long the row's hint holds on in a line of hints that gives way by priority | a `const` builder for `Copy` actions; a footer, which wraps, ignores it; a status bar reads it ([status_bar.md](status_bar.md)) |
 | `resolve` | the action of the first row a key fires | looks inside included tables; ignores availability |
 | `rows` | a table's rows with includes spliced in | what footers, help pages, and checks read |
 | `with_availability` | a copy of a table with each row's availability set | the seam for dimming, hiding, or explaining an action |
-| `Footer`, `Segment`, `footer` | the footer of a table: segments, text, wrapped lines | `Footer::lines` wraps only between segments and dims unavailable ones; `Footer::only` keeps the rows of some actions (a control shows the keys that apply in its state), and a control whose keys are partly its own data (a dialog's verbs) collects its `Segment`s into a `Footer`; `Footer::from(table)` is `Footer::new` |
+| `Footer`, `Segment`, `footer` | the footer of a table: segments, text, wrapped lines | `Footer::lines` wraps only between segments and dims unavailable ones; `Footer::only` keeps the rows of some actions (a control shows the keys that apply in its state), and a control whose keys are partly its own data (a dialog's verbs) collects its `Segment`s into a `Footer`; `Footer::from(table)` is `Footer::new`; a `Segment` also lists the `keys` it names (what a check presses) and the highest `rank` of its rows, and `Segment::note` is one that names no key |
 | `HINT_SEPARATOR` | what joins footer segments | ` · ` |
 | `unavailable_style` | how an action that cannot act now is drawn | `inert` color with the `muted` modifier |
 | `typed_char` | the character a key types into a text field | plain or shifted, no Control or Alt |

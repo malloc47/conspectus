@@ -439,6 +439,11 @@ impl<R, M, Cx: ?Sized> Overlay<M, Cx> for LogList<R, M, Cx> {
     fn render(&mut self, area: Rect, buf: &mut Buffer, cx: &Cx, theme: &Theme) {
         self.draw(area, buf, cx, theme);
     }
+
+    /// The footer the list draws ([`LogList::footer`]).
+    fn hints(&self) -> Footer {
+        self.footer()
+    }
 }
 
 #[cfg(test)]

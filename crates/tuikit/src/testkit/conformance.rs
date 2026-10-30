@@ -16,11 +16,16 @@
 //! | `Words` | No row inside the frame, at any of the ten sizes, ends at the frame's edge in the start of a longer word the same modal shows whole on a wide screen; a deliberate cut ends in the ellipsis mark. |
 //! | `Keys` | Each level's key tables keep the modal key convention by role (`Esc` leaves, `Enter` applies where the [`Convention`] says, `Space` changes), bind `Ctrl-C` first to dismissing, and pass the table checks (every footer label is its key's label, every key a footer names resolves to its row, characters bind as typed, `Ctrl-C` comes first). |
 //! | `Footer` | Every segment of the footer the modal's table generates appears in the modal (in its body or on its bottom border), so the footer is the generated one and not hand-written. |
+//! | `Hints` | Every key the host's status line names while the modal is open is one the modal's footer names (or, for a modal with no footer given, one its first level's tables bind), so the line cannot advertise a key of the screen under the modal. |
 //! | `Close` | `Ctrl-C` closes the modal, `Esc` closes it at its first level, and `q` does too unless the level types (house rule 4); closing says nothing (house rule 5). |
 //!
 //! The host's side is a [`Rig`]: how to draw its whole screen, how to
 //! close the modal on top, how to press a key the way its loop does, how
-//! many modals are open, and what feedback it is showing. Each [`Case`]
+//! many modals are open, what feedback it is showing, and, for a host
+//! whose status line names the keys of the modal on top, which rows that
+//! line takes and which keys it names. The checks that compare the screen
+//! with the modal and without it leave those rows out: they belong to the
+//! host, which redraws them for whatever is on top. Each [`Case`]
 //! opens one modal (a fresh host state with that modal on top) and says
 //! what the checks need to know: whether the modal fills the screen,
 //! whether its first level types, how its selection moves, its key tables
@@ -120,8 +125,8 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 
 use crate::keys::{
-    Convention, Footer, KeyAction, KeyRole, KeyRow, ctrl_c_first, loose_characters, mislabeled,
-    resolve, unresolved,
+    Convention, Footer, KeyAction, KeyMatcher, KeyRole, KeyRow, ctrl_c_first, loose_characters,
+    mislabeled, resolve, unresolved,
 };
 use crate::theme::Theme;
 
@@ -167,6 +172,23 @@ pub trait Rig {
     /// nothing by default.
     fn note(&self, state: &mut Self::State, text: &str) {
         let _ = (state, text);
+    }
+
+    /// The rows of a screen of `area` that the host redraws for whichever
+    /// modal is on top: a status line that names the top modal's keys.
+    /// The `Drawn` and `Contained` checks, which compare the screen with
+    /// the modal and without it, leave these rows out. None by default.
+    fn status_rows(&self, area: Rect) -> Vec<Rect> {
+        let _ = area;
+        Vec::new()
+    }
+
+    /// The keys the host's status line names right now, so the `Hints`
+    /// check can see that, with a modal open, each is a key of the modal.
+    /// None by default, for a host whose status line names no keys.
+    fn hints(&self, state: &Self::State) -> Vec<KeyMatcher> {
+        let _ = state;
+        Vec::new()
     }
 
     /// The theme the host draws with.
@@ -503,13 +525,15 @@ pub enum Check {
     Keys,
     /// Its footer is the one its table generates.
     Footer,
+    /// The host's status line names only keys the modal takes.
+    Hints,
     /// It closes by the one rule, silently.
     Close,
 }
 
 impl Check {
     /// Every check, in the order the suite runs them.
-    pub const ALL: [Check; 8] = [
+    pub const ALL: [Check; 9] = [
         Check::Drawn,
         Check::Contained,
         Check::Title,
@@ -517,6 +541,7 @@ impl Check {
         Check::Words,
         Check::Keys,
         Check::Footer,
+        Check::Hints,
         Check::Close,
     ];
 }
@@ -557,6 +582,7 @@ pub fn check_conventions_of<R: Rig>(registry: &Registry<R>, checks: &[Check]) ->
                 Check::Words => checks::words(&registry.rig, case),
                 Check::Keys => checks::keys(case, &mut tables_seen),
                 Check::Footer => checks::footer(&registry.rig, case),
+                Check::Hints => checks::hints(&registry.rig, case),
                 Check::Close => checks::close(&registry.rig, case),
             };
             failures.extend(found.into_iter().map(|message| Failure {

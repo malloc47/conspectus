@@ -375,12 +375,12 @@ impl<M: ExplorerModel> Explorer<M> {
                         .map_or(text.as_str(), |(label, _)| label);
                     Segment {
                         text: format!("{label} {verb}"),
-                        available: segment.available,
+                        ..segment.clone()
                     }
                 }
                 (Some(text), None) if *text == segment.text => Segment {
-                    text: segment.text.clone(),
                     available: false,
+                    ..segment.clone()
                 },
                 _ => segment.clone(),
             })

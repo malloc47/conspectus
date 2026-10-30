@@ -878,6 +878,12 @@ impl<R: PaletteRow, M, A: PaletteAction, Cx: ?Sized> Overlay<M, Cx> for Palette<
     fn takes_text(&self) -> bool {
         !self.options_open()
     }
+
+    /// The footer the palette draws, the options pane's while it is open
+    /// ([`Palette::footer`]).
+    fn hints(&self) -> Footer {
+        self.footer()
+    }
 }
 
 #[cfg(test)]

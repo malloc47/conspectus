@@ -5,6 +5,7 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 
 use super::Outcome;
+use crate::keys::Footer;
 use crate::theme::Theme;
 
 /// The contract every overlay keeps: it handles a key and it draws
@@ -36,6 +37,10 @@ use crate::theme::Theme;
 /// - **Text.** An overlay whose text field has the keys says so with
 ///   [`takes_text`](Self::takes_text), so a host types a paste into it
 ///   and nowhere else.
+/// - **Hints.** An overlay names the keys it takes now with
+///   [`hints`](Self::hints), the footer of the table it resolves them
+///   with, so a status bar shows them while it is on top instead of keys
+///   that no longer reach the screen under it.
 pub trait Overlay<M, Cx: ?Sized> {
     /// Handles one key press with the host's context, and says what the
     /// host should do next.
@@ -69,6 +74,14 @@ pub trait Overlay<M, Cx: ?Sized> {
     fn takes_text(&self) -> bool {
         false
     }
+
+    /// The keys the overlay takes now, as the footer of the table it
+    /// resolves them with (its footer at its current level), for a
+    /// [`StatusBar`](crate::status_bar::StatusBar) to show while it is on
+    /// top. Empty unless an overlay says otherwise.
+    fn hints(&self) -> Footer {
+        Footer::default()
+    }
 }
 
 /// A boxed overlay is an overlay, so a stack of boxed trait objects
@@ -92,5 +105,9 @@ impl<M, Cx: ?Sized, T: Overlay<M, Cx> + ?Sized> Overlay<M, Cx> for Box<T> {
 
     fn takes_text(&self) -> bool {
         (**self).takes_text()
+    }
+
+    fn hints(&self) -> Footer {
+        (**self).hints()
     }
 }

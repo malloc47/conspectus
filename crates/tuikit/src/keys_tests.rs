@@ -228,6 +228,40 @@ fn footer_groups_labels_by_verb_in_order_and_skips_aliases() {
 }
 
 #[test]
+fn a_footer_segment_names_its_keys_and_takes_its_highest_rank() {
+    const RANKED: &[KeyRow<Key>] = &[
+        shown(key(KeyCode::Up), Key::Up, marks::ARROW_UP, "move").rank(2),
+        shown(key(KeyCode::Down), Key::Down, marks::ARROW_DOWN, "move").rank(5),
+        KeyRow::Note("type to filter"),
+        shown(key(KeyCode::Esc), Key::Close, "Esc", "close"),
+        alias(ch('q'), Key::Close).rank(9),
+    ];
+    let footer = Footer::new(RANKED);
+    let [moves, note, close] = footer.segments() else {
+        panic!("three segments: {footer}");
+    };
+    assert_eq!(moves.keys, vec![key(KeyCode::Up), key(KeyCode::Down)]);
+    assert_eq!(moves.rank, Some(5), "the highest rank of its rows");
+    assert_eq!((note.keys.len(), note.rank), (0, None));
+    // An alias is not in the footer, so neither its key nor its rank is.
+    assert_eq!(close.keys, vec![key(KeyCode::Esc)]);
+    assert_eq!(close.rank, None);
+    // A rank is the hint's: it leaves what the row binds alone.
+    assert_eq!(RANKED[0].rank_of(), Some(2));
+    assert_eq!(RANKED[2].rank_of(), None, "a note has no rank");
+    assert_eq!(
+        resolve(RANKED, press(KeyCode::Down)),
+        Some(Key::Down),
+        "a ranked row resolves as before"
+    );
+    assert_eq!(
+        with_availability(RANKED, |_| false)[1].rank_of(),
+        Some(5),
+        "a copy keeps the ranks"
+    );
+}
+
+#[test]
 fn a_footer_can_show_some_actions_and_take_segments_of_a_control_own() {
     let leaving = Footer::only(MORE, |action| matches!(action, Key::Close | Key::Copy));
     assert_eq!(
@@ -235,12 +269,9 @@ fn a_footer_can_show_some_actions_and_take_segments_of_a_control_own() {
         ["type to filter", "Esc/q close", "y copy"].join(HINT_SEPARATOR),
         "notes stay; rows of other actions go"
     );
-    let composed: Footer = std::iter::once(Segment {
-        text: "m merge".into(),
-        available: true,
-    })
-    .chain(leaving.segments()[1..].iter().cloned())
-    .collect();
+    let composed: Footer = std::iter::once(Segment::note("m merge"))
+        .chain(leaving.segments()[1..].iter().cloned())
+        .collect();
     assert_eq!(
         composed.text(),
         ["m merge", "Esc/q close", "y copy"].join(HINT_SEPARATOR)
@@ -312,12 +343,14 @@ fn an_unavailable_action_is_dimmed_in_the_footer() {
                 key: matcher,
                 action,
                 hint,
+                rank,
                 ..
             } if matcher == ch('q') => KeyRow::Bind {
                 key: matcher,
                 action,
                 hint,
                 available: false,
+                rank,
             },
             other => other,
         })

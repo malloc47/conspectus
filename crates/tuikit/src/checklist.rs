@@ -105,7 +105,7 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 
 use crate::frame::{ModalFrame, ModalSize};
-use crate::keys::{CHECKLIST_KEYS, ChecklistKey, resolve};
+use crate::keys::{CHECKLIST_KEYS, ChecklistKey, Footer, resolve};
 use crate::overlay::{Outcome, Overlay};
 use crate::scroll::ScrollWindow;
 use crate::selection::Ends;
@@ -378,6 +378,11 @@ impl<M, Cx: ?Sized> Overlay<M, Cx> for Checklist<M> {
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, _cx: &Cx, theme: &Theme) {
         self.draw(area, buf, theme);
+    }
+
+    /// The standard checklist table's footer.
+    fn hints(&self) -> Footer {
+        Footer::new(CHECKLIST_KEYS)
     }
 }
 

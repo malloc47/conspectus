@@ -136,7 +136,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 
 use crate::frame::{ModalBody, ModalFrame, ModalSize};
-use crate::keys::{FormKey, KeyRow, resolve};
+use crate::keys::{Footer, FormKey, KeyRow, resolve};
 use crate::overlay::{Outcome, Overlay};
 use crate::selection::Ends;
 use crate::theme::Theme;
@@ -572,6 +572,11 @@ impl<M, Cx: ?Sized> Overlay<M, Cx> for Form<M> {
 
     fn takes_text(&self) -> bool {
         Form::takes_text(self)
+    }
+
+    /// The footer of the form's table, the one it keeps in view.
+    fn hints(&self) -> Footer {
+        Footer::new(self.keys)
     }
 }
 

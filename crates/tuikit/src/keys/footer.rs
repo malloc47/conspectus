@@ -5,6 +5,7 @@ use std::fmt;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
+use super::matcher::KeyMatcher;
 use super::table::{Hint, KeyRow, rows};
 use crate::glyphs::marks;
 use crate::text;
@@ -22,6 +23,26 @@ pub struct Segment {
     pub text: String,
     /// Whether any of its keys can act now; a note always can.
     pub available: bool,
+    /// The keys the segment names, in order: what a check presses to see
+    /// that each does what the segment says. Empty for a note.
+    pub keys: Vec<KeyMatcher>,
+    /// The highest rank of its rows ([`KeyRow::rank`]), which a line of
+    /// hints that gives way by priority keeps it by; `None` when no row
+    /// has one, and for a note.
+    pub rank: Option<u32>,
+}
+
+impl Segment {
+    /// A segment of `text` that names no key: a note, or a control's own
+    /// words.
+    pub fn note(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            available: true,
+            keys: Vec::new(),
+            rank: None,
+        }
+    }
 }
 
 /// The footer of a key table: one [`Segment`] per verb or note, in the
@@ -50,6 +71,8 @@ impl Footer {
                 verb: &'static str,
                 labels: Vec<&'static str>,
                 available: bool,
+                keys: Vec<KeyMatcher>,
+                rank: Option<u32>,
             },
             Note(&'static str),
         }
@@ -57,10 +80,11 @@ impl Footer {
         for row in rows(table) {
             match row {
                 KeyRow::Bind {
+                    key,
                     hint: Hint::Shown { label, verb },
                     available,
                     action,
-                    ..
+                    rank,
                 } if keep(action) => {
                     let existing = parts
                         .iter_mut()
@@ -69,17 +93,23 @@ impl Footer {
                         Some(Part::Keys {
                             labels,
                             available: any,
+                            keys,
+                            rank: highest,
                             ..
                         }) => {
                             if !labels.contains(label) {
                                 labels.push(label);
                             }
                             *any |= *available;
+                            keys.push(*key);
+                            *highest = (*highest).max(*rank);
                         }
                         _ => parts.push(Part::Keys {
                             verb,
                             labels: vec![label],
                             available: *available,
+                            keys: vec![*key],
+                            rank: *rank,
                         }),
                     }
                 }
@@ -94,14 +124,15 @@ impl Footer {
                     verb,
                     labels,
                     available,
+                    keys,
+                    rank,
                 } => Segment {
                     text: format!("{} {verb}", labels.join("/")),
                     available,
+                    keys,
+                    rank,
                 },
-                Part::Note(note) => Segment {
-                    text: note.to_string(),
-                    available: true,
-                },
+                Part::Note(note) => Segment::note(note),
             })
             .collect();
         Self { segments }
