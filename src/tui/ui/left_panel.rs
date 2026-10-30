@@ -119,9 +119,10 @@ impl<'a> LeftRows<'a> {
 }
 
 /// `rows` laid out as the left pane lays out a tree of only them, each at
-/// `width` with no cursor and the pane focused, for a test of the cells a
-/// row draws. `theme` and `now` are what a frame has; with a `spinner`,
-/// every row awaits the hand-off and shows that frame.
+/// `width` (the cells after the cursor gutter) with no cursor and the pane
+/// focused, for a test of the cells a row draws: the producer's line, with
+/// no gutter and no looks. `theme` and `now` are what a frame has; with a
+/// `spinner`, every row awaits the hand-off and shows that frame.
 #[cfg(test)]
 pub(super) fn lay_out(
     rows: &[Row],
@@ -168,8 +169,9 @@ pub(super) fn lay_out(
         .collect()
 }
 
-/// `row` as the left pane draws it on its own, its looks applied: its
-/// state as `app` works it out, its cells measured alone, at `width`.
+/// `row` as the left pane draws it on its own in a body `width` cells
+/// wide: its state as `app` works it out, its cells measured alone, the
+/// cursor gutter before them, and its looks applied.
 #[cfg(test)]
 pub(super) fn render_left_row(
     row: &Row,
@@ -192,12 +194,10 @@ pub(super) fn render_left_row(
         ghost: states[0].ghost,
         pending: states[0].pending,
         mark: states[0].mark,
-        width,
+        width: width.saturating_sub(selection::GUTTER_WIDTH),
         theme: app.theme(),
     };
-    let mut line = left.line(row, &cx);
-    cx.apply_looks(&mut line.spans);
-    line
+    cx.row(left.line(row, &cx))
 }
 
 /// Render the left pane title as a lazydocker-style tab strip

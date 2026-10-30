@@ -1,28 +1,29 @@
 ---
 source: src/tui/ui_tests.rs
+assertion_line: 5607
 expression: all_kinds_frame(width)
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                                                                             
 ┌ ► sessions · mux · prs · pinned · history · search ──────────────────────────┐┌   ◉ pin ─────────────────────────────────────────────────────────────────────┐
-│  ▣ ◉ mux-live          live         1m   codex      ~/src/conspectus         ││► id            mux-live                                                      │
-│  ▣ ◎ mux-gone          stopped      4d   codex      ~/src/conspectus         ││  name          mux-live                                                      │
-│  ▣ ◎ mux-unknown       unknown      2h   codex      ~/src/conspectus         ││  kind          mux                                                           │
-│  ▣ ◎ mux-planned       planned       —                                       ││  status        live                                                          │
-│  ▣ ◎ mux-missing       missing       —                                       ││  target        mux_session:tmux:main                                         │
-│  ● ◉ session-live      resumable   10m   claude     Fix the ledger merge     ││  name          main                                                          │
-│  ● ◎ session-missing   missing       —                                       ││  cwd           /home/op/src/conspectus                                       │
-│▶ ◇ ◉ worktree-live     live          —              conspectus               ││  harness       codex                                                         │
-│  ◇ ◎ worktree-gone     removed      2d              conspectus · feature/old ││  argv          codex                                                         │
-│  ◇ ◎ worktree-planned  planned       —                                       ││───────────────────────────────────────────────────── 1 validated  Related ── │
-│  ◆ ◉ repo-live         live          —              ~/src/conspectus/.git    ││  targets                ▣ tmux:main                                          │
-│  ◆ ◎ repo-gone         removed     10d              ~/src/lost/.git          ││─────────────────────────────────────────────────────────────────── Preview ──│
-│  ⇄ ◉ pr-open           open          —              malloc47/conspectus · Ch…││loading mux preview…                                                          │
-│  ⇄ ◉ pr-draft          draft         —              malloc47/conspectus · Ch…││                                                                              │
-│  ⇄ ◉ pr-closed         closed        —              malloc47/conspectus · Ch…││                                                                              │
-│  ⌥ ◉ branch-live       live          —              conspectus · main        ││                                                                              │
-│  ⌥ ◎ branch-missing    missing       —                                       ││                                                                              │
-│  ▦ ◉ workspace-live    live          —              ~/src                    ││                                                                              │
-│  ⋎ ◉ fork-live         live          —              atelier · spike          ││                                                                              │
+│►   ▣ ◉ mux-live          live         1m   codex      ~/src/conspectus       ││► id            mux-live                                                      │
+│    ▣ ◎ mux-gone          stopped      4d   codex      ~/src/conspectus       ││  name          mux-live                                                      │
+│    ▣ ◎ mux-unknown       unknown      2h   codex      ~/src/conspectus       ││  kind          mux                                                           │
+│    ▣ ◎ mux-planned       planned       —                                     ││  status        live                                                          │
+│    ▣ ◎ mux-missing       missing       —                                     ││  target        mux_session:tmux:main                                         │
+│    ● ◉ session-live      resumable   10m   claude     Fix the ledger merge   ││  name          main                                                          │
+│    ● ◎ session-missing   missing       —                                     ││  cwd           /home/op/src/conspectus                                       │
+│  ▶ ◇ ◉ worktree-live     live          —              conspectus             ││  harness       codex                                                         │
+│    ◇ ◎ worktree-gone     removed      2d              conspectus · feature/o…││  argv          codex                                                         │
+│    ◇ ◎ worktree-planned  planned       —                                     ││───────────────────────────────────────────────────── 1 validated  Related ── │
+│    ◆ ◉ repo-live         live          —              ~/src/conspectus/.git  ││  targets                ▣ tmux:main                                          │
+│    ◆ ◎ repo-gone         removed     10d              ~/src/lost/.git        ││─────────────────────────────────────────────────────────────────── Preview ──│
+│    ⇄ ◉ pr-open           open          —              malloc47/conspectus · …││loading mux preview…                                                          │
+│    ⇄ ◉ pr-draft          draft         —              malloc47/conspectus · …││                                                                              │
+│    ⇄ ◉ pr-closed         closed        —              malloc47/conspectus · …││                                                                              │
+│    ⌥ ◉ branch-live       live          —              conspectus · main      ││                                                                              │
+│    ⌥ ◎ branch-missing    missing       —                                     ││                                                                              │
+│    ▦ ◉ workspace-live    live          —              ~/src                  ││                                                                              │
+│    ⋎ ◉ fork-live         live          —              atelier · spike        ││                                                                              │
 │                                                                              ││                                                                              │
 │                                                                              ││                                                                              │
 │                                                                              ││                                                                              │

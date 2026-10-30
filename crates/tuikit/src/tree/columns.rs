@@ -11,6 +11,7 @@ use super::state::TreeState;
 use super::view::{RowCtx, RowState};
 use crate::columns::{Cell, Cells, ColumnSchema, Measure};
 use crate::glyphs::marks;
+use crate::selection::GUTTER_WIDTH;
 use crate::theme::Theme;
 
 /// The cells a tree indents a row by for each level of its depth.
@@ -45,8 +46,15 @@ pub trait RowColumns<R> {
 /// host's [`RowColumns`] gives; [`line`](Self::line) lays one row out at
 /// the width its context gives: the row's indent ([`INDENT`] cells per
 /// level), then its schema's cells in the cells left, by the one
-/// narrow-width policy of [`crate::columns`]. The tree applies the row's
-/// looks after.
+/// narrow-width policy of [`crate::columns`]. The tree puts its cursor
+/// gutter before the line and applies the row's looks after.
+///
+/// The schema is told each row's lead is the cursor gutter and the indent
+/// ([`lead`](Self::lead)), as the tree draws them. A share of the row or
+/// steps by the row then count the whole row, so a schema drawn here and
+/// in a list of the same whole width gives those columns the same cells;
+/// a column that [absorbs the lead](crate::columns::Column::absorbs_lead)
+/// absorbs the indent alone, because every row has the gutter.
 ///
 /// [`TreeView`]: super::TreeView
 ///
@@ -104,8 +112,8 @@ pub trait RowColumns<R> {
 /// TreeView::new(&rows, &state, |row, cx| columns.line(row, cx), &theme)
 ///     .render(Rect::new(0, 0, 24, 5), &mut buf);
 /// let drawn = buffer::rows(&buf);
-/// assert!(drawn[2].starts_with("│    guide.md    12k "), "{drawn:?}");
-/// assert!(drawn[3].starts_with("│  notes.txt    3k "), "{drawn:?}");
+/// assert!(drawn[2].starts_with("│      guide.md    12k "), "{drawn:?}");
+/// assert!(drawn[3].starts_with("│    notes.txt    3k "), "{drawn:?}");
 /// ```
 pub struct TreeColumns<'a, R, P: RowColumns<R>> {
     columns: &'a P,
@@ -159,22 +167,33 @@ where
         &self.measure
     }
 
-    /// The cells `row`'s indent takes.
+    /// The cells the tree draws before `row`'s cells, which the schema
+    /// counts as the row's lead: the cursor gutter
+    /// ([`GUTTER_WIDTH`]) and the row's indent.
     pub fn lead(&self, row: &R) -> usize {
         lead(row, self.indent)
     }
 
-    /// `row` laid out at the width `cx` gives: its indent, then its cells.
+    /// The cells `row`'s indent takes: the start of the line a producer
+    /// returns.
+    pub fn indent(&self, row: &R) -> usize {
+        indent_of(row, self.indent)
+    }
+
+    /// `row` laid out at the width `cx` gives (the cells after the
+    /// cursor gutter): its indent, then its cells.
     pub fn line(&self, row: &R, cx: &RowCtx<'_>) -> Line<'static> {
-        let lead = self.lead(row);
-        let room = cx.width.saturating_sub(lead);
+        let indent = self.indent(row);
+        let room = cx.width.saturating_sub(indent);
         let cells = self.columns.cells(row, cx);
-        let mut spans = indent(lead);
-        spans.extend(
-            self.columns
-                .schema(row)
-                .draw(&self.measure, lead, room, &cells, cx.theme),
-        );
+        let mut spans = indent_spans(indent);
+        spans.extend(self.columns.schema(row).draw(
+            &self.measure,
+            self.lead(row),
+            room,
+            &cells,
+            cx.theme,
+        ));
         Line::from(spans)
     }
 
@@ -190,15 +209,19 @@ where
         from: P::Key,
         look: impl FnOnce(&mut [Span<'static>]),
     ) -> Line<'static> {
-        let lead = self.lead(row);
-        let room = cx.width.saturating_sub(lead);
+        let indent = self.indent(row);
+        let room = cx.width.saturating_sub(indent);
         let cells = self.columns.cells(row, cx);
-        let (head, mut rest) =
-            self.columns
-                .schema(row)
-                .draw_split(&self.measure, lead, room, &cells, cx.theme, from);
+        let (head, mut rest) = self.columns.schema(row).draw_split(
+            &self.measure,
+            self.lead(row),
+            room,
+            &cells,
+            cx.theme,
+            from,
+        );
         look(&mut rest);
-        let mut spans = indent(lead);
+        let mut spans = indent_spans(indent);
         spans.extend(head);
         spans.extend(rest);
         Line::from(spans)
@@ -214,14 +237,17 @@ where
         cx: &RowCtx<'_>,
         rest: impl FnOnce(usize) -> Vec<Span<'static>>,
     ) -> Line<'static> {
-        let lead = self.lead(row);
-        let room = cx.width.saturating_sub(lead);
+        let indent = self.indent(row);
+        let room = cx.width.saturating_sub(indent);
         let cells = self.columns.cells(row, cx);
-        let (drawn, left) =
-            self.columns
-                .schema(row)
-                .draw_then(&self.measure, lead, room, &cells, cx.theme);
-        let mut spans = indent(lead);
+        let (drawn, left) = self.columns.schema(row).draw_then(
+            &self.measure,
+            self.lead(row),
+            room,
+            &cells,
+            cx.theme,
+        );
+        let mut spans = indent_spans(indent);
         spans.extend(drawn);
         spans.extend(rest(left));
         Line::from(spans)
@@ -229,11 +255,17 @@ where
 }
 
 /// The cells `row`'s indent takes at `per` cells a level.
-fn lead<R: TreeRow>(row: &R, per: usize) -> usize {
+fn indent_of<R: TreeRow>(row: &R, per: usize) -> usize {
     usize::from(row.depth()) * per
 }
 
-fn indent(cells: usize) -> Vec<Span<'static>> {
+/// The schema's lead for `row` at `per` cells a level: the cursor gutter
+/// and the indent.
+fn lead<R: TreeRow>(row: &R, per: usize) -> usize {
+    GUTTER_WIDTH + indent_of(row, per)
+}
+
+fn indent_spans(cells: usize) -> Vec<Span<'static>> {
     if cells == 0 {
         Vec::new()
     } else {

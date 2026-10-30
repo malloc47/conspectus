@@ -133,11 +133,11 @@ TreeView::new(&rows, &state, |row, cx| columns.line(row, cx), &theme).render(are
 ```
 
 A list that draws something before the schema passes it as the row's
-lead: a tree its indent (`TreeColumns` does), a palette its cursor gutter
-(`selection::GUTTER_WIDTH`; see the palette's page). A share and row steps
-count the lead in the row's width, so one schema drawn in a palette and in
-a tree of the same whole width gives those columns the same cells, and a
-row reads alike in both.
+lead: a tree its cursor gutter and its indent (`TreeColumns` does), a
+palette its cursor gutter (`selection::GUTTER_WIDTH`; see the palette's
+page). A share and row steps count the lead in the row's width, so one
+schema drawn in a palette and in a tree of the same whole width gives
+those columns the same cells, and a row reads alike in both.
 
 ### The API
 
@@ -165,7 +165,7 @@ row reads alike in both.
 | `ColumnSchema::draw(measure, lead, room, cells, theme)` | one row's spans, never wider than the room | the policy below |
 | `ColumnSchema::draw_split(..., at)` | one row's spans parted where the column under `at` starts (or the next that shows) | for a look on part of a row; joined, the parts are what `draw` returns |
 | `ColumnSchema::draw_then(...)` | the columns drawn, padded, and the cells left | for a row whose last part the host draws |
-| `tree::RowColumns`, `TreeColumns::new`, `line`, `line_with_look`, `line_then`, `measure`, `lead` | a tree's rows from schemas | indents by `tree::INDENT` cells a level; `line_with_look(row, cx, from, look)` applies `look` to the spans from a column on, before the tree's own looks |
+| `tree::RowColumns`, `TreeColumns::new`, `line`, `line_with_look`, `line_then`, `measure`, `indent`, `lead` | a tree's rows from schemas | indents by `tree::INDENT` cells a level after the tree's cursor gutter, and gives the schema both as the row's lead; `line_with_look(row, cx, from, look)` applies `look` to the spans from a column on, before the tree's own looks |
 | `tree::disclosure(expandable, expanded, theme)` | the disclosure arrow as a cell | blank for a row without children |
 
 ### When a row is too narrow
@@ -226,15 +226,12 @@ text's style, so a padded text cell is one run.
 | 13 | Theme | cells carry the host's styles; the schema adds only the tokens above |
 | 14 | Width | every width counts terminal cells; a cut ends in `…` (or keeps both ends for a middle cut); a row never runs past its room without the mark |
 
-Not applicable: 1 and 10 (the cursor's look is the list's: the tree
-applies it after the producer), 2, 3 to 9, 11, 12, and 15 to 18 (no keys,
-no overlay, no editing).
+Not applicable: 1 and 10 (the cursor's gutter and look are the list's:
+the tree draws them around the producer's line), 2, 3 to 9, 11, 12, and
+15 to 18 (no keys, no overlay, no editing).
 
 ## Seams left open
 
-- **The cursor gutter.** House rule 1's pointer marker in a two-cell
-  gutter is not yet drawn before a tree's rows; a column of the schema
-  is where it goes, once every kind of row a host draws is on one.
 - **Shares of what is left.** A share is of the whole row. A grid whose
   column takes a share of what the fixed columns leave, or whose fill
   drops below its minimum and hands its room to a neighbor instead of to

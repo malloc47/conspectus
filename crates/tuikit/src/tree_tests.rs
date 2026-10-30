@@ -7,6 +7,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::*;
+use crate::glyphs::marks;
 use crate::scroll::ScrollWindow;
 use crate::testkit::buffer::rows;
 use crate::theme::Theme;
@@ -344,10 +345,14 @@ fn the_pane_draws_its_title_rows_and_scrollbar() {
     let (buf, window) = draw(view, 16, 8);
     let text = rows(&buf);
     assert_eq!(text[0], "┌ tabs ────────┐");
-    assert!(text[1].starts_with("│- a  "), "{text:?}");
-    assert!(text[2].starts_with("│    a1  "), "{text:?}");
+    assert!(
+        text[1].starts_with(&format!("│{} - a  ", marks::POINTER)),
+        "{text:?}"
+    );
+    assert!(text[2].starts_with("│      a1  "), "{text:?}");
     assert_eq!(window, Some(ScrollWindow::new(6, 10)));
-    assert!(buf[(3, 1)].modifier.contains(theme.selection_active));
+    assert!(buf[(1, 1)].modifier.contains(theme.selection_active));
+    assert!(buf[(5, 1)].modifier.contains(theme.selection_active));
     // The gutter's column, inside its one-row margins, holds the bar.
     assert_eq!(buf[(14, 1)].symbol(), " ");
     assert!((2..6).all(|y| buf[(14, y)].symbol() != " "), "{text:?}");
@@ -361,8 +366,8 @@ fn rows_that_fit_leave_the_gutter_to_the_rows() {
     let state = open(&[]);
     let (buf, window) = draw(TreeView::new(&tree, &state, label, &theme), 10, 6);
     let text = rows(&buf);
-    assert_eq!(text[1], "│+ a     │");
-    assert_eq!(text[2], "│+ b     │");
+    assert_eq!(text[1], "│  + a   │");
+    assert_eq!(text[2], "│  + b   │");
     assert_eq!(window.map(|window| window.overflows()), Some(false));
 }
 
@@ -383,7 +388,7 @@ fn the_header_and_the_footer_take_rows_only_when_the_pane_has_room() {
     let (buf, window) = draw(view(), 14, 9);
     let text = rows(&buf);
     assert_eq!(text[1], "│heading     │");
-    assert_eq!(text[2], "│- a         │");
+    assert_eq!(text[2], "│  - a       │");
     assert_eq!(text[6], "│note one    │");
     assert_eq!(text[7], "│note two    │");
     assert_eq!(buf[(1, 6)].fg, theme.warning);
@@ -392,9 +397,9 @@ fn the_header_and_the_footer_take_rows_only_when_the_pane_has_room() {
     // Four rows inside the border: no banner; three: no header either.
     let text = rows(&draw(view(), 14, 6).0);
     assert_eq!(text[1], "│heading     │");
-    assert_eq!(text[4], "│    a2      │");
+    assert_eq!(text[4], "│      a2    │");
     let text = rows(&draw(view(), 14, 5).0);
-    assert_eq!(text[1], "│- a         │");
+    assert_eq!(text[1], "│  - a       │");
 }
 
 #[test]
@@ -437,11 +442,15 @@ fn the_unfocused_cursor_row_takes_the_inactive_look() {
     state.end(&tree);
     let view = TreeView::new(&tree, &state, label, &theme).focused(false);
     let (buf, _) = draw(view, 10, 5);
-    // The fold mark of the cursor row carries no bold of its own.
-    assert_eq!(buf[(1, 2)].symbol(), "+");
-    assert!(buf[(1, 2)].modifier.contains(theme.selection_inactive));
-    assert!(!buf[(1, 2)].modifier.contains(Modifier::REVERSED));
-    assert!(!buf[(1, 1)].modifier.contains(theme.selection_inactive));
+    // The unfocused cursor row keeps its marker, and the fold mark carries
+    // no bold of its own.
+    assert_eq!(buf[(1, 2)].symbol(), marks::POINTER);
+    assert_eq!(buf[(3, 2)].symbol(), "+");
+    for x in [1, 3] {
+        assert!(buf[(x, 2)].modifier.contains(theme.selection_inactive));
+        assert!(!buf[(x, 2)].modifier.contains(Modifier::REVERSED));
+    }
+    assert!(!buf[(3, 1)].modifier.contains(theme.selection_inactive));
 }
 
 #[test]
@@ -469,7 +478,7 @@ fn row_states_give_rows_the_ghost_and_pending_looks() {
     };
     let view = TreeView::new(&tree, &state, producer, &theme).states(&states);
     let (buf, _) = draw(view, 10, 5);
-    let ghost = &buf[(3, 2)];
+    let ghost = &buf[(5, 2)];
     assert_eq!(ghost.symbol(), "b");
     assert_eq!(ghost.fg, theme.inert);
     assert!(ghost.modifier.contains(Modifier::ITALIC | theme.muted));
@@ -477,7 +486,7 @@ fn row_states_give_rows_the_ghost_and_pending_looks() {
         !ghost.modifier.contains(Modifier::BOLD),
         "a ghost drops its bold"
     );
-    assert!(buf[(3, 1)].modifier.contains(Modifier::BOLD));
+    assert!(buf[(5, 1)].modifier.contains(Modifier::BOLD));
     assert_eq!(marks.get(), 1, "the producer is told the row's mark");
 }
 
@@ -508,12 +517,74 @@ fn the_producer_is_told_the_width_left_by_the_gutter() {
         label(row, cx)
     };
     draw(TreeView::new(&tree, &open(&[]), &producer, &theme), 12, 6);
-    assert_eq!(widths.get(), (10, 10), "two rows fit: every column");
+    assert_eq!(
+        widths.get(),
+        (8, 8),
+        "two rows fit: every column after the cursor gutter"
+    );
     widths.set((usize::MAX, 0));
     draw(
         TreeView::new(&tree, &open(&[1, 5]), &producer, &theme),
         12,
         6,
     );
-    assert_eq!(widths.get(), (9, 9), "eight rows overflow: one column less");
+    assert_eq!(widths.get(), (7, 7), "eight rows overflow: one column less");
+}
+
+#[test]
+fn every_row_starts_with_the_cursor_gutter_and_only_the_cursor_row_is_marked() {
+    let theme = Theme::default();
+    let tree = groups();
+    let mut state = open(&[1, 5]);
+    state.home(&tree);
+    let shown = state.visible(&tree).len();
+    let mut frames = Vec::new();
+    for _ in 0..shown {
+        for focused in [true, false] {
+            let view = TreeView::new(&tree, &state, label, &theme).focused(focused);
+            let (buf, window) = draw(view, 16, 12);
+            let window = window.expect("rows show");
+            let marked: Vec<u16> = (1..11)
+                .filter(|&y| buf[(1, y)].symbol() == marks::POINTER)
+                .collect();
+            let cursor = state.cursor(&tree).expect("a cursor") - window.offset();
+            let cursor_y = 1 + u16::try_from(cursor).expect("a small tree");
+            assert_eq!(marked, vec![cursor_y], "focused: {focused}");
+            for y in (1..11).filter(|&y| y != cursor_y) {
+                assert_eq!(buf[(1, y)].symbol(), " ", "row {y}");
+                assert_eq!(buf[(2, y)].symbol(), " ", "row {y}");
+            }
+            // The text after the gutter is where it is on every frame.
+            frames.push(
+                rows(&buf)
+                    .iter()
+                    .map(|row| row.chars().skip(3).collect::<String>())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        state.step(&tree, 1);
+    }
+    assert!(
+        frames.windows(2).all(|pair| pair[0] == pair[1]),
+        "{frames:#?}"
+    );
+}
+
+#[test]
+fn of_two_copies_of_a_row_only_the_cursors_is_marked_and_highlighted() {
+    let theme = Theme::default();
+    let tree = duplicated();
+    let mut state = open(&[1, 2]);
+    state.home(&tree);
+    state.step(&tree, 3);
+    assert_eq!((state.selected(), state.cursor(&tree)), (Some(&9), Some(3)));
+    let (buf, _) = draw(TreeView::new(&tree, &state, label, &theme), 16, 8);
+    let text = rows(&buf);
+    assert!(text[2].starts_with("│      shared"), "{text:?}");
+    assert!(
+        text[4].starts_with(&format!("│{}     shared", marks::POINTER)),
+        "{text:?}"
+    );
+    assert!(!buf[(7, 2)].modifier.contains(theme.selection_active));
+    assert!(buf[(7, 4)].modifier.contains(theme.selection_active));
 }

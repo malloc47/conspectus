@@ -120,7 +120,8 @@ fn a_row_is_indented_by_its_depth_and_laid_out_in_the_cells_left() {
     let names = Names::new();
     let rows = tree();
     let columns = TreeColumns::new(&names, &rows, &TreeState::new(), &[], &theme);
-    assert_eq!(columns.lead(&rows[1]), INDENT);
+    assert_eq!(columns.indent(&rows[1]), INDENT);
+    assert_eq!(columns.lead(&rows[1]), GUTTER_WIDTH + INDENT);
     let line = columns.line(&rows[1], &cx(&theme, 26));
     assert_eq!(text(&line), "    a-much-longer-name");
     assert!(crate::text::spans_width(&line.spans) <= 26);
@@ -238,4 +239,56 @@ fn a_look_on_part_of_a_row_leaves_the_cells_before_it_alone() {
         "{:?}",
         looked.spans
     );
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Half {
+    Name,
+    Rest,
+}
+
+/// Rows whose name takes half of the whole row.
+struct Halves {
+    schema: ColumnSchema<Half>,
+}
+
+impl RowColumns<Item> for Halves {
+    type Key = Half;
+
+    fn schema(&self, _: &Item) -> &ColumnSchema<Half> {
+        &self.schema
+    }
+
+    fn cells(&self, row: &Item, _: &RowCtx<'_>) -> Cells<Half> {
+        vec![
+            (Half::Name, Cell::text(row.payload, Style::default())),
+            (Half::Rest, Cell::text("rest", Style::default())),
+        ]
+    }
+}
+
+#[test]
+fn a_share_of_the_row_counts_the_cursor_gutter() {
+    // A share is of the whole row, the cursor gutter the tree draws before
+    // it included: a list of the same whole width that draws its own
+    // gutter gives the column the same cells.
+    let halves = Halves {
+        schema: ColumnSchema::new([
+            Column::share(Half::Name, 1, 2).gap(0),
+            Column::fill(Half::Rest),
+        ]),
+    };
+    let theme = Theme::default();
+    let rows = vec![item(1, 0, false, "name")];
+    let columns = TreeColumns::new(&halves, &rows, &TreeState::new(), &[], &theme);
+    // A body 20 cells wide: the gutter, then 18 cells for the row.
+    let line = columns.line(&rows[0], &cx(&theme, 20 - GUTTER_WIDTH));
+    assert_eq!(text(&line), format!("name{}rest", " ".repeat(10 - 4)));
+    let cells = halves.cells(&rows[0], &cx(&theme, 0));
+    let mut list = crate::columns::Measure::new();
+    list.add(&halves.schema, GUTTER_WIDTH, &cells);
+    let listed = halves
+        .schema
+        .draw(&list, GUTTER_WIDTH, 20 - GUTTER_WIDTH, &cells, &theme);
+    assert_eq!(Cell::plain(&listed), text(&line));
 }

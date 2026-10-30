@@ -1,16 +1,17 @@
 ---
 source: src/tui/ui_tests.rs
+assertion_line: 5528
 expression: "pinned_frame(&mut app, width)"
 ---
 updated 0s ago · 1 sessions · 1 mux                                   
 ┌ ► sessions · mux · prs · pinned · history · search ────────────────┐
-│▶ ▣ ◉ conspectus-main         live       2m   claude     ~/src/cons…│
-│  ▣ ◎ config-agent3           stopped    3d   claude     ~/src/conf…│
-│  ● ◉ e44d01cb                in mux    17m   claude     Fix the le…│
-│  ◇ ◎ ledger-worktree         removed    2d              conspectus…│
-│  ⇄ ◉ ledger-pr               merged     5h              malloc47/c…│
-│  ▣ ◎ nightly                 planned     —   claude     ~/src/cons…│
-│  ▣ ◎ old-api                 planned     —   codex      ~/src/api  │
+│► ▶ ▣ ◉ conspectus-main         live       2m   claude     ~/src/co…│
+│    ▣ ◎ config-agent3           stopped    3d   claude     ~/src/co…│
+│    ● ◉ e44d01cb                in mux    17m   claude     Fix the …│
+│    ◇ ◎ ledger-worktree         removed    2d              conspect…│
+│    ⇄ ◉ ledger-pr               merged     5h              malloc47…│
+│    ▣ ◎ nightly                 planned     —   claude     ~/src/co…│
+│    ▣ ◎ old-api                 planned     —   codex      ~/src/api│
 │1 legacy pin is still read from config files (old-api); run         │
 │`conspectus pin migrate` to convert it                              │
 └────────────────────────────────────────────────────────────────────┘

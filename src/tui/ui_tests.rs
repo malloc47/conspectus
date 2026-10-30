@@ -315,7 +315,7 @@ fn render_at_default_size_shows_header_tree_and_detail() {
         "session harness label missing: {text}"
     );
     assert!(
-        text.contains("could you give me a"),
+        text.contains("could you give me"),
         "same-line preview missing: {text}"
     );
     assert!(
@@ -632,8 +632,8 @@ fn group_row_summary_chips_align_across_visible_groups() {
         .lines()
         .find(|l| l.contains("~/src/very-long-project-name"))
         .expect("long-named group row present");
-    let short_col = short_line.find("(1)").expect("short row has count chip");
-    let long_col = long_line.find("(1)").expect("long row has count chip");
+    let short_col = cell_column(short_line, "(1)").expect("short row has count chip");
+    let long_col = cell_column(long_line, "(1)").expect("long row has count chip");
     assert_eq!(
         short_col, long_col,
         "(N) chips should start at the same column across group rows:\n  short: {short_line}\n  long:  {long_line}",
@@ -659,11 +659,9 @@ fn group_row_secondary_column_starts_at_same_column_across_groups() {
         .lines()
         .find(|l| l.contains("~/src/very-long-project-name"))
         .expect("long-named group row present");
-    let short_col = short_line
-        .find("~/src/x")
-        .expect("short row secondary segment present");
-    let long_col = long_line
-        .find("~/src/very-long-project-name")
+    let short_col =
+        cell_column(short_line, "~/src/x").expect("short row secondary segment present");
+    let long_col = cell_column(long_line, "~/src/very-long-project-name")
         .expect("long row secondary segment present");
     assert_eq!(
         short_col, long_col,
@@ -4214,8 +4212,9 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
         pending
             .spans
             .iter()
+            .skip(1)
             .all(|s| s.style.add_modifier.contains(dim)),
-        "every span of a pending row is dimmed"
+        "every span of a pending row after its cursor gutter is dimmed"
     );
 
     app.update(Msg::HandoffSettled);

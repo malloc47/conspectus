@@ -37,10 +37,13 @@
 //!   an optional footer banner, and a placeholder when no row shows. The
 //!   host's producer lays each row out from the row and its [`RowCtx`];
 //!   the tree applies the pending and ghost looks a host's [`RowState`]
-//!   asks for and the cursor's highlight from the theme's selection pair,
-//!   active with focus and inactive without (house rules 1 and 10). The
-//!   draw returns the window it drew, which the host keeps with
-//!   [`TreeState::set_viewport`]: nothing is sent from inside the draw.
+//!   asks for, starts every row with the cursor gutter (the
+//!   [`marks::POINTER`](crate::glyphs::marks::POINTER) mark on the cursor
+//!   row, two blank cells on the others), and highlights the cursor row
+//!   from the theme's selection pair, active with focus and inactive
+//!   without (house rules 1 and 10). The draw returns the window it drew,
+//!   which the host keeps with [`TreeState::set_viewport`]: nothing is
+//!   sent from inside the draw.
 //!
 //! ```
 //! use ratatui::buffer::Buffer;
@@ -94,8 +97,12 @@
 //!     .render(area, &mut buf);
 //! state.set_viewport(window.expect("rows show"));
 //! assert_eq!(state.window().viewport(), 3);
-//! assert_eq!(buf[(5, 3)].symbol(), "p");
-//! assert!(buf[(5, 3)].modifier.contains(Modifier::REVERSED), "the cursor row is highlighted");
+//! // The cursor row starts with the pointer in the gutter, before the
+//! // indent and the disclosure cell.
+//! assert_eq!(buf[(1, 3)].symbol(), marks::POINTER);
+//! assert_eq!(buf[(1, 2)].symbol(), " ");
+//! assert_eq!(buf[(7, 3)].symbol(), "p");
+//! assert!(buf[(7, 3)].modifier.contains(Modifier::REVERSED), "the cursor row is highlighted");
 //!
 //! // A page moves by the rows the frame showed and stops at the end.
 //! state.page_down(&tree);

@@ -1,13 +1,14 @@
 ---
 source: src/tui/ui_tests.rs
+assertion_line: 5951
 expression: "pinned_frame(&mut app, 110)"
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                           
 ┌ ► sessions · mux · prs · pinned · history · search ─┐┌   detail ───────────────────────────────────────────┐
-│▼ conspectus  ~/src/conspectus                       ││Select a row to view its detail.                     │
-│    ◇ ◎ conspectus-ledger  removed    2d  conspectus…││                                                     │
-│▼ Other                                              ││                                                     │
-│    ▣ ◎ config-agent3      stopped    3d  ~/src/conf…││                                                     │
+│► ▼ conspectus  ~/src/conspectus                     ││Select a row to view its detail.                     │
+│      ◇ ◎ conspectus-ledger  removed    2d  conspect…││                                                     │
+│  ▼ Other                                            ││                                                     │
+│      ▣ ◎ config-agent3      stopped    3d  ~/src/co…││                                                     │
 │                                                     ││                                                     │
 │                                                     ││                                                     │
 │                                                     ││                                                     │

@@ -2,7 +2,8 @@
 //! from the search modal's hit columns: they give way by its order (the
 //! chip, then the age, then the label narrows, and the snippet keeps 20
 //! cells while anything else can give way), are never cut at the pane's
-//! edge, and read as the modal's rows read at the same width.
+//! edge, and give their chip, name, turn, and age the cells the modal's
+//! rows give them at the same width.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -243,25 +244,29 @@ fn modal_row(columns: u16) -> (String, usize) {
 
 #[test]
 fn a_hit_reads_as_the_modal_reads_it_at_the_same_width() {
-    // Where the modal's source word has given way, the two rows are one
-    // row after their two-cell leads (the modal's cursor gutter, the
-    // tree's disclosure).
+    let gutter = tuikit::selection::GUTTER_WIDTH;
+    let after_lead = |text: &str, lead: usize| text.chars().skip(lead).collect::<String>();
+    // Both rows start with a two-cell cursor gutter, and the tree's then
+    // with its disclosure cell (blank on a hit). Where the modal's source
+    // word has given way, a tree whose rows are that cell wider reads as
+    // the modal after their leads.
     let (modal, width) = modal_row(60);
     assert!(!modal.contains("session"), "{modal}");
     let view = drawn(&hit(true), width);
-    let after_lead = |text: &str| text.chars().skip(2).collect::<String>();
     assert_eq!(
-        after_lead(&view),
-        after_lead(&modal).trim_end(),
-        "at {width} cells"
+        after_lead(&view, 2),
+        after_lead(&modal, gutter).trim_end(),
+        "at {width} cells and a tree two cells wider"
     );
-    // Wider, the modal shows its source word and the tree does not; the
-    // chip, the name, the turn, and the age take the same cells.
+    // Wider, the modal shows its source word and the tree does not. At one
+    // width, the gutters included, the chip, the name, the turn, and the
+    // age take the same cells: a share of the row and the turn's steps
+    // count the gutter in both.
     let (modal, width) = modal_row(160);
     assert!(modal.contains("session  "), "{modal}");
-    let view = drawn(&hit(true), width);
+    let view = drawn(&hit(true), width - gutter);
     let cells = 11 + width / 5 + 2 + 22 + 2 + 4;
-    let modal_cells: String = modal.chars().skip(2 + 8).take(cells).collect();
+    let modal_cells: String = modal.chars().skip(gutter + 8).take(cells).collect();
     let view_cells: String = view.chars().skip(2).take(cells).collect();
     assert_eq!(view_cells, modal_cells, "at {width} cells");
 }

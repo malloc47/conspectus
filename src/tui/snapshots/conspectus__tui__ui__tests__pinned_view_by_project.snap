@@ -1,18 +1,19 @@
 ---
 source: src/tui/ui_tests.rs
+assertion_line: 5538
 expression: "pinned_frame(&mut app, 120)"
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                                     
 ┌ ► sessions · mux · prs · pinned · history · search ──────┐┌   detail ────────────────────────────────────────────────┐
-│▼ conspectus  ~/src/conspectus                            ││Select a row to view its detail.                          │
-│  ▶ ▣ ◉ conspectus-main         live       2m  ~/src/cons…││                                                          │
-│    ● ◉ e44d01cb                in mux    17m  Fix the le…││                                                          │
-│    ◇ ◎ ledger-worktree         removed    2d  conspectus…││                                                          │
-│    ▣ ◎ nightly                 planned     —  ~/src/cons…││                                                          │
-│▼ Other                                                   ││                                                          │
-│    ▣ ◎ config-agent3           stopped    3d  ~/src/conf…││                                                          │
-│    ⇄ ◉ ledger-pr               merged     5h  malloc47/c…││                                                          │
-│    ▣ ◎ old-api                 planned     —  ~/src/api  ││                                                          │
+│► ▼ conspectus  ~/src/conspectus                          ││Select a row to view its detail.                          │
+│    ▶ ▣ ◉ conspectus-main         live       2m  ~/src/co…││                                                          │
+│      ● ◉ e44d01cb                in mux    17m  Fix the …││                                                          │
+│      ◇ ◎ ledger-worktree         removed    2d  conspect…││                                                          │
+│      ▣ ◎ nightly                 planned     —  ~/src/co…││                                                          │
+│  ▼ Other                                                 ││                                                          │
+│      ▣ ◎ config-agent3           stopped    3d  ~/src/co…││                                                          │
+│      ⇄ ◉ ledger-pr               merged     5h  malloc47…││                                                          │
+│      ▣ ◎ old-api                 planned     —  ~/src/api││                                                          │
 │                                                          ││                                                          │
 │                                                          ││                                                          │
 │                                                          ││                                                          │

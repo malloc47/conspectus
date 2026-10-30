@@ -1,20 +1,21 @@
 ---
 source: src/tui/ui_tests.rs
+assertion_line: 5539
 expression: "pinned_frame(&mut app, 120)"
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                                     
 ┌ ► sessions · mux · prs · pinned · history · search ──────┐┌   detail ────────────────────────────────────────────────┐
-│▼ Muxes                                                   ││Select a row to view its detail.                          │
-│  ▶ ▣ ◉ conspectus-main         live       2m  ~/src/cons…││                                                          │
-│    ▣ ◎ config-agent3           stopped    3d  ~/src/conf…││                                                          │
-│    ▣ ◎ nightly                 planned     —  ~/src/cons…││                                                          │
-│    ▣ ◎ old-api                 planned     —  ~/src/api  ││                                                          │
-│▼ Sessions                                                ││                                                          │
-│    ● ◉ e44d01cb                in mux    17m  Fix the le…││                                                          │
-│▼ Worktrees                                               ││                                                          │
-│    ◇ ◎ ledger-worktree         removed    2d  conspectus…││                                                          │
-│▼ PRs                                                     ││                                                          │
-│    ⇄ ◉ ledger-pr               merged     5h  malloc47/c…││                                                          │
+│► ▼ Muxes                                                 ││Select a row to view its detail.                          │
+│    ▶ ▣ ◉ conspectus-main         live       2m  ~/src/co…││                                                          │
+│      ▣ ◎ config-agent3           stopped    3d  ~/src/co…││                                                          │
+│      ▣ ◎ nightly                 planned     —  ~/src/co…││                                                          │
+│      ▣ ◎ old-api                 planned     —  ~/src/api││                                                          │
+│  ▼ Sessions                                              ││                                                          │
+│      ● ◉ e44d01cb                in mux    17m  Fix the …││                                                          │
+│  ▼ Worktrees                                             ││                                                          │
+│      ◇ ◎ ledger-worktree         removed    2d  conspect…││                                                          │
+│  ▼ PRs                                                   ││                                                          │
+│      ⇄ ◉ ledger-pr               merged     5h  malloc47…││                                                          │
 │                                                          ││                                                          │
 │                                                          ││                                                          │
 │                                                          ││                                                          │

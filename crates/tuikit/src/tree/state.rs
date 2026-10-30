@@ -204,7 +204,11 @@ impl<Id: Ord + Clone> TreeState<Id> {
     }
 
     /// The cursor's position among `shown`, the showing indices of `rows`.
-    fn cursor_among<R: TreeRow<Id = Id>>(&self, rows: &[R], shown: &[usize]) -> Option<usize> {
+    pub(crate) fn cursor_among<R: TreeRow<Id = Id>>(
+        &self,
+        rows: &[R],
+        shown: &[usize],
+    ) -> Option<usize> {
         let selected = self.selected.as_ref()?;
         nearest(
             shown.iter().map(|&index| rows[index].id()),

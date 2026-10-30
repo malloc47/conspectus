@@ -1,14 +1,15 @@
 ---
 source: src/tui/ui_tests.rs
+assertion_line: 5126
 expression: "pr_frame(&mut app, 4, Some(fetched_pr(\"OPEN\", true, \"[]\", \"\")))"
 ---
 updated 0s ago · 0 sessions · 0 mux                                                                                               
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐┌   ⇄ pr ───────────────────────────────────────────────────────┐
-│▼ project  conspectus/project                                  ││► id            c87271dd104aff7b                               │
-│    ⇄ #4 ◌     —  ◐                                            ││  pr            conspectus/project#4 (OPEN)                    │
-│    ⇄ #3 ◌     —  ⊕                                            ││  draft         true                                           │
-│    ⇄ #2 ◌     —  ⊗                                            ││  head          feature/4                                      │
-│    ⇄ #1 ◌     —  ○                                            ││  updated       —                                              │
+│  ▼ project  conspectus/project                                ││► id            c87271dd104aff7b                               │
+│►     ⇄ #4 ◌     —  ◐                                          ││  pr            conspectus/project#4 (OPEN)                    │
+│      ⇄ #3 ◌     —  ⊕                                          ││  draft         true                                           │
+│      ⇄ #2 ◌     —  ⊗                                          ││  head          feature/4                                      │
+│      ⇄ #1 ◌     —  ○                                          ││  updated       —                                              │
 │                                                               ││  url           https://github.com/conspectus/project/pull/4   │
 │                                                               ││──────────────────────────────────────────────────── Preview ──│
 │                                                               ││Release notes for 0.3                                          │

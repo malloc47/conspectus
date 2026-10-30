@@ -15,8 +15,9 @@ regenerate the frames:
 just tui-columns          # UPDATE_TUI_COLUMNS=1 on the frame test
 ```
 
-The frames show the left pane only, at a terminal width of 170 columns,
-with ages measured at a fixed time. Colors are described in the tables
+The frames show the left pane only, at a terminal width of 170 columns
+unless a frame says otherwise, with ages measured at a fixed time. The
+`►` at the start of a row marks the row the cursor is on. Colors are described in the tables
 because a frame is plain text. For how the views fit into the rest of
 the product, see [design.md](design.md); for keys and menus, see
 [operations.md](operations.md).
@@ -48,10 +49,11 @@ Every row starts with the same cells, left to right:
 
 | # | Cell | Width | Shows | Condition |
 |---|---|---|---|---|
-| 1 | Indent | 2 cells per level | nothing | Flat Sessions (grouping `none`) has no indent |
-| 2 | Disclosure | 2 cells | `▶` collapsed or `▼` expanded, in cyan | Blank when the row has nothing under it |
-| 3 | Kind glyph | 1 cell and a space | what the row is (see [Glyphs](#glyphs)) | A group header that stands for no entity (the Ungrouped bucket, PR remote and state groups, and the Pinned, History, and Search buckets) has none: the cell is blank when another header in the tree has a glyph, so every header's label starts in one column, and omitted when none has |
-| 4 | Pin marker | 2 cells | `◉` pin on a running entity, `◎` pin on one that isn't | Reserved on every row of the tree once any row in it has a marker, so columns hold still |
+| 1 | Cursor gutter | 2 cells | `►` and a space on the cursor row, in the row's look; nothing on every other row | Every row of every view, focused or not, so no cell after it moves when the cursor does. The Search view's header line and the Pinned view's banner are not rows and have none |
+| 2 | Indent | 2 cells per level | nothing | Flat Sessions (grouping `none`) has no indent |
+| 3 | Disclosure | 2 cells | `▶` collapsed or `▼` expanded, in cyan | Blank when the row has nothing under it |
+| 4 | Kind glyph | 1 cell and a space | what the row is (see [Glyphs](#glyphs)) | A group header that stands for no entity (the Ungrouped bucket, PR remote and state groups, and the Pinned, History, and Search buckets) has none: the cell is blank when another header in the tree has a glyph, so every header's label starts in one column, and omitted when none has |
+| 5 | Pin marker | 2 cells | `◉` pin on a running entity, `◎` pin on one that isn't | Reserved on every row of the tree once any row in it has a marker, so columns hold still |
 
 A column padded to its widest value (group labels, paths, and counts,
 PR labels, and the label, status, and chip of a Pinned or History row)
@@ -72,11 +74,14 @@ record a pin points at, shown only when History lists pinned records.
 
 ### Selection, pending refresh, and dimming
 
-- The selected row is reversed and bold while the left pane has focus,
-  and bold only when it does not. A harness or program chip on it keeps
-  the look it has on every other row, so it still reads as a chip
-  inside the highlight. The tree draws no `►` before the selected row;
-  the right pane and every menu, form, and list mark theirs with it.
+- The selected row starts with `►` in the cursor gutter, and is
+  reversed and bold while the left pane has focus and bold only when it
+  does not; the marker alone finds it on a terminal that draws no color
+  or reverse video. A harness or program chip on it keeps the look it has
+  on every other row, so it still reads as a chip inside the highlight.
+  When a view lists one entity twice, only the row the cursor is on is
+  marked and highlighted. The right pane and every menu, form, and list
+  mark their cursor rows the same way.
 - Right after an action in tmux (attach, kill, rebuild), the affected
   rows keep their old values, dimmed, with a spinner where their state
   glyph or word goes, until the refresh lands.
@@ -115,7 +120,7 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `⊗` | a closed pull request | red | PR rows |
 | `▼` | an expanded row | cyan | The disclosure cell |
 | `▶` | a collapsed row | cyan | The disclosure cell |
-| `►` | the focused pane; or the cursor row of a list | cyan in a pane title; the row's look on a cursor row | Left of the tab bar; before the cursor row of the right pane, menus, forms, and lists |
+| `►` | the focused pane; or the cursor row of a list | cyan in a pane title; the row's look on a cursor row | Left of the tab bar; in the cursor gutter of the left pane's cursor row, and before the cursor row of the right pane, menus, forms, and lists |
 | `▲` | at least one session below has an ambiguous mux link | yellow bold | Group headers |
 | `◌` | a pull request with no local branch | dim | PR rows, in the tracking cell |
 | `—` | an age or value that isn't known | dim | Age cells |
@@ -224,7 +229,8 @@ Sorting by recency uses these same times.
 Group headers, session rows, mux rows (running and stopped), PR rows,
 Pinned and History rows, and the Search view's hit, pane, and pane hit
 rows lay their cells out by one rule, in every view that lists them. A
-row's room is the pane's width less the row's indent.
+row's room is the pane's width less the cursor gutter and the row's
+indent.
 
 1. The cells that line up down the tree (the prefix; a session's key,
    chip, age, and state; a mux's name, chips, age, and state; a PR's
@@ -273,18 +279,18 @@ A Pinned row in a narrow pane keeps its name and its state word:
 <!-- frame: keys="4jl" width=40 height=40 -->
 ```text
 ┌ ► sessions · mux · prs · pinned … ───┐
-│▼ project  ~/repos/project            │
-│  ▼ ▣ ◉ project-main     live       5m│
-│      ●   ambiguous mu…  in mux     1m│
-│      ●   ambiguous mu…  in mux     1m│
-│      ●   hook-superse…  in mux     1m│
-│      ●   claude-code …  in mux     1h│
-│    ▣ ◎ nightly          stopped    2d│
-│    ● ◉ parser-session   in mux     1h│
-│    ◇ ◎ ledger-worktree  removed    3d│
-│    ▣ ◎ weekly-review    planned     —│
-│▼ Other                               │
-│    ⇄ ◉ ledger-pr        merged     5d│
+│  ▼ project  ~/repos/project          │
+│►   ▼ ▣ ◉ project-main   live       5m│
+│        ●   ambiguous …  in mux     1m│
+│        ●   ambiguous …  in mux     1m│
+│        ●   hook-super…  in mux     1m│
+│        ●   claude-cod…  in mux     1h│
+│      ▣ ◎ nightly        stopped    2d│
+│      ● ◉ parser-sessi…  in mux     1h│
+│      ◇ ◎ ledger-workt…  removed    3d│
+│      ▣ ◎ weekly-review  planned     —│
+│  ▼ Other                             │
+│      ⇄ ◉ ledger-pr      merged     5d│
 ```
 
 ## Sessions view
@@ -315,22 +321,22 @@ the repo header's columns:
 <!-- frame: keys="<C-g><C-g><C-g>jjjjjl" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼ ◆   repo-a                   ~/atelier-demo/repo-a     (2)                       │
-│  ▼ ◇   repo-a                 ~/atelier-demo/repo-a     (2)                       │
-│      ●   showcase   pi           2h  ∘  Showcase: pi in atelier member repo       │
-│      ●   showcase   codex        3d  ∘  Showcase: codex parent in atelier fork li…│
-│▶ ◆   repo-b                   ~/atelier-demo/repo-b     (1)                       │
-│▼ ◆   bare-project             ~/checkouts/bare-project  (1)                       │
-│  ▶ ◇   bare-project (linked)  ~/checkouts/bare-project  (1)                       │
-│▶ ◆   project                  ~/repos/project           (4)  ▲                    │
-│▶     Ungrouped                                          (3)                       │
+│  ▼ ◆   repo-a                   ~/atelier-demo/repo-a     (2)                     │
+│    ▼ ◇   repo-a                 ~/atelier-demo/repo-a     (2)                     │
+│        ●   showcase   pi           2h  ∘  Showcase: pi in atelier member repo     │
+│        ●   showcase   codex        3d  ∘  Showcase: codex parent in atelier fork …│
+│  ▶ ◆   repo-b                   ~/atelier-demo/repo-b     (1)                     │
+│► ▼ ◆   bare-project             ~/checkouts/bare-project  (1)                     │
+│    ▶ ◇   bare-project (linked)  ~/checkouts/bare-project  (1)                     │
+│  ▶ ◆   project                  ~/repos/project           (4)  ▲                  │
+│  ▶     Ungrouped                                          (3)                     │
 ```
 
 ### Session row
 
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
-| 1 | Prefix | indent, disclosure (only if the session has forks beneath it), `●`, pin marker | always | |
+| 1 | Prefix | cursor gutter, indent, disclosure (only if the session has forks beneath it), `●`, pin marker | always | |
 | 2 | Session key | the harness's own id | always | first 8 cells, dim, padded to 8 |
 | 3 | Harness chip | the session's harness | always | 10 cells |
 | 4 | Age | last activity | always | 4 cells |
@@ -351,45 +357,45 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 <!-- frame: keys="" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
-│    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
-│▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                     │
-│▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                     │
-│▶ ◆   bare-project   ~/checkouts/bare-project              (1)                     │
-│▶ ◆   project        ~/repos/project                       (4)  ▲                  │
-│▶     Ungrouped                                            (1)                     │
+│► ▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                   │
+│      ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher   │
+│  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
+│  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
+│  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
+│  ▶ ◆   project        ~/repos/project                       (4)  ▲                │
+│  ▶     Ungrouped                                            (1)                   │
 ```
 
 <!-- frame: keys="jjjjjlj" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
-│    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
-│▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                     │
-│▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                     │
-│▶ ◆   bare-project   ~/checkouts/bare-project              (1)                     │
-│▼ ◆   project        ~/repos/project                       (4)  ▲                  │
-│    ●   showcase   claude       1m  ∘  ambiguous mux candidate A  Showcase: ambigu…│
-│    ●   showcase   claude       1m  ∘  ambiguous mux candidate B  Showcase: ambigu…│
-│    ●   showcase   claude       1m  ∘  hook-supersession current sessi…  Showcase:…│
-│    ● ◉ showcase   claude       1h  ∘  claude-code in project repo  I expanded `no…│
-│▶     Ungrouped                                            (1)                     │
+│  ▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                   │
+│      ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher   │
+│  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
+│  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
+│  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
+│  ▼ ◆   project        ~/repos/project                       (4)  ▲                │
+│►     ●   showcase   claude       1m  ∘  ambiguous mux candidate A  Showcase: ambi…│
+│      ●   showcase   claude       1m  ∘  ambiguous mux candidate B  Showcase: ambi…│
+│      ●   showcase   claude       1m  ∘  hook-supersession current sessi…  Showcas…│
+│      ● ◉ showcase   claude       1h  ∘  claude-code in project repo  I expanded `…│
+│  ▶     Ungrouped                                            (1)                   │
 ```
 
 <!-- frame: keys="<C-g><C-g><C-g><C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│  ●   showcase   claude       1m  ∘  ambiguous mux candidate A  project            │
-│  ●   showcase   claude       1m  ∘  ambiguous mux candidate B  project            │
-│  ●   showcase   claude       1m  ⊸  agent-deck composite launcher  showcase-deck-…│
-│  ●   showcase   claude       1m  ∘  hook-supersession current sessi…  project     │
-│  ● ◉ showcase   claude       1h  ∘  claude-code in project repo  project          │
-│  ●   showcase   pi           2h  ∘  repo-a            Showcase: pi in atelier mem…│
-│  ●   showcase   opencode     3h  ∘  repo-b            Showcase: opencode in ateli…│
-│  ●   showcase   codex       12h  ⊸  bare-work  bare-project      Showcase: codex …│
-│  ●   showcase   codex        2d  ∘  repo-a            Showcase: codex child forke…│
-│  ●   showcase   codex        3d  ∘  repo-a            Showcase: codex parent in a…│
-│  ●   showcase   codex        7d  ∘  orphan            Showcase: orphan session wi…│
+│►   ●   showcase   claude       1m  ∘  ambiguous mux candidate A  project          │
+│    ●   showcase   claude       1m  ∘  ambiguous mux candidate B  project          │
+│    ●   showcase   claude       1m  ⊸  agent-deck composite launcher  showcase-dec…│
+│    ●   showcase   claude       1m  ∘  hook-supersession current sessi…  project   │
+│    ● ◉ showcase   claude       1h  ∘  claude-code in project repo  project        │
+│    ●   showcase   pi           2h  ∘  repo-a            Showcase: pi in atelier m…│
+│    ●   showcase   opencode     3h  ∘  repo-b            Showcase: opencode in ate…│
+│    ●   showcase   codex       12h  ⊸  bare-work  bare-project      Showcase: code…│
+│    ●   showcase   codex        2d  ∘  repo-a            Showcase: codex child for…│
+│    ●   showcase   codex        3d  ∘  repo-a            Showcase: codex parent in…│
+│    ●   showcase   codex        7d  ∘  orphan            Showcase: orphan session …│
 ```
 
 ## Mux view
@@ -412,8 +418,8 @@ sessions are listed beneath a mux.
 
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
-| 1 | Prefix | indent, disclosure (only with more than one agent attached), `▣`, pin marker | always | |
-| 2 | Name | the mux name without its backend prefix | always | blue; a column of 18 cells, 20 once the row leaves it 39 cells, 24 from 73, and 30 from 105; long names keep their start and end |
+| 1 | Prefix | cursor gutter, indent, disclosure (only with more than one agent attached), `▣`, pin marker | always | |
+| 2 | Name | the mux name without its backend prefix | always | blue; a column of 18 cells, 20 once the row leaves it 37 cells, 24 from 71, and 30 from 103 (counted after the cursor gutter, the indent, and the prefix); long names keep their start and end |
 | 3 | Chip | its agents' harness chips, as many as fit in a column of at most two, with `+N` for the rest; else the pane's harness; else a program chip; else ` no agent ` | always | 10 cells each; the column is as wide as the widest row's chips, so the age lines up |
 | 4 | Age | the mux's own last activity | always | 4 cells |
 | 5 | State | `⊸` a client is attached, `∘` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
@@ -436,20 +442,20 @@ lines up with the running ones, and as a ghost, its `▣` included.
 <!-- frame: keys="2" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│  ▣   ambiguous                  claude      15m  ∘                                │
-│  ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via /p…│
-│  ▣ ◉ project                    claude       5m  ⊸                                │
-│  ▣   showcase-deck              claude      30m  ∘  Showcase: agent-deck composit…│
-│  ▣ ◎ nightly-refactor           claude       2d  ⊘  ~/repos/project               │
+│►   ▣   ambiguous                  claude      15m  ∘                              │
+│    ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via …│
+│    ▣ ◉ project                    claude       5m  ⊸                              │
+│    ▣   showcase-deck              claude      30m  ∘  Showcase: agent-deck compos…│
+│    ▣ ◎ nightly-refactor           claude       2d  ⊘  ~/repos/project             │
 ```
 
 <!-- frame: keys="2<C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼ ◆   bare-project  ~/checkouts/bare-project                                       │
-│    ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via …│
-│▶ ◆   project       ~/repos/project                                                │
-│▶     Ungrouped                                                                    │
+│► ▼ ◆   bare-project  ~/checkouts/bare-project                                     │
+│      ▣   bare-work                  codex        2h  ∘  Showcase: codex resume vi…│
+│  ▶ ◆   project       ~/repos/project                                              │
+│  ▶     Ungrouped                                                                  │
 ```
 
 Under a mux with more than one agent attached, each agent is a nested
@@ -479,7 +485,7 @@ them has an ambiguous mux link.
 
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
-| 1 | Prefix | indent, disclosure (only with sessions beneath), `⇄` colored by state, pin marker | always | |
+| 1 | Prefix | cursor gutter, indent, disclosure (only with sessions beneath), `⇄` colored by state, pin marker | always | |
 | 2 | Label | `#N`, or `owner/repo#N` | the short form only inside a group that holds one forge repo | bold, padded across the tree; when the row is narrow `owner/repo` is cut and `#N` stays whole |
 | 3 | Tracking | `⌥` has a local branch, `◌` none | always | 1 cell |
 | 4 | Age | last update | always | 4 cells |
@@ -498,19 +504,19 @@ two never disagree.
 <!-- frame: keys="3" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                  │
-│  ▶ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                        │
-│▶ ◆   conspectus/project  ~/repos/project  no checkout                             │
-│▶     project             conspectus/project                                       │
+│► ▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                │
+│    ▶ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                      │
+│  ▶ ◆   conspectus/project  ~/repos/project  no checkout                           │
+│  ▶     project             conspectus/project                                     │
 ```
 
 <!-- frame: keys="3<C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼   Draft   (4)  ▲                                                                 │
-│    ⇄   conspectus/project#8 ⌥    1d  ◐  main  Pin the toolchain and refresh the l…│
-│  ▶ ⇄   conspectus/project#7 ⌥    2h  ◐  feature/extra  Release notes for 0.3      │
-│▶   Merged                                                                         │
+│► ▼   Draft   (4)  ▲                                                               │
+│      ⇄   conspectus/project#8 ⌥    1d  ◐  main  Pin the toolchain and refresh the…│
+│    ▶ ⇄   conspectus/project#7 ⌥    2h  ◐  feature/extra  Release notes for 0.3    │
+│  ▶   Merged                                                                       │
 ```
 
 ## Pinned view
@@ -532,7 +538,7 @@ in bold and its path dim; for kind grouping, `Muxes`, `Sessions`,
 
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
-| 1 | Prefix | indent, disclosure (only with rows beneath), the pin's kind glyph, pin marker | always | the glyph keeps its color even on a ghost row |
+| 1 | Prefix | cursor gutter, indent, disclosure (only with rows beneath), the pin's kind glyph, pin marker | always | the glyph keeps its color even on a ghost row |
 | 2 | Label | the pin's name | always | bold, cut at 28, padded so it ends in one column at every depth |
 | 3 | Status | a word from [State words](#state-words) | always | cut at 9, padded; a spinner while a refresh is pending |
 | 4 | Age | see [Age](#age) | always | 4 cells |
@@ -554,40 +560,40 @@ or the first 8 characters of its key, its status is `in mux` or
 <!-- frame: keys="4" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼ project  ~/repos/project                                                         │
-│  ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
-│    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
-│    ● ◉ parser-session                  in mux     1h   claude     claude-code in …│
-│    ◇ ◎ ledger-worktree                 removed    3d              project · featu…│
-│    ▣ ◎ weekly-review                   planned     —   codex      ~/repos/project │
-│▼ Other                                                                            │
-│    ⇄ ◉ ledger-pr                       merged     5d              conspectus/proj…│
+│► ▼ project  ~/repos/project                                                       │
+│    ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/proje…│
+│      ▣ ◎ nightly                         stopped    2d   claude     ~/repos/proje…│
+│      ● ◉ parser-session                  in mux     1h   claude     claude-code i…│
+│      ◇ ◎ ledger-worktree                 removed    3d              project · fea…│
+│      ▣ ◎ weekly-review                   planned     —   codex      ~/repos/proje…│
+│  ▼ Other                                                                          │
+│      ⇄ ◉ ledger-pr                       merged     5d              conspectus/pr…│
 ```
 
 <!-- frame: keys="4<C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼ Muxes                                                                            │
-│  ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
-│    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
-│    ▣ ◎ weekly-review                   planned     —   codex      ~/repos/project │
-│▼ Sessions                                                                         │
-│    ● ◉ parser-session                  in mux     1h   claude     claude-code in …│
-│▼ Worktrees                                                                        │
-│    ◇ ◎ ledger-worktree                 removed    3d              project · featu…│
-│▼ PRs                                                                              │
-│    ⇄ ◉ ledger-pr                       merged     5d              conspectus/proj…│
+│► ▼ Muxes                                                                          │
+│    ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/proje…│
+│      ▣ ◎ nightly                         stopped    2d   claude     ~/repos/proje…│
+│      ▣ ◎ weekly-review                   planned     —   codex      ~/repos/proje…│
+│  ▼ Sessions                                                                       │
+│      ● ◉ parser-session                  in mux     1h   claude     claude-code i…│
+│  ▼ Worktrees                                                                      │
+│      ◇ ◎ ledger-worktree                 removed    3d              project · fea…│
+│  ▼ PRs                                                                            │
+│      ⇄ ◉ ledger-pr                       merged     5d              conspectus/pr…│
 ```
 
 <!-- frame: keys="4<C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project   │
-│  ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project   │
-│  ● ◉ parser-session                  in mux     1h   claude     claude-code in pr…│
-│  ◇ ◎ ledger-worktree                 removed    3d              project · feature…│
-│  ⇄ ◉ ledger-pr                       merged     5d              conspectus/projec…│
-│  ▣ ◎ weekly-review                   planned     —   codex      ~/repos/project   │
+│► ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
+│    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
+│    ● ◉ parser-session                  in mux     1h   claude     claude-code in …│
+│    ◇ ◎ ledger-worktree                 removed    3d              project · featu…│
+│    ⇄ ◉ ledger-pr                       merged     5d              conspectus/proj…│
+│    ▣ ◎ weekly-review                   planned     —   codex      ~/repos/project │
 ```
 
 ## History view
@@ -607,7 +613,7 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 | # | Cell | Source | Condition |
 |---|---|---|---|
-| 1 | Prefix | indent, the record's kind glyph, pin marker (`◎` for a pinned record, when pinned records are listed) | always |
+| 1 | Prefix | cursor gutter, indent, the record's kind glyph, pin marker (`◎` for a pinned record, when pinned records are listed) | always |
 | 2 | Label | mux name; worktree name; repo name; PR number | cut at 28 |
 | 3 | Status | `stopped` (mux), `removed` (worktree, repo), or the PR state | always |
 | 4 | Age | time since it was last seen | always |
@@ -617,34 +623,34 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 <!-- frame: keys="5" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼ project  ~/repos/project                                                         │
-│    ▣ release-prep   stopped    4d   claude     ~/repos/project                    │
-│    ◇ hotfix/login   removed    5d              project · hotfix/login             │
-│    ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                    │
-│    ▣ docs-sweep     stopped    9d   claude     ~/repos/project                    │
-│    ◇ spike/cache    removed   12d              project · spike/cache              │
+│► ▼ project  ~/repos/project                                                       │
+│      ▣ release-prep   stopped    4d   claude     ~/repos/project                  │
+│      ◇ hotfix/login   removed    5d              project · hotfix/login           │
+│      ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                  │
+│      ▣ docs-sweep     stopped    9d   claude     ~/repos/project                  │
+│      ◇ spike/cache    removed   12d              project · spike/cache            │
 ```
 
 <!-- frame: keys="5<C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│▼ Muxes                                                                            │
-│    ▣ release-prep   stopped    4d   claude     ~/repos/project                    │
-│    ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                    │
-│    ▣ docs-sweep     stopped    9d   claude     ~/repos/project                    │
-│▼ Worktrees                                                                        │
-│    ◇ hotfix/login   removed    5d              project · hotfix/login             │
-│    ◇ spike/cache    removed   12d              project · spike/cache              │
+│► ▼ Muxes                                                                          │
+│      ▣ release-prep   stopped    4d   claude     ~/repos/project                  │
+│      ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                  │
+│      ▣ docs-sweep     stopped    9d   claude     ~/repos/project                  │
+│  ▼ Worktrees                                                                      │
+│      ◇ hotfix/login   removed    5d              project · hotfix/login           │
+│      ◇ spike/cache    removed   12d              project · spike/cache            │
 ```
 
 <!-- frame: keys="5<C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│  ▣ release-prep   stopped    4d   claude     ~/repos/project                      │
-│  ◇ hotfix/login   removed    5d              project · hotfix/login               │
-│  ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                      │
-│  ▣ docs-sweep     stopped    9d   claude     ~/repos/project                      │
-│  ◇ spike/cache    removed   12d              project · spike/cache                │
+│►   ▣ release-prep   stopped    4d   claude     ~/repos/project                    │
+│    ◇ hotfix/login   removed    5d              project · hotfix/login             │
+│    ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                    │
+│    ▣ docs-sweep     stopped    9d   claude     ~/repos/project                    │
+│    ◇ spike/cache    removed   12d              project · spike/cache              │
 ```
 
 ## Search view
@@ -702,21 +708,21 @@ session's last activity, as everywhere else, not the time of the match.
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
-│  ▣ ◉ project 0.0   2 hits            0s ready once they pass. │
-│  ● ◉ showcase   claude       1h  ∘  project           2 hits  │
-│  ●   showcase   pi           2h  ∘  repo-a            2 hits  │
+│►   ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
+│    ● ◉ showcase   claude       1h  ∘  project           2 hits│
+│    ●   showcase   pi           2h  ∘  repo-a            2 hits│
 ```
 
 <!-- frame: keys="6sthe<C-f><C-g>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
-│▼   Mux panes                                                  │
-│    ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
-│▼   project    (1)  ▲                                          │
-│    ● ◉ showcase   claude       1h  ∘  project           2 hits│
-│▼   repo-a     (1)                                             │
-│    ●   showcase   pi           2h  ∘  repo-a            2 hits│
+│► ▼   Mux panes                                                │
+│      ▣ ◉ project 0.0   2 hits          ready once they pass.  │
+│  ▼   project    (1)  ▲                                        │
+│      ● ◉ showcase   claude       1h  ∘  project         2 hits│
+│  ▼   repo-a     (1)                                           │
+│      ●   showcase   pi           2h  ∘  repo-a          2 hits│
 ```
 
 ### Hit row
@@ -739,23 +745,23 @@ a hit row, so it names its session first.
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
-│  project 0.0   line 17           0s ready once they pass.     │
-│  project 0.0   line 6            0s …Expand the notes into a… │
-│  claude-code…  turn 3 · mess…  107d Expand the notes into a…  │
-│  claude-code…  turn 4 · mess…  107d …since the last release…  │
-│  pi in ateli…  turn 1 · mess…  107d …cover the fork index…    │
-│  pi in ateli…  turn 2 · mess…  107d …the empty index,…        │
+│►   project 0.0   line 17           0s ready once they pass.   │
+│    project 0.0   line 6            0s …the notes into a…      │
+│    claude-code…  turn 3 · mess…  107d Expand the notes into a…│
+│    claude-code…  turn 4 · mess…  107d …since the last release…│
+│    pi in ateli…  turn 1 · mess…  107d …cover the fork index…  │
+│    pi in ateli…  turn 2 · mess…  107d …the empty index,…      │
 ```
 
 <!-- frame: keys="6sthe<C-f>f<Up><Space><Esc>" width=150 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ─────────────────────┐
-│▼ project  ~/repos/project                                               │
-│    ▣ release-prep   stopped    4d   claude     ~/repos/project          │
-│    ◇ hotfix/login   removed    5d              project · hotfix/login   │
-│    ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project          │
-│    ▣ docs-sweep     stopped    9d   claude     ~/repos/project          │
-│    ◇ spike/cache    removed   12d              project · spike/cache    │
+│► ▼ project  ~/repos/project                                             │
+│      ▣ release-prep   stopped    4d   claude     ~/repos/project        │
+│      ◇ hotfix/login   removed    5d              project · hotfix/login │
+│      ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project        │
+│      ▣ docs-sweep     stopped    9d   claude     ~/repos/project        │
+│      ◇ spike/cache    removed   12d              project · spike/cache  │
 ```
 
 ### Pane row
@@ -769,7 +775,7 @@ It takes the [hit row](#hit-row)'s columns after the mux glyph.
 
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
-| 1 | Prefix | indent, disclosure | always | |
+| 1 | Prefix | cursor gutter, indent, disclosure | always | |
 | 2 | Kind | the mux glyph `▣` | always | mux color |
 | 3 | Command | what the pane was running, in the chip's column | when it is known; gives way first | dim |
 | 4 | Name | the mux's name and the pane's `window.pane`, such as `work 0.1` | always; narrows to 8 cells | as the hit row's |
@@ -781,8 +787,8 @@ It takes the [hit row](#hit-row)'s columns after the mux glyph.
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
-│  ▣ ◉ project 0.0   4 hits            0s from feature/extra…   │
-│  ● ◉ showcase   claude       1h  ∘  project           4 hits  │
+│►   ▣ ◉ project 0.0   4 hits            0s from feature/extra… │
+│    ● ◉ showcase   claude       1h  ∘  project           4 hits│
 ```
 
 ### Pane hit row
@@ -801,14 +807,14 @@ column, then the mux's name and the pane's place, then:
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
-│  project 0.0   line 16           0s from feature/extra into…  │
-│  project 0.0   line 7            0s feature/extra.            │
-│  project 0.0   line 3            0s …feature notes,…          │
-│  project 0.0   line 1            0s …on feature/extra that…   │
-│  claude-code…  turn 1 · mess…  107d …on feature/extra that…   │
-│  claude-code…  turn 2 · mess…  107d …feature notes,…          │
-│  claude-code…  turn 3 · mess…  107d …a PR from feature/extra. │
-│  claude-code…  turn 4 · mess…  107d …from feature/extra into… │
+│►   project 0.0   line 16           0s from feature/extra into…│
+│    project 0.0   line 7            0s feature/extra.          │
+│    project 0.0   line 3            0s …feature notes,…        │
+│    project 0.0   line 1            0s …on feature/extra…      │
+│    claude-code…  turn 1 · mess…  107d …on feature/extra…      │
+│    claude-code…  turn 2 · mess…  107d …feature notes,…        │
+│    claude-code…  turn 3 · mess…  107d …PR from feature/extra. │
+│    claude-code…  turn 4 · mess…  107d …from feature/extra…    │
 ```
 
 ### Paging
@@ -817,7 +823,7 @@ column, then the mux's name and the pane's place, then:
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/2 "the" · All · 2 sessions · 1 pane · 4 skipped · sca…│
-│  ▣ ◉ project 0.0   2 hits            0s ready once they pass. │
-│  ● ◉ showcase   claude       1h  ∘  project           2 hits  │
-│  ●   showcase   pi           2h  ∘  repo-a            2 hits  │
+│►   ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
+│    ● ◉ showcase   claude       1h  ∘  project           2 hits│
+│    ●   showcase   pi           2h  ∘  repo-a            2 hits│
 ```

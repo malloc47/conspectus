@@ -1,11 +1,12 @@
 ---
 source: src/tui/ui_tests.rs
+assertion_line: 6040
 expression: "trimmed(pinned_frame(&mut app, 100))"
 ---
 updated 0s ago · 1 sessions · 1 mux
 ┌ ► sessions · mux┌ mux config-agent3 ───────────────────────────────────────────┐─────────────────┐
-│  ◇ ◎ conspectus-│                                                              │.                │
-│  ▣ ◎ config-agen│► Rebuild                                                    ▲│                 │
+│    ◇ ◎ conspectu│                                                              │.                │
+│►   ▣ ◎ config-ag│► Rebuild                                                    ▲│                 │
 │                 │     bring it back without attaching (Enter also attaches)   █│                 │
 │                 │  Show rebuild plan                                          █│                 │
 │                 │     what rebuild would run, without running it              █│                 │

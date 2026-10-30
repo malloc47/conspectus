@@ -1,16 +1,17 @@
 ---
 source: src/tui/ui_tests.rs
+assertion_line: 5527
 expression: "pinned_frame(&mut app, width)"
 ---
 updated 0s ago · 1 sessions · 1 mux                                                                           
 ┌ ► sessions · mux · prs · pinned · history · search ─┐┌   ◉ pin ────────────────────────────────────────────┐
-│▶ ▣ ◉ conspectus-main         live       2m  ~/src/c…││► id            conspectus-main                      │
-│  ▣ ◎ config-agent3           stopped    3d  ~/src/c…││  name          conspectus-main                      │
-│  ● ◉ e44d01cb                in mux    17m  Fix the…││  kind          mux                                  │
-│  ◇ ◎ ledger-worktree         removed    2d  conspec…││  status        live                                 │
-│  ⇄ ◉ ledger-pr               merged     5h  malloc4…││  target        mux_session:tmux:conspectus-main     │
-│  ▣ ◎ nightly                 planned     —  ~/src/c…││  name          conspectus-main                      │
-│  ▣ ◎ old-api                 planned     —  ~/src/a…││  cwd           /home/op/src/conspectus              │
+│► ▶ ▣ ◉ conspectus-main         live       2m        ││► id            conspectus-main                      │
+│    ▣ ◎ config-agent3           stopped    3d        ││  name          conspectus-main                      │
+│    ● ◉ e44d01cb                in mux    17m        ││  kind          mux                                  │
+│    ◇ ◎ ledger-worktree         removed    2d        ││  status        live                                 │
+│    ⇄ ◉ ledger-pr               merged     5h        ││  target        mux_session:tmux:conspectus-main     │
+│    ▣ ◎ nightly                 planned     —        ││  name          conspectus-main                      │
+│    ▣ ◎ old-api                 planned     —        ││  cwd           /home/op/src/conspectus              │
 │                                                     ││  harness       claude-code                          │
 │                                                     ││  argv          claude                               │
 │                                                     ││──────────────────────────── 1 validated  Related ── │

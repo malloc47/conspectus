@@ -4,13 +4,13 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use super::TreeRow;
 use super::state::TreeState;
 use crate::scroll::{ScrollGutter, ScrollWindow, WrappedRows};
-use crate::selection::{self, Cursor};
+use crate::selection::{self, Cursor, GUTTER_WIDTH};
 use crate::text;
 use crate::theme::Theme;
 
@@ -47,11 +47,14 @@ pub struct RowState {
 /// the row itself.
 ///
 /// The producer writes the row's cells at [`width`](Self::width); the tree
-/// then applies the looks the context names ([`apply_looks`](Self::apply_looks)):
-/// the pending and ghost looks, then the cursor's highlight.
+/// then draws the row from them ([`row`](Self::row)): the pending and
+/// ghost looks, then the cursor gutter before the cells and the cursor's
+/// highlight over both.
 #[derive(Clone, Copy, Debug)]
 pub struct RowCtx<'a> {
-    /// The cursor is on the row: the row has the selected identity.
+    /// The cursor is on the row: the row has the selected identity and,
+    /// when the host lists that identity more than once, is the copy the
+    /// cursor is on. One row of a frame is the cursor's.
     pub selected: bool,
     /// The tree has focus, so the cursor row takes the active highlight.
     pub focused: bool,
@@ -63,8 +66,10 @@ pub struct RowCtx<'a> {
     pub pending: bool,
     /// The host's mark for the row.
     pub mark: RowMark,
-    /// The cells the row may take: the body's width, less the scrollbar
-    /// gutter when the rows overflow.
+    /// The cells the row may take: the body's width less the cursor
+    /// gutter the tree draws before every row
+    /// ([`GUTTER_WIDTH`](crate::selection::GUTTER_WIDTH)), and less the
+    /// scrollbar gutter when the rows overflow.
     pub width: usize,
     /// The theme the tree draws with.
     pub theme: &'a Theme,
@@ -76,19 +81,50 @@ impl RowCtx<'_> {
         Cursor::of(self.selected, self.focused)
     }
 
-    /// Apply the looks the context names to a row's spans, in the order
-    /// that keeps each visible: the pending look, then the ghost look, then
-    /// the cursor's highlight (so a selected ghost row is still a ghost).
-    /// The tree does this to every line a producer returns; a host that
-    /// draws one row on its own calls it too.
-    pub fn apply_looks(&self, spans: &mut [Span<'_>]) {
+    /// The row as the tree draws it from the `line` its producer laid out
+    /// at [`width`](Self::width): the looks the context names on the
+    /// line's spans, in the order that keeps each visible (the pending
+    /// look, then the ghost look), then the cursor gutter before them, the
+    /// pointer mark on the cursor row and two blank cells on every other
+    /// row, and the cursor's highlight over the whole row
+    /// ([`selection::row`]). A selected ghost row is still a ghost, and
+    /// its marker takes only the highlight. The tree does this to every
+    /// line a producer returns; a host that draws one row on its own calls
+    /// it too.
+    ///
+    /// ```
+    /// use ratatui::text::Line;
+    /// use tuikit::glyphs::marks;
+    /// use tuikit::theme::Theme;
+    /// use tuikit::tree::{RowCtx, RowMark};
+    ///
+    /// let theme = Theme::default();
+    /// let cx = RowCtx {
+    ///     selected: true,
+    ///     focused: true,
+    ///     expanded: false,
+    ///     ghost: false,
+    ///     pending: false,
+    ///     mark: RowMark::None,
+    ///     width: 10,
+    ///     theme: &theme,
+    /// };
+    /// let row = cx.row(Line::from("apple"));
+    /// assert_eq!(row.spans[0].content, format!("{} ", marks::POINTER));
+    /// assert_eq!(row.width(), 2 + "apple".len());
+    /// let other = RowCtx { selected: false, ..cx }.row(Line::from("pear"));
+    /// assert_eq!(other.spans[0].content, "  ");
+    /// ```
+    pub fn row<'l>(&self, mut line: Line<'l>) -> Line<'l> {
+        let mut spans = std::mem::take(&mut line.spans);
         if self.pending {
-            selection::pending(spans, self.theme);
+            selection::pending(&mut spans, self.theme);
         }
         if self.ghost {
-            selection::ghost(spans, self.theme);
+            selection::ghost(&mut spans, self.theme);
         }
-        selection::highlight(spans, self.cursor(), self.theme);
+        line.spans = selection::row(spans, self.cursor(), self.theme).spans;
+        line
     }
 }
 
@@ -107,8 +143,11 @@ const HEADER_ROOM: u16 = 3;
 /// The host lays each row out: the producer `line` takes the row and its
 /// [`RowCtx`] and returns the row's [`Line`], at most `width` cells. The
 /// tree decides which rows show, which of them the window shows, and how
-/// the cursor row and the host's [`RowState`]s look. Only the rows the
-/// window shows are laid out.
+/// the cursor row and the host's [`RowState`]s look: every row starts with
+/// the cursor gutter, the pointer mark on the cursor row and two blank
+/// cells on the others (house rule 1), so nothing the producer lays out
+/// moves as the cursor does. Only the rows the window shows are laid
+/// out.
 ///
 /// [`render`](Self::render) returns the window it drew, which the host
 /// keeps with [`TreeState::set_viewport`], or `None` when no row showed
@@ -251,29 +290,36 @@ where
             return None;
         }
 
-        // The gutter is carved out of the body when the rows overflow, so
-        // rows are laid out at the width that is left.
+        // The scrollbar's gutter is carved out of the body when the rows
+        // overflow, and every row starts with the cursor gutter, so rows
+        // are laid out at the width that is left.
         let gutter = ScrollGutter::layout(inner, shown.len());
-        let width = usize::from(gutter.content().width);
+        let width = usize::from(gutter.content().width).saturating_sub(GUTTER_WIDTH);
         let window = self
             .state
             .window_over(self.rows, &shown, usize::from(inner.height));
-        let lines: Vec<Line<'static>> = shown[window.visible()]
+        // One row is the cursor's: the copy of the selected identity the
+        // cursor is on, when the host lists an identity twice.
+        let cursor = self.state.cursor_among(self.rows, &shown);
+        let visible = window.visible();
+        let lines: Vec<Line<'static>> = shown[visible.clone()]
             .iter()
-            .map(|&index| self.row_line(index, width))
+            .zip(visible)
+            .map(|(&index, position)| self.row_line(index, cursor == Some(position), width))
             .collect();
         Paragraph::new(lines).render(gutter.content(), buf);
         gutter.render(&window, buf);
         Some(window)
     }
 
-    /// The line of the row at `index` in the rows, laid out by the producer
-    /// at `width` and given its looks.
-    fn row_line(&self, index: usize, width: usize) -> Line<'static> {
+    /// The line of the row at `index` in the rows, the cursor's row when
+    /// `cursor` says so, laid out by the producer at `width`, given its
+    /// looks, and led by the cursor gutter.
+    fn row_line(&self, index: usize, cursor: bool, width: usize) -> Line<'static> {
         let row = &self.rows[index];
         let state = self.states.get(index).copied().unwrap_or_default();
         let cx = RowCtx {
-            selected: self.state.selected() == Some(row.id()),
+            selected: cursor,
             focused: self.focused,
             expanded: self.state.is_expanded(row.id()),
             ghost: state.ghost,
@@ -282,8 +328,6 @@ where
             width,
             theme: self.theme,
         };
-        let mut line = (self.line)(row, &cx);
-        cx.apply_looks(&mut line.spans);
-        line
+        cx.row((self.line)(row, &cx))
     }
 }

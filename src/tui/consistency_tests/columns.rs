@@ -144,10 +144,11 @@ fn is_state(token: &str) -> bool {
     .contains(&token)
 }
 
-/// The marks a row starts with: the disclosure, the kind glyphs, and the
-/// pin markers.
+/// The marks a row starts with: the cursor's pointer in the tree's gutter,
+/// the disclosure, the kind glyphs, and the pin markers.
 fn is_mark(token: &str) -> bool {
-    ["▶", "▼", "▦", "◆", "◇", "●", "▣", "⇄", "⌥", "⋎", "◉", "◎"].contains(&token)
+    token == marks::POINTER
+        || ["▶", "▼", "▦", "◆", "◇", "●", "▣", "⇄", "⌥", "⋎", "◉", "◎"].contains(&token)
 }
 
 /// The first of `tokens` after `from` that stands two or more cells from

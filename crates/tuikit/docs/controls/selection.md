@@ -171,12 +171,13 @@ stop at the ends whatever the list's rule (house rule 12).
 
 ### Where the marker goes
 
-A list whose rows already start with two blank cells (an indent, a lead
-before a label) puts the gutter there, so adding the marker moves no
-column. A list whose first cells carry meaning of their own (a tree's
-disclosure arrows and kind glyphs) may draw the highlight alone with
-`highlight` until its columns make room for the gutter; the highlight
-still follows the focus.
+Every row starts with the gutter, before anything the list draws of its
+own: a tree puts it before each row's indent and disclosure arrow
+(`TreeView` draws it), and a list whose rows would start with two blank
+cells anyway (an indent, a lead before a label) puts it there, so the
+marker takes no room of its own. A list that lays its rows out from a column
+schema tells the schema the gutter is part of each row's lead, so a
+share of the row and steps by the row count it.
 
 ## Key table
 

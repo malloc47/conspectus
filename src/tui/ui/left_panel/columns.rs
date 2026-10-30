@@ -122,8 +122,10 @@ const LABEL_FLOOR: usize = 8;
 /// The fewest cells a header's path narrows to before it leaves.
 const DETAIL_FLOOR: usize = 8;
 /// The mux name column, by the cells left for it and the columns after
-/// it: a wider pane gives names more room.
-const MUX_NAME_STEPS: &[(usize, usize)] = &[(105, 30), (73, 24), (39, 20), (0, 18)];
+/// it: a wider pane gives names more room. The cells are counted after the
+/// tree's cursor gutter, so a name steps at pane widths two cells past its
+/// thresholds.
+const MUX_NAME_STEPS: &[(usize, usize)] = &[(103, 30), (71, 24), (37, 20), (0, 18)];
 /// The fewest cells a mux name narrows to.
 const MUX_NAME_FLOOR: usize = 10;
 /// The widest branch a PR row shows, so one long branch cannot crowd out
