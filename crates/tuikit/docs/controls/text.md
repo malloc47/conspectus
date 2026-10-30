@@ -22,7 +22,9 @@ wrap, or highlight separates them.
 The module replaces the scattered helpers a program grows: several
 truncators (some counting characters), padding helpers, word wrappers that
 disagree about where a row breaks, two ways of cropping a snippet around a
-match, and a match painter per surface. The host keeps what its text means:
+match, a match painter per surface, and a fit routine per line whose pieces
+give way (a path, a strip of names, a status line). The host keeps what its
+text means:
 which column holds which value, how wide each column is, domain-specific
 compaction (a path shortened to its last segment, an identifier kept to a
 fixed head and tail), and which style a match takes.
@@ -88,6 +90,7 @@ assert_eq!(painted.iter().filter(|span| span.style == bold).count(), 3);
 | `wrap_at` | wrap only at a separator, dropping it at a break | for key hints; an item wider than a row is word-wrapped |
 | `wrap_line`, `wrap_line_chars` | the styled forms of `wrap` and `wrap_chars` | `wrap_line` takes a hanging indent for continuation rows |
 | `fit_snippet` | crop an excerpt around a match to a budget | favors the text after the match; drops the characters you name first |
+| `elide` | keep the pieces of a line that fit by rank, mark what gave way | rules below; `Piece`, `MarkAt`, `Elided`, `Item` |
 | `find_ci`, `find_all_ci` | find matches, ASCII letters without case | offsets stay valid for highlighting |
 | `paint` | restyle byte ranges of a span list | the one match painter |
 | `paint_matches` | patch every occurrence of a query in a row, after a gutter it skips | `find_all_ci` and `paint` together, for a reader's rows |
@@ -138,6 +141,55 @@ word moves to the word's edge unless that gives up the room next to the
 match, and a match wider than the budget shows as much of its start as
 fits. The highlight is widened to whole graphemes.
 
+### Giving way
+
+A line of pieces that can go one by one (the hops of a breadcrumb, the
+names of a tab strip, the hints of a status line) fits its room by one
+rule, `elide(pieces, separator, mark, room, at)`. The caller measures each
+piece in cells and gives it a rank (`Piece::ranked`) or none
+(`Piece::unranked`); `separator` is the cells between two items and `mark`
+the cells of one mark, with any spacing it carries.
+
+- Start from every piece. While the line is wider than the room and a
+  ranked piece is kept, the lowest-ranked one gives way; of two with one
+  rank, the later one.
+- Each run of neighboring pieces that gave way leaves one mark: in its gap,
+  as an item between separators (`MarkAt::Gap`, a breadcrumb's
+  `a › … › e`), or once at the end of the line with no separator before it
+  (`MarkAt::End`, a strip's `one · two …`). A mark's cells are counted
+  before the line counts as fitting.
+- When only unranked pieces are left and they still do not fit, the marks
+  go; if the pieces are still too wide, the last one is cut to the cells
+  the others leave (`Elided::cut`), for the caller to cut with
+  `truncate_end` or `fit_spans`.
+- The line then fits the room, unless more than one piece is unranked and
+  those before the last fill it already.
+
+`Elided` holds the kept pieces by index, where the gap marks stand, whether
+an end mark follows, and the cut; `items()` lists the line's items in order
+(pieces and gap marks, a separator between each two), and `width()` its
+cells.
+
+```rust
+use tuikit::text::{Item, MarkAt, Piece, elide};
+
+// A path of four steps, the last kept whatever the room, the first
+// outlasting the middle, separated by three cells, with a one-cell mark.
+let steps = [
+    Piece::ranked(5, 4),
+    Piece::ranked(5, 1),
+    Piece::ranked(5, 2),
+    Piece::unranked(5),
+];
+let line = elide(&steps, 3, 1, 18, MarkAt::Gap);
+assert_eq!(line.items(), [Item::Piece(0), Item::Mark, Item::Piece(3)]);
+assert_eq!(line.width(&steps, 3, 1), 17);
+```
+
+The `columns` module has a narrow-width policy of its own for the cells of
+a row, which narrow as well as drop; a line whose pieces only stay or go
+uses `elide`.
+
 ### Finding and painting
 
 `find_ci` folds ASCII letters only, so a match is exactly as many bytes as
@@ -168,7 +220,7 @@ cut adds takes the style of the span it stands in for.
 
 | # | Rule | How this module follows it |
 | --- | --- | --- |
-| 14 | Width | Every function measures terminal cells and moves in whole graphemes; every cut ends in `marks::ELLIPSIS`; `truncate_middle` is the cut for paths and identifiers |
+| 14 | Width | Every function measures terminal cells and moves in whole graphemes; every cut ends in `marks::ELLIPSIS`; `truncate_middle` is the cut for paths and identifiers; `elide` takes widths in cells and marks every run of pieces that gave way |
 
 Not applicable: 1 to 13 and 15 to 18 govern how controls look, move, close,
 confirm, edit, page, and label. The module only shapes text; the controls
@@ -189,3 +241,8 @@ that draw it follow those rules.
   read.
 - **Grapheme cursor motion.** An editor's left and right keys could move by
   the same graphemes the cuts use; today the edit engine has its own rule.
+- **Filling the room back.** `elide` gives way strictly by rank, so a
+  low-ranked piece narrow enough to fit beside the kept ones is not brought
+  back once a wider piece of higher rank has gone. A line that wants every
+  cell used (a status line packing what fits) would add a pass after the
+  loop that restores dropped pieces, highest rank first, while they fit.

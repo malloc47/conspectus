@@ -26,6 +26,10 @@
 //!   the count is the count drawn.
 //! - **Snippets**: [`fit_snippet`] cuts a one-line excerpt around a match
 //!   so the match stays on screen.
+//! - **Give way**: [`elide`] fits the pieces of a line (the steps of a
+//!   path, the names of a strip, the hints of a status line) into a room:
+//!   pieces give way by rank, each run that gave way leaves one mark, in
+//!   its gap or at the end, and a piece that cannot give way is cut last.
 //! - **Find and paint**: [`find_ci`] and [`find_all_ci`] find matches
 //!   without case for ASCII; [`paint`] restyles them, the one match
 //!   painter.
@@ -64,6 +68,7 @@
 //! like a wrapped paragraph.
 
 mod cut;
+mod elide;
 mod escape;
 mod find;
 mod measure;
@@ -71,6 +76,7 @@ mod snippet;
 mod wrap;
 
 pub use cut::{clip, clip_start, fit, fit_spans, pad, pad_start, truncate_end, truncate_middle};
+pub use elide::{Elided, Item, MarkAt, Piece, elide};
 pub use escape::strip_ansi;
 pub use find::{FindAll, find_all_ci, find_ci, paint, paint_matches};
 pub use measure::{spans_width, width};
