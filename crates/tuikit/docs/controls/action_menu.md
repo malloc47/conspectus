@@ -152,6 +152,12 @@ as leaving that level, and `Dismiss` as dismissing its whole overlay, and
 draws it with `ActionMenu::draw`, which keeps the scroll window as the
 stack's draw does.
 
+While a step of the menu's own is open over it, the stack draws the menu
+with `render_under_step`, which draws its cursor row in the theme's
+`selection_inactive` and keeps its marker, as a list without focus shows
+it (house rule 10): the step has the keys. On its own,
+`ActionMenu::draw_under_step` does the same.
+
 ### Rows
 
 Inside the frame, from the top: a blank row; for each entry its label row
@@ -254,6 +260,7 @@ close`.
 | `accent` | the frame's border and its title |
 | `surface` | the background the frame paints |
 | `selection_active` | the cursor's label row, gutter to label (`selection::row`) |
+| `selection_inactive` | the cursor's label row while a step of the menu's own has the keys |
 | `error` | an armed entry's label row (with bold) |
 | `inert`, `muted` | a disabled entry's label and key (`keys::unavailable_style`) |
 | `muted` | the footer (`ModalFooter`) |
@@ -271,7 +278,7 @@ Detail rows are unstyled. The scrollbar is the shared
 | 4 | Close keys | `Esc` closes the menu's one level; `Ctrl-C` and `q` dismiss it, armed or not, and with it any step over it; nothing is typed in a menu |
 | 5 | Close feedback | closing returns `Close` or `Dismiss` and carries no message |
 | 8 | Footers and hints | the footer is generated from `MENU_KEYS` in the one grammar and drawn by `ModalFooter` in the one look and fit (receding, under a blank row, keeping its last rows on a short screen); a shortcut is shown in the menu's key column, written as `key_label` writes keys, never in prose |
-| 10 | Unfocused cursor | an open menu has the keys, so its cursor row takes `selection_active` |
+| 10 | Unfocused cursor | an open menu has the keys, so its cursor row takes `selection_active`; under a step of its own the row takes `selection_inactive` and keeps its marker |
 | 13 | Theme | the frame, highlight, armed row, and disabled entries take theme tokens; no raw color or reversed cell |
 | 14 | Width | labels are cut with `…`, details wrapped, the key column padded, and the footer broken, all in cells |
 
@@ -299,9 +306,10 @@ and details are the host's copy), and 18 (pagers).
 - **Mouse hit testing.** The menu's rect is the frame's for the rows it
   measured (`MENU_SIZE.rect`), and each entry's rows are known when it is
   laid out, which a click would be tested against.
-- **An unfocused menu.** A menu covered by another overlay keeps the
-  active look; a stack that told its lower entries they lost focus would
-  let them draw `selection_inactive`.
+- **An unfocused menu.** A menu under a step of its own draws its cursor
+  inactive; covered by an overlay opened on its own (not a step of it) it
+  keeps the active look. A stack that told every lower entry it lost focus
+  would let it recede there too.
 - **The scrollbar on short screens.** On a screen whose entries get fewer
   than five rows the bar's column is kept and no bar is drawn; the
   gutter could skip such a column for every scrolled body at once.

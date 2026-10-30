@@ -22,6 +22,11 @@ dialogs as steps.
 Amended by
 [ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decision 7): the footer recedes and fits by the
 one rule every framed control shares.
+Under a step of its own (a dialog or a prompt a pick opened) the menu
+draws its cursor row in `selection_inactive`, through the
+`render_under_step` override of
+[ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md)
+decision 5 (house rule 10); carried out by CSP-783.
 
 ## Context
 

@@ -271,8 +271,9 @@ copy), and 18 (pagers).
   elsewhere, drawn in a key column as a menu entry's shortcut is; today a
   host writes it into the label (`Notes [1]`), and it acts only outside
   the panel.
-- **Action menus under their steps.** The stack tells an entry that a step
-  of its own is open over it; the panel recedes its cursor, while an
-  action menu keeps its active cursor under its steps for now.
+- **Other lists under their steps.** The stack tells an entry that a step
+  of its own is open over it; the panel and the action menu recede their
+  cursor there. A checklist or a palette that opened a step would take
+  the same `render_under_step` override.
 - **Mouse hit testing.** Each row is one line of the window, which a click
   would be tested against once the frame reports its rect.

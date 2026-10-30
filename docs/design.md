@@ -1256,8 +1256,9 @@ builds the entries from the selection each time a menu opens, so an entity
 offers the same verbs in every view, and shows a shortcut only for a key that
 does the same thing on the list (`p` on Pin, `n` and `N` in the mux menu). The
 cursor wraps and steps over entries that cannot run, an armed entry says what
-`Enter` will do, and the footer generated from the menu key table stays at the
-bottom while the entries scroll.
+`Enter` will do, the footer generated from the menu key table stays at the
+bottom while the entries scroll, and under a step of its own (a dialog or a
+prompt a pick opened) the menu's cursor row recedes.
 
 Dialogs are one control, and a menu's follow-up questions are steps on the
 modal stack (ADR 0172). A dialog is the framework's `Dialog`: a confirmation

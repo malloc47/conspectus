@@ -253,6 +253,10 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   too narrow for both of its keys now shows `Esc cancel`. Quick select's
   and content search's `Esc close` moved to the end of their footers, and
   Controls' footer starts with `changes apply as you make them`.
+- **A menu recedes under its own questions.** While the worktree menu's
+  branch prompt or one of its dialogs is open, the menu's cursor row takes
+  the inactive selection look (bold, its `►` kept), as Controls' does under
+  its editors; it kept the active highlight.
 - **Every text field edits the same way.** The transcript and scrollback
   find prompts take the keys every other field takes (`Ctrl-A`/`Ctrl-E`,
   `Ctrl-B`/`Ctrl-F`, `Ctrl-W`, `Ctrl-K`, `Ctrl-Y`), and `Ctrl-U` there

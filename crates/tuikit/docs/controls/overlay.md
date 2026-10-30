@@ -267,9 +267,10 @@ rule 4 through `Consumed`).
   the host (a global key that works over a passive notice) would join
   `Outcome`, and `route` would hand it back.
 - **Dimming what is underneath.** An entry under a step of its own is told
-  so (`render_under_step`), and the settings panel draws its cursor
-  inactive there; an action menu keeps its active cursor under its steps
-  for now, and every other entry draws as it is. A stack that dimmed every
+  so (`render_under_step`), and the settings panel and the action menu
+  draw their cursor inactive there; every other entry draws as it is (a
+  checklist or a palette that opened a step would take the same
+  override). A stack that dimmed every
   entry under the top one would pass each entry whether it is on top.
 - **Rendered areas.** An entry could report the rect it drew, for mouse hit
   testing and for a conformance check that each entry clears exactly its
