@@ -28,6 +28,11 @@
 //!   A modal whose body has no row to spare for its keys (a one-line
 //!   prompt) hands the frame a footer, which sits on the bottom border in
 //!   the same form.
+//! - **One footer.** [`ModalFooter`] lays out every modal's keys in one
+//!   look (the theme's `muted`) under a blank row and fits them to the
+//!   frame by one rule: the blank row gives way first, then the keys keep
+//!   their last rows (the keys that leave) and their first rows scroll
+//!   after the body's last row ([`FooterFit`]).
 //! - **Measured once.** A [`ModalBody`] is told the width the policy
 //!   gives it, reports the rows it needs, and draws in the area the
 //!   frame leaves; the frame places itself from those rows, once.
@@ -93,6 +98,7 @@
 //! assert_ne!(buf[(20, 0)].fg, theme.panel_focus_accent);
 //! ```
 
+mod footer;
 mod modal;
 mod pane;
 mod rule;
@@ -100,6 +106,7 @@ mod size;
 mod split;
 mod title;
 
+pub use footer::{FooterFit, ModalFooter};
 pub use modal::{Lines, ModalBody, ModalFrame};
 pub use pane::PaneFrame;
 pub use rule::SectionRule;

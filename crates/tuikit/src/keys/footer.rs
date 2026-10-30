@@ -6,6 +6,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use super::matcher::KeyMatcher;
+use super::role::{KeyAction, KeyRole};
 use super::table::{Hint, KeyRow, rows};
 use crate::glyphs::marks;
 use crate::text;
@@ -136,6 +137,44 @@ impl Footer {
             })
             .collect();
         Self { segments }
+    }
+
+    /// The footer of `table` with the keys that leave last: the segments
+    /// of its other rows and its notes in table order, then those of the
+    /// rows that leave or dismiss ([`KeyRole::Leave`], [`KeyRole::Abort`]).
+    /// A footer too tall for its frame keeps its last rows, so this is
+    /// the order a modal draws its keys in; a table that includes a
+    /// standard one and adds its own rows after it still shows its
+    /// leaving keys last.
+    ///
+    /// ```
+    /// use ratatui::crossterm::event::KeyCode;
+    /// use tuikit::keys::{Footer, KeyRow, PALETTE_KEYS, PaletteKey, include, key, shown};
+    ///
+    /// const KEYS: &[KeyRow<PaletteKey>] = &[
+    ///     include(PALETTE_KEYS),
+    ///     shown(key(KeyCode::Tab), PaletteKey::Scope, "Tab", "switch scope"),
+    /// ];
+    /// assert_eq!(Footer::new(KEYS).text(), "↑/↓ move · Enter pick · Esc close · Tab switch scope");
+    /// assert_eq!(
+    ///     Footer::leaving_last(KEYS).text(),
+    ///     "↑/↓ move · Enter pick · Tab switch scope · Esc close"
+    /// );
+    /// ```
+    pub fn leaving_last<A: KeyAction>(table: &[KeyRow<A>]) -> Self {
+        let leaves = |action: &A| matches!(action.role(), KeyRole::Leave | KeyRole::Abort);
+        let others = Self::only(table, |action| !leaves(action));
+        let leaving = Self::only(table, leaves);
+        others
+            .segments
+            .into_iter()
+            .chain(
+                leaving
+                    .segments
+                    .into_iter()
+                    .filter(|segment| !segment.keys.is_empty()),
+            )
+            .collect()
     }
 
     /// The segments, in order.
