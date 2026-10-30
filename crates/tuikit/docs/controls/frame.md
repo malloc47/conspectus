@@ -1,4 +1,4 @@
-# `ModalFrame`, `PaneFrame`, `SplitPane`, and `SectionRule`
+# `ModalFrame`, `ModalFooter`, `PaneFrame`, `SplitPane`, and `SectionRule`
 
 | | |
 | --- | --- |
@@ -31,6 +31,12 @@ It has one look and one sizing rule:
   gives (`measure`), reports the rows it needs, and draws in the area the
   frame leaves (`render`). The frame places itself from those rows. No
   body reports a size it computed from a rect the frame computes again.
+- **One footer.** `ModalFooter` draws every modal's keys: in one look
+  (the theme's `muted`, as the status bar draws hints), on the frame's
+  last rows under a blank row, the keys that leave last, and fitted to the
+  frame by one rule when they do not fit: the blank row goes first, then
+  the keys keep their last rows and their first rows scroll after the
+  body's last row (see [The footer](#the-footer)).
 
 The module replaces what a program grows one modal at a time: a centered
 rect function per modal with its own cap, minimum, and margin (some
@@ -38,7 +44,9 @@ leaving two cells clear, some flush with the screen's edges), frames
 built by hand beside a shared helper, a popup crate whose body had to
 echo back the size its caller had just computed, titles padded by the
 caller or by the widget or not at all, and one or two titles in bold
-where the rest are not. The host keeps what is in the modal: its rows,
+where the rest are not; and footers drawn plain in some modals and dimmed
+in others, under a blank row or not, that lost different keys on a short
+screen. The host keeps what is in the modal: its rows,
 its title text, its keys, and which named size suits it.
 
 `PaneFrame` is the box a pane of the screen draws in: a list, a detail
@@ -224,12 +232,18 @@ assert_eq!(chip_end(&preview, "Preview"), width - SectionRule::CLOSING);
 | --- | --- | --- |
 | `ModalFrame::new(&theme, size)` | a frame sized by a policy | no title, no padding |
 | `title(line)`, `padding(padding)` | set the title and the padding | the title's spans keep their styles (chips); padding is ratatui's `Padding` |
-| `footer(line)` | set a line on the bottom border | the title's form; for a modal whose body has no row to spare for its keys (a one-line prompt); the modal lays it out for `inner_width` less 2 so it breaks between hints, and the frame cuts what still does not fit at the corner |
+| `footer(line)` | set a line on the bottom border | the title's form; for a modal whose body has no row to spare for its keys (a one-line prompt), the line `ModalFooter::border` gives; the modal lays it out for `inner_width` less 2 so it breaks between hints, and the frame cuts what still does not fit at the corner |
 | `inner_width(area)` | the columns a body gets | the policy's width less the border and padding |
 | `rect(area, rows)` | the frame's rect for a body of `rows` rows | centered; a fill policy ignores `rows` |
 | `render(area, buf, body)` | measures the body once, draws the frame, draws the body | returns the body's `Output` |
 | `ModalBody::measure(width)`, `render(area, buf)` | the body's two calls | `measure` once per draw, before the frame is placed |
 | `Lines::new(lines)`, `following(rows)` | a body of lines laid out ahead, scrolled to keep `rows` in view | one row per line; returns the window it showed |
+| `ModalFooter::new(footer, &theme)`, `.status(line)` | a modal's footer, and the line kept above its keys | the keys of a `keys::Footer` (a modal takes its table's from `Footer::leaving_last`); the status line is a form's error line or a reader's find prompt, in its own style |
+| `.keys(width)`, `.height(width)` | the key rows in the footer's look; the rows the footer asks for | broken only between segments; the height counts the blank row and the status line |
+| `.fit(width, room)`, `.fit_beside(area, keep, body_rows)` | the footer fitted to the rows the body leaves | a `FooterFit`; `fit_beside` leaves the body `keep` rows and lays everything out a cell narrower when the body overflows beside a scrollbar |
+| `.border(width)` | the footer as a bottom border shows it | its last key row, in the footer's look |
+| `FooterFit { kept, spill, width }`, `.split(area)`, `.render(area, buf)` | the rows on the frame's last rows, the rows that scroll after the body, the width they were laid out at | `split` gives the body's rows and the footer's; `render` draws the kept rows |
+| `ModalFooter::style(&theme)` | the footer's look | the theme's `muted`, no color |
 | `ModalSize { width, height, fit }` | a policy | `width(screen)`, `height(screen, wanted)`, `rect(area, wanted)` |
 | `Extent::new(cap, min, margin)`, `share(percent)` | one direction of a policy | `cells(screen, wanted)` applies the rule |
 | `Fit::Content`, `Fit::Fill` | where the height comes from | the body's rows, or all the extent allows |
@@ -282,6 +296,83 @@ as wide as `measure` was told and may be shorter than the body asked for
 when the screen is short; the body scrolls. A body that scrolls returns
 its window as its `Output`, which the host keeps for the next key and
 frame (see [scroll.md](scroll.md#the-window)).
+
+### The footer
+
+Every framed control (the menu, the dialog, the checklist, the settings
+panel, the form, the palette, the framed pager, the log list, the prompt)
+draws its keys through `ModalFooter`, so a footer looks and fits the same
+in every modal:
+
+```text
+│► Open                  │   the body
+│  Rename                │
+│                        │   the blank row
+│an error or find line   │   the status line, when the modal has one
+│↑/↓ move · Enter pick · │   the keys, receding, broken between segments,
+│Esc close               │   the keys that leave last, on the last rows
+└────────────────────────┘
+```
+
+- **Look.** Every segment is drawn in `ModalFooter::style`: the theme's
+  `muted`, regular weight, and no color of its own, so it takes the
+  body's foreground (or the accent, on a bottom border). A segment that
+  cannot act now keeps `keys::unavailable_style`. The status line keeps
+  its own style (an error line is `error`).
+- **Order.** A footer lists the keys that leave last: a control takes its
+  table's footer from `keys::Footer::leaving_last`, which keeps the other
+  rows and the notes in table order and puts the rows that leave or
+  dismiss after them.
+- **Fit.** The body keeps at least one row (or the rows its control says,
+  such as a palette's query). When the footer wants more than the rest:
+  the blank row goes first; then the status line takes a row while there
+  is one; then the keys keep their last rows, and their first rows spill.
+  A body draws the spilled rows (a blank row and the first key rows) after
+  its last row, where they scroll with it, so no key is lost and the keys
+  that leave are the last to go out of view. A footer spills only when
+  the body is down to the rows it keeps, so a list whose window follows
+  its cursor shows none of them, while a body that scrolls freely (a
+  reader, a dialog's body, a log's detail) brings them into view. When the
+  body and the spilled rows overflow beside a scrollbar, `fit_beside`
+  lays the footer out a cell narrower so its rows line up beside the bar.
+- **The bottom border.** A modal with no row to spare (the one-line
+  prompt) hands `ModalFrame::footer` the line `ModalFooter::border` gives:
+  the last key row at the border's width less a space on each side, in
+  the footer's look over the accent. With no body to scroll into, the
+  first rows are not shown.
+- **Very narrow frames.** At eight cells or fewer the keys stay on one
+  row, cut at the frame's edge.
+
+A host's own modal does the same in a few lines: lay its body out, then
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::text::Line;
+use ratatui::widgets::{Paragraph, Widget};
+use tuikit::frame::ModalFooter;
+use tuikit::keys::{Footer, MENU_KEYS};
+use tuikit::testkit::buffer::rows;
+use tuikit::theme::Theme;
+
+let theme = Theme::default();
+let area = Rect::new(0, 0, 14, 3);
+let mut buf = Buffer::empty(area);
+let entries = vec![Line::from("Open"), Line::from("Rename")];
+let footer = ModalFooter::new(Footer::leaving_last(MENU_KEYS), &theme);
+// Three rows: the body keeps one, and the footer's three key rows and
+// its blank row want more than the two left; the blank row and the
+// first key row give way, the keys that leave stay.
+let mut fit = footer.fit_beside(area, 1, |_| entries.len());
+let [body, keys] = fit.split(area);
+let mut lines = entries;
+lines.append(&mut fit.spill);
+Paragraph::new(lines).render(body, &mut buf);
+fit.render(keys, &mut buf);
+assert_eq!(rows(&buf)[0].trim_end(), "Open");
+assert_eq!(rows(&buf)[1].trim_end(), "Enter pick");
+assert_eq!(rows(&buf)[2].trim_end(), "Esc close");
+```
 
 ### `PaneFrame`
 
@@ -373,7 +464,7 @@ rule handle no keys either.
 | `panel_focus_accent` | a focused pane's border and its focus marker |
 | `surface` | the background painted over a modal's cleared rect |
 | `badge` | the modifier that fills a section rule's chip |
-| `muted` | a section rule's leading and closing rules |
+| `muted` | a section rule's leading and closing rules; every modal footer (`ModalFooter`) |
 | `inert` | a section rule's summary |
 
 A title's chips (a segmented choice) keep the look their own module gave
@@ -385,7 +476,7 @@ look.
 
 | # | Rule | How this control follows it |
 | --- | --- | --- |
-| 8 | Footers and hints | The frame draws no hint of its own; a modal's footer is its body's or the bottom-border line it hands the frame, either way generated from its key table |
+| 8 | Footers and hints | The frame draws no hint of its own; a modal's footer, generated from its key table, is drawn by `ModalFooter` in one look and fitted by one rule, in its body or on its bottom border |
 | 9 | Focus cue | A focused pane's border and title marker take `panel_focus_accent`; an unfocused pane keeps the plain border and a blank where the marker goes, so its title stays in place |
 | 13 | Theme | A modal's border and background come from `accent` and `surface`, a focused pane's border and marker from `panel_focus_accent`, a section rule's pieces from `muted`, `accent`, `badge`, and `inert`; nothing names a color |
 | 14 | Width | A body is laid out for the inner width the policy gives in cells, so nothing is laid out for one width and drawn at another; a pane's title is laid out for `title_width`, in cells; a section rule measures its chip and summary in cells and fills the width it is given |

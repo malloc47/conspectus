@@ -50,8 +50,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
-use tuikit::frame::{Lines, ModalFrame, ModalSize};
-use tuikit::keys::{self, Convention, EnterMeans, MENU_KEYS, MenuKey, SpaceMeans};
+use tuikit::frame::{Lines, ModalFooter, ModalFrame, ModalSize};
+use tuikit::keys::{self, Convention, EnterMeans, Footer, MENU_KEYS, MenuKey, SpaceMeans};
 use tuikit::overlay::{ModalStack, Outcome, Overlay};
 use tuikit::testkit::conformance::{self, Case, Registry, Rig};
 use tuikit::testkit::{buffer, golden, keys as script, render};
@@ -83,10 +83,13 @@ impl Overlay<(), ()> for Menu {
     }
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, (): &(), theme: &Theme) {
-        let lines = vec![Line::from("  Open"), Line::from(""), Line::from(keys::footer(MENU_KEYS))];
-        ModalFrame::new(theme, ModalSize::MENU)
-            .title("Actions")
-            .render(area, buf, Lines::new(lines));
+        let frame = ModalFrame::new(theme, ModalSize::MENU).title("Actions");
+        let width = usize::from(frame.inner_width(area));
+        // The entry, then the footer under its blank row, in its look.
+        let mut lines = vec![Line::from("  Open")];
+        let footer = ModalFooter::new(Footer::leaving_last(MENU_KEYS), theme);
+        lines.extend(footer.fit(width, usize::MAX).kept);
+        frame.render(area, buf, Lines::new(lines));
     }
 }
 
@@ -152,6 +155,28 @@ accepts a cell whose only change is the selection modifiers. Run the
 checks one per test (`assert_conventions_of` with one `Check`) so they run
 in parallel.
 
+### The footer check
+
+`Check::Footer` reads a case's footer (`Case::footer`) on a frame drawn
+at 200 by 50, wide enough that no footer wraps inside a segment:
+
+- every segment the table generates is drawn, in the frame's body or on
+  its bottom border, so the footer is the generated one;
+- in a frame, every segment is in the footer's look: the theme's `muted`,
+  regular weight, and the color of where it sits (the blank row above it,
+  or the border), unless it cannot act now;
+- a footer in the body sits on the frame's last rows, under a blank row;
+- the last segment on its last row names a key that leaves the modal
+  (`KeyRole::Leave` or `Abort` in its first level's tables), when the
+  footer names one, so the footer lists the keys that leave last.
+
+Then it draws the frame at 40 by 10, where a footer of several rows has
+fewer than it wants, and checks that the frame's last row inside (or its
+bottom border) still names a key that leaves: a control that keeps a
+footer's first rows on a short frame fails. A modal that draws its footer
+with [`ModalFooter`](frame.md#the-footer) and takes its table's footer
+from `Footer::leaving_last` passes all of it.
+
 A host whose status line names the keys of the modal on top (a
 [`StatusBar`](status_bar.md) built from `Overlay::hints`) says so in its
 rig: `Rig::status_rows` names the rows that line takes, which the `Drawn`
@@ -201,7 +226,7 @@ every modal a host registers.
 | 1 | List cursor and highlight | `Selection`: moving the cursor repaints rows and moves no text outside the two-cell cursor gutter |
 | 4 | Close keys | `Close`: `Ctrl-C` and `Esc` close the modal at its first level, and `q` too unless the level types; `Keys`: `Ctrl-C` is bound first, to dismissing |
 | 5 | Close feedback | `Close`: closing leaves nothing on the status line and posts no toast |
-| 8 | Footers and hints | `Footer`: every segment the modal's table generates is drawn, in the frame's body or on its bottom border; `Hints`: every key the host's status line names with the modal open is one its footer names; `Keys`: the table checks (labels, unresolved keys) |
+| 8 | Footers and hints | `Footer`: every segment the modal's table generates is drawn, in the frame's body or on its bottom border; in a frame, in the one look and fit of `ModalFooter` (see [The footer check](#the-footer-check)); `Hints`: every key the host's status line names with the modal open is one its footer names; `Keys`: the table checks (labels, unresolved keys) |
 | 13 | Theme | `Title`: the frame and title take the theme's `accent`; the kit's own code reads no raw style except the ANSI writer, which encodes the colors it is given |
 | 14 | Width | `Words`: no row ends at the frame's edge in the start of a word the modal shows whole on a wide screen; `Contained`: nothing escapes the frame at any of ten sizes |
 

@@ -17,6 +17,10 @@ framework's `text_prompt` module. Amended by
 [ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md):
 `PromptResult` gains `Back(M)`, a confirm that steps back to the overlay
 the prompt is a step of.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decision 5): the footer on the bottom border
+recedes (`muted` over the accent) and, too wide for the border, keeps
+its last row (`Esc cancel`).
 
 ## Context
 

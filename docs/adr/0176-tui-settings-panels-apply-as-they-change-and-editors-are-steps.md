@@ -27,6 +27,10 @@ of its own open over it. Amends
 [ADR 0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md):
 a conformance `Case` can be a `step`, whose entry under it may recede its
 cursor row outside the step's frame.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decisions 6 and 7): the note comes first in
+`SETTINGS_KEYS`, the footer recedes, and the blank row above it stays
+while it fits.
 
 ## Context
 

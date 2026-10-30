@@ -155,7 +155,7 @@ stack's draw does.
 ### Rows
 
 Inside the frame, from the top: a blank row; for each entry its label row
-and its detail rows; a blank row; the footer.
+and its detail rows; the footer under its blank row.
 
 - **The label row** starts with the cursor gutter (`selection::row`). When
   any entry has a shortcut, a key column follows: each shortcut's label as
@@ -166,7 +166,9 @@ and its detail rows; a blank row; the footer.
 - **Detail rows** are the detail wrapped to the width left after an indent
   three cells past the labels, unstyled.
 - **The footer** is generated from `MENU_KEYS` (`↑/↓ move · Enter pick ·
-  Esc close`) and broken only between hints.
+  Esc close`) and drawn by the frame's `ModalFooter`
+  ([frame.md](frame.md#the-footer)): receding in `muted`, under a blank
+  row, broken only between hints.
 
 ### Size and scrolling
 
@@ -175,13 +177,16 @@ The menu is the menu-sized modal frame (`MENU_SIZE`, which is
 clear on each side while the screen allows) and is as tall as its rows
 plus the border. One title form, the frame's: no heading inside the body.
 
-When the screen is too short, the footer keeps the bottom rows (every row
-but one, its blank row giving way first) and the entries scroll in a
+When the screen is too short, the footer keeps the frame's last rows by
+the one fit every framed control shares: every row but one, its blank row
+giving way first and then its first rows, so the keys that leave stay. The
+entries scroll in a
 `ScrollWindow` the menu keeps between draws: the window moves no further
 than it must to show the cursor's entry (its label first, when the entry
 is taller than the window), so moving inside the window does not scroll
 it. Entries that overflow give their last column to the shared scrollbar
-(`ScrollGutter`) and are laid out again one cell narrower. The bar's track
+(`ScrollGutter`) and are laid out again one cell narrower, and so is the
+footer. The bar's track
 keeps a row clear above and below it, so on a screen where the entries
 have fewer than five rows (a 40x10 screen gives them four) the column is
 kept but no bar is drawn. `ActionMenu::window` is the window of the last
@@ -251,8 +256,9 @@ close`.
 | `selection_active` | the cursor's label row, gutter to label (`selection::row`) |
 | `error` | an armed entry's label row (with bold) |
 | `inert`, `muted` | a disabled entry's label and key (`keys::unavailable_style`) |
+| `muted` | the footer (`ModalFooter`) |
 
-Detail rows and the footer are unstyled. The scrollbar is the shared
+Detail rows are unstyled. The scrollbar is the shared
 `ScrollGutter` look.
 
 ## House rules followed
@@ -264,7 +270,7 @@ Detail rows and the footer are unstyled. The scrollbar is the shared
 | 3 | Confirmation | `Confirm::Inline` is the inline arm, for an action with nothing more to say; the armed row says what `Enter` will do. A dialog is the idiom when a body helps, opened by an entry that opens a step |
 | 4 | Close keys | `Esc` closes the menu's one level; `Ctrl-C` and `q` dismiss it, armed or not, and with it any step over it; nothing is typed in a menu |
 | 5 | Close feedback | closing returns `Close` or `Dismiss` and carries no message |
-| 8 | Footers and hints | the footer is generated from `MENU_KEYS` in the one grammar; a shortcut is shown in the menu's key column, written as `key_label` writes keys, never in prose |
+| 8 | Footers and hints | the footer is generated from `MENU_KEYS` in the one grammar and drawn by `ModalFooter` in the one look and fit (receding, under a blank row, keeping its last rows on a short screen); a shortcut is shown in the menu's key column, written as `key_label` writes keys, never in prose |
 | 10 | Unfocused cursor | an open menu has the keys, so its cursor row takes `selection_active` |
 | 13 | Theme | the frame, highlight, armed row, and disabled entries take theme tokens; no raw color or reversed cell |
 | 14 | Width | labels are cut with `…`, details wrapped, the key column padded, and the footer broken, all in cells |

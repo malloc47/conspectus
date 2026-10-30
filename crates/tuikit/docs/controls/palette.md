@@ -265,9 +265,15 @@ way; with a size that follows its body, the palette asks for its query,
 status row, every result, and footer.
 
 Inside the frame, from the top: the query; the status row, when there is
-one; the results (or the note, or the options pane); the footer. The
-footer keeps the bottom rows, at most four, and leaves the query, the
-status row, and one row of results above it. The results scroll in a
+one; the results (or the note, or the options pane); the footer under its
+blank row, drawn by the frame's `ModalFooter`
+([frame.md](frame.md#the-footer)): receding in `muted`, the keys that
+leave last (`Footer::leaving_last`, so a host table that adds rows after
+`PALETTE_KEYS` still ends with `Esc close`). The footer keeps the frame's
+last rows by the one fit every framed control shares and leaves the
+query, the status row, and one row of results above it: on a short frame
+its blank row goes first and then its first rows, so the keys that leave
+stay. The results scroll in a
 `ScrollWindow` the palette keeps between draws, moving no further than the
 cursor needs (so the cursor rides the bottom row as it moves down, and
 moving back up stays in the window). Results that overflow give the last
@@ -286,16 +292,17 @@ standard one:
 
 ```rust
 use ratatui::crossterm::event::KeyCode;
-use tuikit::keys::{self, KeyRow, PALETTE_KEYS, PaletteKey, ctrl, include, key, shown};
+use tuikit::keys::{Footer, KeyRow, PALETTE_KEYS, PaletteKey, ctrl, include, key, shown};
 
 const FIND_KEYS: &[KeyRow<PaletteKey>] = &[
     include(PALETTE_KEYS),
     shown(key(KeyCode::Tab), PaletteKey::Scope, "Tab", "look here/everywhere"),
     shown(ctrl('o'), PaletteKey::Options, "Ctrl-O", "set options"),
 ];
+// The palette draws the keys that leave last.
 assert_eq!(
-    keys::footer(FIND_KEYS),
-    "↑/↓ move · Enter pick · Esc close · Tab look here/everywhere · Ctrl-O set options"
+    Footer::leaving_last(FIND_KEYS).text(),
+    "↑/↓ move · Enter pick · Tab look here/everywhere · Ctrl-O set options · Esc close"
 );
 ```
 
@@ -308,7 +315,7 @@ own (`None`). The host's overlay resolves its own actions first with
 host action it is handed rather than typing it. `action(key)` is the
 action a key resolves to at the results' level, for a host that must act
 before the palette does (build what a wider scope searches before the
-switch). `footer()` is the footer as drawn.
+switch). `footer()` is the footer as drawn, the keys that leave last.
 
 ## Key table
 
@@ -365,7 +372,7 @@ shared `ScrollGutter` look.
 | 2 | List ends | a palette is a short choice list: the arrows wrap (`Ends::Wrap`); the page keys stop |
 | 4 | Close keys | `Esc` closes the palette's first level and steps back from the options pane; `Ctrl-C` dismisses from either; the query types `q`, and the pane, where nothing is typed, dismisses on it |
 | 5 | Close feedback | closing returns `Close` or `Dismiss` and carries no message |
-| 8 | Footers and hints | the footer is generated from the palette's table (or the pane's) in the one grammar and keeps the bottom rows |
+| 8 | Footers and hints | the footer is generated from the palette's table (or the pane's) in the one grammar, the keys that leave last, and drawn by `ModalFooter` in the one look and fit: receding, under a blank row, keeping its last rows |
 | 10 | Unfocused cursor | an open palette has the keys, so its cursor row takes `selection_active`; the query shows no caret while the pane has the keys |
 | 12 | Paging | `PgUp`/`PgDn` move by the rows shown and stop at the ends; `Home`/`End` move the query's caret, and `g`/`G` type |
 | 13 | Theme | the frame, the prompt, the caret, the highlight, the status, the notes, and the footer take theme tokens; no raw color or reversed cell |

@@ -23,6 +23,9 @@ count is drawn through a mark. Carries out what
 left for the Messages detail, and applies the footer-fit rule of
 [ADR 0178](0178-tui-help-pages-and-long-values-are-pager-contents.md)
 decision 3 to the log list's footer.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decision 5): the footer sits under a blank row
+and fits by the one rule.
 
 ## Context
 

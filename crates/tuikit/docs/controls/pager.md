@@ -146,7 +146,7 @@ to rows (`line_of`, `rows_of`), which is what `match_rows` and `paint` need.
 | Mode | Chrome | Position | Footer |
 | --- | --- | --- | --- |
 | `Screen` (the default) | the header, a rule, the body, a rule, a one-row footer; it fills the screen (`fills_screen`) | the `[ n/m ]` chip leading the footer: the first row shown and the rows in all | the position, the find chip, the note, the content's chips, then the keys, fitted to one row |
-| `Modal(size)` | a `ModalFrame` of the named size, titled with the header | the shared scrollbar, in a column the rows give up when they overflow | the find chip and note (or the prompt), then the keys, receding and broken only between segments, at the body's text width, on the frame's last rows; a footer too tall keeps its last rows and scrolls the rest (below) |
+| `Modal(size)` | a `ModalFrame` of the named size, titled with the header | the shared scrollbar, in a column the rows give up when they overflow | the frame's `ModalFooter` ([frame.md](frame.md#the-footer)): under a blank row, the find chip and note (or the prompt), then the keys, receding and broken only between segments, at the body's text width, on the frame's last rows; a footer too tall keeps its last rows and scrolls the rest (below) |
 | `Embedded` | none: the body in the area the host gives it | the shared scrollbar | none; the host routes the keys it wants (`scroll_by`, `page_down`, `to_end`) |
 
 A full-screen footer too narrow for everything drops, in turn, the keys
@@ -154,13 +154,15 @@ that scroll, the pager's other keys (find, help), the content's chips
 from the last, and the content's keys; the keys that leave stay, and what
 is still too wide is cut with `…`. The header is cut with `…` too.
 
-A framed pager leaves its body at least one row. When the prompt (or the
-find chip and the note) and the footer need more rows than that leaves,
-the prompt or chip row stays, the footer keeps its last rows (the keys
-that leave), and its first rows (the keys that scroll) go after the
-content's last row and scroll with it, so no key is lost and the keys
-that leave are the last out of view, the same priority as the full-screen
-footer's. The rows under the body are laid out at the body's text width,
+A framed pager leaves its body at least one row and fits its footer by
+the one rule every framed control shares (`ModalFooter::fit`). When the
+blank row, the prompt (or the find chip and the note), and the footer
+need more rows than the body leaves, the blank row goes first; then the
+prompt or chip row stays, the footer keeps its last rows (the keys that
+leave), and its first rows (the keys that scroll) go after the content's
+last row, behind a blank row, and scroll with it, so no key is lost and
+the keys that leave are the last out of view, the same priority as the
+full-screen footer's. The rows under the body are laid out at the body's text width,
 a cell narrower beside the scrollbar when the body overflows. A frame
 whose size fills its extent (`Fit::Fill`, as `WIDE` does) lays the
 content out in the draw only.
@@ -288,7 +290,7 @@ rows. The scrollbar is the shared `ScrollGutter` look.
 | 2 | List ends | scrollable content clamps: every step stops at the ends, and the window is clamped on every draw |
 | 4 | Close keys | `Esc` steps back one level (help, prompt, find, pager); `Ctrl-C` and `q` dismiss from any level; `q` types in the prompt |
 | 5 | Close feedback | closing returns `Close` or `Dismiss` with nothing to report |
-| 8 | Footers and hints | every footer (full screen, framed, help page, prompt) is generated from the tables in the one grammar |
+| 8 | Footers and hints | every footer (full screen, framed, help page, prompt) is generated from the tables in the one grammar; a framed one is drawn by `ModalFooter` in the one look and fit |
 | 11 | Feedback severity | a note is a `Feedback` drawn in its severity's tone: a wrap is info, a refusal a warning |
 | 12 | Paging | viewport-sized `PgUp`/`PgDn`, `Home`/`End`/`g`/`G`, half-page `Ctrl-D`/`Ctrl-U`, and an offset clamped on every draw and kept |
 | 13 | Theme | everything is drawn from theme tokens; the current match takes `selection_active` rather than a reversed cell of its own |

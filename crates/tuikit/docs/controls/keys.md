@@ -130,7 +130,7 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 | `resolve` | the action of the first row a key fires | looks inside included tables; ignores availability |
 | `rows` | a table's rows with includes spliced in | what footers, help pages, and checks read |
 | `with_availability` | a copy of a table with each row's availability set | the seam for dimming, hiding, or explaining an action |
-| `Footer`, `Segment`, `footer` | the footer of a table: segments, text, wrapped lines | `Footer::lines` wraps only between segments and dims unavailable ones; `Footer::only` keeps the rows of some actions (a control shows the keys that apply in its state), and a control whose keys are partly its own data (a dialog's verbs) collects its `Segment`s into a `Footer`; `Footer::from(table)` is `Footer::new`; a `Segment` also lists the `keys` it names (what a check presses) and the highest `rank` of its rows, and `Segment::note` is one that names no key |
+| `Footer`, `Segment`, `footer` | the footer of a table: segments, text, wrapped lines | `Footer::lines` wraps only between segments and dims unavailable ones; `Footer::only` keeps the rows of some actions (a control shows the keys that apply in its state), and a control whose keys are partly its own data (a dialog's verbs) collects its `Segment`s into a `Footer`; `Footer::from(table)` is `Footer::new`; `Footer::leaving_last(table)` puts the rows that leave or dismiss after the rest, the order every modal draws its table's footer in; a `Segment` also lists the `keys` it names (what a check presses) and the highest `rank` of its rows, and `Segment::note` is one that names no key |
 | `HINT_SEPARATOR` | what joins footer segments | ` · ` |
 | `unavailable_style` | how an action that cannot act now is drawn | `inert` color with the `muted` modifier |
 | `typed_char` | the character a key types into a text field | plain or shifted, no Control or Alt |
@@ -165,7 +165,9 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 - **One footer grammar.** A segment is the keys, a space, and a short
   imperative verb with no "to" and no "=": `Esc close`, `Enter pick`,
   `Tab search current/all`. Labels that share a verb join with `/`; notes
-  are short phrases; aliases are not shown.
+  are short phrases; aliases are not shown. The keys that leave come last
+  (`Footer::leaving_last`), so a footer too tall for its frame, which
+  keeps its last rows, keeps them (see [frame.md](frame.md#the-footer)).
 - **`Esc` says what leaving costs.** `Esc close` where leaving loses
   nothing (a menu, a list, a pager, a settings panel whose changes already
   applied), `Esc cancel` where it drops something pending (a prompt, a
@@ -304,7 +306,7 @@ not shown in the footer.
 | `PATH_FIELD_KEYS` (`PathKey`) | `Tab` completes the path, an alias (a path field's own key, consulted after its form's table; see [path_field.md](path_field.md)) | none |
 | `CHECKLIST_KEYS` (`ChecklistKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `PgUp`/`PgDn` page; `g`/`Home` top and `G`/`End` bottom (aliases); `Space` toggle; `a` select all; `n` select none; `Enter` confirm; `Esc` cancel | `↑/↓ move · Space toggle · a select all · n select none · Enter confirm · Esc cancel` |
 | `LOG_LIST_KEYS` (`LogListKey`) | `Ctrl-C` and `q` abort; `j`/`↓`/`Ctrl-N` down and `k`/`↑`/`Ctrl-P` up a row of the list, stopping at the ends; `g`/`Home` the newest and `G`/`End` the oldest (aliases); `J`/`K` the detail a row; `PgDn`/`Space` and `PgUp` the detail a page (aliases); `Esc` close (the table of `LogList`; see [log_list.md](log_list.md)) | `j/k select · J/K scroll detail · Esc close` |
-| `SETTINGS_KEYS` (`SettingsKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `PgUp`/`PgDn` page; `g`/`Home` top and `G`/`End` bottom (aliases); `Space` change; `Enter` apply; `Esc` close; a note that changes apply as they are made (the table of `SettingsPanel`; see [settings_panel.md](settings_panel.md)) | `↑/↓ move · Space select/toggle · Enter apply & close · Esc close · changes apply as you make them` |
+| `SETTINGS_KEYS` (`SettingsKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `PgUp`/`PgDn` page; `g`/`Home` top and `G`/`End` bottom (aliases); `Space` change; `Enter` apply; `Esc` close; a note that changes apply as they are made (the table of `SettingsPanel`; see [settings_panel.md](settings_panel.md)) | `changes apply as you make them · ↑/↓ move · Space select/toggle · Enter apply & close · Esc close` |
 | `PALETTE_KEYS` (`PaletteKey`) | `Ctrl-C` abort; `↑`/`Ctrl-P` up; `↓`/`Ctrl-N` down; `PgUp`/`PgDn` page (aliases); `Enter` pick; `Esc` cancel; every other key edits the query, so `q`, `j`, and `k` type (the table of `Palette`; a palette with a scope or options includes it and binds `PaletteKey::Scope` and `PaletteKey::Options` with its own verbs, by convention on `Tab` and `Ctrl-O`; see [palette.md](palette.md)) | `↑/↓ move · Enter pick · Esc close` |
 | `PALETTE_OPTION_KEYS` (`PaletteOptionKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Space` and `Enter` toggle; `Esc` and `Ctrl-O` back (a palette's options pane) | `↑/↓ move · Space toggle · Esc back` |
 | `FORM_KEYS` (`FormKey`) | `Ctrl-C` abort; `↑`/`Ctrl-P` previous field; `↓`/`Ctrl-N` next field; `Tab` complete or next; `S-Tab` back | `↑/↓ move · Tab complete/next · S-Tab back` |

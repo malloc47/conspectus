@@ -116,17 +116,19 @@ Inside the frame, from the top: a blank row; the body's lines, each
 wrapped to the frame (an empty line is a blank row); when there is a
 warning list, a blank row (if there is a body), the heading after the
 warning mark, its continuation rows indented under its first word, and
-each item after `  - `, wrapped under its first word; a blank row; the
-footer.
+each item after `  - `, wrapped under its first word; the footer under
+its blank row.
 
 - **The footer** is generated from `DIALOG_KEYS`: `Enter/y confirm ·
   Esc/n cancel` for a confirmation; each verb's key and verb, then
   `Esc/n cancel`, for a choice (the cancel segment is the table's,
   through `Footer::only`); and `Enter/Esc close` for a notice, the first
   keys the table shows for confirming and cancelling under the verb
-  `close`, since leaving a notice loses nothing. It breaks only between
-  hints. `Dialog::footer` returns it, so a host's conformance case checks
-  the footer the dialog draws.
+  `close`, since leaving a notice loses nothing. The frame's
+  `ModalFooter` draws it ([frame.md](frame.md#the-footer)): receding in
+  `muted`, under a blank row, broken only between hints. `Dialog::footer`
+  returns it, so a host's conformance case checks the footer the dialog
+  draws.
 - **A verb's key** is a `KeyMatcher`, so it follows the overlay rule for
   characters (`ch('m')` fires on `m` typed plain or with Shift, never on
   `Ctrl-M`). The dialog resolves its table first, so a verb on a key
@@ -144,13 +146,15 @@ wide as the menus, so a dialog a menu asks covers the menu where they
 overlap and the menu shows above and below it only where the menu is
 taller.
 
-When the screen is too short, the blank rows go first, as many as must:
-the one above the body, then the one between the body and the keys. Then
-the footer keeps the bottom rows (all of them, on a frame with no room for
-more; the title still says what is asked) and the body scrolls in a
-`ScrollWindow` the dialog keeps between draws: the arrows and `k`/`j`
-scroll it a row. A body that overflows gives its last column to the shared
-scrollbar (`ScrollGutter`) and is laid out again one cell narrower.
+When the screen is too short, the blank row above the body goes first.
+Then the footer keeps the frame's last rows by the one fit every framed
+control shares: every row but one, its blank row giving way first and
+then its first rows, which scroll after the body's last row, so the keys
+that leave stay. The body scrolls in a `ScrollWindow` the dialog keeps
+between draws: the arrows and `k`/`j` scroll it a row, down to any footer
+rows that spilled after it. A body that overflows gives its last column to
+the shared scrollbar (`ScrollGutter`) and is laid out again one cell
+narrower, and so is the footer.
 `Dialog::window` is the window of the last draw.
 
 ## Key table
@@ -178,8 +182,9 @@ The footer of a confirmation reads `Enter/y confirm · Esc/n cancel`.
 | `accent` | the frame's border and its title |
 | `surface` | the background the frame paints |
 | `warning` | the warning mark and heading (with bold) |
+| `muted` | the footer (`ModalFooter`) |
 
-The body, the items, and the footer are unstyled. The scrollbar is the
+The body and the items are unstyled. The scrollbar is the
 shared `ScrollGutter` look.
 
 ## House rules followed
@@ -189,7 +194,7 @@ shared `ScrollGutter` look.
 | 3 | Confirmation | the dialog is the idiom when a body helps: `y`/`Enter` confirm, `n`/`Esc` cancel, in every dialog; a choice keeps the same cancel keys beside its verbs |
 | 4 | Close keys | `Esc` and `n` close the dialog's one level (as a step, back to what asked); `Ctrl-C` and `q` dismiss it with its flow; nothing is typed in a dialog |
 | 5 | Close feedback | closing returns `Close` or `Dismiss` and carries no message |
-| 8 | Footers and hints | the footer is generated from `DIALOG_KEYS` (and a choice's verbs) in the one grammar, and stays in view on a short screen |
+| 8 | Footers and hints | the footer is generated from `DIALOG_KEYS` (and a choice's verbs) in the one grammar and drawn by `ModalFooter` in the one look and fit: receding, under a blank row, keeping its last rows (the keys that leave) on a short screen |
 | 13 | Theme | the frame and the warning heading take theme tokens; no raw color or reversed cell |
 | 14 | Width | the body, the heading, and the items wrap in cells, under their first words; the footer breaks between hints |
 

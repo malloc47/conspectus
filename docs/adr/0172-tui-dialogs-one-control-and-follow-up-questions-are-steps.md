@@ -22,6 +22,10 @@ worktree menu is an `ActionMenu<Msg>` whose entries open steps
 [ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md):
 the seam for a step that applies its answer and returns to the entry
 under it is built as `Outcome::Back`.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decision 4): the footer recedes; the blank row
+above it stays while it fits, and the body keeps a row on the shortest
+screens.
 
 ## Context
 

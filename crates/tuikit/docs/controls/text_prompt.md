@@ -134,9 +134,12 @@ the bottom border), and **4 rows** while an error line shows. The frame is
 centered each time it is drawn, so growing moves its top up a row on most
 screens. `TextPrompt::rect` is the rect it draws in.
 
-The footer is laid out for the inner width less the space on each side of
-it and breaks only between hints, so a narrow prompt keeps the hints that
-fit whole (`Enter confirm` at the 20-column minimum). The error line is
+The footer is the frame's `ModalFooter` on the bottom border
+([frame.md](frame.md#the-footer)): receding in `muted` over the border's
+accent, laid out for the inner width less the space on each side of it,
+and broken only between hints. Too wide for the border, it keeps its last
+row, the keys that leave (`Esc cancel` at the 20-column minimum), as
+every footer too tall for its frame does. The error line is
 cut with `…` to the inner width. A screen too short for the fourth row
 (five rows or fewer) puts the reason on the bottom border in place of the
 hints, so a refusal is never invisible.
@@ -162,6 +165,7 @@ The footer, generated from the table, reads `Enter confirm · Esc cancel`.
 | Token | Used for |
 | --- | --- |
 | `accent` | the frame's border, its title, and the footer on the bottom border |
+| `muted` | the footer on the bottom border, receding over the accent (`ModalFooter`) |
 | `surface` | the background the frame paints |
 | `field_cursor` | the caret, the cell under the cursor |
 | `error` | the error line (or, on a screen too short for it, the reason on the bottom border) |
@@ -176,7 +180,7 @@ The text the user types is unstyled.
 | 4 | Close keys | `Esc` closes the prompt's one level (as a step, back to what is under it); `Ctrl-C` dismisses it and its flow; `q` is typed, since a prompt always has text in play |
 | 5 | Close feedback | closing returns `Close` or `Dismiss` and carries no message, so the host posts nothing |
 | 7 | Validation errors | a refused confirm sets one error line in the footer slot under the field; the next edit clears it; no confirm is refused silently |
-| 8 | Footers and hints | the footer is generated from `TEXT_INPUT_KEYS`, in the one grammar; the prompt needs no hint on the host's status line |
+| 8 | Footers and hints | the footer is generated from `TEXT_INPUT_KEYS`, in the one grammar, and drawn by `ModalFooter` on the bottom border, receding and keeping its last row; the prompt needs no hint on the host's status line |
 | 13 | Theme | the frame, caret, error line, and placeholder take theme tokens; no raw color or reversed cell |
 | 14 | Width | the field windows in cells (`TextField`), and the footer and error line are cut in cells |
 | 15 | Text editing | the field is a `LineEdit`, with the shared editing keys and the one-line paste rule |

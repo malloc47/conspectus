@@ -241,6 +241,18 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `Ctrl-R recall search`, `Ctrl-O set options`, and `Ctrl-S open Search
   view`, and the forms read `←/→/Space change`. The value viewer's footer
   lists its keys in the help page's order and names `PgDn`/`PgUp`.
+- **Every modal's keys look and fit one way.** The keys at the bottom of
+  every menu, dialog, checklist, form, search, picker, help page, value
+  viewer, Messages, and Controls recede (the `muted` look of
+  `[tui.theme]`, as the status bar's hints do) under a blank row: menus,
+  dialogs, checklists, and Controls drew them plain, and the searches, the
+  picker, the help pages, the value viewer, and Messages had no blank row.
+  On a screen too short for a whole footer every modal keeps its last
+  rows, which end with the key that closes it (`Esc close`, `Esc cancel`);
+  forms and the searches kept their first rows and lost it, and a prompt
+  too narrow for both of its keys now shows `Esc cancel`. Quick select's
+  and content search's `Esc close` moved to the end of their footers, and
+  Controls' footer starts with `changes apply as you make them`.
 - **Every text field edits the same way.** The transcript and scrollback
   find prompts take the keys every other field takes (`Ctrl-A`/`Ctrl-E`,
   `Ctrl-B`/`Ctrl-F`, `Ctrl-W`, `Ctrl-K`, `Ctrl-Y`), and `Ctrl-U` there

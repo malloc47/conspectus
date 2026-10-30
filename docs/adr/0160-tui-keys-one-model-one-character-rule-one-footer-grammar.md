@@ -59,6 +59,9 @@ the scoped keymap (`Keymap`, `Bind`, `Scope`, `ActiveScopes`) replaces the
 main view's keymap, as decision 3 foresaw; it keeps the main view's own
 matchers for its letters, and its build refuses any two keys of a scope
 that one key event fires.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decision 5): a footer lists the keys that leave
+last, so a footer too tall for its frame keeps them.
 
 ## Context
 

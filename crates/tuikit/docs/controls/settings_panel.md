@@ -93,7 +93,7 @@ let drawn = rows(&buf).join("\n");
 assert!(drawn.contains("  [x] Wrap long lines"), "{drawn}");
 assert!(drawn.contains("  name  active"), "{drawn}");
 assert!(drawn.contains("► date"), "{drawn}");
-assert!(drawn.contains("Esc close · changes apply as you make them"), "{drawn}");
+assert!(drawn.contains("Enter apply & close · Esc close"), "{drawn}");
 ```
 
 The same example is the doctest on the `settings_panel` module, so it
@@ -173,13 +173,17 @@ The panel is the menu-sized modal frame (`SETTINGS_SIZE`, which is
 clear on each side while the screen allows), as tall as its sections and
 footer: the height comes from the rows, not from a budget.
 
-When the screen is too short, the blank row above the footer goes first.
-Then the footer keeps the bottom rows (all but one, so the cursor's row
-always shows) and the sections scroll in a `ScrollWindow` the panel keeps
-between draws, moving no further than the cursor needs. Moving onto the
+The footer is drawn by the frame's `ModalFooter`
+([frame.md](frame.md#the-footer)): receding in `muted`, under a blank row,
+on the frame's last rows. When the screen is too short, it keeps them by
+the one fit every framed control shares: all but one, so the cursor's row
+always shows, its blank row giving way first and then its first rows, so
+the keys that leave stay. The sections scroll in a `ScrollWindow` the
+panel keeps between draws, moving no further than the cursor needs. Moving onto the
 first row of a section brings its heading into view with it. Lines that
 overflow give their last column to the shared scrollbar (`ScrollGutter`)
-and are laid out again one cell narrower. `SettingsPanel::window` is the
+and are laid out again one cell narrower, and so is the footer.
+`SettingsPanel::window` is the
 window of the last draw; `PgUp` and `PgDn` move the cursor by its rows,
 onto the row nearest the line a page away.
 
@@ -201,11 +205,13 @@ onto the row nearest the line a page away.
 | `Space` | Change | acts on the cursor's row (see [Rows](#rows)) |
 | `Enter` | Apply | applies the cursor's choice and closes, opens an editor, presses a button, or closes on a row `Space` changes |
 | `Esc` | Close | closes the panel (`Close`), keeping every change |
-| (note) | | `changes apply as you make them`, the last footer segment |
+| (note) | | `changes apply as you make them`, the first footer segment |
 | any other key | (none) | swallowed |
 
-The footer reads `↑/↓ move · Space select/toggle · Enter apply & close ·
-Esc close · changes apply as you make them`, broken only between hints.
+The footer reads `changes apply as you make them · ↑/↓ move · Space
+select/toggle · Enter apply & close · Esc close`, broken only between
+hints: the note first, where it wraps on a row of its own on a narrow
+screen, and the key that leaves last, as every footer lists it.
 
 ## Theme tokens
 
@@ -215,9 +221,10 @@ Esc close · changes apply as you make them`, broken only between hints.
 | `surface` | the background the frame paints |
 | `selection_active` | the cursor's row, gutter to the end of its text, while the panel has the keys (`selection::row`) |
 | `selection_inactive` | the cursor's row while an editor open over the panel has the keys |
+| `muted` | the footer (`ModalFooter`) |
 
 Headings, the choice in force, and a checked checkbox are bold; every other
-row and the footer are unstyled. The scrollbar is the shared `ScrollGutter`
+row is unstyled. The scrollbar is the shared `ScrollGutter`
 look.
 
 ## House rules followed
@@ -228,7 +235,7 @@ look.
 | 2 | List ends | the arrows wrap (`Ends::Wrap`) over the rows, as in every short choice list; headings are never landed on |
 | 4 | Close keys | `Esc` closes the panel's one level; `Ctrl-C` and `q` dismiss it, an editor over it included; nothing is typed in the panel, and an editor that types is a prompt of its own |
 | 5 | Close feedback | closing returns `Close` or `Dismiss` and carries no message; there is nothing to cancel, since every change applied when it was made |
-| 8 | Footers and hints | the footer is generated from `SETTINGS_KEYS` in the one grammar and keeps the bottom rows while the sections scroll |
+| 8 | Footers and hints | the footer is generated from `SETTINGS_KEYS` in the one grammar and drawn by `ModalFooter` in the one look and fit: receding, under a blank row, keeping its last rows (the keys that leave) while the sections scroll |
 | 10 | Unfocused cursor | under an editor of its own the cursor row takes `selection_inactive` and keeps its marker |
 | 12 | Paging | `PgUp`/`PgDn` move by the rows shown and `Home`/`End`/`g`/`G` go to the ends, stopping there; the window is clamped |
 | 13 | Theme | the frame and the highlight take theme tokens; emphasis is bold; no raw color or reversed cell |

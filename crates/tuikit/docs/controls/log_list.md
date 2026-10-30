@@ -129,14 +129,18 @@ The frame is titled with the title and the count of entries (`Events ·
   window, clamped on every draw, and goes back to its top when the
   selection moves; an entry logged while the list is open shows at the next
   draw.
-- **The footer** on the frame's last rows, generated from the table and
-  broken only between segments. When the footer is taller than the room
-  under the rule leaves beside a row of detail, its last rows (the keys
-  that leave) stay and its first rows go after the detail's last row and
-  scroll with it, as a framed pager's footer does, so no key is lost.
+- **The footer** on the frame's last rows, generated from the table,
+  drawn by the frame's `ModalFooter` ([frame.md](frame.md#the-footer)):
+  receding in `muted`, under a blank row, broken only between segments.
+  When the footer is taller than the room under the rule leaves beside a
+  row of detail, its blank row goes first, its last rows (the keys that
+  leave) stay, and its first rows go after the detail's last row, behind a
+  blank row, and scroll with it, by the one fit every framed control
+  shares, so no key is lost.
 
 An empty log shows the host's note, each line wrapped at the frame's width,
-over the footer.
+over the footer and its blank row; the note keeps a row on the shortest
+frames.
 
 ## Key table
 
@@ -187,7 +191,7 @@ unstyled: the host's words.
 | 2 | List ends | a log is scrollable content: the selection stops at the newest and the oldest entry (`Ends::Clamp`), and the detail at its ends |
 | 4 | Close keys | `Esc` closes; `Ctrl-C` and `q` dismiss |
 | 5 | Close feedback | closing returns `Close` or `Dismiss` with nothing to report |
-| 8 | Footers and hints | the footer is generated from the table, the keys that leave last |
+| 8 | Footers and hints | the footer is generated from the table, the keys that leave last, and drawn by `ModalFooter` in the one look and fit |
 | 11 | Feedback severity | each entry's mark and its color come from its severity and the theme |
 | 12 | Paging | the detail pages by the rows it shows and its window is clamped on every draw; `g`/`G` and `Home`/`End` go to the ends of the list |
 | 13 | Theme | every style is a theme token; no raw color |

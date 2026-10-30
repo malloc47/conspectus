@@ -69,10 +69,13 @@ drawn with the same `[x]`; and each form's own label column.
   theme's `error`, cut with `…` to the width. The next key that changes a
   value (typing, stepping an option, flipping a toggle, completing a path)
   clears it; moving does not.
-- **A fixed footer,** generated from the form's key table and broken only
-  between hints, which never scrolls away. When the frame is shorter than
-  the form, only the rows scroll, keeping the focused one in view
-  (`FormBody`).
+- **A fixed footer,** generated from the form's key table and drawn by
+  the frame's `ModalFooter` ([frame.md](frame.md#the-footer)): receding in
+  `muted`, under a blank row, broken only between hints, the error line in
+  its slot. It never scrolls away. When the frame is shorter than the
+  form, only the rows scroll, keeping the focused one in view
+  (`FormBody`), and a footer too tall for the frame keeps its last rows,
+  the keys that leave.
 - **One grid.** The cursor gutter, the label column (`Cols`: as wide as the
   longest label, at least `LABEL_MIN` (11) and at most `LABEL_MAX` (16)
   cells, a longer label cut with `…`), a two-cell gap, and the value; every
@@ -87,9 +90,9 @@ that follow a choice) wraps the form, routes each key to it, and reads
 
 The row kit the form draws with (`text_row`, `path_row`, `choice_row`,
 `toggle_row`, `check_row`, `one_of_row`, `static_row`, `read_only_row`,
-`source_cells`, `detail_line`, `paragraph_lines`, `footer_lines`,
-`error_line`, `label`, `Cols`) and the body (`FormBody`) are public, for
-a host form that still lays out its own rows.
+`source_cells`, `detail_line`, `paragraph_lines`, `error_line`, `label`,
+`Cols`) and the body (`FormBody`, which takes a `ModalFooter`) are public,
+for a host form that still lays out its own rows.
 
 ## Usage example
 
@@ -181,7 +184,7 @@ The form drawn at 64 by 20 with an error (the golden in
 ```
 
 and at 40 by 10, where only the focused row, the error line, and the
-footer fit (`src/form/goldens/narrow.golden`):
+footer under its blank row fit (`src/form/goldens/narrow.golden`):
 
 ```text
 ┌ Make a thing ────────────────────────┐
@@ -339,14 +342,16 @@ row and a reset one (`src/form/goldens/override.golden`):
 The form is drawn in the form modal frame (`FORM_SIZE`, which is
 `ModalSize::FORM`: up to 80 columns, at least 44, two columns and one row
 clear on each side while the screen allows) and is as tall as its intro
-and a blank line (when it has one), its rows, a blank line, its detail
-lines and a blank line (when it reserves some), the error line while
-there is one, the footer, and the border. `Form::rect` is the rect it
-draws in. When the frame is shorter, the rows go first: the focused row,
-the error line, the footer (its first lines), the lines under the rows
-(the blank line, then the detail lines), the intro, and then the other
-rows are kept in that order, so a refusal and the row it is about always
-show.
+and a blank line (when it has one), its rows, a blank line and its
+detail lines (when it reserves some), the footer's blank row, the error
+line while there is one, the footer, and the border. `Form::rect` is the
+rect it draws in. When the frame is shorter, the rows go first: the
+focused row, the error line, the footer as `ModalFooter::fit` fits it
+(its last rows, then its blank row), the lines under the rows (the blank
+line, then the detail lines), the intro, and then the other rows are kept
+in that order, so a refusal, the row it is about, and the keys that leave
+always show. The footer's first rows that do not fit go after the last
+row, where the focused row's window never reaches.
 
 ## Key table
 

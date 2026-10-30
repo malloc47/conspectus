@@ -99,8 +99,8 @@ window), and takes `Close` as stepping back to its own level and
 
 ### Rows
 
-Inside the frame, from the top: a blank row; one row per item; a blank
-row; the footer. An item's row is the cursor gutter, its check mark, a
+Inside the frame, from the top: a blank row; one row per item; the
+footer under its blank row. An item's row is the cursor gutter, its check mark, a
 space, its label, and, when it has one, the separator mark and its
 detail. The row is cut to the frame with `…` in cells
 (`text::fit_spans`), so the detail is cut before the label is.
@@ -115,7 +115,8 @@ detail. The row is cut to the frame with `…` in cells
   that cannot change count when they are checked.
 - **The footer** is generated from `CHECKLIST_KEYS`: `↑/↓ move · Space
   toggle · a select all · n select none · Enter confirm · Esc cancel`,
-  broken only between hints.
+  drawn by the frame's `ModalFooter` ([frame.md](frame.md#the-footer)):
+  receding in `muted`, under a blank row, broken only between hints.
 
 ### Size and scrolling
 
@@ -123,13 +124,14 @@ The checklist is the compact modal frame (`CHECKLIST_SIZE`, which is
 `ModalSize::COMPACT`: up to 60 columns, at least 20, two columns and a
 row clear on each side while the screen allows), as tall as its rows.
 
-When the screen is too short, the blank rows go first (the one above the
-items, then the one above the keys). Then the footer keeps the bottom
-rows (all but one, so the cursor's row always shows) and the items scroll
-in a `ScrollWindow` the checklist keeps between draws, moving no further
-than the cursor needs. Items that overflow give their last column to the
-shared scrollbar (`ScrollGutter`) and are laid out again one cell
-narrower. `Checklist::window` is the window of the last draw; `PgUp` and
+When the screen is too short, the blank row above the items goes first.
+Then the footer keeps the frame's last rows by the one fit every framed
+control shares: all but one, so the cursor's row always shows, its blank
+row giving way first and then its first rows, so the keys that leave
+stay. The items scroll in a `ScrollWindow` the checklist keeps between
+draws, moving no further than the cursor needs. Items that overflow give
+their last column to the shared scrollbar (`ScrollGutter`) and are laid
+out again one cell narrower, and so is the footer. `Checklist::window` is the window of the last draw; `PgUp` and
 `PgDn` move the cursor by its rows.
 
 ### Items that cannot change
@@ -175,8 +177,9 @@ in every list.
 | `surface` | the background the frame paints |
 | `selection_active` | the cursor's row, gutter to the end of its text (`selection::row`) |
 | `inert`, `muted` | an item that cannot change: its mark and label (`keys::unavailable_style`) |
+| `muted` | the footer (`ModalFooter`) |
 
-Unchecked labels, details, and the footer are unstyled. The scrollbar is
+Unchecked labels and details are unstyled. The scrollbar is
 the shared `ScrollGutter` look.
 
 ## House rules followed
@@ -187,7 +190,7 @@ the shared `ScrollGutter` look.
 | 2 | List ends | a checklist is a short choice list: the arrows wrap (`Ends::Wrap`), stepping over items that cannot change |
 | 4 | Close keys | `Esc` closes the checklist's one level; `Ctrl-C` and `q` dismiss it; nothing is typed in a checklist |
 | 5 | Close feedback | closing returns `Close` or `Dismiss` and carries no message; the checks are not reported |
-| 8 | Footers and hints | the footer is generated from `CHECKLIST_KEYS` in the one grammar and keeps the bottom rows on a short screen |
+| 8 | Footers and hints | the footer is generated from `CHECKLIST_KEYS` in the one grammar and drawn by `ModalFooter` in the one look and fit: receding, under a blank row, keeping its last rows (the keys that leave) on a short screen |
 | 10 | Unfocused cursor | an open checklist has the keys, so its cursor row takes `selection_active` |
 | 12 | Paging | `PgUp`/`PgDn` move by the rows shown and `Home`/`End`/`g`/`G` go to the ends, stopping there; the window is clamped |
 | 13 | Theme | the frame, the checked items, the highlight, and items that cannot change take theme tokens; no raw color or reversed cell |

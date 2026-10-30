@@ -180,28 +180,28 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md) | Text Is Measured, Cut, And Wrapped In Terminal Cells By One Module | Accepted |
 | [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161, 0177, 0182) |
 | [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted (decision 8's status-bar segments carried out by 0190) |
-| [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted (amended by 0166, 0174; decision 7 carried out by 0189) |
+| [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted (amended by 0166, 0174, 0193; decision 7 carried out by 0189) |
 | [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted (amended by 0186) |
-| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176, 0177, 0179, 0180, 0188, 0191, 0192) |
+| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176, 0177, 0179, 0180, 0188, 0191, 0192, 0193) |
 | [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted (amended by 0172, 0176, 0177, 0180, 0191) |
 | [0162](0162-tui-help-pages-one-page-generated-from-key-tables.md) | Help Pages Are One Page, Generated From The Key Tables | Accepted (amended by 0177, 0178, 0180, 0192) |
 | [0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md) | Feedback Is One Type With Four Severities, And Toasts Are In-Tree | Accepted (amended by 0179) |
 | [0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md) | The Test Kit Drives Frames, Keeps Colors In Goldens, And Holds Every Modal To The Conventions | Accepted (amended by 0176, 0177, 0191) |
 | [0165](0165-tui-text-entry-one-line-editor-and-one-text-field.md) | Text Entry Has One Line Editor And One Text Field | Accepted |
-| [0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md) | Text Prompts Are One Overlay That Explains Its Refusals | Accepted (amended by 0176) |
+| [0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md) | Text Prompts Are One Overlay That Explains Its Refusals | Accepted (amended by 0176, 0193) |
 | [0167](0167-tui-path-fields-complete-behind-a-source-and-expand-tilde-on-commit.md) | Path Fields Complete Behind A Source, Ask For A Kind, And Expand `~` On Commit | Accepted |
-| [0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md) | Forms Move On One Ring, Submit From Any Field, And Keep Their Keys In View | Accepted (amended by 0170) |
+| [0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md) | Forms Move On One Ring, Submit From Any Field, And Keep Their Keys In View | Accepted (amended by 0170, 0193) |
 | [0169](0169-tui-launch-form-is-a-form-and-one-grammar-splits-every-argv.md) | The Launch Form Is A `Form`, And One Grammar Splits Every Argv | Accepted |
 | [0170](0170-tui-pin-edit-form-is-a-form-with-override-rows.md) | The Pin Edit Form Is A `Form` With Override Rows | Accepted |
-| [0171](0171-tui-menus-one-control-entries-as-data.md) | Menus Are One Control Whose Entries Are Data | Accepted (amended by 0172) |
-| [0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md) | Dialogs Are One Control, And A Menu's Questions Are Steps On The Stack | Accepted (amended by 0176) |
-| [0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md) | Checklists Are One Control That Selects All Or None And Counts | Accepted |
-| [0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md) | Palettes Are One Control, A Query Over Results The Host Ranks | Accepted (amended by 0175) |
+| [0171](0171-tui-menus-one-control-entries-as-data.md) | Menus Are One Control Whose Entries Are Data | Accepted (amended by 0172, 0193) |
+| [0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md) | Dialogs Are One Control, And A Menu's Questions Are Steps On The Stack | Accepted (amended by 0176, 0193) |
+| [0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md) | Checklists Are One Control That Selects All Or None And Counts | Accepted (amended by 0193) |
+| [0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md) | Palettes Are One Control, A Query Over Results The Host Ranks | Accepted (amended by 0175, 0193) |
 | [0175](0175-tui-search-is-two-palettes-and-a-hit-is-one-column-plan.md) | Search Is Two Palettes, And A Hit's Cells Are One Column Plan | Accepted (amended by 0185) |
-| [0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md) | Settings Panels Are One Control That Applies Each Change As It Is Made, And Their Editors Are Steps | Accepted |
+| [0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md) | Settings Panels Are One Control That Applies Each Change As It Is Made, And Their Editors Are Steps | Accepted (amended by 0193) |
 | [0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md) | Readers Are One Pager Over Content The Host Lays Out | Accepted (amended by 0178, 0181) |
-| [0178](0178-tui-help-pages-and-long-values-are-pager-contents.md) | Help Pages And Long Values Are Pager Contents, And A Framed Footer Scrolls What Does Not Fit | Accepted (amended by 0180) |
-| [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted |
+| [0178](0178-tui-help-pages-and-long-values-are-pager-contents.md) | Help Pages And Long Values Are Pager Contents, And A Framed Footer Scrolls What Does Not Fit | Accepted (amended by 0180; decision 3 generalised by 0193) |
+| [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted (amended by 0193) |
 | [0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) | The Transcript Viewer Is A Pager Content, And The Viewer Boundary Keeps Only The Transcript | Accepted |
 | [0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md) | Rich Text Is A Framework Feature, And The Preview Scrolls In A Region Counted From An Anchor | Accepted |
 | [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted (amended by 0183, 0186) |
@@ -215,6 +215,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an-empty-slot-says-so-one-way.md) | The Tab Strip, The Header, And The Status Bar Give Way By One Rule, And An Empty Slot Says So One Way | Accepted (decision 6's hints generated by 0191) |
 | [0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md) | The Status Bar Names The Keys Of The Scope That Has Them, Generated From Its Key Tables | Accepted (amended by 0192) |
 | [0192](0192-tui-the-main-screens-keys-are-one-scoped-keymap-and-the-help-page-is-generated-from-it.md) | The Main Screen's Keys Are One Scoped Keymap, And The Help Page Is Generated From It | Accepted |
+| [0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) | Every Modal Footer Is One Footer: One Look Under A Blank Row, And One Fit That Keeps The Keys That Leave | Accepted |
 
 ## Transcript viewer
 

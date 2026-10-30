@@ -149,7 +149,7 @@ assert_eq!(shown.line(20).to_string(), "could not read note…");
 | `KeyHintBar::new()` | a bar with no hints | |
 | `.table(table, rank)` | every shown row of `table` and its notes as hints, as written | included tables spliced in; a row with no rank holds on at `rank` |
 | `.annotated(table, rank, annotate)` | the rows `annotate` keeps, as it says | `annotate(&action)` returns `None` to leave a row out, or an `Annotation`; notes stay |
-| `.footer(&footer, rank)` | a control's footer, each segment a hint, whole | what `Overlay::hints` returns; a segment never joins another |
+| `.footer(&footer, rank)` | a control's footer, each segment a hint, whole | what `Overlay::hints` returns; a segment never joins another; a segment with no rank holds on at `rank`, and a note (no keys) a step below, so it gives way before the keys |
 | `.keymap(&keymap, active, &cx, rank, annotate)` | the bindings of a scoped keymap with a verb, in the scopes `active`, as `annotate` says | each names its first key; left out when `annotate` returns `None`, when it cannot act in `cx`, or when a scope looked up before its own takes the key; joins and ranks as `annotated` |
 | `.hints()`, `.keys()`, `.text()`, `.is_empty()` | the hints, every key they name, the hints as one line | `keys` is what a check presses |
 | `.segments(&theme)` | the hints as `PriorityLine` segments with their ranks | `muted`; a hint that cannot act in `keys::unavailable_style` |

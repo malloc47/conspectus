@@ -19,6 +19,9 @@ an entry can open a step (`Entry::opens_step`, picked with `Stay`), the
 menu answers `q` and `Ctrl-C` with `Dismiss`, and the worktree menu of
 decision 8 is now an `ActionMenu<Msg>` whose entries open its prompt and
 dialogs as steps.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decision 7): the footer recedes and fits by the
+one rule every framed control shares.
 
 ## Context
 

@@ -15,6 +15,9 @@ framework's `checklist` module. Amends
 [ADR 0031](0031-tui-filter-view-switching-and-per-view-state.md): the
 Controls overlay's harness, mux-state, and PR-state editors are the
 framework's checklist, not a multi-select primitive of its own.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decision 6): the footer recedes; the blank row
+above it stays while it fits.
 
 ## Context
 

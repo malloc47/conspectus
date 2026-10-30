@@ -18,6 +18,10 @@ Decision 7 carried out by
 [ADR 0189](0189-tui-the-screen-is-an-app-frame-and-the-focused-pane-is-framed-in-the-focus-accent.md):
 the pane frame, which shares the title form and carries the focus cue,
 and the split pane join the `frame` module.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md): the frame module gains `ModalFooter`, which
+draws every modal's footer, and a footer on the bottom border takes the
+footer's look (`muted` over the border's color).
 
 ## Context
 

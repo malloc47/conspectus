@@ -1178,7 +1178,11 @@ modal key convention is checked by, and the standard tables for menus,
 dialogs, pagers, prompts, checklists, and forms; `conspectus` keeps the
 tables of its own overlays (search, Controls, Messages, the viewers) and the
 main view's keymap. A letter in an overlay fires plain or shifted, never as
-a chord, and every list moves with `Ctrl-N`/`Ctrl-P`.
+a chord, and every list moves with `Ctrl-N`/`Ctrl-P`. Every modal draws its
+footer through one `ModalFooter` (ADR 0193): its keys recede in the theme's
+`muted`, as the status bar's do, on the frame's last rows under a blank row,
+the keys that leave last; a footer too tall for its frame gives up the
+blank row, keeps its last rows, and scrolls its first rows after the body.
 
 Help pages are one page (ADR 0162). The framework's `help` module draws
 every help page the same way (bold headings, keys in an accent column with
@@ -1325,7 +1329,7 @@ The value modal is a framed pager over the wrapped value, whose `y` is the
 copy hook, and every help page (the keymap's, the viewers', a pager's `?`
 level) is the framework's `HelpPage` read in a framed pager (ADR 0178); a
 framed footer too tall for its frame keeps its last rows and scrolls the
-rest with the body. The Messages overlay is the framework's log list
+rest with the body, as every modal footer does (ADR 0193). The Messages overlay is the framework's log list
 (ADR 0179): `LogList<R, M, Cx>` reads the host's `feedback::Log` from its
 context on every key and draw, lists its entries newest first (the
 severity's mark, the age, the summary with its repeat count) in a kept

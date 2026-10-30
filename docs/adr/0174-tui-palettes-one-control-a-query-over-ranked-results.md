@@ -13,6 +13,9 @@ the `PALETTE` size, not `WIDE`. Amends
 `PALETTE_KEYS` (`PaletteKey`) and `PALETTE_OPTION_KEYS`
 (`PaletteOptionKey`) join the standard tables, and the host's all-alias
 `PICKER_KEYS` is gone.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decision 6): the footer sits under a blank row,
+has no four-row cap, and keeps its last rows.
 
 ## Context
 

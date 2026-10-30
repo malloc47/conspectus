@@ -21,6 +21,10 @@ the same `change` verb. Amended by
 form gains override rows with a reset key bound in the form's own table,
 an intro paragraph, and a band of detail lines, and the pin edit form is
 a `Form`.
+Amended by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) (decision 5): the footer is a `ModalFooter`
+under a blank row with the error line in its slot, and a footer too tall
+for the frame keeps its last rows, not its first.
 
 ## Context
 

@@ -18,6 +18,9 @@ Amended by
 [ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) (decision 6):
 the transcript viewer is on the
 pager, so its interim help pager is gone.
+Decision 3 generalised by
+[ADR 0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md): every framed control fits its footer by
+that rule, the spilled rows behind a blank row.
 
 ## Context
 
