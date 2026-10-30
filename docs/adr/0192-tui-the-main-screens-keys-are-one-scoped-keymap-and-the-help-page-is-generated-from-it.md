@@ -20,7 +20,10 @@ right pane's are now scopes of one table, and the focus guard is gone); and
 decisions 5 and 6 (`MAIN_VIEW_KEYS` and the test that kept it in step with
 the keymap are replaced by the keymap itself). Decides open question 2 of
 the interaction-conventions inventory (a scoped keymap in this cut, its
-rows carrying help text that renders).
+rows carrying help text that renders). Decision 6 amended by
+[ADR 0197](0197-tui-the-main-screens-characters-bind-as-typed-as-the-overlays-do.md):
+the program's letters no longer keep their matchers; every character
+binds as typed, as in the overlays, so `Alt-a` no longer attaches.
 
 ## Context
 

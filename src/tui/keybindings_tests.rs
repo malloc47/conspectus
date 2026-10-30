@@ -90,7 +90,8 @@ fn the_only_program_key_a_pane_takes_is_the_inspect_key() {
 
 /// The shadowing the build refuses: `g` with any modifier took `Ctrl-G`
 /// from the grouping key's row, and `Enter` with any modifier overlapped
-/// `Shift-Enter` and `Alt-Enter`. Both are bound so they cannot.
+/// `Shift-Enter` and `Alt-Enter`. Both are bound so they cannot: `g` binds
+/// as typed, so `Ctrl-G` groups and `Alt-g` does nothing.
 #[test]
 fn g_leaves_ctrl_g_to_grouping_and_enter_leaves_its_chords_to_reveal() {
     let ctrl_g = chord(KeyModifiers::CONTROL, KeyCode::Char('g'));
@@ -98,7 +99,7 @@ fn g_leaves_ctrl_g_to_grouping_and_enter_leaves_its_chords_to_reveal() {
     assert_eq!(reached(Focus::Left, typed('g')), Some("tree.first"));
     assert_eq!(
         reached(Focus::Left, chord(KeyModifiers::ALT, KeyCode::Char('g'))),
-        Some("tree.first")
+        None
     );
     for modifiers in [KeyModifiers::SHIFT, KeyModifiers::ALT] {
         assert_eq!(
@@ -136,6 +137,107 @@ fn a_view_key_switches_to_its_view() {
 fn the_messages_hint_names_the_messages_key() {
     let app = App::new(crate::tui::RunConfig::defaults());
     assert_eq!(messages_hint(&app, "details"), "! details");
+}
+
+/// The main screen binds characters as every overlay does: alone or with
+/// Shift, never with Control or Alt, and a chord is a binding of its own,
+/// spelled out. So a chord of a bound character reaches nothing unless a
+/// binding names that chord.
+#[test]
+fn every_character_binds_as_typed_and_every_chord_is_spelled_out() {
+    assert!(
+        keymap().loose_characters().is_empty(),
+        "{:?}",
+        keymap().loose_characters()
+    );
+    let chords = [
+        KeyModifiers::ALT,
+        KeyModifiers::CONTROL,
+        KeyModifiers::ALT | KeyModifiers::CONTROL,
+        KeyModifiers::SUPER,
+        KeyModifiers::ALT | KeyModifiers::SHIFT,
+    ];
+    for binding in keymap().bindings() {
+        for key in binding.keys() {
+            let KeyMatcher::Char(c) = *key else { continue };
+            for focus in [Focus::Left, Focus::Right] {
+                for modifiers in chords {
+                    let event = chord(modifiers, KeyCode::Char(c));
+                    let spelled = keymap().resolve(active_scopes(focus), event).map(|found| {
+                        found.keys().iter().any(|key| {
+                            *key == KeyMatcher::Exact {
+                                modifiers,
+                                code: KeyCode::Char(c),
+                            }
+                        })
+                    });
+                    assert!(
+                        spelled.is_none_or(|spelled| spelled),
+                        "{focus:?}: {modifiers:?} {c:?} reaches a binding that does not name it"
+                    );
+                }
+            }
+        }
+    }
+    // Among them, the chords that used to work: `Alt-a` attached, `Alt-p`
+    // pinned, and `Ctrl-j` (what many terminals send for `Ctrl-Enter`)
+    // moved the tree.
+    for (modifiers, c) in [
+        (KeyModifiers::ALT, 'a'),
+        (KeyModifiers::ALT, 'p'),
+        (KeyModifiers::ALT, 'r'),
+        (KeyModifiers::ALT, '/'),
+        (KeyModifiers::CONTROL, 'j'),
+        (KeyModifiers::CONTROL, 'k'),
+        (KeyModifiers::CONTROL, 'J'),
+    ] {
+        assert_eq!(
+            reached(Focus::Left, chord(modifiers, KeyCode::Char(c))),
+            None,
+            "{modifiers:?} {c}"
+        );
+    }
+    // The chords the program binds on purpose still reach their bindings,
+    // and a character typed with Shift is the character.
+    for (event, id) in [
+        (
+            chord(KeyModifiers::CONTROL, KeyCode::Char('r')),
+            "refresh.hard",
+        ),
+        (
+            chord(KeyModifiers::CONTROL, KeyCode::Char('g')),
+            "grouping.cycle",
+        ),
+        (
+            chord(KeyModifiers::CONTROL, KeyCode::Char('/')),
+            "search.contents",
+        ),
+        (
+            chord(KeyModifiers::CONTROL, KeyCode::Char('7')),
+            "search.contents",
+        ),
+        (
+            chord(KeyModifiers::CONTROL, KeyCode::Char('l')),
+            "search.granularity",
+        ),
+        (
+            chord(KeyModifiers::CONTROL, KeyCode::Char('o')),
+            "search.options",
+        ),
+        (
+            chord(KeyModifiers::CONTROL, KeyCode::Char('f')),
+            "search.keep",
+        ),
+        (chord(KeyModifiers::CONTROL, KeyCode::Char('c')), "quit"),
+        (chord(KeyModifiers::ALT, KeyCode::Enter), "row.reveal"),
+        (chord(KeyModifiers::SHIFT, KeyCode::Enter), "row.reveal"),
+        (chord(KeyModifiers::SHIFT, KeyCode::Char('?')), "help"),
+        (chord(KeyModifiers::SHIFT, KeyCode::Char('G')), "tree.last"),
+        (chord(KeyModifiers::SHIFT, KeyCode::Char('R')), "rename"),
+        (chord(KeyModifiers::NONE, KeyCode::Char('q')), "quit"),
+    ] {
+        assert_eq!(reached(Focus::Left, event), Some(id), "{event:?}");
+    }
 }
 
 /// A message names a key as hints write it, from the binding that takes

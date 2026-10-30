@@ -1462,8 +1462,9 @@ With the right pane focused (and no dialog open), these keys drive the
 graph explorer. Every other key means what it means on the left pane:
 `E` toggles edge meta, `i` copies the id, `O`, `Shift+Enter`, and
 `Alt+Enter` reveal, `J`/`K` scroll the Preview, `Tab` moves focus, `q`
-quits. The keys that move the left tree do nothing here, so a chord the
-table does not list (`Alt-j`, `Ctrl-j`) leaves the tree alone.
+quits. The keys that move the left tree do nothing here, and a letter
+means the letter on either pane, so a chord of it (`Alt-j`, `Ctrl-j`)
+moves neither the explorer nor the tree.
 
 | Key | Does | On the left pane |
 |---|---|---|
@@ -1521,11 +1522,13 @@ Every dialog uses the same three keys the same way:
 | `Enter` | Applies or submits the dialog's main action; in a list it activates the focused item. |
 | `Space` | Changes the focused item: toggles a checkbox, steps an option, selects a choice. In a text field it types a space. |
 
-A letter key in a dialog means the letter typed plain or with Shift, never
-a `Ctrl` or `Alt` chord of it: `g` and `G` (or `Home` and `End`) go to the
-top and bottom of the help page, the value viewer, Messages, and the
-viewers, and `Ctrl-G` there does nothing. A chord a dialog uses is named
-as one (`Ctrl-R`, `Ctrl-O`). Every list moves with `↑`/`↓` and with
+A letter key means the letter typed plain or with Shift, never a `Ctrl`
+or `Alt` chord of it, on the main screen and in every dialog: `a`
+attaches and `Alt-a` does nothing, `j` moves the tree and `Ctrl-j` does
+nothing, and `g` and `G` (or `Home` and `End`) go to the top and bottom
+of the tree, the help page, the value viewer, Messages, and the viewers,
+where `Ctrl-G` does nothing (on the main screen it cycles the grouping).
+A chord a key uses is named as one (`Ctrl-R`, `Ctrl-G`, `Ctrl-O`). Every list moves with `↑`/`↓` and with
 `Ctrl-P`/`Ctrl-N`, and with `k`/`j` where nothing is typed: the menus,
 Controls and its checklists, Clean up, Messages, the picker, quick select,
 content search and its options, and a form's fields.

@@ -529,6 +529,20 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   with `…` instead of running into the pane's corner, and ` · depth N`
   is never clipped. Two hops of different kinds with the same name now
   carry the `·xxxx` id suffix too.
+- **A letter on the main screen means the letter, as in every dialog.**
+  With no dialog open, a character key fires typed alone or with Shift,
+  never with `Ctrl` or `Alt`; the chords the keys name (`Ctrl-R`,
+  `Ctrl-G`, `Ctrl-/`, `Ctrl-L`, `Ctrl-O`, `Ctrl-F`, `Ctrl-C`,
+  `Shift+Enter`, `Alt+Enter`) are unchanged. Keys that stop working: the
+  `Alt` chord of `f`, `!`, `?`, `a`, `i`, `o`, `w`, `v`, `r`, `n`, `m`,
+  `p`, `u`, `]`, `[`, `/`, `s`, `<`, and `>` (so `Alt-a` no longer
+  attaches and `Alt-p` no longer pins) and of the left tree's `h`, `l`,
+  and `g`; the `Ctrl` and `Alt` chords of the left tree's `j`, `k`, and
+  `G` (`Ctrl-j`, which many terminals send for `Ctrl+Enter`, no longer
+  moves the tree) and of the Preview's `J` and `K`; and any other
+  modifier a terminal reports with these keys (Super, Meta). Keys that
+  start working: `q`, `.`, and `1` to `6` when a terminal reports them
+  with Shift.
 - **The right pane's keys are one table, and a few gained meanings.**
   With the right pane focused, `PgUp` and `PgDn` page the explorer by
   the rows its zone shows (they moved one row); `h`/`l` and `←`/`→`

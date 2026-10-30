@@ -713,11 +713,11 @@ fn the_inspect_key_the_cut_hint_names_is_the_right_panes_inspect_key() {
 }
 
 #[test]
-fn chords_the_right_pane_does_not_bind_leave_the_left_tree_alone() {
-    // The left pane's tree keys match `j` with any modifier, so `Alt-j`
-    // used to move the explorer through the remap. The right pane's
-    // table binds characters as typed, and the tree's keys are the left
-    // pane's bindings, so these chords do nothing on the right pane.
+fn chords_of_the_tree_keys_move_neither_pane() {
+    // The left pane's tree keys bind their characters as typed, as the
+    // right pane's table does, and they are the left pane's bindings, so
+    // these chords do nothing on either pane (`Alt-j` used to move the
+    // tree, and the explorer through the remap before that).
     use crate::tui::app::Focus;
     use crate::tui::keybindings::{Command, LEFT_PANE, keymap};
     use tuikit::keys::{Binding, Scope};
@@ -732,11 +732,9 @@ fn chords_the_right_pane_does_not_bind_leave_the_left_tree_alone() {
         (KeyModifiers::ALT, 'l'),
     ] {
         let event = chord(modifiers, KeyCode::Char(c));
-        assert_eq!(resolved(Focus::Right, event), None, "{modifiers:?} {c}");
-        assert!(
-            resolved(Focus::Left, event).is_some(),
-            "the left tree keeps {c}"
-        );
+        for focus in [Focus::Left, Focus::Right] {
+            assert_eq!(resolved(focus, event), None, "{focus:?} {modifiers:?} {c}");
+        }
     }
     // The tree's keys are the left pane's bindings, so none of them is
     // looked up with the right pane focused; the program's are.

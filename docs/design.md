@@ -1022,8 +1022,10 @@ Traversal through N levels of the graph is explicit rather than
 inline. The right pane's keys are one table (`RIGHT_PANE_KEYS`, the
 framework explorer's), resolved before the program-wide keymap while
 the pane has focus and no modal is open; the program-wide keys that
-drive the left tree do nothing there, so a chord the table does not bind
-(`Alt-j`) leaves the tree alone. With the right pane focused:
+drive the left tree do nothing there. Every character binds as typed,
+alone or with Shift, on the main screen as in every overlay (ADR 0197),
+so a chord no binding spells out (`Alt-j`, `Ctrl-j`) moves nothing. With
+the right pane focused:
 
 - `j` / `k` and the arrows walk the cursor through Node fields,
   validated rows, the `Other` header, then its children when expanded;

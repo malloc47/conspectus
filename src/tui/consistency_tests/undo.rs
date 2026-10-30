@@ -85,8 +85,8 @@ fn undo_steps_back_through_operations_newest_first_then_says_so() {
 
 #[test]
 fn the_undo_key_is_bound_globally_to_undo() {
-    use tuikit::keys::{ActiveScopes, KeyMatcher, Scope};
-    let undo = KeyMatcher::AnyModExceptCtrl(UNDO_KEY);
+    use tuikit::keys::{ActiveScopes, Scope, ch};
+    let undo = ch(UNDO_KEY);
     let found = keymap().resolve(ActiveScopes::global(), undo.example());
     assert!(
         found.is_some_and(|binding| binding.scope() == Scope::Global

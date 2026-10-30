@@ -22,9 +22,11 @@
 //! Building the keymap fails when two keys of one scope can match one key
 //! event, so no key shadows another and the table's order is the order
 //! the `?` page lists the keys in; each binding's help text is its row
-//! there. The status bar names the bindings with a verb, each worded for
-//! the selection. Overlays keep their own tables ([`overlay`]) and take
-//! every key while they are open.
+//! there. A character binds as typed, alone or with Shift, never with
+//! Control or Alt, as in every overlay; a chord is a binding of its own,
+//! spelled out (`Ctrl-R`, `Ctrl-G`). The status bar names the bindings
+//! with a verb, each worded for the selection. Overlays keep their own
+//! tables ([`overlay`]) and take every key while they are open.
 
 use std::sync::LazyLock;
 
@@ -234,26 +236,6 @@ mod heading {
     pub const EXPLORER: &str = "Detail-pane graph explorer (right focus)";
 }
 
-/// A character pressed alone or with any modifier but Control, so its
-/// Control chord stays free for a binding of its own: how the program's
-/// letters bind (`Alt-a` attaches as `a` does).
-const fn unless_ctrl(c: char) -> KeyMatcher {
-    KeyMatcher::AnyModExceptCtrl(c)
-}
-
-/// A character pressed with no modifier at all: the digits, `q`, and `.`.
-const fn plain(c: char) -> KeyMatcher {
-    KeyMatcher::Exact {
-        modifiers: KeyModifiers::NONE,
-        code: KeyCode::Char(c),
-    }
-}
-
-/// A character whatever modifiers come with it: the tree's vi keys.
-const fn any_mod(c: char) -> KeyMatcher {
-    KeyMatcher::AnyMod(KeyCode::Char(c))
-}
-
 const GLOBAL: Scope = Scope::Global;
 
 /// `Shift-Enter`, which needs a terminal that reports it.
@@ -266,17 +248,17 @@ const SHIFT_ENTER: KeyMatcher = KeyMatcher::Exact {
 /// page lists them; the right pane's come from its table after them
 /// ([`keymap`]).
 pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
-    bind("controls", GLOBAL, &[unless_ctrl('f')], Command::Controls).help(
+    bind("controls", GLOBAL, &[ch('f')], Command::Controls).help(
         heading::DISCOVERABLE,
         "Open the controls overlay (view / grouping / filters / sort / preview wrap)",
     ),
-    bind("messages", GLOBAL, &[unless_ctrl('!')], Command::Messages)
+    bind("messages", GLOBAL, &[ch('!')], Command::Messages)
         .verb("messages")
         .help(
             heading::DISCOVERABLE,
             "Open the messages log: launch, attach and rename outcomes with full output",
         ),
-    bind("help", GLOBAL, &[unless_ctrl('?')], Command::Help).help(heading::DISCOVERABLE, "This help"),
+    bind("help", GLOBAL, &[ch('?')], Command::Help).help(heading::DISCOVERABLE, "This help"),
     bind("row.default", LEFT_PANE, &[exact(KeyCode::Enter)], Command::Default)
         .verb("open")
         .rank(status_rank::DEFAULT_ACTION)
@@ -284,18 +266,18 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
             heading::ACTIONS,
             "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a stopped mux, pin, or history record, expand groups",
         ),
-    bind("attach", GLOBAL, &[unless_ctrl('a')], Command::Attach)
+    bind("attach", GLOBAL, &[ch('a')], Command::Attach)
         .verb("attach")
         .rank(status_rank::DEFAULT_ACTION)
         .help(heading::ACTIONS, "Attach to the selected mux"),
-    bind("row.copy-id", GLOBAL, &[unless_ctrl('i')], Command::CopyId).help(
+    bind("row.copy-id", GLOBAL, &[ch('i')], Command::CopyId).help(
         heading::ACTIONS,
         "Copy the selected agent or mux session's full id to the clipboard",
     ),
     bind(
         "value.inspect",
         GLOBAL,
-        &[unless_ctrl(INSPECT_KEY)],
+        &[ch(INSPECT_KEY)],
         Command::Explorer(ExplorerKey::Inspect),
     )
     .help(
@@ -306,7 +288,7 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
         heading::ACTIONS,
         "Rename the selected agent session (alias) or mux (tmux + pin cascade)",
     ),
-    bind("worktree.menu", GLOBAL, &[unless_ctrl('w')], Command::WorktreeMenu).help(
+    bind("worktree.menu", GLOBAL, &[ch('w')], Command::WorktreeMenu).help(
         heading::ACTIONS,
         "Open the worktree action menu for the selected repo / worktree / mux (new, merge, remove, close-down, prune, reveal; mutations need a backend)",
     ),
@@ -314,14 +296,14 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
         heading::ACTIONS,
         "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, forget its history",
     ),
-    bind("transcript.view", GLOBAL, &[unless_ctrl('v')], Command::View)
+    bind("transcript.view", GLOBAL, &[ch('v')], Command::View)
         .verb("view")
         .rank(status_rank::DEFAULT_ACTION)
         .help(
             heading::ACTIONS,
             "Open the selected session's transcript (or the mux row's linked session)",
         ),
-    bind("refresh", GLOBAL, &[unless_ctrl('r')], Command::Refresh)
+    bind("refresh", GLOBAL, &[ch('r')], Command::Refresh)
         .verb("refresh")
         .rank(status_rank::REFRESH)
         .help(heading::ACTIONS, "Refresh discovery now"),
@@ -339,11 +321,11 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
             heading::ACTIONS,
             "Resume the selected un-muxed agent session in a new terminal",
         ),
-    bind("quit", GLOBAL, &[plain('q'), ctrl('c')], Command::Quit)
+    bind("quit", GLOBAL, &[ch('q'), ctrl('c')], Command::Quit)
         .verb("quit")
         .rank(status_rank::QUIT)
         .help(heading::ACTIONS, "Quit"),
-    bind("mux.new", GLOBAL, &[unless_ctrl('n')], Command::NewMux).help(
+    bind("mux.new", GLOBAL, &[ch('n')], Command::NewMux).help(
         heading::MUX,
         "Create a bare tmux session (no agent, no worktree) — shell in the selected cwd",
     ),
@@ -351,46 +333,46 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
         heading::MUX,
         "Launch a harness in a new mux (the form can also create a worktree for it)",
     ),
-    bind("mux.menu", GLOBAL, &[unless_ctrl('m')], Command::MuxMenu).help(
+    bind("mux.menu", GLOBAL, &[ch('m')], Command::MuxMenu).help(
         heading::MUX,
         "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux",
     ),
-    bind("pin.toggle", GLOBAL, &[unless_ctrl('p')], Command::TogglePin).help(
+    bind("pin.toggle", GLOBAL, &[ch('p')], Command::TogglePin).help(
         heading::ROW_ACTIONS,
         "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉ (◎ when the pinned entity isn't running)",
     ),
-    bind("undo", GLOBAL, &[unless_ctrl(UNDO_KEY)], Command::Undo).help(
+    bind("undo", GLOBAL, &[ch(UNDO_KEY)], Command::Undo).help(
         heading::ROW_ACTIONS,
         "Undo the last pin or unpin, as far back as this session goes; a removed pin comes back with its overrides and its place in the order",
     ),
-    bind("row.menu", GLOBAL, &[plain('.')], Command::Menu)
+    bind("row.menu", GLOBAL, &[ch('.')], Command::Menu)
         .verb("menu")
         .rank(status_rank::DEFAULT_ACTION)
         .help(
             heading::ROW_ACTIONS,
             "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a history record; edit, rename, retarget, refresh, or reveal a pin in the Pinned view; Clean up… in the History view",
         ),
-    bind("view.sessions", GLOBAL, &[plain('1')], Command::SwitchView(View::Sessions))
+    bind("view.sessions", GLOBAL, &[ch('1')], Command::SwitchView(View::Sessions))
         .help(heading::VIEWS, "Switch directly to the sessions view"),
-    bind("view.mux", GLOBAL, &[plain('2')], Command::SwitchView(View::Mux))
+    bind("view.mux", GLOBAL, &[ch('2')], Command::SwitchView(View::Mux))
         .help(heading::VIEWS, "Switch directly to the mux view"),
-    bind("view.prs", GLOBAL, &[plain('3')], Command::SwitchView(View::Prs))
+    bind("view.prs", GLOBAL, &[ch('3')], Command::SwitchView(View::Prs))
         .help(heading::VIEWS, "Switch directly to the PRs view"),
-    bind("view.pinned", GLOBAL, &[plain('4')], Command::SwitchView(View::Pinned))
+    bind("view.pinned", GLOBAL, &[ch('4')], Command::SwitchView(View::Pinned))
         .help(heading::VIEWS, "Switch directly to the pinned view"),
-    bind("view.history", GLOBAL, &[plain('5')], Command::SwitchView(View::History))
+    bind("view.history", GLOBAL, &[ch('5')], Command::SwitchView(View::History))
         .help(heading::VIEWS, "Switch directly to the history view"),
-    bind("view.search", GLOBAL, &[plain('6')], Command::SwitchView(View::Search))
+    bind("view.search", GLOBAL, &[ch('6')], Command::SwitchView(View::Search))
         .help(heading::VIEWS, "Switch directly to the Search view"),
-    bind("view.next", GLOBAL, &[unless_ctrl(']')], Command::NextView)
+    bind("view.next", GLOBAL, &[ch(']')], Command::NextView)
         .help(heading::VIEWS, "Cycle to the next view"),
-    bind("view.previous", GLOBAL, &[unless_ctrl('[')], Command::PreviousView)
+    bind("view.previous", GLOBAL, &[ch('[')], Command::PreviousView)
         .help(heading::VIEWS, "Cycle to the previous view"),
     bind("filters.clear", LEFT_PANE, &[ch('F')], Command::ClearFilters)
         .help(heading::FILTERS, "Clear all active filters for the visible view"),
     bind("grouping.cycle", GLOBAL, &[ctrl('g')], Command::CycleGrouping)
         .help(heading::FILTERS, "Cycle grouping forward for the active view"),
-    bind("search.quick", GLOBAL, &[unless_ctrl('/')], Command::QuickSelect).help(
+    bind("search.quick", GLOBAL, &[ch('/')], Command::QuickSelect).help(
         heading::SEARCH,
         "Quick select: find a row of this view by name (rows under collapsed groups too)",
     ),
@@ -401,18 +383,18 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
     bind(
         "search.contents",
         GLOBAL,
-        &[unless_ctrl('s'), ctrl('/'), ctrl('_'), ctrl('7')],
+        &[ch('s'), ctrl('/'), ctrl('_'), ctrl('7')],
         Command::ContentSearch,
     )
     .help(
         heading::SEARCH,
         "Search contents: what was said in the sessions and what is in mux scrollback, in this view's sessions and muxes",
     ),
-    bind("search.older", GLOBAL, &[unless_ctrl('<')], Command::OlderSearch).help(
+    bind("search.older", GLOBAL, &[ch('<')], Command::OlderSearch).help(
         heading::SEARCH,
         "Search view: show the previous (older) remembered search without searching again; Controls lists them",
     ),
-    bind("search.newer", GLOBAL, &[unless_ctrl('>')], Command::NewerSearch).help(
+    bind("search.newer", GLOBAL, &[ch('>')], Command::NewerSearch).help(
         heading::SEARCH,
         "Search view: show the next (newer) remembered search without searching again; Controls lists them",
     ),
@@ -428,18 +410,18 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
         heading::SEARCH,
         "Search view: keep the search shown as the filter on the lists (paging does not change the filter; F clears it)",
     ),
-    bind("tree.up", LEFT_PANE, &[key(KeyCode::Up), any_mod('k')], Command::Up)
+    bind("tree.up", LEFT_PANE, &[key(KeyCode::Up), ch('k')], Command::Up)
         .verb("move")
         .rank(status_rank::LEFT_PANE_KEYS)
         .help(heading::NAVIGATION, "Move the selection up"),
-    bind("tree.down", LEFT_PANE, &[key(KeyCode::Down), any_mod('j')], Command::Down)
+    bind("tree.down", LEFT_PANE, &[key(KeyCode::Down), ch('j')], Command::Down)
         .verb("move")
         .rank(status_rank::LEFT_PANE_KEYS)
         .help(heading::NAVIGATION, "Move the selection down"),
     bind(
         "tree.collapse",
         LEFT_PANE,
-        &[key(KeyCode::Left), unless_ctrl('h')],
+        &[key(KeyCode::Left), ch('h')],
         Command::Collapse,
     )
     .verb("fold")
@@ -451,7 +433,7 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
     bind(
         "tree.expand",
         LEFT_PANE,
-        &[key(KeyCode::Right), unless_ctrl('l')],
+        &[key(KeyCode::Right), ch('l')],
         Command::Expand,
     )
     .verb("fold")
@@ -466,15 +448,15 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
         .help(heading::NAVIGATION, "Page down through the row tree"),
     bind("tree.page-up", LEFT_PANE, &[key(KeyCode::PageUp)], Command::PageUp)
         .help(heading::NAVIGATION, "Page up through the row tree"),
-    // `g` leaves its Control chord to the grouping key.
+    // `g` binds as typed, so its Control chord is the grouping key's.
     bind(
         "tree.first",
         LEFT_PANE,
-        &[key(KeyCode::Home), unless_ctrl('g')],
+        &[key(KeyCode::Home), ch('g')],
         Command::First,
     )
     .help(heading::NAVIGATION, "Jump to the first row"),
-    bind("tree.last", LEFT_PANE, &[key(KeyCode::End), any_mod('G')], Command::Last)
+    bind("tree.last", LEFT_PANE, &[key(KeyCode::End), ch('G')], Command::Last)
         .help(heading::NAVIGATION, "Jump to the last row"),
     bind(
         "row.reveal",
@@ -498,9 +480,9 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
             heading::NAVIGATION,
             "Cycle focus between left tree and right panel",
         ),
-    bind("preview.down", GLOBAL, &[any_mod('J')], Command::PreviewDown)
+    bind("preview.down", GLOBAL, &[ch('J')], Command::PreviewDown)
         .help(heading::NAVIGATION, "Scroll the right-panel preview down"),
-    bind("preview.up", GLOBAL, &[any_mod('K')], Command::PreviewUp)
+    bind("preview.up", GLOBAL, &[ch('K')], Command::PreviewUp)
         .help(heading::NAVIGATION, "Scroll the right-panel preview up"),
 ];
 
