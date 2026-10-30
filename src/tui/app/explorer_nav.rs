@@ -209,12 +209,28 @@ impl App {
                     .map_or(0, |explorer| explorer.content().core_fields.len());
                 format!("explorer: this node kind has no extra fields ({core} total)")
             }
-            Refusal::NoFarEnd => "explorer: unresolved evidence — `o` opens detail".to_string(),
+            // An unresolved stub names no node, but the Preview shows its
+            // evidence while the cursor is on it, which is where Enter
+            // was just pressed.
+            Refusal::NoFarEnd if self.cursor_on_unresolved() => {
+                "explorer: evidence names no node — the Preview shows it".to_string()
+            }
+            Refusal::NoFarEnd => "explorer: this link leads to no node".to_string(),
             Refusal::NothingToInspect => "explorer: row has no truncated value to open".to_string(),
             Refusal::Gone => {
                 "explorer: cannot restore breadcrumb hop — node missing from snapshot".to_string()
             }
         }
+    }
+
+    /// Whether the explorer's cursor is on an unresolved-evidence row.
+    fn cursor_on_unresolved(&self) -> bool {
+        self.explorer.as_ref().is_some_and(|explorer| {
+            matches!(
+                explorer.cursor_key(),
+                Some(crate::tui::explorer::ExplorerRowKey::OtherUnresolved { .. })
+            )
+        })
     }
 
     /// `Backspace` on the left pane with no reveal to return from: say

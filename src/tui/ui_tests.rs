@@ -1751,6 +1751,94 @@ fn agreeing_mux_evidence_renders_as_one_row_with_preview_evidence_list() {
 }
 
 #[test]
+fn enter_on_unresolved_evidence_points_at_the_preview_that_shows_it() {
+    use crate::model::{
+        AgentSessionId, Confidence, GraphLink, LinkEndpoint, LinkState, Metadata, NodeId,
+        Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
+    };
+    use crate::tui::explorer::ExplorerRow;
+
+    let unresolved = GraphLink {
+        id: "parent-unresolved".to_string(),
+        source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+        target: LinkEndpoint::Unresolved {
+            evidence: UnresolvedEndpoint {
+                node_type: "agent_session".to_string(),
+                harness_key: Some("codex".to_string()),
+                native_id: Some("9a1f".to_string()),
+                state_scope: None,
+                path: Some("/state/rollout-9a1f.jsonl".to_string()),
+                metadata: Metadata::default(),
+            },
+        },
+        relation: RelationKind::ParentSession,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::Low,
+        freshness: crate::model::Freshness::Fresh,
+        source_metadata: SourceMetadata::default(),
+        state: LinkState::Active,
+    };
+    let mut app = muxed_app_with_links("editor", None, vec![unresolved]);
+    app.update(Msg::CycleFocus);
+    let walk_to = |app: &mut App, wanted: fn(&ExplorerRow) -> bool| {
+        let at = app
+            .explorer_rows()
+            .iter()
+            .position(wanted)
+            .expect("the row is listed");
+        app.update(Msg::Explorer(ExplorerKey::First));
+        for _ in 0..at {
+            app.update(Msg::Explorer(ExplorerKey::Down));
+        }
+    };
+    walk_to(&mut app, |row| {
+        matches!(row, ExplorerRow::OtherHeader { .. })
+    });
+    app.update(Msg::Explorer(ExplorerKey::Activate));
+    walk_to(&mut app, |row| {
+        matches!(row, ExplorerRow::OtherUnresolved { .. })
+    });
+
+    // Enter has nothing to follow; the hint names the Preview and no key.
+    app.update(Msg::Explorer(ExplorerKey::Activate));
+    let hint = app.status_message().expect("Enter says why").to_string();
+    assert_eq!(
+        hint,
+        "explorer: evidence names no node — the Preview shows it"
+    );
+    assert!(!hint.contains('`'), "the hint names no key: {hint}");
+
+    // The Preview shows what the evidence records while the cursor is on
+    // the row.
+    let area = Rect::new(0, 0, 140, 40);
+    let text = buffer_to_string(&render_to_buffer(&mut app, area));
+    let preview = text
+        .lines()
+        .skip_while(|line| !line.contains(" Preview "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for shown in [
+        "unresolved",
+        "agent_session",
+        "harness_key",
+        "codex",
+        "native_id",
+        "9a1f",
+        "/state/rollout-9a1f.jsonl",
+    ] {
+        assert!(preview.contains(shown), "the Preview shows {shown}: {text}");
+    }
+
+    // `o`, which the hint used to name, opens nothing on the row.
+    app.update(Msg::Explorer(ExplorerKey::Inspect));
+    assert!(app.value_modal().is_none());
+    assert_eq!(
+        app.status_message(),
+        Some("explorer: row has no truncated value to open")
+    );
+}
+
+#[test]
 fn mux_detail_session_section_shows_session_id_when_collapsed() {
     // Regression: with a long mux native_id, the right pane's
     // Session section originally vanished entirely. After the

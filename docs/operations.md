@@ -1470,7 +1470,7 @@ table does not list (`Alt-j`, `Ctrl-j`) leaves the tree alone.
 | `↑`/`k`, `↓`/`j` | Move the cursor through the fields and the related rows. | Move the selection. |
 | `PgUp`, `PgDn` | Page the cursor by the rows the explorer zone shows. | Page the tree. |
 | `g`/`Home`, `G`/`End` | First and last row. | First and last row. |
-| `Enter` | Copy a field's whole value, drill into a related row, or open and close `Other` on its header. | The row's default action. |
+| `Enter` | Copy a field's whole value, drill into a related row, or open and close `Other` on its header. On an unresolved row under `Other` (evidence that names no node) it says so; the Preview shows what the evidence records. | The row's default action. |
 | `e` | Open or close `Other` on its header. | Nothing. |
 | `l`/`→`, `h`/`←` | Open `Other` on its header; close it from its header or a row inside it. | Expand or collapse the tree row. |
 | `o` | Open a cut value whole. | The same (the right pane's cursor row). |
