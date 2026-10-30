@@ -1127,3 +1127,29 @@ byte-identical.
 - **Separators (8.6).** Three separators remain on purpose (` · `,
   `  ·  `, `  `), now declared as a line's separator and segments' gaps
   rather than spliced spans.
+
+## Verification (CSP-759)
+
+The status bar is `tuikit::status_bar::StatusBar` and its hints a
+`KeyHintBar` generated from key tables (ADR 0191). Checked with
+`conspectus tui --snapshot` on the showcase fixture: 248 status-bar
+frames (every view, both focus states, the row kinds whose hints differ,
+each reachable overlay, and each severity of message, at 160, 100, 60, and
+40 columns) and 114 whole-screen frames before and after; no whole-screen
+frame differs outside the status bar.
+
+- **Status bar (3.6).** The segment structure is kept: the unseen and busy
+  chips lead both modes, the scope tag and stale mark lead the keys, the
+  provider chips follow them, and the settings keep their ranks. The
+  hints are no longer bundled strings: each key group is a segment with
+  its row's rank, so a narrow bar drops them one by one. The message mode
+  draws the severity's color (CSP-731, unchanged here) and now ends a
+  message too long for the bar with `…`.
+- **`default_action_status_hint` (3.6).** Replaced by annotations on the
+  rows of `MAIN_VIEW_KEYS`, with `Enter`'s verb from the dispatcher's own
+  `selected_default_action`; the right pane keeps only `a`, which acts on
+  its entity.
+- **Hint text in three places (7, 8.12).** The status bar and the help
+  page both generate the right pane's keys from `RIGHT_PANE_KEYS`
+  (CSP-756); the left pane's are `MAIN_VIEW_KEYS` rows checked against
+  the keymap. The three modal-open copies (7) are gone.

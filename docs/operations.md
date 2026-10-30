@@ -1478,6 +1478,29 @@ fold · Backspace back`), with `Enter`'s word for what it does on the
 cursor's row: `copy` on a field, `follow` on a related row, `fold` on
 the `Other` header. The help page (`?`) lists every key above.
 
+## The status bar's hints
+
+The status bar names the keys of whatever has them, worded for where you
+are, so a hint never names a key that does something else there:
+
+- **The left pane:** what the selected row's keys do (`Enter/a attach
+  tmux:main`, `Enter/v view codex:4184 · S resume`, `Enter/v open at the
+  match · . menu`, `Enter rebuild` on a gone pin or a history record,
+  `Enter show URL` on a live PR pin, `Enter/←/→ fold` on a group), then
+  `↑/↓ move · ←/→ fold`, `Tab focus` (`Tab inspect candidates` on a
+  row with several candidate muxes), `r refresh` (and `Ctrl-R hard
+  refresh` in the PRs view), `q quit`, and `Backspace back` after a
+  reveal. `j`/`k` and `h`/`l` work as the arrows do.
+- **The right pane:** `a attach …` when its entity attaches, its own
+  keys, then `Tab focus`, `r refresh`, and `q quit`.
+- **A dialog:** its own keys, the same as its footer; the `[left]` or
+  `[right]` tag goes while it is open.
+
+A key that cannot act on the selection is named dimmed, with why
+(`a attach: selected row has no mux to attach to`). On a narrow terminal
+the hints give way one by one, least important first, and the bar ends
+with `…`; a status message too long for the bar ends with `…` too.
+
 ## Keys in dialogs
 
 Every dialog uses the same three keys the same way:
@@ -1717,7 +1740,8 @@ A warning or error also:
 
 - sets the status message to its summary plus `· ! details`;
 - keeps a `▲ N · ! messages` chip at the start of the status bar until
-  you open the overlay;
+  you open the overlay (`▲ N` while a dialog is open, where `!` does not
+  reach the log);
 - leads the Preview of the row it concerns (its pin or mux) until a
   later operation on that row succeeds.
 

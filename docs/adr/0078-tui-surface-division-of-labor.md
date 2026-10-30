@@ -6,7 +6,10 @@ Accepted. Amended by [ADR 0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an
 the header keeps what it carries and gives way on a narrow screen in
 order of importance (the opt-in chips first, then the stopped count,
 the triage chip, the mux count, and the freshness; the session count
-never), ending with `…`.
+never), ending with `…`. Amended by [ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md): the status bar's
+contextual key hints are the keys of whatever has them (the focused pane,
+or the overlay on top), generated from their key tables, and the focus
+scope tag shows while a pane has the keys.
 
 ## Context
 

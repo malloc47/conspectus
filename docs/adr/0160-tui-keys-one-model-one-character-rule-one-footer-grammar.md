@@ -50,7 +50,10 @@ the explorer's `EXPLORER_KEYS`, resolved as `RIGHT_PANE_KEYS` before the
 program-wide keymap while the pane has focus, binds characters as typed
 (`Alt-j` is not `j`) and `Enter` with no modifier (`keys::exact`), takes
 every check but `ctrl_c_first` (a pane leaves `q` and `Ctrl-C` to its
-program), and generates its help section and status hint.
+program), and generates its help section and status hint. Amended by
+[ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md): a bound row carries an optional rank (`KeyRow::rank`), how long
+its hint holds on in a status bar, and a footer segment lists the keys it
+names and its highest rank.
 
 ## Context
 

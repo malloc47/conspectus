@@ -16,7 +16,11 @@ a `Case` can be a `step`, whose `Contained` check accepts a change of the
 selection look of the entry under it outside its frame. Amended by
 [ADR 0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md):
 a level's table consulted after its first is a `conformance::part`, which
-need not start with `Ctrl-C`.
+need not start with `Ctrl-C`. Amended by
+[ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md): a rig names its status rows (`Rig::status_rows`), which the
+`Drawn` and `Contained` checks leave out, and the keys its status line
+names (`Rig::hints`), which the new `Hints` check holds to the modal's
+footer.
 
 ## Context
 

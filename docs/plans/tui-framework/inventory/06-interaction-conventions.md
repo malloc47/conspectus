@@ -1006,3 +1006,25 @@ used.
   form and picker keys; CSP-732 extends the snapshot driver to every
   overlay key. With the handlers taking `send`, that driver can pass its
   own. The three dispatchers remain three.
+
+## Verification (CSP-759)
+
+The status bar's hints are generated from key tables (ADR 0191). Checked
+with `conspectus tui --snapshot` on the showcase fixture: the status bar
+in every view, both focus states, on each row kind whose hints differ,
+and with each reachable overlay open, at 160, 100, 60, and 40 columns.
+
+- **The four hand-written status hints (1.3, 9.3).** Gone. The worktree
+  and mux menus, Controls, and both searches no longer post a hint when
+  they open; the status bar names the top overlay's keys from its own
+  table (`Overlay::hints`). `tests/overlay_keymap_hygiene.rs` now scans
+  `runtime.rs`, `runtime/executor.rs`, `app/overlays.rs`, and
+  `ui/header.rs` for any hand-written hint, by a stricter rule.
+- **The main view's hints (1.3 item 3).** Generated from
+  `MAIN_VIEW_KEYS`, a key table of the main view's keys, with the
+  contextual wording as annotations on its rows; a consistency test
+  presses every key the bar names, in every view, row, and focus, through
+  the loops' routing. They are not yet the `KEYBINDINGS` rows themselves:
+  the scoped keymap (CSP-760) merges the two.
+- **`Msg::Report`'s ` · ! details` (9.3).** The `!` comes from its row of
+  `MAIN_VIEW_KEYS`, as the unseen chip's does.

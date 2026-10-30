@@ -14,7 +14,8 @@ left for this story. Applies house rule 14 of
 [ADR 0151](0151-tui-framework-control-set-and-house-rules.md) to the header,
 which had no fit. Keeps the header's content and order of
 [ADR 0078](0078-tui-surface-division-of-labor.md) and gives it a narrow-width
-order.
+order. Decision 6's hints, still hand-written here, are generated from the
+key tables by [ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md).
 
 ## Context
 

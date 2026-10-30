@@ -12,7 +12,11 @@ kept each key's old modifier handling), every list moves with
 by [ADR 0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md):
 `Abort` (`Ctrl-C`) dismisses the whole overlay from any level rather
 than meaning what each handler decides, the worktree menu's screens
-included, and `q` binds to it wherever nothing is typed.
+included, and `q` binds to it wherever nothing is typed. Amended by
+[ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md): no overlay opener writes its footer into the status
+line; the status bar generates the overlay's hints from its table
+(`Overlay::hints`), and the hygiene guard scans the code that writes the
+status line.
 
 ## Context
 

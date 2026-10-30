@@ -143,6 +143,25 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   (`transcript unavailable: …`, `tmux unavailable: …`) keeps the plain
   look. The right pane's `Select a row to view its detail.` wraps on a
   pane too narrow for it instead of being cut by the border.
+- **The status bar names only keys that do what it says.** Its hints are
+  generated from the keys of whatever has them. With a dialog open it
+  shows the dialog's keys instead of the main view's (`q quit` and `Tab
+  focus` there were the dialog's keys), without the `[left]`/`[right]`
+  tag, and the menus, Controls, and the searches no longer post a copy of
+  their footer when they open (`worktree: ↑/↓ move · …`, `mux: …`,
+  `quick select: type to find · …`). With the right pane focused,
+  `Enter/a attach X` becomes `a attach X` (the right pane's `Enter`
+  copies or follows), and the left row's view, resume, menu, and fold
+  hints go. On the left pane, `j/k move · h/l fold · Enter default`
+  becomes `↑/↓ move · ←/→ fold`, a group's `Enter/l expand · h collapse`
+  becomes `Enter/←/→ fold`, the PRs view's `^R forges` becomes `Ctrl-R
+  hard refresh`, a pin's `pin `x` is stopped · Enter runs `conspectus
+  rebuild x` to bring it back` (and the removed, planned, and missing
+  forms) becomes `Enter rebuild` (the Preview keeps the sentence), a live
+  PR pin says `Enter show URL`, a row that cannot attach says `a attach:
+  <why>` dimmed instead of `attach: <why>`, and an ambiguous row names
+  `Tab` once. A narrow bar keeps more hints, since each gives way on its
+  own, and a status message too long for the bar ends with `…`.
 - **The right pane's rows read alike.** A field label of 14 characters or
   more keeps a space before its value (`current_commit e52b2ef`, where it
   read `current_commite52b2ef`), so a long path beside one starts on the

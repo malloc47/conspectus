@@ -31,7 +31,10 @@ Amended by
 [ADR 0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) (decision 7):
 the transcript viewer is the
 framework's pager on the stack, not a nested reducer; `Msg::Viewer` and
-`Msg::ViewerFind` are gone.
+`Msg::ViewerFind` are gone. Amended by
+[ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md): an overlay names the keys it takes now (`Overlay::hints`, the
+footer of the table it resolves them with), which the status bar shows
+while it is on top.
 
 ## Context
 

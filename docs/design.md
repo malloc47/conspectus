@@ -1432,6 +1432,13 @@ still fits (`text::elide_filled`), ending with `…` when something went:
 the header keeps its session count always, then the freshness, the mux
 count, the `▲ N` triage chip, the stopped count, and the opt-in harness
 chips, from the last to go; the status bar keeps its old priority order.
+The status bar is a `tuikit::status_bar::StatusBar` (ADR 0191): a message
+in its severity's style, or the settings and the keys of the scope that has
+them, generated from key tables and never written by hand: the left pane's
+and the program's (`MAIN_VIEW_KEYS`, each row worded for the selection by
+an annotation), the right pane's table, or the overlay on top's own keys
+(`Overlay::hints`). A consistency test presses every key it names through
+the loops' routing.
 Every empty slot says so through `tuikit::empty_state::EmptyState` (a
 message and a hint, wrapped and receding): the left pane's placeholders,
 the right pane's, and a Preview with nothing to show, with their words

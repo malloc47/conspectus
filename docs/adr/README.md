@@ -155,7 +155,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0074](0074-detail-pane-related-entities-flatten.md) | Detail-Pane Related-Entities Flatten | Accepted (amended by 0187, narrowed by 0188) |
 | [0075](0075-edge-state-visual-language.md) | Edge-State Visual Language In The Detail-Pane Other Zone | Accepted (amended by 0187) |
 | [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted (amended by 0155, 0156, 0189) |
-| [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted (amended by 0190) |
+| [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted (amended by 0190, 0191) |
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161, 0188) |
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179) |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181) |
@@ -168,7 +168,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0117](0117-capability-manifest-and-traced-backstop.md) | A Capability Manifest With A Traced Backstop | Accepted |
 | [0118](0118-csp-short-name.md) | `csp` Is The Short Name | Accepted |
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
-| [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted (amended by 0160, 0161) |
+| [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted (amended by 0160, 0161, 0191) |
 | [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted (amended) |
 | [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted (amended by 0145) |
 | [0145](0145-state-glyphs-and-words-in-the-left-panel.md) | State Glyphs And Words In The Left Panel | Accepted |
@@ -182,11 +182,11 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted (decision 8's status-bar segments carried out by 0190) |
 | [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted (amended by 0166, 0174; decision 7 carried out by 0189) |
 | [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted (amended by 0186) |
-| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176, 0177, 0179, 0180, 0188) |
-| [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted (amended by 0172, 0176, 0177, 0180) |
+| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176, 0177, 0179, 0180, 0188, 0191) |
+| [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted (amended by 0172, 0176, 0177, 0180, 0191) |
 | [0162](0162-tui-help-pages-one-page-generated-from-key-tables.md) | Help Pages Are One Page, Generated From The Key Tables | Accepted (amended by 0177, 0178, 0180) |
 | [0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md) | Feedback Is One Type With Four Severities, And Toasts Are In-Tree | Accepted (amended by 0179) |
-| [0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md) | The Test Kit Drives Frames, Keeps Colors In Goldens, And Holds Every Modal To The Conventions | Accepted (amended by 0176, 0177) |
+| [0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md) | The Test Kit Drives Frames, Keeps Colors In Goldens, And Holds Every Modal To The Conventions | Accepted (amended by 0176, 0177, 0191) |
 | [0165](0165-tui-text-entry-one-line-editor-and-one-text-field.md) | Text Entry Has One Line Editor And One Text Field | Accepted |
 | [0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md) | Text Prompts Are One Overlay That Explains Its Refusals | Accepted (amended by 0176) |
 | [0167](0167-tui-path-fields-complete-behind-a-source-and-expand-tilde-on-commit.md) | Path Fields Complete Behind A Source, Ask For A Kind, And Expand `~` On Commit | Accepted |
@@ -212,7 +212,8 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md) | Detail Rows Are A Property Grid, And A Row Reports What It Asks For | Accepted |
 | [0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md) | The Explorer Is A Framework Control Over A Host Source, And The Right Pane's Keys Are One Table | Accepted (carried out by CSP-789, CSP-790, CSP-791, CSP-756; decision 6's tab bar and priority line by 0190) |
 | [0189](0189-tui-the-screen-is-an-app-frame-and-the-focused-pane-is-framed-in-the-focus-accent.md) | The Screen Is An App Frame, The Panes Split By One Rule, And The Focused Pane Is Framed In The Focus Accent | Accepted |
-| [0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an-empty-slot-says-so-one-way.md) | The Tab Strip, The Header, And The Status Bar Give Way By One Rule, And An Empty Slot Says So One Way | Accepted |
+| [0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an-empty-slot-says-so-one-way.md) | The Tab Strip, The Header, And The Status Bar Give Way By One Rule, And An Empty Slot Says So One Way | Accepted (decision 6's hints generated by 0191) |
+| [0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md) | The Status Bar Names The Keys Of The Scope That Has Them, Generated From Its Key Tables | Accepted |
 
 ## Transcript viewer
 
