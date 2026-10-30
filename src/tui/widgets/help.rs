@@ -7,21 +7,20 @@
 //! those keys. The viewers' pages are the same page generated from their
 //! key tables, with the footer of a viewer's help level (where `q` leaves
 //! the viewer), so the three share one frame, one column grid, and one
-//! heading style. This one's rows are hand-written prose, kept as
-//! annotation sections until the program-wide keymap carries help text the
-//! page can be generated from (backlog `CSP-760`), except the right pane's,
-//! which is generated from the right pane's table in this page's words;
-//! then legends of the marks the screens draw.
+//! heading style. This one is generated from the program's keymap: a row
+//! per binding with its help text, under the section the binding names.
+//! What the keymap cannot say is an annotation ([`annotations`]): the keys
+//! of the overlay a key opens, a key sequence the keymap does not bind as
+//! one key, and the legends of the marks the screens draw.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
-use tuikit::explorer::ExplorerKey;
 use tuikit::glyphs::marks;
-use tuikit::help::{HelpPage, HelpSection, sections_described};
+use tuikit::help::{HelpAnnotation, HelpPage, HelpRow, HelpSection, keymap_sections};
 use tuikit::pager::Pager;
 
 use crate::tui::icons::{NodeKind, node_kind_style};
-use crate::tui::keybindings::RIGHT_PANE_KEYS;
+use crate::tui::keybindings::keymap;
 use crate::tui::keybindings::overlay::HELP_KEYS;
 use crate::tui::{Msg, Theme};
 
@@ -34,195 +33,45 @@ pub fn open(theme: &Theme) -> KeymapHelp {
     HelpPage::new(sections(theme)).pager(HELP_KEYS)
 }
 
-/// The keymap page: the keymap's sections, then the legends.
+/// The keymap page: a row per binding of the program's keymap, then what
+/// it cannot say ([`annotations`]).
 pub(crate) fn sections(theme: &Theme) -> Vec<HelpSection> {
-    let mut sections = keymap_sections();
-    sections.extend([
-        icon_legend(theme),
-        mux_state_legend(theme),
-        pr_state_legend(theme),
-        pin_marker_legend(theme),
-    ]);
-    sections
+    keymap_sections(keymap(), &annotations(theme))
 }
 
-/// The keymap as hand-written sections. Their prose says more than a
-/// key table's one-line descriptions can, so they stay annotations until
-/// the program-wide keymap's rows carry help text of their own. The
-/// right pane's section is generated ([`explorer_section`]).
-fn keymap_sections() -> Vec<HelpSection> {
+/// What the keymap page says that the keymap's bindings cannot, each
+/// anchored to a binding by its id: the keys of the overlay a key opens
+/// (Controls, quick select, the content search, the transcript viewer),
+/// which their own tables bind; quick select's `Tab`, a key of the
+/// overlay `/` opens, as a row of its own; and the legends of the marks
+/// the screens draw.
+pub(crate) fn annotations(theme: &Theme) -> Vec<HelpAnnotation> {
     vec![
-        HelpSection::new("Discoverable controls")
-            .keys(
-                "f",
-                "Open the controls overlay (view / grouping / filters / sort / preview wrap); Space selects or toggles, Enter applies and closes, Esc closes",
-            )
-            .keys("!", crate::tui::keybindings::MESSAGES_HELP)
-            .keys("?", "This help"),
-        HelpSection::new("Actions")
-            .keys(
-                "Enter",
-                "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a stopped mux, pin, or history record, expand groups",
-            )
-            .keys("a", "Attach to the selected mux")
-            .keys(
-                "i",
-                "Copy the selected agent or mux session's full id to the clipboard",
-            )
-            .keys(
-                "R",
-                "Rename the selected agent session (alias) or mux (tmux + pin cascade)",
-            )
-            .keys(
-                "w",
-                "Open the worktree action menu for the selected repo / worktree / mux (new, merge, remove, close-down, prune, reveal; mutations need a backend)",
-            )
-            .keys(
-                "X",
-                "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, forget its history",
-            )
-            .keys(
-                "v",
-                "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking, / find then n/N step through matches, ? lists every key",
-            )
-            .keys("r", "Refresh discovery now")
-            .keys("Ctrl-R", crate::tui::keybindings::HARD_REFRESH_HELP)
-            .keys(
-                "S",
-                "Resume the selected un-muxed agent session in a new terminal",
-            )
-            .keys("q / Ctrl-C", "Quit"),
-        HelpSection::new("Mux")
-            .keys(
-                "n",
-                "Create a bare tmux session (no agent, no worktree) — shell in the selected cwd",
-            )
-            .keys(
-                "N",
-                "Launch a harness in a new mux (the form can also create a worktree for it)",
-            )
-            .keys(
-                "m",
-                "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux",
-            ),
-        HelpSection::new("Row actions")
-            .keys(
-                "p",
-                "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉ (◎ when the pinned entity isn't running)",
-            )
-            .keys(
-                crate::tui::keybindings::UNDO_KEY.to_string(),
-                "Undo the last pin or unpin, as far back as this session goes; a removed pin comes back with its overrides and its place in the order",
-            )
-            .keys(
-                ".",
-                "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a history record; edit, rename, retarget, refresh, or reveal a pin in the Pinned view; Clean up… in the History view",
-            ),
-        HelpSection::new("View switching")
-            .keys(
-                "1 / 2 / 3 / 4",
-                "Switch directly to the sessions / mux / PRs / pinned view",
-            )
-            .keys("5", "Switch directly to the history view")
-            .keys("6", "Switch directly to the Search view")
-            .keys("] / [", "Cycle to next / previous view"),
-        HelpSection::new("Filters & grouping")
-            .keys("F", "Clear all active filters for the visible view")
-            .keys("Ctrl-G", "Cycle grouping forward for the active view"),
-        HelpSection::new("Search")
-            .keys(
-                "/",
-                "Quick select: find a row of this view by name (rows under collapsed groups too); Enter selects it",
-            )
-            .keys(
+        HelpAnnotation::more(
+            "controls",
+            "; Space selects or toggles, Enter applies and closes, Esc closes",
+        ),
+        HelpAnnotation::more(
+            "transcript.view",
+            "; q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking, / find then n/N step through matches, ? lists every key",
+        ),
+        HelpAnnotation::more("search.quick", "; Enter selects it"),
+        HelpAnnotation::row_after(
+            "search.quick",
+            HelpRow::keys(
                 "/ then Tab",
                 "Find anything, whichever view it lives in (Tab again goes back to this view); the word at the right says whether Enter selects it here, follows its relationships in the right pane, or switches views",
-            )
-            .keys(
-                "Ctrl-/ (or Ctrl-_ / Ctrl-7) / s",
-                "Search contents: what was said in the sessions and what is in mux scrollback, in this view's sessions and muxes (Tab searches all of them). S-Tab switches between listing sessions and listing messages; Ctrl-O opens the options (tool calls, thinking, pane scrollback); Ctrl-S keeps the search in the Search view and goes there; Ctrl-F keeps the query as a filter on the lists. `s` works in every terminal",
-            )
-            .keys(
-                "< / >",
-                "Search view: show the previous (older) or next (newer) remembered search without searching again; Controls lists them",
-            )
-            .keys(
-                "Ctrl-L",
-                "Search view: list sessions or messages (the same matches, no new scan)",
-            )
-            .keys(
-                "Ctrl-O",
-                "Search view: choose what a search looks in (tool calls, thinking, pane scrollback)",
-            )
-            .keys(
-                "Ctrl-F",
-                "Search view: keep the search shown as the filter on the lists (paging does not change the filter; F clears it)",
             ),
-        HelpSection::new("Navigation")
-            .keys("j / k / ↓ / ↑", "Move selection down / up")
-            .keys(
-                "l / → / h / ←",
-                "Expand / collapse the selected left-tree row (vi-style fold)",
-            )
-            .keys("PgDn / PgUp", "Page through the row tree")
-            .keys("g / G", "First / last row")
-            .keys(
-                "Enter",
-                "Left tree: row-kind default action (attach / view / rebuild / expand); on the right pane, see its keys below",
-            )
-            .keys(
-                "Shift-Enter / Alt-Enter / O",
-                "Reveal the row's entity in its own view (Sessions, Mux, PRs, History); Backspace on the left tree returns. Shift-Enter needs a terminal that reports it",
-            )
-            .keys("Tab", "Cycle focus between left tree and right panel")
-            .keys("J / K", "Scroll the right-panel preview"),
-        explorer_section(),
+        ),
+        HelpAnnotation::more(
+            "search.contents",
+            " (Tab searches all of them). S-Tab switches between listing sessions and listing messages; Ctrl-O opens the options (tool calls, thinking, pane scrollback); Ctrl-S keeps the search in the Search view and goes there; Ctrl-F keeps the query as a filter on the lists. `s` works in every terminal",
+        ),
+        HelpAnnotation::section(icon_legend(theme)),
+        HelpAnnotation::section(mux_state_legend(theme)),
+        HelpAnnotation::section(pr_state_legend(theme)),
+        HelpAnnotation::section(pin_marker_legend(theme)),
     ]
-}
-
-/// The right pane's keys, generated from the table the right pane
-/// resolves (`RIGHT_PANE_KEYS`) in this page's words, so the page lists
-/// every key it binds and no other; then `E`, which the program-wide
-/// keymap binds for the explorer's link rows.
-fn explorer_section() -> HelpSection {
-    let mut section = HelpSection::new("Detail-pane graph explorer (right focus)");
-    section.rows = sections_described(RIGHT_PANE_KEYS, |key| Some(explorer_key_help(key)))
-        .into_iter()
-        .flat_map(|generated| generated.rows)
-        .collect();
-    section.keys(
-        "E",
-        "Toggle edge meta (provenance · confidence · state) on link rows",
-    )
-}
-
-/// What each of the right pane's keys does, in this page's words.
-fn explorer_key_help(key: ExplorerKey) -> &'static str {
-    match key {
-        ExplorerKey::Down => {
-            "Move the explorer cursor down, from the Node fields into the relationship rows"
-        }
-        ExplorerKey::Up => "Move the explorer cursor up",
-        ExplorerKey::PageDown => "Page the explorer cursor down by the rows the zone shows",
-        ExplorerKey::PageUp => "Page the explorer cursor up by the rows the zone shows",
-        ExplorerKey::First => "First explorer row",
-        ExplorerKey::Last => "Last explorer row",
-        ExplorerKey::Activate => {
-            "Copy the value on a Node-zone field row · drill on a link row · open or close the Other zone on its header"
-        }
-        ExplorerKey::Inspect => "Open the full untruncated value for the cursor row in a modal",
-        ExplorerKey::ToggleFull => {
-            "Toggle Expanded Node Detail (every per-kind field) on the focused node"
-        }
-        ExplorerKey::ToggleSection => {
-            "Open or close the Other zone (alternates, conflicts, unresolved evidence) on its header"
-        }
-        ExplorerKey::OpenSection => "Open the Other zone on its header",
-        ExplorerKey::CloseSection => "Close the Other zone from its header or a row inside it",
-        ExplorerKey::Back => {
-            "Back out of the most recent drilldown hop · once the stack is empty, press twice to return focus to the left pane"
-        }
-    }
 }
 
 /// Built-in legend mapping each `NodeKind` glyph to its

@@ -611,22 +611,22 @@ fn opening_a_pane_hit_reveals_the_mux_and_asks_for_the_scrollback() {
 
 #[test]
 fn the_three_ctrl_slash_forms_open_the_contents_search_and_plain_slash_does_not() {
-    use crate::tui::keybindings::translate_via_table;
-    use crate::tui::keymap::Action;
-    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+    use crate::tui::keymap::{Action, translate};
+    use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let keymap_action = |modifiers, code| translate(Event::Key(KeyEvent::new(code, modifiers)));
     for code in ['/', '7', '_'] {
         assert_eq!(
-            translate_via_table(KeyModifiers::CONTROL, KeyCode::Char(code)),
+            keymap_action(KeyModifiers::CONTROL, KeyCode::Char(code)),
             Some(Action::OpenContentSearch),
             "Ctrl-{code}"
         );
     }
     assert_eq!(
-        translate_via_table(KeyModifiers::NONE, KeyCode::Char('/')),
+        keymap_action(KeyModifiers::NONE, KeyCode::Char('/')),
         Some(Action::OpenSearch)
     );
     assert_eq!(
-        translate_via_table(KeyModifiers::NONE, KeyCode::Char('s')),
+        keymap_action(KeyModifiers::NONE, KeyCode::Char('s')),
         Some(Action::OpenContentSearch)
     );
 }

@@ -5,21 +5,21 @@
 //!
 //! Split out of `tui::runtime` so `runtime.rs` can shrink toward
 //! the ADR 0085 contract 5 target of a thin loop-driver module
-//! separate from the keymap. The right pane's table
-//! ([`right_pane_action`]), the focus guard ([`guard_focus`]), and view
-//! cycling ([`cycle_view`]) live here too since they are
-//! keymap-adjacent steps the loop applies before dispatch.
+//! separate from the keymap. The keys themselves are the scoped keymap
+//! of [`crate::tui::keybindings`]; this module resolves an event against
+//! it for the focused pane ([`translate_in`]) and keeps view cycling
+//! ([`cycle_view`]), a keymap-adjacent step the loop applies before
+//! dispatch.
 //!
 //! Overlay-owned input is not this module's responsibility — the
 //! [`crate::tui::modal`] contract routes keys to the top-of-stack
 //! overlay before the fallback keymap sees them (see
 //! `overlay_key_from_event` in `runtime.rs`).
 
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
-use tuikit::explorer::ExplorerKey;
+use ratatui::crossterm::event::{Event, KeyEventKind};
 
 use crate::tui::app::{App, Focus};
-use crate::tui::keybindings::RIGHT_PANE_KEYS;
+use crate::tui::keybindings::{active_scopes, keymap};
 use crate::tui::{Msg, View};
 
 /// The key that opens the explorer cursor row's whole value
@@ -111,101 +111,30 @@ pub fn cycle_view(view: View, delta: i32) -> View {
     VIEW_OPTIONS[tuikit::scroll::wrap_step(idx, VIEW_OPTIONS.len(), delta)]
 }
 
-/// The action of a key the right pane's table ([`RIGHT_PANE_KEYS`])
-/// binds, while the right pane has focus: a [`Msg::Explorer`] key. `None`
-/// on the left pane, for a key the table leaves to the program-wide
-/// keymap, and for an event that is not a key press. An open modal owns
-/// every key, so the caller asks the modal stack first.
-pub fn right_pane_action(focus: Focus, event: &Event) -> Option<Action> {
+/// The action of `event` in the keymap with `focus`: the focused pane's
+/// binding of the key, else the program's. `None` for a key neither
+/// binds and for an event that is not a key press. An open modal owns
+/// every key, so the caller asks the modal stack first. Pure, so tests
+/// need no terminal.
+///
+/// The left tree's keys are the left pane's bindings, so a key the right
+/// pane's table does not bind (`Alt-j`, `Ctrl-j`) leaves the tree alone
+/// with the right pane focused instead of moving it behind the operator.
+pub fn translate_in(focus: Focus, event: Event) -> Option<Action> {
     let Event::Key(key) = event else {
         return None;
     };
-    if focus != Focus::Right || key.kind != KeyEventKind::Press {
+    if key.kind != KeyEventKind::Press {
         return None;
     }
-    tuikit::keys::resolve(RIGHT_PANE_KEYS, *key)
-        .map(|key| Action::Msg(Box::new(Msg::Explorer(key))))
+    keymap()
+        .resolve(active_scopes(focus), key)
+        .map(|binding| binding.action().action())
 }
 
-/// The program-wide keymap's `action` with the right pane focused: the
-/// actions that drive the left tree (its moves, pages, ends, folds,
-/// default action, filter clearing, and `Backspace`) do nothing there, so
-/// a key the right pane's table does not bind (`Alt-j`, `Ctrl-j`) leaves
-/// the tree alone instead of moving it behind the operator. Every other
-/// action, and every action on the left pane, passes. Overlay-owned keys
-/// never reach here; the modal stack routes them first.
-pub fn guard_focus(action: Action, focus: Focus) -> Option<Action> {
-    if focus != Focus::Right {
-        return Some(action);
-    }
-    let drives_the_tree = match &action {
-        Action::DefaultAction | Action::ClearFilters => true,
-        Action::Msg(msg) => matches!(
-            **msg,
-            Msg::NavDown
-                | Msg::NavUp
-                | Msg::PageDown
-                | Msg::PageUp
-                | Msg::Home
-                | Msg::End
-                | Msg::ExpandRow
-                | Msg::CollapseRow
-                | Msg::NavBack
-        ),
-        _ => false,
-    };
-    (!drives_the_tree).then_some(action)
-}
-
-/// Map crossterm events to [`Action`]s. Returns `None` for events
-/// the v1 shell ignores. Pulled out so tests don't need a terminal.
-/// The right pane's table ([`right_pane_action`]) is consulted before
-/// this, and the focus guard ([`guard_focus`]) after it, so the keymap
-/// stays pure with respect to terminal state.
+/// [`translate_in`] with the left pane focused, as the program starts.
 pub fn translate(event: Event) -> Option<Action> {
-    // Consult the declarative KEYBINDINGS table first; keys it
-    // doesn't hold fall through to the match below.
-    if let Event::Key(key) = &event
-        && key.kind == KeyEventKind::Press
-        && let Some(action) = crate::tui::keybindings::translate_via_table(key.modifiers, key.code)
-    {
-        return Some(action);
-    }
-    match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
-            // All single-char parametric guards
-            // (r/a/v/f/p/[/]//?/l/h/e) + arrow / nav keys
-            // (j/k/Down/Up/Right/Left/Enter/Backspace/Home/End/g/G)
-            // migrated to `keybindings::KEYBINDINGS` via
-            // `KeyMatcher::AnyModExceptCtrl` and `KeyMatcher::AnyMod`.
-            // Dispatched via `translate_via_table` above.
-            //
-            // Remaining hand-matched:
-            // - `PageDown` / `PageUp` — the help page documents the
-            //   pair on one line, and the tree pages by the rows its
-            //   state kept from the last frame.
-            (_, KeyCode::PageDown) => Some(Action::Msg(Box::new(Msg::PageDown))),
-            (_, KeyCode::PageUp) => Some(Action::Msg(Box::new(Msg::PageUp))),
-            // `o` opens the full-value modal on the explorer cursor's
-            // row, whichever pane has focus. The explorer says so when
-            // the row has no truncated value.
-            (m, KeyCode::Char(INSPECT_KEY)) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Inspect))))
-            }
-            // `i` copies the selected agent or mux session's
-            // full id to the clipboard via OSC 52 (ADR 0056) and
-            // posts a toast. The runtime branches on selection kind;
-            // a non-session row surfaces a status hint instead.
-            (m, KeyCode::Char('i')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::CopySessionId)
-            }
-            (_, KeyCode::Tab) => Some(Action::Msg(Box::new(Msg::CycleFocus))),
-            (_, KeyCode::Char('J')) => Some(Action::Msg(Box::new(Msg::ScrollPreviewBy(1)))),
-            (_, KeyCode::Char('K')) => Some(Action::Msg(Box::new(Msg::ScrollPreviewBy(-1)))),
-            _ => None,
-        },
-        _ => None,
-    }
+    translate_in(Focus::Left, event)
 }
 
 /// Resolved default action for the left-pane cursor. Pure

@@ -438,15 +438,6 @@ fn the_left_pane_keeps_the_program_wide_keymap() {
         None,
         "Esc means nothing here"
     );
-    // Every action passes the guard on the left pane.
-    for action in [
-        Action::DefaultAction,
-        Action::ClearFilters,
-        Action::Msg(Box::new(Msg::NavDown)),
-        Action::Msg(Box::new(Msg::NavBack)),
-    ] {
-        assert_eq!(guard_focus(action.clone(), Focus::Left), Some(action));
-    }
 }
 
 #[test]
@@ -707,11 +698,13 @@ fn the_inspect_key_the_cut_hint_names_is_the_right_panes_inspect_key() {
 
 #[test]
 fn chords_the_right_pane_does_not_bind_leave_the_left_tree_alone() {
-    // The program-wide keymap matches `j` with any modifier, so `Alt-j`
+    // The left pane's tree keys match `j` with any modifier, so `Alt-j`
     // used to move the explorer through the remap. The right pane's
-    // table binds characters as typed, and the focus guard drops the
-    // left tree's actions, so these chords do nothing on the right pane.
+    // table binds characters as typed, and the tree's keys are the left
+    // pane's bindings, so these chords do nothing on the right pane.
     use crate::tui::app::Focus;
+    use crate::tui::keybindings::{Command, LEFT_PANE, keymap};
+    use tuikit::keys::{Binding, Scope};
     for (modifiers, c) in [
         (KeyModifiers::ALT, 'j'),
         (KeyModifiers::ALT, 'k'),
@@ -729,31 +722,41 @@ fn chords_the_right_pane_does_not_bind_leave_the_left_tree_alone() {
             "the left tree keeps {c}"
         );
     }
-    for action in [
-        Action::DefaultAction,
-        Action::ClearFilters,
-        Action::Msg(Box::new(Msg::NavDown)),
-        Action::Msg(Box::new(Msg::NavUp)),
-        Action::Msg(Box::new(Msg::PageDown)),
-        Action::Msg(Box::new(Msg::PageUp)),
-        Action::Msg(Box::new(Msg::Home)),
-        Action::Msg(Box::new(Msg::End)),
-        Action::Msg(Box::new(Msg::ExpandRow)),
-        Action::Msg(Box::new(Msg::CollapseRow)),
-        Action::Msg(Box::new(Msg::NavBack)),
+    // The tree's keys are the left pane's bindings, so none of them is
+    // looked up with the right pane focused; the program's are.
+    for command in [
+        Command::Default,
+        Command::ClearFilters,
+        Command::Down,
+        Command::Up,
+        Command::PageDown,
+        Command::PageUp,
+        Command::First,
+        Command::Last,
+        Command::Expand,
+        Command::Collapse,
+        Command::Back,
     ] {
-        assert_eq!(
-            guard_focus(action.clone(), Focus::Right),
-            None,
-            "{action:?}"
-        );
+        let scopes: Vec<Scope> = keymap()
+            .bindings()
+            .iter()
+            .filter(|binding| binding.action() == command)
+            .map(Binding::scope)
+            .collect();
+        assert_eq!(scopes, [LEFT_PANE], "{command:?}");
     }
-    for action in [
-        Action::Refresh,
-        Action::Msg(Box::new(Msg::CycleFocus)),
-        Action::Msg(Box::new(Msg::Explorer(ExplorerKey::Inspect))),
+    for command in [
+        Command::Refresh,
+        Command::Focus,
+        Command::Explorer(ExplorerKey::Inspect),
     ] {
-        assert_eq!(guard_focus(action.clone(), Focus::Right), Some(action));
+        assert!(
+            keymap()
+                .bindings()
+                .iter()
+                .any(|binding| binding.action() == command && binding.scope() == Scope::Global),
+            "{command:?}"
+        );
     }
 }
 

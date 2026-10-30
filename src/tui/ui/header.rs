@@ -5,7 +5,7 @@ use tuikit::priority_line::{PriorityLine, Segment};
 use tuikit::status_bar::{Annotation, KeyHintBar, StatusBar};
 
 use super::*;
-use crate::tui::keybindings::{MAIN_VIEW_KEYS, MainKey, RIGHT_PANE_KEYS, status_rank};
+use crate::tui::keybindings::{Command, RIGHT_PANE_KEYS, active_scopes, keymap, status_rank};
 use crate::tui::keymap::{SelectedDefault, selected_default_action};
 
 /// How long each part of the header holds on as the screen narrows, the
@@ -301,7 +301,7 @@ pub(super) fn push_unseen_messages_chip(app: &App, theme: &Theme, spans: &mut Ve
     } else {
         format!(
             "{unseen} · {}",
-            crate::tui::keybindings::messages_hint("messages")
+            crate::tui::keybindings::messages_hint(app, "messages")
         )
     };
     spans.push(
@@ -532,58 +532,58 @@ pub(super) fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize)
 }
 
 /// The keys the status bar names: those of the scope that has them,
-/// generated from its key tables. With an overlay on top, its own keys
-/// (`Overlay::hints`). On the left pane, the main view's table, each row
-/// worded for the selection. On the right pane, `a` when the right pane's
-/// entity attaches, the right pane's table (with `Enter`'s verb from the
-/// cursor's row), and the program's keys.
+/// generated from the keymap and its tables. With an overlay on top, its
+/// own keys (`Overlay::hints`). Otherwise the keymap's bindings in the
+/// focused pane's scope and the program's, in groups: what acts on the
+/// selection, the focus key, the program's keys, then the way back. On
+/// the left pane the selection's keys are worded for the row; on the
+/// right pane they are `a` when the right pane's entity attaches and the
+/// right pane's table (with `Enter`'s verb from the cursor's row). The
+/// unseen-messages chip names `!`.
 pub(crate) fn status_hints(app: &App) -> KeyHintBar {
     if let Some(hints) = app.top_modal_hints() {
         return KeyHintBar::new().footer(&hints, status_rank::OVERLAY_KEYS);
     }
     let selection = selection_keys(app);
-    let program = |key: &MainKey| match key {
-        MainKey::Focus => Some(match app.focus() {
+    let active = active_scopes(app.focus());
+    let pass = |bar: KeyHintBar, annotate: &dyn Fn(&Command) -> Option<Annotation>| {
+        bar.keymap(keymap(), active, app, status_rank::LEFT_PANE_KEYS, annotate)
+    };
+    let focus = |command: &Command| {
+        (*command == Command::Focus).then(|| match app.focus() {
             Focus::Left => selection.tab.clone().unwrap_or_default(),
             Focus::Right => Annotation::new(),
-        }),
-        MainKey::Refresh | MainKey::Quit => Some(Annotation::new()),
+        })
+    };
+    let program = |command: &Command| match command {
+        Command::Refresh | Command::Quit => Some(Annotation::new()),
         // A hard refresh asks the forges again, which only the PRs view
         // shows.
-        MainKey::HardRefresh => (app.active_view() == View::Prs).then(Annotation::new),
+        Command::HardRefresh => (app.active_view() == View::Prs).then(Annotation::new),
         _ => None,
     };
-    match app.focus() {
-        Focus::Left => {
-            KeyHintBar::new().annotated(MAIN_VIEW_KEYS, status_rank::LEFT_PANE_KEYS, |key| {
-                match key {
-                    MainKey::Default => selection.enter.clone(),
-                    MainKey::Attach => selection.attach.clone(),
-                    MainKey::View => selection.view.clone(),
-                    MainKey::Resume => selection.resume.then(Annotation::new),
-                    MainKey::Menu => selection.menu.clone(),
-                    MainKey::Up | MainKey::Down | MainKey::Collapse | MainKey::Expand => {
-                        Some(Annotation::new())
-                    }
-                    MainKey::Back => app.can_nav_back().then(Annotation::new),
-                    // The unseen-messages chip names it.
-                    MainKey::Messages => None,
-                    other => program(other),
-                }
-            })
-        }
-        Focus::Right => KeyHintBar::new()
-            .annotated(
-                MAIN_VIEW_KEYS,
-                status_rank::DEFAULT_ACTION,
-                |key| match key {
-                    MainKey::Attach => selection.attach.clone().filter(Annotation::is_available),
-                    _ => None,
-                },
-            )
-            .footer(&right_pane_footer(app), status_rank::RIGHT_PANE_KEYS)
-            .annotated(MAIN_VIEW_KEYS, status_rank::LEFT_PANE_KEYS, program),
-    }
+    let selected = match app.focus() {
+        Focus::Left => pass(KeyHintBar::new(), &|command| match command {
+            Command::Default => selection.enter.clone(),
+            Command::Attach => selection.attach.clone(),
+            Command::View => selection.view.clone(),
+            Command::Resume => selection.resume.then(Annotation::new),
+            Command::Menu => selection.menu.clone(),
+            Command::Up | Command::Down | Command::Collapse | Command::Expand => {
+                Some(Annotation::new())
+            }
+            _ => None,
+        }),
+        Focus::Right => pass(KeyHintBar::new(), &|command| match command {
+            Command::Attach => selection.attach.clone().filter(Annotation::is_available),
+            _ => None,
+        })
+        .footer(&right_pane_footer(app), status_rank::RIGHT_PANE_KEYS),
+    };
+    // `Backspace` has the left pane's binding, which names itself only
+    // while a reveal can be returned from.
+    let back = |command: &Command| (*command == Command::Back).then(Annotation::new);
+    pass(pass(pass(selected, &focus), &program), &back)
 }
 
 /// The right pane's keys as the status bar names them, generated from the
@@ -597,8 +597,8 @@ fn right_pane_footer(app: &App) -> Footer {
 }
 
 /// What the keys that act on the selection do, as the status bar words
-/// them: each an annotation on its row of [`MAIN_VIEW_KEYS`], or `None`
-/// when the key does nothing worth naming here.
+/// them: each an annotation on its binding in the keymap, or `None` when
+/// the key does nothing worth naming here.
 #[derive(Debug, Default)]
 pub(super) struct SelectionKeys {
     /// `Enter` on the left pane: the row's default action.

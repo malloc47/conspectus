@@ -5,7 +5,7 @@
 use super::*;
 use crate::tui::Effect;
 use crate::tui::effect::{ExecSpec, StoreOp, lifecycle};
-use crate::tui::keybindings::KEYBINDINGS;
+use crate::tui::keybindings::keymap;
 use crate::tui::keymap::Action;
 
 /// Every key bound to a message runs on an executor that can run what
@@ -18,8 +18,8 @@ fn every_key_runs_on_an_executor_that_can_run_what_it_emits() {
     use crate::tui::runtime::{ExecutorKind, live_executor_for, pure_executor_runs};
     let mut checked = 0;
     let mut live_only = 0;
-    for binding in KEYBINDINGS {
-        let action = (binding.action)();
+    for binding in keymap().bindings() {
+        let action = binding.action().action();
         let Action::Msg(msg) = &action else {
             continue;
         };
@@ -35,8 +35,8 @@ fn every_key_runs_on_an_executor_that_can_run_what_it_emits() {
             assert_eq!(
                 live_executor_for(&action),
                 ExecutorKind::Live,
-                "{:?} emits {effect:?}, which only the live executor can run",
-                binding.key
+                "{} emits {effect:?}, which only the live executor can run",
+                binding.id()
             );
         }
     }

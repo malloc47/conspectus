@@ -1,97 +1,78 @@
-//! Declarative keybinding table.
+//! The program's keymap: every key the main screen takes while no modal
+//! is open, in one scoped table ([`keymap`]).
 //!
-//! A `(mode/focus, key, action, help)` table so the dispatcher,
-//! the focus remap, the help overlay, and the controls hint
-//! footers all consume the same source-of-truth list. A drift test
-//! asserts every entry's `help_text` appears in
-//! `crate::tui::widgets::help::keymap_sections`. Keys the table
-//! doesn't hold stay as match arms in `keymap::translate`
-//! (`PageUp` / `PageDown`, which the help page documents as one
-//! pair, among them).
+//! Each binding names its scope: the program's ([`Scope::Global`]), the
+//! left pane's row tree ([`LEFT_PANE`]), or the right pane's explorer
+//! ([`RIGHT_PANE`], the framework explorer's own table taken in). A key is
+//! looked up in the focused pane's scope, then the program's, so the keys
+//! that mean one thing on the left pane and another on the right are two
+//! bindings of this one table:
 //!
-//! Actions with runtime parameters (`SwitchView(v)`,
-//! `CycleView(dir)`) are represented as closures returning the
-//! parameterized action; parameter-free actions are stored
-//! directly. The table stays a compile-time `&'static`
-//! (no allocation on init) and every entry is
-//! `#[derive(Debug)]` for the drift test's assertion messages.
+//! | Key | Left pane | Right pane |
+//! | --- | --- | --- |
+//! | `Enter` | the row's default action | copy a field, drill a link, fold `Other` |
+//! | `F` | clear every filter | Expanded Node Detail |
+//! | `Backspace` | return from a reveal | back out of a drill; with none, arm, then leave the pane |
+//! | `h`/`l`, `←`/`→` | fold the tree row | close or open the `Other` zone |
+//! | `j`/`k`, the arrows, `PgUp`/`PgDn`, `g`/`G`, `Home`/`End` | move and page the tree | move and page the explorer |
+//! | `Esc` | nothing | back, as `Backspace` |
+//! | `e` | nothing | fold `Other` on its header |
+//! | `o` | open the right pane's cursor value | the same |
+//!
+//! Building the keymap fails when two keys of one scope can match one key
+//! event, so no key shadows another and the table's order is the order
+//! the `?` page lists the keys in; each binding's help text is its row
+//! there. The status bar names the bindings with a verb, each worded for
+//! the selection. Overlays keep their own tables ([`overlay`]) and take
+//! every key while they are open.
+
+use std::sync::LazyLock;
 
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
 pub mod overlay;
 
 use tuikit::explorer::{EXPLORER_KEYS, ExplorerKey};
-use tuikit::glyphs::marks;
-use tuikit::keys::{KeyAction, KeyMatcher, KeyRole, KeyRow, ch, ctrl, exact, include, key, shown};
+use tuikit::keys::{
+    ActiveScopes, Bind, KeyMatcher, KeyRow, Keymap, Scope, alt_key, bind, ch, ctrl, exact, include,
+    key,
+};
+use tuikit::status_bar::{Annotation, KeyHintBar};
 
+use crate::tui::Msg;
 use crate::tui::View;
-use crate::tui::keymap::Action;
-
-/// One row of the declarative keymap. Each entry ties a
-/// crossterm key to a semantic [`Action`] and a
-/// human-readable help string. The `mode` field carries the
-/// focus / overlay context the entry applies to; wave 1 ships
-/// only the `Global` variant, subsequent waves add focus-aware
-/// entries so `remap_for_focus` becomes data-driven too.
-#[derive(Debug)]
-pub struct KeyBinding {
-    pub mode: KeyMode,
-    pub key: KeyMatcher,
-    /// Callback producing the [`Action`] the runtime dispatches
-    /// when this binding fires. A callback (not a stored
-    /// `Action`) so parameterized actions (`SwitchView(v)`)
-    /// stay expressible without wrapping every table entry in
-    /// a builder.
-    pub action: fn() -> Action,
-    /// Help-overlay description. Non-empty per drift-test
-    /// invariant.
-    pub help_text: &'static str,
-}
-
-/// Focus context a [`KeyBinding`] applies to. Keys inside an
-/// overlay live in that overlay's [`overlay`] table instead
-/// (ADR 0123).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyMode {
-    /// Fires regardless of pane focus.
-    Global,
-}
+use crate::tui::app::{App, Focus};
+use crate::tui::keymap::{Action, INSPECT_KEY};
 
 /// The undo key. Toasts that offer an undo name it from here.
 pub const UNDO_KEY: char = 'u';
 
-/// The right pane's keys: what each key means while the right pane has
-/// focus and no modal is open. The runtime resolves this table before
-/// [`KEYBINDINGS`], so a key it binds never reaches the program-wide
-/// keymap from the right pane. A key it leaves out (`E`, `i`, `O`,
-/// `Shift-Enter`, `Alt-Enter`, `Tab`, `J`/`K`, `q`, the view and search
-/// keys) means what it means everywhere, except that the global keys
-/// that drive the left tree do nothing here, so a chord this table does
-/// not bind (`Alt-j`) leaves the tree alone.
-///
-/// It is the framework explorer's table: its moves, its section keys,
-/// `Enter`, `o`, `F`, and `Backspace`/`Esc`. Several of these keys mean
-/// something else on the left pane, where [`KEYBINDINGS`] binds them:
-///
-/// | Key | Left pane | Right pane |
-/// | --- | --- | --- |
-/// | `Enter` | the row's default action | copy a field, drill a link, fold `Other` |
-/// | `F` | clear every filter | Expanded Node Detail |
-/// | `Backspace` | return from a reveal | back out of a drill; with none, arm, then leave the pane |
-/// | `h`/`l`, `←`/`→` | fold the tree row | close or open the `Other` zone |
-/// | `PgUp`/`PgDn` | page the tree | page the explorer |
-/// | `Esc` | nothing | back, as `Backspace` |
-/// | `e` | nothing | fold `Other` on its header |
-/// | `o` | open the right pane's cursor value | the same |
+/// The left pane's scope: the row tree's keys, while it has focus.
+pub const LEFT_PANE: Scope = Scope::Pane("left");
+
+/// The right pane's scope: the explorer's keys, while it has focus.
+pub const RIGHT_PANE: Scope = Scope::Pane("right");
+
+/// The scopes that have the keys with `focus` and no modal open: the
+/// focused pane's, then the program's.
+pub fn active_scopes(focus: Focus) -> ActiveScopes {
+    match focus {
+        Focus::Left => ActiveScopes::pane("left"),
+        Focus::Right => ActiveScopes::pane("right"),
+    }
+}
+
+/// The right pane's keys: the framework explorer's table, which the
+/// keymap takes in as the right pane's scope ([`RIGHT_PANE`]), and from
+/// which the status bar's right-pane hint is generated.
 pub const RIGHT_PANE_KEYS: &[KeyRow<ExplorerKey>] = &[include(EXPLORER_KEYS)];
 
 /// How long each piece of the status bar holds on as the bar narrows, the
 /// highest longest, so the bar packs what fits in this order: an
 /// overlay's keys, what a narrowed view is narrowed by, the way back, and
-/// the way out first; the refresh keys last. The rows of
-/// [`MAIN_VIEW_KEYS`] carry theirs; the right pane's keys and an
-/// overlay's take one rank each, and among them the earlier hint holds on
-/// longer.
+/// the way out first; the refresh keys last. The keymap's bindings carry
+/// theirs; the right pane's keys and an overlay's take one rank each, and
+/// among them the earlier hint holds on longer.
 pub mod status_rank {
     /// The keys of the overlay on top, which the bar names instead of the
     /// main view's: they outlast the view's settings, which the overlay
@@ -114,624 +95,507 @@ pub mod status_rank {
     pub const REFRESH: u32 = 1;
 }
 
-/// The main view's keys as the status bar names them: the keys
-/// [`KEYBINDINGS`] gives the left pane's tree and the program, with no
-/// modal open. The status bar shows the rows that act now, each worded
-/// for the selection (what `Enter` does on this row, what `a` attaches
-/// to), so a hint names only a key that does what it says; with the
-/// right pane focused it leaves out the tree's rows, whose keys the right
-/// pane's table takes. The program-wide keymap resolves the keys; a test
-/// routes every row's key through it.
+/// What a key of the keymap asks for: one variant per binding (the
+/// explorer's keys, and `o` from either pane, are [`Command::Explorer`]).
+/// [`Command::action`] is what the loops dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MainKey {
-    /// `Enter`: the selected row's default action.
+pub enum Command {
+    /// `f`: the Controls overlay.
+    Controls,
+    /// `!`: the Messages log.
+    Messages,
+    /// `?`: the help page.
+    Help,
+    /// `Enter` on the left pane: the selected row's default action.
     Default,
     /// `a`: attach the selection's mux.
     Attach,
+    /// `i`: copy the selected session's id.
+    CopyId,
+    Rename,
+    WorktreeMenu,
+    WorktreeCloseDown,
     /// `v`: open the selection's transcript.
     View,
+    Refresh,
+    /// `Ctrl-R`: refresh and ask the forges again.
+    HardRefresh,
     /// `S`: resume an un-muxed session.
     Resume,
+    Quit,
+    NewMux,
+    LaunchMux,
+    MuxMenu,
+    TogglePin,
+    Undo,
     /// `.`: the selection's action menu.
     Menu,
+    SwitchView(View),
+    NextView,
+    PreviousView,
+    ClearFilters,
+    CycleGrouping,
+    QuickSelect,
+    ContentSearch,
+    OlderSearch,
+    NewerSearch,
+    SearchGranularity,
+    SearchOptions,
+    KeepSearch,
     Up,
     Down,
     /// `←`: fold the selected row.
     Collapse,
     /// `→`: unfold the selected row.
     Expand,
+    PageUp,
+    PageDown,
+    First,
+    Last,
+    Reveal,
+    /// `Backspace` on the left pane: return from a reveal.
+    Back,
     /// `Tab`: the other pane.
     Focus,
-    Refresh,
-    /// `Ctrl-R`: refresh and ask the forges again.
-    HardRefresh,
-    Quit,
-    /// `Backspace`: return from a reveal.
-    Back,
-    /// `!`: the Messages log. Named by the status bar's unseen-messages
-    /// chip and a failure's status message ([`messages_hint`]), not among
-    /// the hints.
-    Messages,
+    PreviewDown,
+    PreviewUp,
+    ToggleEdgeMeta,
+    /// An explorer key: the right pane's, or `o` from either pane.
+    Explorer(ExplorerKey),
 }
 
-impl KeyAction for MainKey {
-    fn role(self) -> KeyRole {
+impl Command {
+    /// What the loops dispatch for this command.
+    pub fn action(self) -> Action {
+        let msg = |msg: Msg| Action::Msg(Box::new(msg));
         match self {
-            Self::Default => KeyRole::Apply,
-            Self::Up | Self::Down => KeyRole::Move,
-            Self::Collapse | Self::Expand => KeyRole::Change,
-            Self::Quit | Self::Back => KeyRole::Leave,
-            Self::Attach
-            | Self::View
-            | Self::Resume
-            | Self::Menu
-            | Self::Focus
-            | Self::Refresh
-            | Self::HardRefresh
-            | Self::Messages => KeyRole::Other,
+            Command::Controls => Action::OpenControls,
+            Command::Messages => Action::OpenMessages,
+            Command::Help => Action::OpenHelp,
+            Command::Default => Action::DefaultAction,
+            Command::Attach => Action::Attach,
+            Command::CopyId => Action::CopySessionId,
+            Command::Rename => Action::OpenRename,
+            Command::WorktreeMenu => Action::OpenWorktreeMenu,
+            Command::WorktreeCloseDown => Action::OpenWorktreeCloseDown,
+            Command::View => Action::View,
+            Command::Refresh => Action::Refresh,
+            Command::HardRefresh => Action::HardRefresh,
+            Command::Resume => Action::Resume,
+            Command::Quit => msg(Msg::Quit),
+            Command::NewMux => Action::OpenNewMuxForm,
+            Command::LaunchMux => msg(Msg::OpenMuxLaunchForm),
+            Command::MuxMenu => Action::OpenMuxMenu,
+            Command::TogglePin => msg(Msg::TogglePin),
+            Command::Undo => msg(Msg::Undo),
+            Command::Menu => msg(Msg::OpenRowMenu),
+            Command::SwitchView(view) => Action::SwitchView(view),
+            Command::NextView => Action::CycleView(1),
+            Command::PreviousView => Action::CycleView(-1),
+            Command::ClearFilters => Action::ClearFilters,
+            Command::CycleGrouping => Action::CycleGrouping(1),
+            Command::QuickSelect => Action::OpenSearch,
+            Command::ContentSearch => Action::OpenContentSearch,
+            Command::OlderSearch => msg(Msg::PageSearchHistory(-1)),
+            Command::NewerSearch => msg(Msg::PageSearchHistory(1)),
+            Command::SearchGranularity => msg(Msg::ToggleSearchGranularity),
+            Command::SearchOptions => msg(Msg::OpenSearchOptions),
+            Command::KeepSearch => msg(Msg::ApplySearchEntry),
+            Command::Up => msg(Msg::NavUp),
+            Command::Down => msg(Msg::NavDown),
+            Command::Collapse => msg(Msg::CollapseRow),
+            Command::Expand => msg(Msg::ExpandRow),
+            Command::PageUp => msg(Msg::PageUp),
+            Command::PageDown => msg(Msg::PageDown),
+            Command::First => msg(Msg::Home),
+            Command::Last => msg(Msg::End),
+            Command::Reveal => msg(Msg::RevealSelected),
+            Command::Back => msg(Msg::NavBack),
+            Command::Focus => msg(Msg::CycleFocus),
+            Command::PreviewDown => msg(Msg::ScrollPreviewBy(1)),
+            Command::PreviewUp => msg(Msg::ScrollPreviewBy(-1)),
+            Command::ToggleEdgeMeta => msg(Msg::ToggleEdgeMeta),
+            Command::Explorer(key) => msg(Msg::Explorer(key)),
         }
     }
 }
 
-/// The main view's status bar keys ([`MainKey`]), in the order the bar
-/// shows them, each with its [`status_rank`].
-pub const MAIN_VIEW_KEYS: &[KeyRow<MainKey>] = &[
-    shown(exact(KeyCode::Enter), MainKey::Default, "Enter", "open")
-        .rank(status_rank::DEFAULT_ACTION),
-    shown(ch('a'), MainKey::Attach, "a", "attach").rank(status_rank::DEFAULT_ACTION),
-    shown(ch('v'), MainKey::View, "v", "view").rank(status_rank::DEFAULT_ACTION),
-    shown(ch('S'), MainKey::Resume, "S", "resume").rank(status_rank::DEFAULT_ACTION),
-    shown(ch('.'), MainKey::Menu, ".", "menu").rank(status_rank::DEFAULT_ACTION),
-    shown(key(KeyCode::Up), MainKey::Up, marks::ARROW_UP, "move").rank(status_rank::LEFT_PANE_KEYS),
-    shown(key(KeyCode::Down), MainKey::Down, marks::ARROW_DOWN, "move")
-        .rank(status_rank::LEFT_PANE_KEYS),
-    shown(
-        key(KeyCode::Left),
-        MainKey::Collapse,
-        marks::ARROW_LEFT,
-        "fold",
+/// The headings of the `?` page's sections, in the order the keymap
+/// first reaches each.
+mod heading {
+    pub const DISCOVERABLE: &str = "Discoverable controls";
+    pub const ACTIONS: &str = "Actions";
+    pub const MUX: &str = "Mux";
+    pub const ROW_ACTIONS: &str = "Row actions";
+    pub const VIEWS: &str = "View switching";
+    pub const FILTERS: &str = "Filters & grouping";
+    pub const SEARCH: &str = "Search";
+    pub const NAVIGATION: &str = "Navigation";
+    pub const EXPLORER: &str = "Detail-pane graph explorer (right focus)";
+}
+
+/// A character pressed alone or with any modifier but Control, so its
+/// Control chord stays free for a binding of its own: how the program's
+/// letters bind (`Alt-a` attaches as `a` does).
+const fn unless_ctrl(c: char) -> KeyMatcher {
+    KeyMatcher::AnyModExceptCtrl(c)
+}
+
+/// A character pressed with no modifier at all: the digits, `q`, and `.`.
+const fn plain(c: char) -> KeyMatcher {
+    KeyMatcher::Exact {
+        modifiers: KeyModifiers::NONE,
+        code: KeyCode::Char(c),
+    }
+}
+
+/// A character whatever modifiers come with it: the tree's vi keys.
+const fn any_mod(c: char) -> KeyMatcher {
+    KeyMatcher::AnyMod(KeyCode::Char(c))
+}
+
+const GLOBAL: Scope = Scope::Global;
+
+/// `Shift-Enter`, which needs a terminal that reports it.
+const SHIFT_ENTER: KeyMatcher = KeyMatcher::Exact {
+    modifiers: KeyModifiers::SHIFT,
+    code: KeyCode::Enter,
+};
+
+/// The program's own bindings and the left pane's, in the order the `?`
+/// page lists them; the right pane's come from its table after them
+/// ([`keymap`]).
+pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
+    bind("controls", GLOBAL, &[unless_ctrl('f')], Command::Controls).help(
+        heading::DISCOVERABLE,
+        "Open the controls overlay (view / grouping / filters / sort / preview wrap)",
+    ),
+    bind("messages", GLOBAL, &[unless_ctrl('!')], Command::Messages)
+        .verb("messages")
+        .help(
+            heading::DISCOVERABLE,
+            "Open the messages log: launch, attach and rename outcomes with full output",
+        ),
+    bind("help", GLOBAL, &[unless_ctrl('?')], Command::Help).help(heading::DISCOVERABLE, "This help"),
+    bind("row.default", LEFT_PANE, &[exact(KeyCode::Enter)], Command::Default)
+        .verb("open")
+        .rank(status_rank::DEFAULT_ACTION)
+        .help(
+            heading::ACTIONS,
+            "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a stopped mux, pin, or history record, expand groups",
+        ),
+    bind("attach", GLOBAL, &[unless_ctrl('a')], Command::Attach)
+        .verb("attach")
+        .rank(status_rank::DEFAULT_ACTION)
+        .help(heading::ACTIONS, "Attach to the selected mux"),
+    bind("row.copy-id", GLOBAL, &[unless_ctrl('i')], Command::CopyId).help(
+        heading::ACTIONS,
+        "Copy the selected agent or mux session's full id to the clipboard",
+    ),
+    bind(
+        "value.inspect",
+        GLOBAL,
+        &[unless_ctrl(INSPECT_KEY)],
+        Command::Explorer(ExplorerKey::Inspect),
     )
-    .rank(status_rank::LEFT_PANE_KEYS),
-    shown(
-        key(KeyCode::Right),
-        MainKey::Expand,
-        marks::ARROW_RIGHT,
-        "fold",
+    .help(
+        heading::ACTIONS,
+        "Open the full untruncated value of the right pane's cursor row in a modal, from either pane",
+    ),
+    bind("rename", GLOBAL, &[ch('R')], Command::Rename).help(
+        heading::ACTIONS,
+        "Rename the selected agent session (alias) or mux (tmux + pin cascade)",
+    ),
+    bind("worktree.menu", GLOBAL, &[unless_ctrl('w')], Command::WorktreeMenu).help(
+        heading::ACTIONS,
+        "Open the worktree action menu for the selected repo / worktree / mux (new, merge, remove, close-down, prune, reveal; mutations need a backend)",
+    ),
+    bind("worktree.close-down", GLOBAL, &[ch('X')], Command::WorktreeCloseDown).help(
+        heading::ACTIONS,
+        "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, forget its history",
+    ),
+    bind("transcript.view", GLOBAL, &[unless_ctrl('v')], Command::View)
+        .verb("view")
+        .rank(status_rank::DEFAULT_ACTION)
+        .help(
+            heading::ACTIONS,
+            "Open the selected session's transcript (or the mux row's linked session)",
+        ),
+    bind("refresh", GLOBAL, &[unless_ctrl('r')], Command::Refresh)
+        .verb("refresh")
+        .rank(status_rank::REFRESH)
+        .help(heading::ACTIONS, "Refresh discovery now"),
+    bind("refresh.hard", GLOBAL, &[ctrl('r')], Command::HardRefresh)
+        .verb("hard refresh")
+        .rank(status_rank::REFRESH)
+        .help(
+            heading::ACTIONS,
+            "Hard refresh: rescan and re-query forges (gh) for pull requests",
+        ),
+    bind("resume", GLOBAL, &[ch('S')], Command::Resume)
+        .verb("resume")
+        .rank(status_rank::DEFAULT_ACTION)
+        .help(
+            heading::ACTIONS,
+            "Resume the selected un-muxed agent session in a new terminal",
+        ),
+    bind("quit", GLOBAL, &[plain('q'), ctrl('c')], Command::Quit)
+        .verb("quit")
+        .rank(status_rank::QUIT)
+        .help(heading::ACTIONS, "Quit"),
+    bind("mux.new", GLOBAL, &[unless_ctrl('n')], Command::NewMux).help(
+        heading::MUX,
+        "Create a bare tmux session (no agent, no worktree) — shell in the selected cwd",
+    ),
+    bind("mux.launch", GLOBAL, &[ch('N')], Command::LaunchMux).help(
+        heading::MUX,
+        "Launch a harness in a new mux (the form can also create a worktree for it)",
+    ),
+    bind("mux.menu", GLOBAL, &[unless_ctrl('m')], Command::MuxMenu).help(
+        heading::MUX,
+        "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux",
+    ),
+    bind("pin.toggle", GLOBAL, &[unless_ctrl('p')], Command::TogglePin).help(
+        heading::ROW_ACTIONS,
+        "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉ (◎ when the pinned entity isn't running)",
+    ),
+    bind("undo", GLOBAL, &[unless_ctrl(UNDO_KEY)], Command::Undo).help(
+        heading::ROW_ACTIONS,
+        "Undo the last pin or unpin, as far back as this session goes; a removed pin comes back with its overrides and its place in the order",
+    ),
+    bind("row.menu", GLOBAL, &[plain('.')], Command::Menu)
+        .verb("menu")
+        .rank(status_rank::DEFAULT_ACTION)
+        .help(
+            heading::ROW_ACTIONS,
+            "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a history record; edit, rename, retarget, refresh, or reveal a pin in the Pinned view; Clean up… in the History view",
+        ),
+    bind("view.sessions", GLOBAL, &[plain('1')], Command::SwitchView(View::Sessions))
+        .help(heading::VIEWS, "Switch directly to the sessions view"),
+    bind("view.mux", GLOBAL, &[plain('2')], Command::SwitchView(View::Mux))
+        .help(heading::VIEWS, "Switch directly to the mux view"),
+    bind("view.prs", GLOBAL, &[plain('3')], Command::SwitchView(View::Prs))
+        .help(heading::VIEWS, "Switch directly to the PRs view"),
+    bind("view.pinned", GLOBAL, &[plain('4')], Command::SwitchView(View::Pinned))
+        .help(heading::VIEWS, "Switch directly to the pinned view"),
+    bind("view.history", GLOBAL, &[plain('5')], Command::SwitchView(View::History))
+        .help(heading::VIEWS, "Switch directly to the history view"),
+    bind("view.search", GLOBAL, &[plain('6')], Command::SwitchView(View::Search))
+        .help(heading::VIEWS, "Switch directly to the Search view"),
+    bind("view.next", GLOBAL, &[unless_ctrl(']')], Command::NextView)
+        .help(heading::VIEWS, "Cycle to the next view"),
+    bind("view.previous", GLOBAL, &[unless_ctrl('[')], Command::PreviousView)
+        .help(heading::VIEWS, "Cycle to the previous view"),
+    bind("filters.clear", LEFT_PANE, &[ch('F')], Command::ClearFilters)
+        .help(heading::FILTERS, "Clear all active filters for the visible view"),
+    bind("grouping.cycle", GLOBAL, &[ctrl('g')], Command::CycleGrouping)
+        .help(heading::FILTERS, "Cycle grouping forward for the active view"),
+    bind("search.quick", GLOBAL, &[unless_ctrl('/')], Command::QuickSelect).help(
+        heading::SEARCH,
+        "Quick select: find a row of this view by name (rows under collapsed groups too)",
+    ),
+    // `Ctrl-/` reaches the program as one of three keys, depending on the
+    // terminal: a terminal using the kitty keyboard protocol sends it as
+    // such; the rest send the byte 0x1F, which decodes as `Ctrl-7` (and
+    // which is also what `Ctrl-_` sends).
+    bind(
+        "search.contents",
+        GLOBAL,
+        &[unless_ctrl('s'), ctrl('/'), ctrl('_'), ctrl('7')],
+        Command::ContentSearch,
     )
-    .rank(status_rank::LEFT_PANE_KEYS),
-    shown(key(KeyCode::Tab), MainKey::Focus, "Tab", "focus").rank(status_rank::FOCUS),
-    shown(ch('r'), MainKey::Refresh, "r", "refresh").rank(status_rank::REFRESH),
-    shown(ctrl('r'), MainKey::HardRefresh, "Ctrl-R", "hard refresh").rank(status_rank::REFRESH),
-    shown(ch('q'), MainKey::Quit, "q", "quit").rank(status_rank::QUIT),
-    shown(key(KeyCode::Backspace), MainKey::Back, "Backspace", "back").rank(status_rank::BACK),
-    shown(ch('!'), MainKey::Messages, "!", "messages"),
+    .help(
+        heading::SEARCH,
+        "Search contents: what was said in the sessions and what is in mux scrollback, in this view's sessions and muxes",
+    ),
+    bind("search.older", GLOBAL, &[unless_ctrl('<')], Command::OlderSearch).help(
+        heading::SEARCH,
+        "Search view: show the previous (older) remembered search without searching again; Controls lists them",
+    ),
+    bind("search.newer", GLOBAL, &[unless_ctrl('>')], Command::NewerSearch).help(
+        heading::SEARCH,
+        "Search view: show the next (newer) remembered search without searching again; Controls lists them",
+    ),
+    bind("search.granularity", GLOBAL, &[ctrl('l')], Command::SearchGranularity).help(
+        heading::SEARCH,
+        "Search view: list sessions or messages (the same matches, no new scan)",
+    ),
+    bind("search.options", GLOBAL, &[ctrl('o')], Command::SearchOptions).help(
+        heading::SEARCH,
+        "Search view: choose what a search looks in (tool calls, thinking, pane scrollback)",
+    ),
+    bind("search.keep", GLOBAL, &[ctrl('f')], Command::KeepSearch).help(
+        heading::SEARCH,
+        "Search view: keep the search shown as the filter on the lists (paging does not change the filter; F clears it)",
+    ),
+    bind("tree.up", LEFT_PANE, &[key(KeyCode::Up), any_mod('k')], Command::Up)
+        .verb("move")
+        .rank(status_rank::LEFT_PANE_KEYS)
+        .help(heading::NAVIGATION, "Move the selection up"),
+    bind("tree.down", LEFT_PANE, &[key(KeyCode::Down), any_mod('j')], Command::Down)
+        .verb("move")
+        .rank(status_rank::LEFT_PANE_KEYS)
+        .help(heading::NAVIGATION, "Move the selection down"),
+    bind(
+        "tree.collapse",
+        LEFT_PANE,
+        &[key(KeyCode::Left), unless_ctrl('h')],
+        Command::Collapse,
+    )
+    .verb("fold")
+    .rank(status_rank::LEFT_PANE_KEYS)
+    .help(
+        heading::NAVIGATION,
+        "Collapse the selected left-tree row (vi-style fold)",
+    ),
+    bind(
+        "tree.expand",
+        LEFT_PANE,
+        &[key(KeyCode::Right), unless_ctrl('l')],
+        Command::Expand,
+    )
+    .verb("fold")
+    .rank(status_rank::LEFT_PANE_KEYS)
+    .help(
+        heading::NAVIGATION,
+        "Expand the selected left-tree row (vi-style fold)",
+    ),
+    // The tree pages by the rows it drew in the last frame, which its
+    // state keeps.
+    bind("tree.page-down", LEFT_PANE, &[key(KeyCode::PageDown)], Command::PageDown)
+        .help(heading::NAVIGATION, "Page down through the row tree"),
+    bind("tree.page-up", LEFT_PANE, &[key(KeyCode::PageUp)], Command::PageUp)
+        .help(heading::NAVIGATION, "Page up through the row tree"),
+    // `g` leaves its Control chord to the grouping key.
+    bind(
+        "tree.first",
+        LEFT_PANE,
+        &[key(KeyCode::Home), unless_ctrl('g')],
+        Command::First,
+    )
+    .help(heading::NAVIGATION, "Jump to the first row"),
+    bind("tree.last", LEFT_PANE, &[key(KeyCode::End), any_mod('G')], Command::Last)
+        .help(heading::NAVIGATION, "Jump to the last row"),
+    bind(
+        "row.reveal",
+        GLOBAL,
+        &[SHIFT_ENTER, alt_key(KeyCode::Enter), ch('O')],
+        Command::Reveal,
+    )
+    .help(
+        heading::NAVIGATION,
+        "Reveal the row's entity in its own view (Sessions, Mux, PRs, History); Backspace on the left tree returns. Shift-Enter needs a terminal that reports it",
+    ),
+    bind("reveal.back", LEFT_PANE, &[key(KeyCode::Backspace)], Command::Back)
+        .verb("back")
+        .rank(status_rank::BACK)
+        .available_when(App::can_nav_back)
+        .help(heading::NAVIGATION, "Return to where the last reveal started"),
+    bind("focus.cycle", GLOBAL, &[key(KeyCode::Tab)], Command::Focus)
+        .verb("focus")
+        .rank(status_rank::FOCUS)
+        .help(
+            heading::NAVIGATION,
+            "Cycle focus between left tree and right panel",
+        ),
+    bind("preview.down", GLOBAL, &[any_mod('J')], Command::PreviewDown)
+        .help(heading::NAVIGATION, "Scroll the right-panel preview down"),
+    bind("preview.up", GLOBAL, &[any_mod('K')], Command::PreviewUp)
+        .help(heading::NAVIGATION, "Scroll the right-panel preview up"),
 ];
 
+/// The program's bindings listed after the right pane's: `E`, which acts
+/// on the explorer's link rows from either pane.
+pub const AFTER_RIGHT_PANE_KEYS: &[Bind<Command, App>] = &[bind(
+    "explorer.edge-meta",
+    GLOBAL,
+    &[ch('E')],
+    Command::ToggleEdgeMeta,
+)
+.help(
+    heading::EXPLORER,
+    "Toggle edge meta (provenance · confidence · state) on link rows",
+)];
+
+/// The right pane's binding of each explorer key: its id and what it does
+/// on this page; its keys, verb, and order come from [`RIGHT_PANE_KEYS`].
+fn right_pane_binding(key: ExplorerKey) -> Bind<Command, App> {
+    let (id, help) = match key {
+        ExplorerKey::Down => (
+            "explorer.down",
+            "Move the explorer cursor down, from the Node fields into the relationship rows",
+        ),
+        ExplorerKey::Up => ("explorer.up", "Move the explorer cursor up"),
+        ExplorerKey::PageDown => (
+            "explorer.page-down",
+            "Page the explorer cursor down by the rows the zone shows",
+        ),
+        ExplorerKey::PageUp => (
+            "explorer.page-up",
+            "Page the explorer cursor up by the rows the zone shows",
+        ),
+        ExplorerKey::First => ("explorer.first", "First explorer row"),
+        ExplorerKey::Last => ("explorer.last", "Last explorer row"),
+        ExplorerKey::Activate => (
+            "explorer.activate",
+            "Copy the value on a Node-zone field row · drill on a link row · open or close the Other zone on its header",
+        ),
+        ExplorerKey::Inspect => (
+            "explorer.inspect",
+            "Open the full untruncated value for the cursor row in a modal",
+        ),
+        ExplorerKey::ToggleFull => (
+            "explorer.toggle-full",
+            "Toggle Expanded Node Detail (every per-kind field) on the focused node",
+        ),
+        ExplorerKey::ToggleSection => (
+            "explorer.toggle-section",
+            "Open or close the Other zone (alternates, conflicts, unresolved evidence) on its header",
+        ),
+        ExplorerKey::OpenSection => ("explorer.open-section", "Open the Other zone on its header"),
+        ExplorerKey::CloseSection => (
+            "explorer.close-section",
+            "Close the Other zone from its header or a row inside it",
+        ),
+        ExplorerKey::Back => (
+            "explorer.back",
+            "Back out of the most recent drilldown hop · once the stack is empty, press twice to return focus to the left pane",
+        ),
+    };
+    bind(id, RIGHT_PANE, &[], Command::Explorer(key)).help(heading::EXPLORER, help)
+}
+
+/// The program's keymap, built once: [`PROGRAM_KEYS`], the right pane's
+/// table, then [`AFTER_RIGHT_PANE_KEYS`].
+///
+/// # Panics
+///
+/// When two keys of one scope can match one key event, two bindings
+/// share an id, or a binding has no key or no help; the keymap's tests
+/// build it, so such a table fails them first.
+pub fn keymap() -> &'static Keymap<Command, App> {
+    static KEYMAP: LazyLock<Keymap<Command, App>> = LazyLock::new(|| {
+        Keymap::builder()
+            .rows(PROGRAM_KEYS)
+            .table(RIGHT_PANE_KEYS, right_pane_binding)
+            .rows(AFTER_RIGHT_PANE_KEYS)
+            .build()
+            .unwrap_or_else(|conflicts| panic!("the keymap's keys conflict:\n{conflicts}"))
+    });
+    &KEYMAP
+}
+
 /// The key that opens the Messages log with `verb` (`! details`), from its
-/// row of [`MAIN_VIEW_KEYS`]: what the unseen-messages chip and a failure's
-/// status message say, so they name the key the keymap binds.
-pub fn messages_hint(verb: &str) -> String {
-    use tuikit::status_bar::{Annotation, KeyHintBar};
+/// binding: what the unseen-messages chip and a failure's status message
+/// say, so they name the key the keymap binds.
+pub fn messages_hint(app: &App, verb: &str) -> String {
     KeyHintBar::new()
-        .annotated(MAIN_VIEW_KEYS, 0, |key| {
-            (*key == MainKey::Messages).then(|| Annotation::new().verb(verb))
+        .keymap(keymap(), ActiveScopes::global(), app, 0, |command| {
+            (*command == Command::Messages).then(|| Annotation::new().verb(verb))
         })
         .text()
 }
 
-/// Wave 1 pilot: view switching bindings. Each entry produces
-/// a parameterized `Action::SwitchView` or `Action::CycleView`.
-///
-/// Wave 2 folds `translate`'s 52 `KeyCode::` arms into this
-/// same table; wave 3 does the same for the runtime
-/// dispatcher's 76 arms; wave 4 rewires `keymap_sections` to be derived from
-/// the table so the help overlay can't drift.
-/// Help text for `!`, shared with the help overlay's
-/// "Discoverable controls" section.
-pub const MESSAGES_HELP: &str =
-    "Open the messages log: launch, attach and rename outcomes with full output";
-
-/// Help text for Ctrl-R, shared with the help overlay.
-pub const HARD_REFRESH_HELP: &str =
-    "Hard refresh: rescan and re-query forges (gh) for pull requests";
-
-pub const KEYBINDINGS: &[KeyBinding] = &[
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::NONE,
-            code: KeyCode::Char('1'),
-        },
-        action: || Action::SwitchView(View::Sessions),
-        help_text: "Switch to Sessions view",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::NONE,
-            code: KeyCode::Char('2'),
-        },
-        action: || Action::SwitchView(View::Mux),
-        help_text: "Switch to Mux view",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::NONE,
-            code: KeyCode::Char('3'),
-        },
-        action: || Action::SwitchView(View::Prs),
-        help_text: "Switch to PRs view",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::NONE,
-            code: KeyCode::Char('4'),
-        },
-        action: || Action::SwitchView(View::Pinned),
-        help_text: "Switch to Pinned view",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::NONE,
-            code: KeyCode::Char('5'),
-        },
-        action: || Action::SwitchView(View::History),
-        help_text: "Switch to History view",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::NONE,
-            code: KeyCode::Char('6'),
-        },
-        action: || Action::SwitchView(View::Search),
-        help_text: "Switch to the Search view",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::CONTROL,
-            code: KeyCode::Char('g'),
-        },
-        action: || Action::CycleGrouping(1),
-        help_text: "Cycle grouping (Ctrl-G)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::CONTROL,
-            code: KeyCode::Char('c'),
-        },
-        action: || Action::Msg(Box::new(crate::tui::Msg::Quit)),
-        help_text: "Quit (Ctrl-C)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::NONE,
-            code: KeyCode::Char('q'),
-        },
-        action: || Action::Msg(Box::new(crate::tui::Msg::Quit)),
-        help_text: "Quit (q)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Char('S'),
-        action: || Action::Resume,
-        help_text: "Resume the selected un-muxed agent session",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Char('R'),
-        action: || Action::OpenRename,
-        help_text: "Rename the selected agent session or mux",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('w'),
-        action: || Action::OpenWorktreeMenu,
-        help_text: "Open the worktree action menu for the selected node",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Char('X'),
-        action: || Action::OpenWorktreeCloseDown,
-        help_text: "Close down the selected stream (merge/discard + teardown)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('n'),
-        action: || Action::OpenNewMuxForm,
-        help_text: "Create a new bare tmux session (no agent)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Char('N'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::OpenMuxLaunchForm)),
-        help_text: "Launch a harness in a new mux (the form can add a worktree)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('m'),
-        action: || Action::OpenMuxMenu,
-        help_text: "Open the Mux action menu (new session / launch harness)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::NONE,
-            code: KeyCode::Char('.'),
-        },
-        action: || Action::Msg(Box::new(crate::tui::Msg::OpenRowMenu)),
-        help_text: "Open the row action menu (pin, rebuild, forget, clean up)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('p'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::TogglePin)),
-        help_text: "Pin the selected row, or unpin it when it already is",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl(UNDO_KEY),
-        action: || Action::Msg(Box::new(crate::tui::Msg::Undo)),
-        help_text: "Undo the last pin or unpin",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Char('F'),
-        action: || Action::ClearFilters,
-        help_text: "Clear every active filter",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Char('E'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::ToggleEdgeMeta)),
-        help_text: "Toggle explorer edge-meta visibility",
-    },
-    // Parametric-guard shortcuts. Each
-    // matcher fires on any non-Ctrl modifier + the char, so Ctrl
-    // chords (`Ctrl-R`, the hard refresh) stay distinct.
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('r'),
-        action: || Action::Refresh,
-        help_text: "Refresh discovery now",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::CONTROL,
-            code: KeyCode::Char('r'),
-        },
-        action: || Action::HardRefresh,
-        help_text: HARD_REFRESH_HELP,
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('a'),
-        action: || Action::Attach,
-        help_text: "Attach to the selected mux",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('v'),
-        action: || Action::View,
-        help_text: "Open the selected session's transcript viewer",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('f'),
-        action: || Action::OpenControls,
-        help_text: "Open the controls overlay (view / grouping / filters / sort / preview wrap)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl(']'),
-        action: || Action::CycleView(1),
-        help_text: "Cycle to the next view",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('['),
-        action: || Action::CycleView(-1),
-        help_text: "Cycle to the previous view",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('/'),
-        action: || Action::OpenSearch,
-        help_text: "Quick select: find a row in this view, or Tab to find anything",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('s'),
-        action: || Action::OpenContentSearch,
-        help_text: "Search the contents of sessions and mux scrollback",
-    },
-    // Ctrl-/ reaches the app as one of three keys, depending on the
-    // terminal: a terminal using the kitty keyboard protocol sends it as
-    // such; the rest send the byte 0x1F, which decodes as Ctrl-7 (and
-    // which is also what Ctrl-_ sends).
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::CONTROL,
-            code: KeyCode::Char('/'),
-        },
-        action: || Action::OpenContentSearch,
-        help_text: "Search the contents of sessions and mux scrollback (Ctrl-/)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::CONTROL,
-            code: KeyCode::Char('7'),
-        },
-        action: || Action::OpenContentSearch,
-        help_text: "Ctrl-/ as most terminals send it (Ctrl-7)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::CONTROL,
-            code: KeyCode::Char('_'),
-        },
-        action: || Action::OpenContentSearch,
-        help_text: "Ctrl-/ as some terminals send it (Ctrl-_)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('<'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::PageSearchHistory(-1))),
-        help_text: "Search view: show the previous (older) search",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('>'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::PageSearchHistory(1))),
-        help_text: "Search view: show the next (newer) search",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::CONTROL,
-            code: KeyCode::Char('f'),
-        },
-        action: || Action::Msg(Box::new(crate::tui::Msg::ApplySearchEntry)),
-        help_text: "Search view: keep the shown search as the filter on the lists",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::CONTROL,
-            code: KeyCode::Char('l'),
-        },
-        action: || Action::Msg(Box::new(crate::tui::Msg::ToggleSearchGranularity)),
-        help_text: "Search view: list sessions, or the matching messages",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::CONTROL,
-            code: KeyCode::Char('o'),
-        },
-        action: || Action::Msg(Box::new(crate::tui::Msg::OpenSearchOptions)),
-        help_text: "Search view: choose what a search looks in (tools, thinking, panes)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('?'),
-        action: || Action::OpenHelp,
-        help_text: "Show the help overlay",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('!'),
-        action: || Action::OpenMessages,
-        help_text: MESSAGES_HELP,
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('l'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::ExpandRow)),
-        help_text: "Expand the selected row's children",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('h'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::CollapseRow)),
-        help_text: "Collapse the selected row's children",
-    },
-    // Arrow / nav keys — any modifier is fine.
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Down),
-        action: || Action::Msg(Box::new(crate::tui::Msg::NavDown)),
-        help_text: "Move cursor down",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Up),
-        action: || Action::Msg(Box::new(crate::tui::Msg::NavUp)),
-        help_text: "Move cursor up",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Right),
-        action: || Action::Msg(Box::new(crate::tui::Msg::ExpandRow)),
-        help_text: "Expand the selected row (Right arrow)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Left),
-        action: || Action::Msg(Box::new(crate::tui::Msg::CollapseRow)),
-        help_text: "Collapse the selected row (Left arrow)",
-    },
-    // Shift+Enter needs a terminal that reports it (kitty protocol);
-    // Alt+Enter arrives everywhere.
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::SHIFT,
-            code: KeyCode::Enter,
-        },
-        action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
-        help_text: "Reveal the row's entity in its own view (Backspace returns)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::ALT,
-            code: KeyCode::Enter,
-        },
-        action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
-        help_text: "Reveal the row's entity in its own view (Backspace returns)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::Char('O'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
-        help_text: "Reveal the row's entity in its own view (Backspace returns)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Enter),
-        action: || Action::DefaultAction,
-        help_text: "Default action on the selected row",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Backspace),
-        action: || Action::Msg(Box::new(crate::tui::Msg::NavBack)),
-        help_text: "Return to where the last reveal started",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Home),
-        action: || Action::Msg(Box::new(crate::tui::Msg::Home)),
-        help_text: "Jump to the first row",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::End),
-        action: || Action::Msg(Box::new(crate::tui::Msg::End)),
-        help_text: "Jump to the last row",
-    },
-    // `j` / `k` also fire NavDown / NavUp per Vim convention.
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Char('j')),
-        action: || Action::Msg(Box::new(crate::tui::Msg::NavDown)),
-        help_text: "Move cursor down (j)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Char('k')),
-        action: || Action::Msg(Box::new(crate::tui::Msg::NavUp)),
-        help_text: "Move cursor up (k)",
-    },
-    // `g` / `G` also fire Home / End per Vim convention.
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Char('g')),
-        action: || Action::Msg(Box::new(crate::tui::Msg::Home)),
-        help_text: "Jump to the first row (g)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyMod(KeyCode::Char('G')),
-        action: || Action::Msg(Box::new(crate::tui::Msg::End)),
-        help_text: "Jump to the last row (G)",
-    },
-];
-
-/// Look up `(modifiers, code)` in [`KEYBINDINGS`]. Called first by
-/// [`crate::tui::keymap::translate`]; keys the table doesn't hold
-/// fall through to its remaining match arms.
-pub fn translate_via_table(modifiers: KeyModifiers, code: KeyCode) -> Option<Action> {
-    for binding in KEYBINDINGS {
-        if binding.mode != KeyMode::Global {
-            continue;
-        }
-        if binding.key.matches(modifiers, code) {
-            return Some((binding.action)());
-        }
-    }
-    None
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Drift-test infrastructure: every entry's help_text must
-    /// be non-empty. Establishes the invariant wave 5 uses to
-    /// enforce dispatcher / help-overlay coherence.
-    #[test]
-    fn every_binding_has_nonempty_help_text() {
-        for binding in KEYBINDINGS {
-            assert!(
-                !binding.help_text.is_empty(),
-                "binding {binding:?} has empty help_text"
-            );
-        }
-    }
-
-    /// Drift-test scaffold: every binding's key matcher fires
-    /// exactly once against its own canonical event. Guards
-    /// against accidental duplicate entries in later waves.
-    #[test]
-    fn no_two_bindings_match_the_same_global_key() {
-        for (i, a) in KEYBINDINGS.iter().enumerate() {
-            for (j, b) in KEYBINDINGS.iter().enumerate() {
-                if i >= j {
-                    continue;
-                }
-                if a.mode != b.mode {
-                    continue;
-                }
-                // A key matcher shouldn't match its sibling's
-                // matcher — the drift test's tightest form is
-                // "no two rows produce Some(action) for the
-                // same event."
-                if let (
-                    KeyMatcher::Exact { modifiers, code },
-                    KeyMatcher::Exact {
-                        modifiers: m2,
-                        code: c2,
-                    },
-                ) = (a.key, b.key)
-                {
-                    assert!(
-                        !(modifiers == m2 && code == c2),
-                        "bindings [{i}] and [{j}] collide on same key"
-                    );
-                }
-            }
-        }
-    }
-
-    /// Wave 1 pilot: view-switching bindings produce the
-    /// parameterized SwitchView action correctly.
-    #[test]
-    fn view_switch_bindings_produce_correct_action() {
-        // The `1` binding should produce SwitchView(Sessions).
-        let sessions = KEYBINDINGS
-            .iter()
-            .find(|b| {
-                matches!(
-                    b.key,
-                    KeyMatcher::Exact {
-                        code: KeyCode::Char('1'),
-                        ..
-                    }
-                )
-            })
-            .expect("`1` binding registered");
-        assert_eq!((sessions.action)(), Action::SwitchView(View::Sessions));
-    }
-}
+#[path = "keybindings_tests.rs"]
+mod tests;

@@ -171,11 +171,12 @@ fn an_explicit_rescan_keeps_the_list_and_selection_until_the_new_results_land() 
 
 #[test]
 fn the_refresh_key_is_the_one_that_rescans() {
-    use crate::tui::keybindings::KEYBINDINGS;
+    use crate::tui::keybindings::keymap;
     use crate::tui::keymap::Action;
-    let has_refresh_key = KEYBINDINGS
+    let has_refresh_key = keymap()
+        .bindings()
         .iter()
-        .any(|binding| (binding.action)() == Action::Refresh);
+        .any(|binding| binding.action().action() == Action::Refresh);
     assert!(
         has_refresh_key,
         "an explicit refresh key exists, and the live loop answers it with RescanContent"

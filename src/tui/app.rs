@@ -1192,7 +1192,7 @@ impl App {
                     format!(
                         "{} · {}",
                         entry.summary,
-                        crate::tui::keybindings::messages_hint("details")
+                        crate::tui::keybindings::messages_hint(self, "details")
                     )
                 } else {
                     entry.summary.clone()

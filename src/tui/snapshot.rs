@@ -12,8 +12,8 @@
 //!    to populate the row tree via live discovery.
 //! 2. Parse the optional `--snapshot-keys` script with the framework's
 //!    key-script notation (`tuikit::testkit::keys`) and dispatch each key
-//!    through the same `translate` function the interactive event loop
-//!    uses, so key behavior matches the live UI. A key an open modal owns
+//!    through the same `action_for_event` function the interactive event
+//!    loop uses, so key behavior matches the live UI. A key an open modal owns
 //!    goes through the modal stack, and whatever the modal sends goes
 //!    through the reducer, so every overlay key does what it does live.
 //! 3. Render one frame with the framework's one-frame driver

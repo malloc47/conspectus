@@ -8,7 +8,7 @@ use tuikit::keys::{
 };
 
 use super::*;
-use crate::tui::keybindings::{MAIN_VIEW_KEYS, RIGHT_PANE_KEYS};
+use crate::tui::keybindings::RIGHT_PANE_KEYS;
 use crate::viewer::keys::{TRANSCRIPT_KEYS, TranscriptKey};
 use tuikit::explorer::EXPLORER_KEYS;
 use tuikit::testkit::keys::chord;
@@ -64,7 +64,6 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("TRANSCRIPT_KEYS", problems(TRANSCRIPT_KEYS)),
         ("EXPLORER_KEYS", problems(EXPLORER_KEYS)),
         ("RIGHT_PANE_KEYS", problems(RIGHT_PANE_KEYS)),
-        ("MAIN_VIEW_KEYS", problems(MAIN_VIEW_KEYS)),
     ]
 }
 
@@ -89,11 +88,6 @@ const FRAGMENTS: &[&str] = &[
 /// leaves `q` and `Ctrl-C` to the program, so its table need not start
 /// with `Ctrl-C`; it takes every other check.
 const PANES: &[&str] = &["EXPLORER_KEYS", "RIGHT_PANE_KEYS"];
-
-/// The main view's keys as the status bar names them: the program-wide
-/// keymap resolves them, `Ctrl-C` and `q` quit there, and the table takes
-/// every other check.
-const MAIN_VIEW: &[&str] = &["MAIN_VIEW_KEYS"];
 
 #[test]
 fn every_advertised_key_resolves_to_what_its_footer_says() {
@@ -133,8 +127,8 @@ fn every_overlay_table_starts_with_ctrl_c() {
     for (name, found) in registry() {
         assert_eq!(
             found.ctrl_c_first,
-            !FRAGMENTS.contains(&name) && !PANES.contains(&name) && !MAIN_VIEW.contains(&name),
-            "{name}: Ctrl-C first (a fragment, a pane, or the main view is exempt, and says so)"
+            !FRAGMENTS.contains(&name) && !PANES.contains(&name),
+            "{name}: Ctrl-C first (a fragment or a pane is exempt, and says so)"
         );
     }
 }

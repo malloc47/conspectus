@@ -9,14 +9,13 @@
 //! panes.
 
 use ratatui::crossterm::event::Event;
-use tuikit::keys::{KeyRow, key_label, resolve};
+use tuikit::keys::key_label;
 use tuikit::status_bar::KeyHintBar;
 
 use super::*;
 use crate::filter::{HarnessFilter, PrStateFilter, PrStateKey};
 use crate::tui::app::Focus;
-use crate::tui::keybindings::{MAIN_VIEW_KEYS, MainKey, RIGHT_PANE_KEYS};
-use crate::tui::keymap::Action;
+use crate::tui::keybindings::{RIGHT_PANE, RIGHT_PANE_KEYS, active_scopes, keymap};
 use crate::tui::rows::RowKind;
 
 /// The word the tab strip uses for each view, in strip order.
@@ -441,43 +440,13 @@ fn the_header_counts_the_sessions_a_search_found() {
     }
 }
 
-/// What the program-wide keymap does with each of the main view's status
-/// bar keys: the action a hint that names the key promises.
-fn promised(key: MainKey) -> Action {
-    let msg = |msg: Msg| Action::Msg(Box::new(msg));
-    match key {
-        MainKey::Default => Action::DefaultAction,
-        MainKey::Attach => Action::Attach,
-        MainKey::View => Action::View,
-        MainKey::Resume => Action::Resume,
-        MainKey::Menu => msg(Msg::OpenRowMenu),
-        MainKey::Up => msg(Msg::NavUp),
-        MainKey::Down => msg(Msg::NavDown),
-        MainKey::Collapse => msg(Msg::CollapseRow),
-        MainKey::Expand => msg(Msg::ExpandRow),
-        MainKey::Focus => msg(Msg::CycleFocus),
-        MainKey::Refresh => Action::Refresh,
-        MainKey::HardRefresh => Action::HardRefresh,
-        MainKey::Quit => msg(Msg::Quit),
-        MainKey::Back => msg(Msg::NavBack),
-        MainKey::Messages => Action::OpenMessages,
-    }
-}
-
-/// The keys `hints` names that do not do what they say in `app`'s scope,
-/// as findings: [`unresolved_in`] with the main view's table.
-fn unresolved_hints(app: &App, hints: &KeyHintBar) -> Vec<String> {
-    unresolved_in(app, hints, MAIN_VIEW_KEYS)
-}
-
 /// The keys `hints` names that do not do what they say in `app`'s scope.
-/// Each key is pressed the way the loops press it (`action_for_event`):
-/// with the right pane focused, a key of the right pane's table must
-/// reach the explorer as that table's action, under one of the right
-/// pane's own hints; any other key must be a row of `main`, the main
-/// view's table, that the program-wide keymap turns into the action the
-/// row stands for.
-fn unresolved_in(app: &App, hints: &KeyHintBar, main: &[KeyRow<MainKey>]) -> Vec<String> {
+/// Each key is pressed the way the loops press it (`action_for_event`)
+/// and must reach the action of the binding the keymap resolves it to in
+/// the focused pane's scope and the program's; with the right pane
+/// focused, a key of the right pane's table must also be named under one
+/// of the right pane's own hints.
+fn unresolved_hints(app: &App, hints: &KeyHintBar) -> Vec<String> {
     let pane_hints: Vec<String> = match (app.explorer(), app.graph_source()) {
         (Some(explorer), Some(source)) => explorer.footer(RIGHT_PANE_KEYS, &source),
         _ => tuikit::explorer::hint(RIGHT_PANE_KEYS),
@@ -486,15 +455,16 @@ fn unresolved_in(app: &App, hints: &KeyHintBar, main: &[KeyRow<MainKey>]) -> Vec
     .iter()
     .map(|segment| segment.text.clone())
     .collect();
+    let active = active_scopes(app.focus());
     let mut findings = Vec::new();
     for hint in hints.hints() {
         for key in hint.keys() {
             let event = key.example();
             let routed = crate::tui::runtime::action_for_event(app, Event::Key(event));
-            let pane = (app.focus() == Focus::Right)
-                .then(|| resolve(RIGHT_PANE_KEYS, event))
-                .flatten();
-            if pane.is_some() && !pane_hints.contains(&hint.text()) {
+            let binding = keymap().resolve(active, event);
+            if binding.is_some_and(|binding| binding.scope() == RIGHT_PANE)
+                && !pane_hints.contains(&hint.text())
+            {
                 findings.push(format!(
                     "`{}` ({}) is the right pane's key, which says {pane_hints:?}",
                     key_label(key),
@@ -502,10 +472,7 @@ fn unresolved_in(app: &App, hints: &KeyHintBar, main: &[KeyRow<MainKey>]) -> Vec
                 ));
                 continue;
             }
-            let expected = match pane {
-                Some(explorer) => Some(Action::Msg(Box::new(Msg::Explorer(explorer)))),
-                None => resolve(main, event).map(promised),
-            };
+            let expected = binding.map(|binding| binding.action().action());
             if expected.is_none() || routed != expected {
                 findings.push(format!(
                     "`{}` ({}) is {routed:?}, not {expected:?}",
@@ -520,10 +487,11 @@ fn unresolved_in(app: &App, hints: &KeyHintBar, main: &[KeyRow<MainKey>]) -> Vec
 
 /// In every view, on every row, with either pane focused, and with a way
 /// back from a reveal, every key the status bar names does what its hint
-/// says: the status bar is generated from the tables of the scope that
-/// has the keys, so it cannot advertise a key that does something else
-/// there. (Over a modal it names the modal's keys, which the conformance
-/// suite's `Hints` check holds to the modal's footer.)
+/// says: the status bar is generated from the keymap's bindings in the
+/// scopes that have the keys, so it cannot advertise a key that does
+/// something else there, and the loops route each key to the binding the
+/// keymap resolves. (Over a modal it names the modal's keys, which the
+/// conformance suite's `Hints` check holds to the modal's footer.)
 #[test]
 fn every_key_the_status_bar_names_does_what_it_says() {
     let mut checked = 0;
@@ -566,27 +534,26 @@ fn every_key_the_status_bar_names_does_what_it_says() {
     assert_eq!(unresolved_hints(&app, &hints), Vec::<String>::new());
 }
 
-/// The check fails a hint that names a key no table of its scope binds,
-/// one whose key does something else, and one of the left pane's tree
-/// keys named while the right pane has the keys.
+/// The check fails a hint that names a key no active scope binds, and one
+/// of the left pane's tree keys named while the right pane has the keys.
 #[test]
 fn a_hint_that_does_not_do_what_it_says_is_caught() {
-    use tuikit::keys::{ch, key, shown};
-    const UNBOUND: &[KeyRow<MainKey>] = &[shown(ch('z'), MainKey::Quit, "z", "quit")];
-    const ELSEWHERE: &[KeyRow<MainKey>] = &[shown(ch('q'), MainKey::Refresh, "q", "refresh")];
-    const TREE: &[KeyRow<MainKey>] = &[shown(
+    use tuikit::keys::{KeyRow, ch, key, shown};
+    const UNBOUND: &[KeyRow<()>] = &[shown(ch('z'), (), "z", "quit")];
+    const TREE: &[KeyRow<()>] = &[shown(
         key(ratatui::crossterm::event::KeyCode::Down),
-        MainKey::Down,
+        (),
         "↓",
         "move",
     )];
     let mut app = app_in(View::Sessions);
-    // A table whose row names a key the keymap leaves unbound, or binds
-    // to something else.
-    for table in [UNBOUND, ELSEWHERE] {
-        let bar = KeyHintBar::new().table(table, 1);
-        assert_eq!(unresolved_in(&app, &bar, table).len(), 1, "{}", bar.text());
-    }
+    let unbound = KeyHintBar::new().table(UNBOUND, 1);
+    assert_eq!(
+        unresolved_hints(&app, &unbound).len(),
+        1,
+        "{}",
+        unbound.text()
+    );
     let tree = KeyHintBar::new().table(TREE, 1);
     assert!(
         unresolved_hints(&app, &tree).is_empty(),
@@ -597,6 +564,6 @@ fn a_hint_that_does_not_do_what_it_says_is_caught() {
     assert_eq!(
         unresolved_hints(&app, &tree).len(),
         1,
-        "on the right pane the explorer takes the down arrow, not the tree"
+        "on the right pane the explorer takes the down arrow, under its own hint"
     );
 }

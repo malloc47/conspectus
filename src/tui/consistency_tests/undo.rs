@@ -5,7 +5,7 @@ use super::styling::all_stopped_muxes;
 use super::*;
 use crate::tui::Effect;
 use crate::tui::effect::{StoreOp, UndoClass, lifecycle, undo_class};
-use crate::tui::keybindings::{KEYBINDINGS, UNDO_KEY};
+use crate::tui::keybindings::{UNDO_KEY, keymap};
 use crate::tui::keymap::Action;
 use crate::tui::undo::{RestoreFocus, UNDO_DEPTH, Undo, UndoStack};
 
@@ -85,20 +85,22 @@ fn undo_steps_back_through_operations_newest_first_then_says_so() {
 
 #[test]
 fn the_undo_key_is_bound_globally_to_undo() {
-    let bound = KEYBINDINGS.iter().any(|binding| {
-        matches!(
-            binding.key,
-            tuikit::keys::KeyMatcher::AnyModExceptCtrl(c) if c == UNDO_KEY
-        ) && matches!((binding.action)(), Action::Msg(msg) if *msg == Msg::Undo)
-    });
-    assert!(bound, "`{UNDO_KEY}` is bound to Msg::Undo");
-    let others = KEYBINDINGS
+    use tuikit::keys::{ActiveScopes, KeyMatcher, Scope};
+    let undo = KeyMatcher::AnyModExceptCtrl(UNDO_KEY);
+    let found = keymap().resolve(ActiveScopes::global(), undo.example());
+    assert!(
+        found.is_some_and(|binding| binding.scope() == Scope::Global
+            && matches!(binding.action().action(), Action::Msg(msg) if *msg == Msg::Undo)),
+        "`{UNDO_KEY}` is bound to Msg::Undo"
+    );
+    let others = keymap()
+        .bindings()
         .iter()
         .filter(|binding| {
-            matches!(
-                binding.key,
-                tuikit::keys::KeyMatcher::AnyModExceptCtrl(c) if c == UNDO_KEY
-            )
+            binding
+                .keys()
+                .iter()
+                .any(|key| key.overlap(&undo).is_some())
         })
         .count();
     assert_eq!(others, 1, "no other binding shares the undo key");

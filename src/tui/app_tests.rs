@@ -870,7 +870,7 @@ fn explorer_home_and_end_snap_cursor_to_first_and_last_row() {
     // cursor to its first / last row when the right pane has
     // focus. Reducer-level test: dispatching the messages
     // directly drives the cursor regardless of which pane has
-    // focus (the focus check happens in `remap_for_focus`).
+    // focus (the keymap's scopes decide which pane a key reaches).
     let mut app = app_for_explorer();
     let row_count = app.explorer_rows().len();
     assert!(row_count > 1, "fixture should expose multiple rows");

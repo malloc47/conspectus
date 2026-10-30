@@ -14,7 +14,7 @@
 //! shape verb lands, the ADR 0095 follow-up notes an `m`-keyed
 //! mux action menu will fold New + the future verb + surface
 //! attach/rename for discovery. Today discoverability rides on the
-//! `?` help overlay and the `n` binding in the KEYBINDINGS table.
+//! `?` help overlay and the `n` binding in the program's keymap.
 
 use tuikit::form::{Field, Form, Submit};
 use tuikit::path_field::{Candidate, PathField};
