@@ -5,14 +5,17 @@ use std::collections::BTreeSet;
 
 use ratatui::buffer::{Buffer, Cell};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::Modifier;
 use ratatui::symbols::line;
 
 use super::{Case, HEIGHTS, KeyRole, Look, Rig, Selection, WIDTHS};
 use crate::glyphs::marks;
+use crate::keys::{Footer, Segment};
 use crate::testkit::buffer::{self, frame_rect, inner_rows, is_side, restyled_rows};
 use crate::testkit::keys::{ctrl, press};
+use crate::text;
+use crate::theme::Theme;
 
 /// The sizes the `Drawn` check compares at.
 const DRAWN_SIZES: [(u16, u16); 2] = [(100, 30), (60, 20)];
@@ -27,6 +30,9 @@ const WIDE: (u16, u16) = (240, 40);
 /// The screen a footer is read on: wide and tall enough that no footer
 /// wraps inside a segment or scrolls away.
 const FOOTER_SIZE: (u16, u16) = (200, 50);
+/// The screen a footer's fit is read on: narrow and short enough that a
+/// footer of several rows has fewer rows than it wants.
+const FOOTER_SHORT: (u16, u16) = (40, 10);
 /// The two-cell cursor gutter at a list's left edge, which the cursor's
 /// marker moves through.
 const GUTTER: u16 = 2;
@@ -352,7 +358,8 @@ pub(super) fn footer<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
         return Vec::new();
     };
     let (with, without) = with_and_without(rig, case, FOOTER_SIZE);
-    let rows = match (case.look, frame_rect(&with, &without)) {
+    let frame = frame_rect(&with, &without);
+    let rows = match (case.look, frame) {
         // A frame's footer is in its body or, for a body with no row to
         // spare, on its bottom border.
         (Look::Framed, Some(rect)) => {
@@ -367,7 +374,7 @@ pub(super) fn footer<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
         }
         _ => buffer::rows(&with),
     };
-    footer
+    let mut out: Vec<String> = footer
         .segments()
         .iter()
         .filter(|segment| !rows.iter().any(|row| row.contains(&segment.text)))
@@ -378,7 +385,166 @@ pub(super) fn footer<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
                 buffer::text(&with)
             )
         })
-        .collect()
+        .collect();
+    if let (Look::Framed, Some(rect), true) = (case.look, frame, out.is_empty()) {
+        let leaves = |segment: &Segment| leaves(case, segment);
+        out.extend(footer_look(rig.theme(), footer, &with, rect, &leaves));
+        out.extend(footer_fit(rig, case, footer, &leaves));
+    }
+    out
+}
+
+/// Whether `segment` names a key that leaves the case's modal at its
+/// first level (its role there is to leave or to dismiss).
+fn leaves<S>(case: &Case<S>, segment: &Segment) -> bool {
+    case.levels.first().is_some_and(|level| {
+        segment.keys.iter().any(|key| {
+            level.tables.iter().any(|table| {
+                matches!(
+                    (table.role)(key.example()),
+                    Some(KeyRole::Leave | KeyRole::Abort)
+                )
+            })
+        })
+    })
+}
+
+/// The rows of `rect`'s frame a footer can be drawn on, inside its sides:
+/// the inner rows and the bottom border, from the bottom up.
+fn footer_rows(rect: Rect) -> impl Iterator<Item = Rect> {
+    let bottom = rect.bottom() - 1;
+    (rect.y + 1..=bottom)
+        .rev()
+        .map(move |y| Rect::new(rect.x + 1, y, rect.width.saturating_sub(2), 1))
+}
+
+/// Where `segment` is drawn lowest in `rect`'s frame.
+fn lowest(buf: &Buffer, rect: Rect, segment: &Segment) -> Option<Position> {
+    footer_rows(rect).find_map(|row| buffer::find_in(buf, row, &segment.text))
+}
+
+/// The one look of a modal footer, read on a frame drawn at
+/// [`FOOTER_SIZE`]: every segment in the theme's `muted`, regular weight,
+/// with no color of its own (the color of the blank row above it, or of
+/// the border it sits on); on the frame's last rows, under a blank row,
+/// the keys that leave last.
+fn footer_look(
+    theme: &Theme,
+    footer: &Footer,
+    buf: &Buffer,
+    rect: Rect,
+    leaves: &dyn Fn(&Segment) -> bool,
+) -> Vec<String> {
+    let bottom = rect.bottom() - 1;
+    let on_border = |at: &Position| at.y == bottom;
+    let placed: Vec<(&Segment, Position)> = footer
+        .segments()
+        .iter()
+        .filter_map(|segment| lowest(buf, rect, segment).map(|at| (segment, at)))
+        .collect();
+    let (Some(&(_, first)), Some(&(_, last))) = (placed.first(), placed.last()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let screen = || buffer::text(buf);
+    if !on_border(&last) {
+        if last.y + 1 != bottom {
+            out.push(format!(
+                "its footer's last row is not the frame's last row, so the footer is not on the frame's last rows\n{}",
+                screen()
+            ));
+        }
+        let above = first.y.saturating_sub(1);
+        let blank = above > rect.y
+            && (rect.x + 1..rect.right() - 1).all(|x| buf[(x, above)].symbol() == " ");
+        if !blank {
+            out.push(format!(
+                "its footer has no blank row above it\n{}",
+                screen()
+            ));
+        }
+    }
+    // The color a footer cell takes: the border's on the border, the
+    // blank body's in the body.
+    let border = buf[(rect.x, bottom)].fg;
+    let body = buf[(rect.x + 1, first.y.saturating_sub(1).max(rect.y + 1))].fg;
+    for (segment, at) in &placed {
+        let color = if on_border(at) { border } else { body };
+        let cells = u16::try_from(text::width(&segment.text)).unwrap_or(u16::MAX);
+        let off = (at.x..at.x.saturating_add(cells))
+            .map(|x| &buf[(x, at.y)])
+            .filter(|cell| !cell.symbol().trim().is_empty())
+            .any(|cell| {
+                !cell.modifier.contains(theme.muted)
+                    || cell.modifier.contains(Modifier::BOLD)
+                    || (segment.available && cell.fg != color)
+            });
+        if off {
+            out.push(format!(
+                "its footer's `{}` is not in the footer's look: the theme's muted, regular weight, no color of its own",
+                segment.text
+            ));
+        }
+    }
+    // The last segment on the footer's last row is a key that leaves,
+    // when the footer names one: a footer lists them last.
+    if placed.iter().any(|(segment, _)| leaves(segment)) {
+        let rightmost = placed
+            .iter()
+            .filter(|(_, at)| at.y == last.y)
+            .max_by_key(|(_, at)| at.x);
+        if let Some((segment, _)) = rightmost
+            && !leaves(segment)
+        {
+            out.push(format!(
+                "its footer ends with `{}`, not with the keys that leave, which a footer lists last",
+                segment.text
+            ));
+        }
+    }
+    out
+}
+
+/// The one fit of a modal footer, read on a frame drawn at
+/// [`FOOTER_SHORT`]: the frame's last row (the last inner row, or the
+/// bottom border) still names a key that leaves, so a footer too tall
+/// for its frame keeps its last rows.
+fn footer_fit<R: Rig>(
+    rig: &R,
+    case: &Case<R::State>,
+    footer: &Footer,
+    leaves: &dyn Fn(&Segment) -> bool,
+) -> Vec<String> {
+    let leaving: Vec<&Segment> = footer
+        .segments()
+        .iter()
+        .filter(|segment| leaves(segment))
+        .collect();
+    if leaving.is_empty() {
+        return Vec::new();
+    }
+    let (with, without) = with_and_without(rig, case, FOOTER_SHORT);
+    let Some(rect) = frame_rect(&with, &without) else {
+        return Vec::new();
+    };
+    let last: Vec<Rect> = footer_rows(rect).take(2).collect();
+    let shown = leaving.iter().any(|segment| {
+        last.iter()
+            .any(|row| buffer::find_in(&with, *row, &segment.text).is_some())
+    });
+    if shown {
+        return Vec::new();
+    }
+    vec![format!(
+        "at {}, the frame's last row names none of the keys that leave ({}): a footer too tall for its frame keeps its last rows\n{}",
+        size_label(FOOTER_SHORT),
+        leaving
+            .iter()
+            .map(|segment| format!("`{}`", segment.text))
+            .collect::<Vec<_>>()
+            .join(", "),
+        buffer::text(&with)
+    )]
 }
 
 pub(super) fn hints<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {

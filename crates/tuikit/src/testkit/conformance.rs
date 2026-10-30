@@ -15,7 +15,7 @@
 //! | `Selection` | Moving the selection (down four times, up once) neither moves nor resizes the frame, and moves no text above the last row it repaints, outside the two-cell cursor gutter. |
 //! | `Words` | No row inside the frame, at any of the ten sizes, ends at the frame's edge in the start of a longer word the same modal shows whole on a wide screen; a deliberate cut ends in the ellipsis mark. |
 //! | `Keys` | Each level's key tables keep the modal key convention by role (`Esc` leaves, `Enter` applies where the [`Convention`] says, `Space` changes), bind `Ctrl-C` first to dismissing, and pass the table checks (every footer label is its key's label, every key a footer names resolves to its row, characters bind as typed, `Ctrl-C` comes first). |
-//! | `Footer` | Every segment of the footer the modal's table generates appears in the modal (in its body or on its bottom border), so the footer is the generated one and not hand-written. |
+//! | `Footer` | Every segment of the footer the modal's table generates appears in the modal (in its body or on its bottom border), so the footer is the generated one and not hand-written. In a frame, the footer takes the one look ([`ModalFooter`](crate::frame::ModalFooter)): every segment in the theme's `muted`, regular weight, with no color of its own; on the frame's last rows under a blank row (or on its bottom border); ending with a key that leaves. At 40 by 10 the frame's last row still names a key that leaves, so a footer too tall for its frame keeps its last rows. |
 //! | `Hints` | Every key the host's status line names while the modal is open is one the modal's footer names (or, for a modal with no footer given, one its first level's tables bind), so the line cannot advertise a key of the screen under the modal. |
 //! | `Close` | `Ctrl-C` closes the modal, `Esc` closes it at its first level, and `q` does too unless the level types (house rule 4); closing says nothing (house rule 5). |
 //!
@@ -43,8 +43,8 @@
 //! use ratatui::layout::Rect;
 //! use ratatui::text::Line;
 //! use ratatui::widgets::{Paragraph, Widget};
-//! use tuikit::frame::{Lines, ModalFrame, ModalSize};
-//! use tuikit::keys::{self, Convention, EnterMeans, MENU_KEYS, MenuKey, SpaceMeans};
+//! use tuikit::frame::{Lines, ModalFooter, ModalFrame, ModalSize};
+//! use tuikit::keys::{self, Convention, EnterMeans, Footer, MENU_KEYS, MenuKey, SpaceMeans};
 //! use tuikit::overlay::{ModalStack, Outcome, Overlay};
 //! use tuikit::testkit::conformance::{self, Case, Registry, Rig};
 //! use tuikit::theme::Theme;
@@ -62,12 +62,12 @@
 //!     }
 //!
 //!     fn render(&mut self, area: Rect, buf: &mut Buffer, _: &(), theme: &Theme) {
-//!         let lines = vec![
-//!             Line::from("  Open"),
-//!             Line::from(""),
-//!             Line::from(keys::footer(MENU_KEYS)),
-//!         ];
 //!         let frame = ModalFrame::new(theme, ModalSize::MENU).title("Actions");
+//!         let width = usize::from(frame.inner_width(area));
+//!         // The entry, then the footer under its blank row, in its look.
+//!         let mut lines = vec![Line::from("  Open")];
+//!         let footer = ModalFooter::new(Footer::new(MENU_KEYS), theme);
+//!         lines.extend(footer.fit(width, usize::MAX).kept);
 //!         frame.render(area, buf, Lines::new(lines));
 //!     }
 //! }

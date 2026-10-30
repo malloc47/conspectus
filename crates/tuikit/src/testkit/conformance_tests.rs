@@ -12,11 +12,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Widget};
 
 use super::*;
-use crate::frame::{Lines, ModalFrame, ModalSize};
+use crate::frame::{Lines, ModalBody, ModalFooter, ModalFrame, ModalSize};
 use crate::glyphs::marks;
 use crate::keys::{
     EnterMeans, Footer, KeyRow, MENU_KEYS, MenuKey, SpaceMeans, TEXT_INPUT_KEYS, TextInputKey,
-    alias, key, shown, typed_char,
+    alias, ctrl, include, key, shown, typed_char,
 };
 use crate::overlay::{ModalStack, Outcome, Overlay};
 use crate::selection::{self, Cursor};
@@ -145,8 +145,11 @@ impl Overlay<String, ()> for Menu {
                 selection::row([Span::raw(*item)], cursor, theme)
             })
             .collect();
-        lines.push(Line::from(""));
-        lines.extend(Footer::new(MENU_KEYS).lines(width, theme));
+        lines.extend(
+            ModalFooter::new(Footer::new(MENU_KEYS), theme)
+                .fit(width, usize::MAX)
+                .kept,
+        );
         frame.render(
             area,
             buf,
@@ -183,8 +186,12 @@ impl Overlay<String, ()> for Prompt {
     fn render(&mut self, area: Rect, buf: &mut Buffer, (): &(), theme: &Theme) {
         let frame = ModalFrame::new(theme, ModalSize::COMPACT).title("Name");
         let width = usize::from(frame.inner_width(area));
-        let mut lines = vec![Line::from(self.text.clone()), Line::from("")];
-        lines.extend(Footer::new(TEXT_INPUT_KEYS).lines(width, theme));
+        let mut lines = vec![Line::from(self.text.clone())];
+        lines.extend(
+            ModalFooter::new(Footer::new(TEXT_INPUT_KEYS), theme)
+                .fit(width, usize::MAX)
+                .kept,
+        );
         frame.render(area, buf, Lines::new(lines));
     }
 
@@ -663,5 +670,180 @@ fn a_status_line_that_names_the_screens_keys_over_a_modal_fails_hints() {
             .iter()
             .all(|message| message.contains("names `x`, which is not a key its footer names")),
         "{hints:?}"
+    );
+}
+
+/// How a footered modal draws its footer: through the one footer, or
+/// breaking one of its rules.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Flaw {
+    /// Through the one footer, fitted to the frame: a footer too tall for
+    /// a short frame keeps its last rows.
+    None,
+    /// The keys drawn plain, not in the footer's look.
+    Plain,
+    /// No blank row above the keys.
+    Tight,
+    /// A blank row under the keys, so they are not on the frame's last
+    /// rows.
+    Afloat,
+    /// The keys that leave first, not last.
+    LeavesFirst,
+    /// A tall footer laid out with the entries, so a short frame scrolls
+    /// it from the top and keeps its first rows.
+    KeepsFirst,
+}
+
+/// A footer that takes six rows at 40 columns, the keys that leave last.
+const TALL_KEYS: &[KeyRow<MenuKey>] = &[
+    KeyRow::Note("a first note for its own row"),
+    KeyRow::Note("a second note for a row"),
+    KeyRow::Note("a third note for a row too"),
+    KeyRow::Note("a fourth note for a row"),
+    KeyRow::Note("a fifth note for a row"),
+    include(MENU_KEYS),
+];
+
+/// A footer that names the key that leaves first.
+const EARLY_KEYS: &[KeyRow<MenuKey>] = &[
+    alias(ctrl('c'), MenuKey::Abort),
+    shown(key(KeyCode::Esc), MenuKey::Close, "Esc", "close"),
+    shown(key(KeyCode::Up), MenuKey::Up, marks::ARROW_UP, "move"),
+    shown(key(KeyCode::Down), MenuKey::Down, marks::ARROW_DOWN, "move"),
+    shown(key(KeyCode::Enter), MenuKey::Pick, "Enter", "pick"),
+];
+
+/// A menu whose footer is drawn as its flaw says.
+struct Footered {
+    flaw: Flaw,
+}
+
+impl Footered {
+    fn table(flaw: Flaw) -> &'static [KeyRow<MenuKey>] {
+        match flaw {
+            Flaw::None | Flaw::KeepsFirst => TALL_KEYS,
+            Flaw::LeavesFirst => EARLY_KEYS,
+            Flaw::Plain | Flaw::Tight | Flaw::Afloat => MENU_KEYS,
+        }
+    }
+}
+
+/// Entries over a footer that keeps the frame's last rows by the one fit.
+struct Fitted<'a> {
+    entries: Vec<Line<'static>>,
+    footer: ModalFooter<'a>,
+}
+
+impl ModalBody for Fitted<'_> {
+    type Output = ();
+
+    fn measure(&mut self, width: u16) -> u16 {
+        let rows = self.entries.len() + self.footer.height(usize::from(width));
+        u16::try_from(rows).unwrap_or(u16::MAX)
+    }
+
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let entries = self.entries.len();
+        let fit = self.footer.fit_beside(area, 1, |_| entries);
+        let [body, rows] = fit.split(area);
+        Paragraph::new(self.entries).render(body, buf);
+        fit.render(rows, buf);
+    }
+}
+
+impl Overlay<String, ()> for Footered {
+    fn handle(&mut self, key: KeyEvent, (): &()) -> Outcome<String> {
+        match crate::keys::resolve(Self::table(self.flaw), key) {
+            Some(MenuKey::Abort | MenuKey::Close) => Outcome::Close,
+            Some(MenuKey::Pick) => Outcome::Commit("picked".to_string()),
+            _ => Outcome::Consumed,
+        }
+    }
+
+    fn render(&mut self, area: Rect, buf: &mut Buffer, (): &(), theme: &Theme) {
+        let frame = ModalFrame::new(theme, ModalSize::MENU).title("Footered");
+        let width = usize::from(frame.inner_width(area));
+        let mut lines: Vec<Line<'static>> = ["Open the file", "Rename it", "Remove it"]
+            .into_iter()
+            .map(Line::from)
+            .collect();
+        let footer = ModalFooter::new(Footer::new(Self::table(self.flaw)), theme);
+        match self.flaw {
+            Flaw::None => {
+                frame.render(
+                    area,
+                    buf,
+                    Fitted {
+                        entries: lines,
+                        footer,
+                    },
+                );
+                return;
+            }
+            Flaw::Plain => {
+                lines.push(Line::default());
+                lines.extend(Footer::new(MENU_KEYS).lines(width, theme));
+            }
+            Flaw::Tight => lines.extend(footer.keys(width)),
+            Flaw::Afloat => {
+                lines.extend(footer.fit(width, usize::MAX).kept);
+                lines.push(Line::default());
+            }
+            Flaw::LeavesFirst | Flaw::KeepsFirst => {
+                lines.extend(footer.fit(width, usize::MAX).kept);
+            }
+        }
+        frame.render(area, buf, Lines::new(lines));
+    }
+}
+
+fn footered(flaw: Flaw) -> Registry<Host> {
+    Registry::new(host()).case(
+        Case::new("Footered", open(move || Box::new(Footered { flaw })))
+            .keys(
+                menu_convention(),
+                [table("FOOTERED_KEYS", Footered::table(flaw))],
+            )
+            .footer(Footered::table(flaw)),
+    )
+}
+
+#[test]
+fn a_footer_out_of_the_one_look_or_the_one_fit_fails_the_footer_check() {
+    for (flaw, expected) in [
+        (Flaw::Plain, "is not in the footer's look"),
+        (Flaw::Tight, "has no blank row above it"),
+        (Flaw::Afloat, "is not on the frame's last rows"),
+        (Flaw::LeavesFirst, "not with the keys that leave"),
+        (Flaw::KeepsFirst, "names none of the keys that leave"),
+    ] {
+        let failures = check_conventions_of(&footered(flaw), &[Check::Footer]);
+        let footer = failed(&failures, Check::Footer);
+        assert!(
+            footer.iter().any(|message| message.contains(expected)),
+            "{flaw:?}: {footer:?}"
+        );
+    }
+}
+
+#[test]
+fn a_tall_footer_fitted_by_the_one_rule_passes_the_footer_check() {
+    let failures = check_conventions_of(&footered(Flaw::None), &[Check::Footer]);
+    assert!(failures.is_empty(), "{failures:?}");
+    // At 40 by 10 the footer wants seven rows, the blank row and six key
+    // rows, where the frame leaves it five: it gives up the blank row and
+    // keeps its last five rows, the keys that leave among them.
+    let mut screen = open(|| Box::new(Footered { flaw: Flaw::None }))();
+    let buf = host().render(&mut screen, Rect::new(0, 0, 40, 10));
+    let drawn = crate::testkit::buffer::rows(&buf);
+    let bottom = drawn
+        .iter()
+        .rposition(|row| row.contains('└'))
+        .expect("frame");
+    assert!(drawn[bottom - 1].contains("Esc close"), "{drawn:#?}");
+    assert!(drawn[bottom - 5].contains("a second note"), "{drawn:#?}");
+    assert!(
+        !drawn.iter().any(|row| row.contains("a first note")),
+        "{drawn:#?}"
     );
 }
