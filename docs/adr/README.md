@@ -152,7 +152,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted (amended by 0145) |
 | [0120](0120-mux-rows-drop-the-ambiguity-glyph.md) | Mux Rows Drop The Ambiguity Glyph | Accepted |
 | [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted (amended by 0144, 0145, 0154) |
-| [0074](0074-detail-pane-related-entities-flatten.md) | Detail-Pane Related-Entities Flatten | Accepted (amended by 0187) |
+| [0074](0074-detail-pane-related-entities-flatten.md) | Detail-Pane Related-Entities Flatten | Accepted (amended by 0187, narrowed by 0188) |
 | [0075](0075-edge-state-visual-language.md) | Edge-State Visual Language In The Detail-Pane Other Zone | Accepted (amended by 0187) |
 | [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted (amended by 0155, 0156) |
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted |
@@ -210,7 +210,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md) | A Search Hit Is One Column Schema In The Modal And The Search View | Accepted |
 | [0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md) | The Tree Marks Its Cursor Row In A Gutter Before Every Row | Accepted |
 | [0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md) | Detail Rows Are A Property Grid, And A Row Reports What It Asks For | Accepted |
-| [0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md) | The Explorer Is A Framework Control Over A Host Source, And The Right Pane's Keys Are One Table | Accepted (design; carried out by CSP-789, CSP-790, CSP-791, CSP-756) |
+| [0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md) | The Explorer Is A Framework Control Over A Host Source, And The Right Pane's Keys Are One Table | Accepted (design; carried out by CSP-789, CSP-790, CSP-791, CSP-756; CSP-789 landed) |
 
 ## Transcript viewer
 

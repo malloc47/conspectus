@@ -1038,6 +1038,17 @@ inline. With the right pane focused:
   intervening action (navigation, focus cycle, …) cancels the arming
   so the next `Backspace` re-prompts instead of jumping straight to
   the focus shift.
+- A drill lasts while the left selection stays on the row the pane
+  reflects (the row it opened for, the row the left pane followed a
+  drill to, or the row `Backspace` put back): the periodic refresh,
+  `r`, and a filter or sort change reload the node the pane shows and
+  keep the breadcrumb, the `Other` fold, Expanded Node Detail, and the
+  cursor. When that node is gone the pane opens on the selected row's
+  node. Moving the selection, or jumping to a row (a pick, quick
+  select's `here`, a regroup), opens the pane on that row's node with
+  an empty breadcrumb. Older hops are rebuilt only when `Backspace`
+  reaches them; one whose node is gone is dropped with a warning, and
+  the next press goes on.
 - `o` opens the full untruncated value of the cursor row in a centered
   modal — used for `cwd`, `command`, `url`, `last_message_preview`,
   and other rows that carry `(truncated · o)` hints.
@@ -1366,7 +1377,8 @@ a node's view, its zones of rows, where a link leads, the breadcrumb
 tag, the left-pane selection a frame saves), and answers each key with
 an outcome whose effects (the copy, the value modal, the left-pane
 mirror, the focus change) and words stay in `conspectus`. A refresh
-keeps the drill while the left selection is unchanged. The right pane's
+keeps the drill while the left selection is unchanged (the host does
+this already). The right pane's
 keys will be one table resolved before the global keymap when it has
 focus; the breadcrumb, the tab strip, and the status bar share one rule
 for what gives way on a narrow line.

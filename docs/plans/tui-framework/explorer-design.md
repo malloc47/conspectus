@@ -875,6 +875,18 @@ The failing test is the probe of section 10 (drill into the mux from
 `app_for_explorer`, `SetData` with the same snapshot, assert the
 focused node and the depth).
 
+As landed (CSP-789): the field is `App::explorer_reflects`, the
+in-place reload is `App::reload_drill` over `ExplorerState::reload`,
+and it applies only to a drilled pane (an undrilled one reloads the
+selection's node as before). `set_selection`, the path of every jump
+to a row (a pick, quick select's `here`, a regroup, a follow, an
+undo's restore), forgets the field first, so a jump onto the row
+already selected opens the pane on it again: the adapter calls `open`
+there, not `refresh`. Six reducer tests in `app_tests.rs` (the
+refresh, a sort and filter change, a pick of the selected row, a move,
+a gone drilled node, and `Backspace` to a gone frame) join the 26 that
+section 6.2 ports.
+
 **The first framework step (CSP-790).** Create
 `crates/tuikit/src/text/elide.rs` with `Piece`, `MarkAt`, `Elided`, and
 `elide`, re-exported from `tuikit::text`; add `CRUMB` (`›`) and

@@ -11,6 +11,12 @@ keys identify neighbors. Amended by
 [ADR 0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md):
 the rows are the framework's property grid rows, and the Other
 header's arrow takes the `disclosure` color the tree's arrows take.
+Narrowed by
+[ADR 0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md)
+(decision 6): a refresh or a filter or sort change keeps a drill, its
+breadcrumb, and its cursor while the left selection stays on the row
+the pane reflects, including a drill into a neighbor the view has no
+row for.
 
 ## Context
 

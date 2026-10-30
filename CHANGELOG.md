@@ -494,6 +494,14 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   nothing: `Enter` did not copy them, and `o` said the row had no
   truncated value even beside a `(truncated · o)` hint. Both now act on
   the field under the cursor, expanded or not.
+- **A drill in the right pane survives a refresh.** After `Enter`
+  drilled into a neighbor the view has no row for (a session's mux,
+  checkout, repo, or process from the Sessions view), the next periodic
+  refresh, `r`, or a filter or sort change put the pane back on the
+  session with an empty breadcrumb. The pane now stays where you
+  drilled to, with its breadcrumb, `Other` fold, Expanded Node Detail,
+  and cursor, until you move the left selection or jump to a row; if
+  the node it shows is gone, it opens on the selected row's node.
 - **A pull request's state reads one way everywhere.** A closed or merged
   PR still marked draft drew a draft-yellow `⇄` beside its red or
   magenta state glyph. The state now beats the draft flag in every cell,

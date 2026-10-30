@@ -19,6 +19,20 @@ key model; the index records each amendment then. The design, with the
 measurements, the Rust signatures, and the migration, is
 `docs/plans/tui-framework/explorer-design.md`.
 
+CSP-789 landed decision 3's refresh rule in the host, ahead of the
+framework, and narrowed ADR 0074 decision 6 with it: the app remembers
+the left selection the right pane reflects (set when the pane opens or
+reloads, after the mirror moves the left pane, and after `Backspace`
+restores a frame's selection), and while the selection is still that
+row a refresh or a projection change reloads the drilled node in place
+and keeps the breadcrumb, the fold, the every-property switch, and the
+cursor; when that node is gone the pane opens on the selection's node.
+A jump to a row through `set_selection` (a pick, quick select's
+`here`, a regroup, a follow) opens the pane again even onto the row
+already selected, so the adapter calls `open` there, not `refresh`.
+`Backspace` to a frame whose node is gone still takes a press of its
+own; the framework's `back` rule changes that.
+
 ## Context
 
 The inventory for the framework extraction
