@@ -37,7 +37,9 @@ The crate is populated one module at a time as controls move in from the
 host. Today it holds the `theme` module (design tokens, named styles, and
 the style-spec grammar), the `glyphs` module (shared marks, the vetted-glyph
 table, and the source scanner), the `text` module (measuring, cutting,
-wrapping, snippets, and match painting in terminal cells), the
+wrapping, snippets, match painting, and the one rule for pieces of a line
+that give way, in terminal cells), the `breadcrumb` module (the chain of
+steps that led to what a pane shows, which gives way hop by hop), the
 `text_edit` module (the line editor every text field edits with and the
 text field that draws it), the `text_prompt` module (the one-line prompt
 that commits, refuses with a reason, or stays), the `path_field` module

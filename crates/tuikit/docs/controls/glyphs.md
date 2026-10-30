@@ -18,14 +18,14 @@ selection highlight cuts it in half. The module has four parts:
 - **Marks** (`glyphs::marks`): the shared glyphs, each defined once: the
   list cursor, a "go back" arrow, the two disclosure arrows, the check and
   failure marks, a warning mark, a bullet, the ellipsis, the no-value dash,
-  one cell of a rule, the separator dot, and the eight frames of a spinner. A control draws a
+  one cell of a rule, the separator dot, a breadcrumb's crumb, and the
+  eight frames of a spinner. A control draws a
   mark by constant, so two surfaces cannot drift to look-alike codepoints.
 - **The vetted table** (`VettedGlyphs`): the glyphs that have been measured,
   each with a note on how. The framework's own glyphs are in it (the
-  marks, a few punctuation and arrow glyphs, the box drawing of frames
-  and of a rendered table's borders, and the half and quadrant blocks of
-  a toast's border); a host registers
-  the glyphs of its own vocabulary on top.
+  marks, the arrow keys among them, the box drawing of frames and of a
+  rendered table's borders, and the half and quadrant blocks of a toast's
+  border); a host registers the glyphs of its own vocabulary on top.
 - **The checks** (`cell_width`, `glyph_risk`): a glyph is registered only if
   it is exactly one cell and is not one terminals commonly draw as a wide
   emoji or need a joiner or selector for.
@@ -79,6 +79,7 @@ for drawn in vetted.unvetted(source) {
 | `RULE` | `─` | one cell of a horizontal rule |
 | `DERIVED` | `└` | the corner that leads in a line derived from the rows above it (a form's command line), so it reads as output |
 | `SEPARATOR` | `·` | the separator between the parts of one item (a name and its state in a chip) and between short items in a line |
+| `CRUMB` | `›` | the separator between the hops of a breadcrumb, the steps that led somewhere (see [breadcrumb.md](breadcrumb.md)) |
 | `ARROW_UP`, `ARROW_DOWN`, `ARROW_LEFT`, `ARROW_RIGHT` | `↑ ↓ ← →` | the arrow keys, as key labels name them (see [keys.md](keys.md)) |
 | `SPINNER` | `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧` | the frames of a busy spinner (an operator-preference exception, below) |
 
@@ -88,7 +89,9 @@ from it, so the two cannot disagree. `marks::ALL` lists every mark once,
 spinner frames included, and a test keeps the list and the module's source
 in step. `marks::SPACED_SEPARATOR` is
 `SEPARATOR` with a space on each side (` · `), what joins the hints of a
-footer; it is three cells, so it is not one of the marks. `marks::TIMES`
+footer; it is three cells, so it is not one of the marks, and
+`marks::SPACED_CRUMB` (` › `) is `CRUMB` the same way, what joins the hops
+of a breadcrumb. `marks::TIMES`
 is `FAIL`'s character read as the multiplication sign in a count of
 repeats (`(×3)`), so it is not a mark of its own either. The boxes a form
 draws before an option are three cells too, built from vetted glyphs, and

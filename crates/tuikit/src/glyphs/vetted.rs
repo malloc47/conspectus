@@ -66,6 +66,7 @@ const FRAMEWORK: &[(&str, &str)] = &[
     (marks::RULE, BOX),
     (marks::DERIVED, BOX),
     (marks::SEPARATOR, "Latin-1; every font; ambiguous"),
+    (marks::CRUMB, "WGL4; every font"),
     (marks::ARROW_LEFT, "WGL4 arrows; every font; ambiguous"),
     (marks::ARROW_UP, "WGL4 arrows; every font; ambiguous"),
     (marks::ARROW_RIGHT, "WGL4 arrows; every font; ambiguous"),
@@ -78,8 +79,6 @@ const FRAMEWORK: &[(&str, &str)] = &[
     (marks::SPINNER[5], BRAILLE),
     (marks::SPINNER[6], BRAILLE),
     (marks::SPINNER[7], BRAILLE),
-    // Punctuation the interface text uses.
-    ("›", "WGL4; every font"),
     // The line drawing of frames and borders.
     ("│", BOX),
     ("┃", BOX),
