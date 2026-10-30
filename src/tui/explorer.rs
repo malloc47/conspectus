@@ -25,9 +25,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Style;
+use ratatui::text::Span;
 use tuikit::age::Age;
+use tuikit::breadcrumb::Hop;
 use tuikit::glyphs::marks;
 use tuikit::text;
 
@@ -814,10 +815,10 @@ pub struct BreadcrumbHop {
     /// produced this hop.
     pub focused: NodeId,
     /// Compact `kind:short_tag` identity label for the hop,
-    /// rendered as one segment of the breadcrumb chain. Callers can
-    /// disambiguate same-short-label collisions across the chain
-    /// using [`render_breadcrumb_chain`], which suffixes the last-4
-    /// of the focused node's display when two hops collide.
+    /// rendered as one segment of the breadcrumb chain through
+    /// [`breadcrumb_hops`], which drops the `kind:` and gives the
+    /// hop the last four characters of the focused node's id to
+    /// tell two hops with one tag apart.
     pub short_label: String,
     /// Cursor row identity at the time of the drill, so Backspace
     /// can re-find it.
@@ -912,145 +913,26 @@ impl NodeView {
     }
 }
 
-/// Format a breadcrumb chain for the right-pane title.
-/// Each hop renders as `<kind-glyph> <tag>` so the operator can
-/// scan the drill chain by symbol rather than reading the verbose
-/// `kind:tag` text form. The glyph is drawn in the kind color
-/// (ADR 0073); the tag and separators use the theme's secondary
-/// text color so the row reads as one quiet line with bursts of
-/// kind identity. Hops that share a `short_label` get a `·xxxx`
-/// suffix on the tag (last-4 of the focused node's display) so
-/// two same-named hops disambiguate. Elision keeps the chain
-/// inside `available` cells: full chain → `first … last` →
-/// `… last` → just `last` as the chain narrows. Returns `None`
-/// when `hops` is empty so callers can skip the breadcrumb glyph
-/// entirely.
-pub fn render_breadcrumb_chain(
-    hops: &[BreadcrumbHop],
-    theme: &Theme,
-    available: usize,
-) -> Option<Line<'static>> {
-    if hops.is_empty() {
-        return None;
-    }
-    let rendered = build_breadcrumb_hops(hops, theme);
-    Some(build_breadcrumb_line(&rendered, theme, available))
-}
-
-/// Per-hop render data. Owns the glyph + tag strings plus the
-/// effective color so the rendering pass can splice spans without
-/// re-resolving the theme. `width` is the display-cell count for
-/// `<glyph> <tag>` so elision can sum cells across hops.
-#[derive(Clone, Debug, PartialEq)]
-struct RenderedBreadcrumbHop {
-    glyph: String,
-    glyph_color: Color,
-    tag: String,
-    width: usize,
-}
-
-fn build_breadcrumb_hops(hops: &[BreadcrumbHop], theme: &Theme) -> Vec<RenderedBreadcrumbHop> {
-    let mut counts: std::collections::HashMap<&str, usize> =
-        std::collections::HashMap::with_capacity(hops.len());
-    for hop in hops {
-        *counts.entry(hop.short_label.as_str()).or_insert(0) += 1;
-    }
+/// The right-pane title's breadcrumb hops, one per drill frame, for
+/// [`Breadcrumb`](tuikit::breadcrumb::Breadcrumb): the glyph of the
+/// frame's node kind in its kind color (ADR 0073; a PR's glyph takes
+/// the `pr_open` hue, since the frame holds no PR state), the tag from
+/// the frame's `kind:tag` short label with the `kind:` dropped (the
+/// glyph carries the kind), and the last four characters of the node's
+/// id, which the breadcrumb shows only when two hops have one tag.
+pub fn breadcrumb_hops(hops: &[BreadcrumbHop], theme: &Theme) -> Vec<Hop> {
     hops.iter()
         .map(|hop| {
-            let kind = NodeKind::from(&hop.focused);
-            // A PR's glyph takes the `pr_open` hue here: the
-            // breadcrumb has no PR state on hand.
-            let style = node_kind_style(kind, theme);
-            let color = style.color;
-            let raw_tag = hop
+            let kind = node_kind_style(NodeKind::from(&hop.focused), theme);
+            let tag = hop
                 .short_label
                 .split_once(':')
                 .map_or(hop.short_label.as_str(), |(_, tag)| tag);
-            let tag = if counts.get(hop.short_label.as_str()).copied().unwrap_or(0) > 1 {
-                let tail = text::clip_start(&hop.focused.to_string(), 4);
-                format!("{raw_tag}·{tail}")
-            } else {
-                raw_tag.to_string()
-            };
-            let width = style.width + 1 + text::width(&tag);
-            RenderedBreadcrumbHop {
-                glyph: style.glyph,
-                glyph_color: color,
-                tag,
-                width,
-            }
+            Hop::new(tag)
+                .glyph(Span::styled(kind.glyph, Style::default().fg(kind.color)))
+                .suffix(text::clip_start(&hop.focused.to_string(), 4))
         })
         .collect()
-}
-
-const BREADCRUMB_SEPARATOR: &str = " › ";
-const BREADCRUMB_SEPARATOR_WIDTH: usize = 3;
-const BREADCRUMB_ELLIPSIS: &str = marks::ELLIPSIS;
-const BREADCRUMB_ELLIPSIS_WIDTH: usize = 1;
-
-fn build_breadcrumb_line(
-    rendered: &[RenderedBreadcrumbHop],
-    theme: &Theme,
-    available: usize,
-) -> Line<'static> {
-    let secondary = Style::default().fg(theme.inert);
-    let full_width: usize = rendered.iter().map(|h| h.width).sum::<usize>()
-        + BREADCRUMB_SEPARATOR_WIDTH * rendered.len().saturating_sub(1);
-    if full_width <= available || rendered.len() <= 1 {
-        return spans_for_hops(rendered, secondary);
-    }
-    // Try `first <SEP> … <SEP> last`.
-    let first = rendered.first().expect("rendered non-empty");
-    let last = rendered.last().expect("rendered non-empty");
-    let with_first =
-        first.width + last.width + BREADCRUMB_ELLIPSIS_WIDTH + BREADCRUMB_SEPARATOR_WIDTH * 2;
-    if with_first <= available {
-        return Line::from(vec![
-            styled_glyph(first, secondary),
-            Span::raw(" "),
-            Span::styled(first.tag.clone(), secondary),
-            Span::styled(BREADCRUMB_SEPARATOR, secondary),
-            Span::styled(BREADCRUMB_ELLIPSIS, secondary),
-            Span::styled(BREADCRUMB_SEPARATOR, secondary),
-            styled_glyph(last, secondary),
-            Span::raw(" "),
-            Span::styled(last.tag.clone(), secondary),
-        ]);
-    }
-    // Try `… <SEP> last`.
-    let only_last = last.width + BREADCRUMB_ELLIPSIS_WIDTH + BREADCRUMB_SEPARATOR_WIDTH;
-    if only_last <= available {
-        return Line::from(vec![
-            Span::styled(BREADCRUMB_ELLIPSIS, secondary),
-            Span::styled(BREADCRUMB_SEPARATOR, secondary),
-            styled_glyph(last, secondary),
-            Span::raw(" "),
-            Span::styled(last.tag.clone(), secondary),
-        ]);
-    }
-    // Last-resort: just the last hop, no elision marker.
-    Line::from(vec![
-        styled_glyph(last, secondary),
-        Span::raw(" "),
-        Span::styled(last.tag.clone(), secondary),
-    ])
-}
-
-fn spans_for_hops(rendered: &[RenderedBreadcrumbHop], secondary: Style) -> Line<'static> {
-    let mut spans = Vec::with_capacity(rendered.len() * 4);
-    for (idx, hop) in rendered.iter().enumerate() {
-        if idx > 0 {
-            spans.push(Span::styled(BREADCRUMB_SEPARATOR, secondary));
-        }
-        spans.push(styled_glyph(hop, secondary));
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(hop.tag.clone(), secondary));
-    }
-    Line::from(spans)
-}
-
-fn styled_glyph(hop: &RenderedBreadcrumbHop, _secondary: Style) -> Span<'static> {
-    Span::styled(hop.glyph.clone(), Style::default().fg(hop.glyph_color))
 }
 
 /// Borrowed view of the Preview-zone content for a single cursor row.

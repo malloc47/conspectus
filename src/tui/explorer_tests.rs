@@ -7,6 +7,7 @@ use crate::model::{
 };
 use crate::resolve::resolve_snapshot;
 use std::path::PathBuf;
+use tuikit::breadcrumb::Breadcrumb;
 
 #[test]
 fn directional_verb_catalog_is_exhaustive_and_disambiguates_inverses() {
@@ -1138,53 +1139,26 @@ fn short_node_label_renders_kind_short_tag_per_node() {
     );
 }
 
-#[test]
-fn render_breadcrumb_chain_joins_hops_with_separator() {
-    let theme = Theme::default();
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc-1")),
-        ),
-        breadcrumb_hop(
-            "mux:editor",
-            NodeId::MuxSession(MuxSessionId::new("editor")),
-        ),
-        breadcrumb_hop(
-            "proc:claude",
-            NodeId::RuntimeProcess(RuntimeProcessId::new("proc:1")),
-        ),
-    ];
-    let rendered = render_breadcrumb_chain(&hops, &theme, 80).expect("non-empty");
-    // Flatten the line back to plain text. Each hop renders as
-    // `<glyph> <tag>` (no `kind:` prefix; the glyph carries
-    // the kind identity now).
-    let plain = breadcrumb_plain(&rendered);
-    assert_eq!(
-        plain,
-        format!(
-            "{} abc › {} editor › {} claude",
-            NodeKind::AgentSession.default_glyph(),
-            NodeKind::MuxSession.default_glyph(),
-            NodeKind::RuntimeProcess.default_glyph(),
-        ),
-    );
-}
+// The breadcrumb's fit, join, and repeated-tag rules are the framework's
+// (`tuikit::breadcrumb`'s tests); these cover what the adapter supplies.
 
 #[test]
-fn render_breadcrumb_chain_uses_kind_color_per_glyph_span() {
+fn breadcrumb_hops_draw_each_glyph_in_its_kind_color() {
     let theme = Theme::default();
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc-1")),
-        ),
-        breadcrumb_hop(
-            "mux:editor",
-            NodeId::MuxSession(MuxSessionId::new("editor")),
-        ),
-    ];
-    let rendered = render_breadcrumb_chain(&hops, &theme, 80).expect("non-empty");
+    let hops = breadcrumb_hops(
+        &[
+            breadcrumb_hop(
+                "session:abc",
+                NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc-1")),
+            ),
+            breadcrumb_hop(
+                "mux:editor",
+                NodeId::MuxSession(MuxSessionId::new("editor")),
+            ),
+        ],
+        &theme,
+    );
+    let rendered = Breadcrumb::new(&hops, &theme).line(80).expect("non-empty");
     let session_glyph = NodeKind::AgentSession.default_glyph();
     let mux_glyph = NodeKind::MuxSession.default_glyph();
     let session_span = rendered
@@ -1202,97 +1176,39 @@ fn render_breadcrumb_chain_uses_kind_color_per_glyph_span() {
 }
 
 #[test]
-fn render_breadcrumb_chain_returns_none_when_empty() {
+fn breadcrumb_hops_tag_a_frame_by_its_short_label_and_suffix_it_by_its_id() {
     let theme = Theme::default();
-    assert!(render_breadcrumb_chain(&[], &theme, 80).is_none());
-}
-
-#[test]
-fn render_breadcrumb_chain_elides_middle_when_too_long() {
-    let theme = Theme::default();
-    // Four hops; budget only fits `first … last`.
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abcdefgh",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "agent-1")),
-        ),
-        breadcrumb_hop(
-            "mux:editor-east",
-            NodeId::MuxSession(MuxSessionId::new("editor-east")),
-        ),
-        breadcrumb_hop(
-            "proc:claude-helper",
-            NodeId::RuntimeProcess(RuntimeProcessId::new("proc:helper")),
-        ),
-        breadcrumb_hop(
-            "session:xyzlast",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "agent-2")),
-        ),
-    ];
-    let plain = breadcrumb_plain(&render_breadcrumb_chain(&hops, &theme, 40).expect("non-empty"));
-    let session_glyph = NodeKind::AgentSession.default_glyph();
-    assert!(
-        plain.starts_with(&format!("{session_glyph} abcdefgh")),
-        "expected leading first hop in {plain:?}",
+    let first = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "session-1234"));
+    let last = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "session-5678"));
+    let tail = |id: &NodeId| text::clip_start(&id.to_string(), 4);
+    let hops = breadcrumb_hops(
+        &[
+            breadcrumb_hop("session:abc", first.clone()),
+            breadcrumb_hop(
+                "mux:editor",
+                NodeId::MuxSession(MuxSessionId::new("editor")),
+            ),
+            breadcrumb_hop("session:abc", last.clone()),
+        ],
+        &theme,
     );
-    assert!(
-        plain.ends_with(&format!("{session_glyph} xyzlast")),
-        "expected trailing last hop in {plain:?}",
+    // The `kind:` prefix goes (the glyph carries the kind); the two
+    // frames with one tag carry the last four characters of their ids.
+    let plain = Breadcrumb::new(&hops, &theme)
+        .line(80)
+        .expect("non-empty")
+        .to_string();
+    let session = NodeKind::AgentSession.default_glyph();
+    let mux = NodeKind::MuxSession.default_glyph();
+    assert_eq!(
+        plain,
+        format!(
+            "{session} abc·{} › {mux} editor › {session} abc·{}",
+            tail(&first),
+            tail(&last)
+        ),
     );
-    assert!(plain.contains('…'), "expected elision marker in {plain:?}");
-}
-
-#[test]
-fn render_breadcrumb_chain_falls_back_to_last_hop_when_extremely_narrow() {
-    let theme = Theme::default();
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc-1")),
-        ),
-        breadcrumb_hop(
-            "mux:editor",
-            NodeId::MuxSession(MuxSessionId::new("editor")),
-        ),
-        breadcrumb_hop(
-            "proc:claude",
-            NodeId::RuntimeProcess(RuntimeProcessId::new("proc:1")),
-        ),
-    ];
-    // Budget only fits the last hop.
-    let plain = breadcrumb_plain(&render_breadcrumb_chain(&hops, &theme, 5).expect("non-empty"));
-    let proc_glyph = NodeKind::RuntimeProcess.default_glyph();
-    assert_eq!(plain, format!("{proc_glyph} claude"));
-}
-
-#[test]
-fn render_breadcrumb_chain_disambiguates_colliding_short_labels() {
-    let theme = Theme::default();
-    // Two `session:abc` hops should pick up a `·last4` tail
-    // so the operator can tell which is which.
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "session-1234")),
-        ),
-        breadcrumb_hop(
-            "mux:editor",
-            NodeId::MuxSession(MuxSessionId::new("editor")),
-        ),
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "session-5678")),
-        ),
-    ];
-    let plain = breadcrumb_plain(&render_breadcrumb_chain(&hops, &theme, 80).expect("non-empty"));
-    // Both colliding hops should carry a `·` disambiguator
-    // (`abc·1234`, `abc·5678`).
-    let session_segments: Vec<&str> = plain.split(" › ").filter(|s| s.contains("abc")).collect();
-    assert_eq!(session_segments.len(), 2);
-    assert!(
-        session_segments.iter().all(|s| s.contains('·')),
-        "colliding hops should be disambiguated: {plain}",
-    );
+    assert_ne!(tail(&first), tail(&last));
 }
 
 fn breadcrumb_hop(short_label: &str, focused: NodeId) -> BreadcrumbHop {
@@ -1304,10 +1220,6 @@ fn breadcrumb_hop(short_label: &str, focused: NodeId) -> BreadcrumbHop {
         full_detail_expanded: false,
         left_pane_selection: None,
     }
-}
-
-fn breadcrumb_plain(line: &Line<'_>) -> String {
-    line.spans.iter().map(|s| s.content.as_ref()).collect()
 }
 
 #[test]

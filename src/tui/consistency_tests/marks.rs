@@ -1,7 +1,8 @@
 //! A shared mark's character is typed once, in the framework.
 //!
 //! The marks the framework defines (the list cursor, the disclosure
-//! arrows, the check and failure marks, the warning mark, a rule cell)
+//! arrows, the check and failure marks, the warning mark, a rule cell,
+//! the breadcrumb's separator)
 //! each mean one thing wherever they are drawn. Typing the character at a
 //! use site is how look-alike codepoints drift apart (`\u{25BA}` for
 //! `\u{25B6}`) and how a glyph escapes the width checks, so drawing code
@@ -37,6 +38,7 @@ fn guarded_marks() -> Vec<&'static str> {
         marks::WARNING,
         marks::BULLET,
         marks::RULE,
+        marks::CRUMB,
     ];
     out.extend(marks::SPINNER);
     out

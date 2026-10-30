@@ -1591,6 +1591,57 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
 }
 
 #[test]
+fn a_drilled_title_fits_inside_its_corners_and_cuts_the_chain_last() {
+    use crate::tui::explorer::ExplorerRow;
+
+    let mut app = muxed_app("editor", None);
+    app.update(Msg::CycleFocus);
+    let link_idx = app
+        .explorer()
+        .expect("state")
+        .rows()
+        .iter()
+        .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
+        .expect("link row");
+    for _ in 0..link_idx {
+        app.update(Msg::ExplorerNavDown);
+    }
+    app.update(Msg::ExplorerActivate);
+
+    // The title is as wide as its room allows: the fixed parts and the
+    // pad, with the chain in what they leave, never wider.
+    let full = right_panel_title(&app, 200);
+    let fixed = right_panel_title(&app, 0).width();
+    assert!(full.to_string().ends_with(" · depth 1 "), "{full}");
+    assert!(!full.to_string().contains(marks::ELLIPSIS), "{full}");
+    for width in fixed..=full.width() + 2 {
+        let title = right_panel_title(&app, width);
+        assert!(title.width() <= width, "{width}: {title}");
+        assert!(title.to_string().contains(" · depth 1"), "{width}: {title}");
+    }
+    // A cell short, the pad gives way before the chain; then the chain
+    // is cut.
+    let padless = right_panel_title(&app, full.width() - 1).to_string();
+    assert!(padless.ends_with(" · depth 1"), "{padless}");
+    assert!(!padless.contains(marks::ELLIPSIS), "{padless}");
+    let cut = right_panel_title(&app, full.width() - 2).to_string();
+    assert!(cut.contains(marks::ELLIPSIS), "{cut}");
+    assert!(cut.ends_with(" · depth 1"), "{cut}");
+
+    // Drawn in a pane too narrow for the whole title (the panes stack on
+    // a screen this narrow), the chain is cut and the corner clips
+    // nothing of the depth.
+    let screen = u16::try_from(full.width()).expect("a narrow screen");
+    let narrow = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, screen, 24)));
+    let title_row = narrow
+        .lines()
+        .find(|line| line.contains(marks::BACK))
+        .expect("the drilled title");
+    assert!(title_row.ends_with(" · depth 1┐"), "{narrow}");
+    assert!(title_row.contains(marks::ELLIPSIS), "{narrow}");
+}
+
+#[test]
 fn agreeing_mux_evidence_renders_as_one_row_with_preview_evidence_list() {
     use crate::model::{
         AgentSessionId, Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionId, NodeId,

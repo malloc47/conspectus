@@ -1,5 +1,6 @@
 //! Right panel: the graph explorer (ADR 0074) and its title.
 
+use tuikit::breadcrumb::Breadcrumb;
 use tuikit::property_grid::{GridLines, PropertyGrid, PropertyRow};
 
 use crate::tui::explorer::grid::{self as explorer_grid, field_row};
@@ -20,9 +21,13 @@ pub(super) fn draw_right_panel(
     frame: &mut Frame<'_>,
     area: Rect,
 ) -> (Option<ScrollWindow>, Option<ScrollRegion>) {
+    // The corners take a cell each from the top border.
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(right_panel_title(app, area.width as usize));
+        .title(right_panel_title(
+            app,
+            usize::from(area.width.saturating_sub(2)),
+        ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -119,8 +124,11 @@ pub(super) fn draw_right_panel(
 /// being inspected (`session`, `mux`, `pr`, …) so the operator can
 /// tell what they're looking at without re-reading the body.
 /// Falls back to `detail` while no selection is resolved.
+///
+/// `width` is the cells the pane's top border leaves for the title.
 pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     let label = right_panel_kind_label(app);
+    let theme = app.theme();
     let mut spans = vec![Span::raw(" "), focus_marker_span(app, Focus::Right)];
     // ADR 0073 §3: the right-panel node header is `<glyph> <label>`
     // with the glyph in the node-kind color and the label bold. The
@@ -128,52 +136,35 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     // (fallback "detail" label) so a placeholder pane does not stamp
     // a misleading kind cue.
     if let Some(node_kind) = right_panel_node_kind(app) {
-        let style = node_kind_style(node_kind, app.theme());
+        let style = node_kind_style(node_kind, theme);
         spans.push(span!(Style::default().fg(style.color); "{} ", style.glyph));
     }
     spans.push(span!(Modifier::BOLD; "{label}"));
-    // Render the full drilldown chain in short `kind:tag`
-    // form so the operator can see depth at a glance, with elision
-    // (`first … last`) when the chain exceeds the title's available
-    // width. The breadcrumb glyph `◄` plus the trailing depth marker
-    // anchor the chain so even an elided rendering still conveys
-    // where the explorer is.
+    // A drilled pane shows the chain that led here between ` ◄ ` and
+    // ` · depth N`, so even a chain that gave way says how deep the
+    // pane is. The chain takes the cells the rest of the title leaves
+    // and gives way hop by hop to fit. The trailing pad, which keeps the
+    // title off the corner, gives way before any hop: it is drawn only
+    // when the chain leaves a cell for it.
+    let mut pad = true;
     if let Some(state) = app.explorer()
         && !state.breadcrumb.is_empty()
     {
-        // Budget for the chain itself: total title width minus the
-        // fixed-cost spans we already pushed (focus marker + label +
-        // back-mark prefix + " · depth N" suffix + the leading/trailing
-        // padding spaces).
-        let depth_suffix = format!(" · depth {}", state.breadcrumb.len());
-        let back_prefix = format!(" {} ", marks::BACK);
-        // ADR 0073 §3 prefix glyph: `<glyph> ` between the focus
-        // marker and the bold label takes 2 cells whenever the pane
-        // resolves to a known node kind, which a live explorer does.
-        let kind_glyph_width = 2;
-        let fixed_width = 1
-            + focus_marker_width(app, Focus::Right)
-            + kind_glyph_width
-            + text::width(label)
-            + text::width(&back_prefix)
-            + text::width(&depth_suffix)
-            + 1;
-        let available = width.saturating_sub(fixed_width);
-        if let Some(chain) = crate::tui::explorer::render_breadcrumb_chain(
-            &state.breadcrumb,
-            app.theme(),
-            available.max(8),
-        ) {
-            // The leading ` ◄ ` and trailing `depth N` chrome stays
-            // `inert`; the chain itself carries its own per-hop
-            // styling (kind glyph in kind color, tag `inert`) so the
-            // spans are pushed verbatim.
-            spans.push(span!(Style::default().fg(app.theme().inert); "{back_prefix}"));
+        let inert = Style::default().fg(theme.inert);
+        let back = span!(inert; " {} ", marks::BACK);
+        let depth = span!(inert; " · depth {}", state.breadcrumb.len());
+        let room = width.saturating_sub(text::spans_width(&spans) + back.width() + depth.width());
+        let hops = crate::tui::explorer::breadcrumb_hops(&state.breadcrumb, theme);
+        if let Some(chain) = Breadcrumb::new(&hops, theme).line(room) {
+            pad = chain.width() < room;
+            spans.push(back);
             spans.extend(chain.spans);
-            spans.push(span!(Style::default().fg(app.theme().inert); "{depth_suffix}"));
+            spans.push(depth);
         }
     }
-    spans.push(Span::raw(" "));
+    if pad {
+        spans.push(Span::raw(" "));
+    }
     Line::from(spans)
 }
 

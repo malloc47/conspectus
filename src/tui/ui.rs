@@ -151,10 +151,6 @@ fn draw_body(app: &mut App, frame: &mut Frame<'_>, area: Rect) -> ViewportReport
     }
 }
 
-fn focus_marker_width(app: &App, focus: Focus) -> usize {
-    text::width(&focus_marker_span(app, focus).content)
-}
-
 /// `► ` when the given panel has focus, two-space pad otherwise.
 /// Keeps title widths consistent across focus states so the tab
 /// strip and right-pane label sit at the same offset before and
