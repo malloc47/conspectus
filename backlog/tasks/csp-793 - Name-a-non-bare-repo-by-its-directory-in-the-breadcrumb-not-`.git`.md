@@ -4,9 +4,12 @@ title: 'Name a non-bare repo by its directory in the breadcrumb, not `.git`'
 status: To Do
 assignee: []
 created_date: '2026-10-30 09:41'
+updated_date: '2026-10-31 00:28'
 labels:
   - tui
   - bug
+  - tui-framework
+milestone: m-25
 dependencies: []
 priority: low
 ordinal: 879000
