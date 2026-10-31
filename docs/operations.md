@@ -692,8 +692,13 @@ will do:
   result, so `Backspace` retraces the way. `via mux` names the first
   neighbor on the path.
 - `in <View> view`: otherwise the view that lists it is shown and the row
-  selected. If it is not listed there (a filter hides it, say), you stay
-  where you were and a message says so.
+  selected.
+- `not listed`: nothing the right pane is on leads to it, and no view
+  lists it as you have the views set up, so `Enter` leaves you where you
+  are and a message says why. No view lists a fork; a repo or checkout
+  appears in Sessions only as the group of its sessions, so one with no
+  sessions is not there; and a row a view's filter hides is not listed
+  in that view.
 
 The keys are on the modal's last row: `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`)
 move, `Enter` picks, `Tab` switches Current and All, `Esc` closes.
@@ -1172,7 +1177,9 @@ session with it and pins the name, as `pin rename` does), **Retarget…** (a
 searchable list of the other entities of the same kind, running or gone; type
 to filter, `Enter` picks), **Refresh snapshot**, **Reveal in its view**
 (switches to Sessions, Mux, or PRs and selects the entity; a gone entity
-opens in History), and **Unpin**. Each is the same write
+opens in History; offered only when that view lists the entity, so not
+for a fork, a branch, or a pin with nothing to point at), and **Unpin**.
+Each is the same write
 as the `pin` command of that name. Legacy pins refuse edits until they are
 migrated.
 

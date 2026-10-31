@@ -113,7 +113,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0146](0146-the-hook-spool-is-the-durable-hook-record.md) | The Hook Spool Is The Durable Hook Record | Accepted |
 | [0147](0147-session-content-search.md) | Session Content Search | Accepted (amended by 0149) |
 | [0148](0148-opt-in-transcript-search-index.md) | Opt-In Transcript Search Index | Accepted (decided, not built) |
-| [0149](0149-two-level-search-current-and-wider-context.md) | Two-Level Search: Current Context And Wider Context | Accepted (amended by 0157, 0158) |
+| [0149](0149-two-level-search-current-and-wider-context.md) | Two-Level Search: Current Context And Wider Context | Accepted (amended by 0157, 0158, 0198) |
 
 ## CLI output and exports
 
@@ -170,7 +170,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
 | [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted (amended by 0160, 0161, 0191) |
 | [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted (amended) |
-| [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted (amended by 0145) |
+| [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted (amended by 0145, 0198) |
 | [0145](0145-state-glyphs-and-words-in-the-left-panel.md) | State Glyphs And Words In The Left Panel | Accepted |
 | [0150](0150-tui-framework-workspace-crate.md) | The TUI Framework Is A Workspace Member Crate | Accepted |
 | [0151](0151-tui-framework-control-set-and-house-rules.md) | The Framework Control Set And Its House Rules | Accepted |
@@ -220,6 +220,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0195](0195-tui-a-tree-row-keeps-its-layout-when-its-list-overflows.md) | A Tree Row Keeps Its Layout When Its List Overflows | Accepted |
 | [0196](0196-tui-quick-selects-entity-rows-come-from-a-column-schema.md) | Quick Select's Entity Rows Come From A Column Schema | Accepted |
 | [0197](0197-tui-the-main-screens-characters-bind-as-typed-as-the-overlays-do.md) | The Main Screen's Characters Bind As Typed, As The Overlays' Do | Accepted |
+| [0198](0198-tui-quick-select-and-reveal-promise-only-a-view-that-lists-the-entity.md) | Quick Select And Reveal Promise Only A View That Lists The Entity | Accepted |
 
 ## Transcript viewer
 

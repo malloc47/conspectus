@@ -567,6 +567,16 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 
 ### Fixed
 
+- **Quick select and the pin menu promise only a view that lists the
+  entity.** Since the Forks view went, quick select's All reach said `in
+  Sessions view` for a fork and then failed on `Enter`, and a fork's pin
+  offered **Reveal in its view**, which failed too; a repo or checkout
+  with no sessions, or a row a view's filter hides, did the same. A
+  result no view lists now says `not listed` (`Enter` says why and stays
+  put), and a pin's menu offers **Reveal in its view** only when that
+  view lists the entity. A pin found by quick select from another view
+  (`in Pinned view`) now opens there; it said the Pinned view did not
+  list it.
 - **The right pane's breadcrumb names a repo by its directory.** A hop
   for a non-bare repo read `.git` (the last part of its `.git`
   directory's path), and two such repos in one chain read `.git·.git`

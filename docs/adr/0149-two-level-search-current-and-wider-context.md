@@ -12,6 +12,8 @@ second content source) and builds on ADR 0112 (in-memory pane captures,
 `--no-live-preview`). Amended by ADR 0157: the chip column of item 25 is
 a chip's footprint from the theme. Amended by ADR 0158: the rect of item
 25 is the framework's palette policy, whose minimums beat the margin.
+Amended by ADR 0198: decision 6 gains a fourth outcome, `not listed`,
+and `in <View> view` names a view only when it lists the entity.
 
 ## Context
 

@@ -896,7 +896,9 @@ Enter selects the item in the left pane; `Tab` widens it to every entity,
 and Enter then selects the entity where it is listed, highlights it in the
 right pane along the shortest relationship path when it is related to the
 selection, or switches to the view where it lives, with an outcome word on
-each result saying which. `Ctrl+/` (also `Ctrl+_`, `Ctrl+7`, and plain `s`
+each result saying which; a result no view lists as its view is set up (a
+fork, a repo with no sessions) says `not listed`, and a pin's menu offers
+to reveal its entity only where a view lists it. `Ctrl+/` (also `Ctrl+_`, `Ctrl+7`, and plain `s`
 where the terminal cannot send it) searches the content of sessions and
 mux scrollback, with `Tab` switching the current view's entities and all
 entities, deduplicating pane text that a session transcript already shows.
