@@ -3,12 +3,13 @@
 Status: executed on branch `worktree-tui-framework` (2026-10-31). The
 operator confirmed the control set and house rules, and ADRs 0150 to 0152
 record those decisions. Milestone m-25 held 57 planned stories (CSP-710 to
-CSP-766); three were split out of CSP-756 (CSP-789 to CSP-791), and 32
+CSP-766); three were split out of CSP-756 (CSP-789 to CSP-791), and 33
 follow-ups were filed while the stories ran. Every story is Done except the
-optional stretch CSP-765 and the close-out CSP-766, and of the follow-ups
-CSP-770 (a test flake) and CSP-776 (dimming actions that cannot act) are
-open; the tables at the end of this file have each one's status. ADRs 0153
-to 0199 record what the stories decided, and the framework's own log,
+close-out CSP-766, and of the follow-ups CSP-770 (a test flake), CSP-776
+(dimming actions that cannot act), and CSP-802 (folding the keymap's `Action`
+layer into `Msg`) are open; the tables at the end of this file have each
+one's status. ADRs 0153 to 0200 record what the stories decided, and the
+framework's own log,
 `crates/tuikit/docs/decisions/`, restates the framework's part. The
 framework's documentation starts at `crates/tuikit/README.md`.
 
@@ -62,6 +63,11 @@ Design notes written during execution:
   (CSP-755): the measured code, the `ExplorerSource` seam, the state and
   outcome type, `Breadcrumb` and the stacked layout, the right pane's key
   table, the migration steps, and the go decision (ADR 0188).
+- [`runtime-evaluation.md`](runtime-evaluation.md) — extracting the
+  application runtime, layer 3 (CSP-765): the runtime's lines classified
+  generic or domain by file, a `Runtime<M, Fx>` seam checked against the
+  loops and the layer 2 contracts, the stories and risks, the benefit for a
+  second program, and the recommendation, later (ADR 0200).
 
 ## Deliverables
 
@@ -211,7 +217,7 @@ palette adapter keeps aider's entries until m-24 lands and deletes them then.
 
 | Task | Story | Depends on | Status |
 | --- | --- | --- | --- |
-| CSP-765 | Optional stretch: evaluate extracting the application runtime (layer 3) | CSP-729, CSP-731, CSP-732, CSP-757 | To Do |
+| CSP-765 | Optional stretch: evaluate extracting the application runtime (layer 3) | CSP-729, CSP-731, CSP-732, CSP-757 | Done |
 | CSP-766 | Assess the milestone's impact on the existing backlog | CSP-764, CSP-762, CSP-763 | To Do |
 
 ### Follow-ups filed during execution
@@ -254,3 +260,4 @@ above.
 | CSP-799 | Check a pin's new name in `conspectus pin rename` before the tmux session is renamed | CSP-778 | Done |
 | CSP-800 | Keep the context beside a match when a snippet's text has no space near the cut | CSP-774 | Done |
 | CSP-801 | Cut a snippet inside a word only beside a token, not beside ordinary prose | CSP-800 | Done |
+| CSP-802 | Fold the keymap's `Action` layer into `Msg` so every loop routes a key one way | CSP-765 | To Do (no milestone) |
