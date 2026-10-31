@@ -561,9 +561,11 @@ turn order within a session (`flat` rows run newest first across all
 sessions, so the `SESSION` column says where each one lives). The snippet is cut to fit `--width`
 the way the TUI cuts it: the match stays, two thirds of the room it
 leaves goes to the text after it, cuts fall on word boundaries (a blank,
-or beside a CJK or other two-cell character) where they can, a side whose
-only word is wider than its room shows the part of it that fits rather
-than nothing, and a cut side ends in `…`. Every character of the snippet is kept,
+or beside a CJK or other two-cell character) where they can, and a cut
+side ends in `…`. A side whose only word is wider than its room shows
+nothing rather than part of a word, unless that word is a token: a path,
+a file name, a URL, a code name with `_` or `::`, a run over 24 cells
+(a hash), or CJK text shows the part of it that fits. Every character of the snippet is kept,
 so the table reads as the JSON's `snippet.text`. When nothing matches, the
 table is empty and stderr says `No sessions match "<query>"`.
 

@@ -14,7 +14,11 @@ serves every surface. Item 6's word edges were refined (CSP-800): a word
 also ends beside a wide character, so CJK text is cut between its
 characters, and a cut whose only edge on its side is the one beside the
 match stays between graphemes instead of emptying that side, as the
-fit's documentation already said.
+fit's documentation already said. That fallback was then narrowed to
+tokens (CSP-801): a stretch between blanks that holds a wide character,
+runs past 24 cells, or joins names with a path or address separator.
+An ordinary word still goes whole, so spaced prose is cut exactly as
+before; a golden over generated English holds it there.
 
 ## Context
 

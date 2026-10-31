@@ -616,14 +616,16 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   only boundary there was the one next to it, so Japanese or Chinese
   text (no spaces between words) or a long path or URL beside the match
   showed only the match: `…wombat…`. A boundary now also falls beside
-  any CJK or other two-cell character, and a side whose only word is
-  wider than its room shows the part that fits: `…のテキストと説明 wombat
+  any CJK or other two-cell character, and a side whose only word is a
+  token wider than its room (a path, a file name, a URL, a code name, a
+  hash, CJK text) shows the part that fits: `…のテキストと説明 wombat
   もっと日本語のテキストと説明がここに…`, `…config.toml wombat
   https://example.com/…`. This holds in the TUI's search results, the
   Search view, quick select, the `conspectus search` table, and the
   stored snippet (`snippet.text` in the JSON, whose shape is unchanged).
-  English text keeps its whole-word cuts where a whole word fits, and
-  shows a cut word (`…mit, feature notes,…`) where it showed nothing.
+  English and other spaced prose is cut as before, at whole words only:
+  a side whose only word does not fit stays empty (`…wombat ten…`)
+  rather than show part of the word.
 - **A file no longer passes for a working directory.** The TUI's path
   fields offered files as completions and marked an existing file `√`, a
   path `mux new`, `mux launch`, and a rebuild then refused. They now
