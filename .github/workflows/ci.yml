@@ -76,3 +76,40 @@ jobs:
 
       - name: Check whitespace errors
         run: git diff --check
+
+  # The framework crate exported with its history into a repository of its
+  # own, its manifest made standalone, and its checks run there with no file
+  # of this repository reachable (ADR 0199). Not path-filtered: the export
+  # also reads the root manifest's workspace tables, Cargo.lock,
+  # rust-toolchain.toml, LICENSE, and the script. Same as
+  # `just separation-rehearsal --self-test`.
+  separation-rehearsal:
+    name: Separation rehearsal
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The export keeps the crate's history.
+          fetch-depth: 0
+
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: echo "channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: clippy,rustfmt
+
+      # The export builds in its own target directory under the runner's
+      # temporary space, so only the registry is worth caching.
+      - name: Cache Cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
+
+      - name: Export the framework and check it alone
+        run: scripts/export-tuikit.sh --self-test "$RUNNER_TEMP/separation-rehearsal"

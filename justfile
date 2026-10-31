@@ -37,6 +37,18 @@ tuikit-features:
     cargo test -p tuikit --no-default-features
     cargo test -p tuikit --no-default-features --features richtext
 
+# Rehearse moving the framework into a repository of its own (ADR 0199):
+# export `crates/tuikit` at HEAD with its history into a scratch
+# repository, make its manifest stand alone, add its root files, and run
+# fmt, clippy, the tests, and the docs there with no file of this
+# repository reachable. Takes the script's arguments: a scratch directory
+# (default target/separation-rehearsal, removed afterwards), `--self-test`
+# (a host-relative leak must fail it; CI runs this), `--keep`, and
+# `--allow-dirty`. Builds the crate from scratch: minutes and a few GB, so
+# it is not part of `check`.
+separation-rehearsal *args:
+    scripts/export-tuikit.sh {{args}}
+
 # Regenerate the comprehensive showcase fixture (ADR 0070).
 #
 # Three post-processing steps:
