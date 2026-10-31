@@ -81,9 +81,7 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `conspectus search` table now cuts its snippet column to `--width` the
   same way (it centered the match): at 80 columns a long message reads
   `…eight nine wombat ten eleven twelve…` where it read `…seven eight
-  nine wombat ten eleven…`. A snippet of text without spaces near the
-  match (CJK) can show only the match once cut, as it already did in the
-  TUI. The JSON is unchanged.
+  nine wombat ten eleven…`. The JSON is unchanged.
 - **Ages read one way across the TUI.** The Search view's match, pane,
   and pane-line rows color their age by how recent it is, as every other
   row does (they were all gray). The search status says `scanned 0s ago`
@@ -613,6 +611,19 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   ``a pin named `x` already exists``); it now checks the new name
   first, so a taken or unusable name fails with that reason and leaves
   the tmux session, the pin's overrides, and `pins.toml` as they were.
+- **A cut snippet keeps the text beside its match.** A snippet cut on
+  word boundaries dropped everything on one side of the match when the
+  only boundary there was the one next to it, so Japanese or Chinese
+  text (no spaces between words) or a long path or URL beside the match
+  showed only the match: `…wombat…`. A boundary now also falls beside
+  any CJK or other two-cell character, and a side whose only word is
+  wider than its room shows the part that fits: `…のテキストと説明 wombat
+  もっと日本語のテキストと説明がここに…`, `…config.toml wombat
+  https://example.com/…`. This holds in the TUI's search results, the
+  Search view, quick select, the `conspectus search` table, and the
+  stored snippet (`snippet.text` in the JSON, whose shape is unchanged).
+  English text keeps its whole-word cuts where a whole word fits, and
+  shows a cut word (`…mit, feature notes,…`) where it showed nothing.
 - **A file no longer passes for a working directory.** The TUI's path
   fields offered files as completions and marked an existing file `√`, a
   path `mux new`, `mux launch`, and a rebuild then refused. They now

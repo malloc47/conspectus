@@ -10,7 +10,11 @@ choice): a scrolled pane's content length is the row count it draws, not an
 estimate. ADR 0147's ASCII-only matcher moves into the framework unchanged.
 Item 8's follow-up is done (CSP-774): the CLI search table crops its
 snippet with `fit_snippet`, keeping every character, so one snippet fit
-serves every surface.
+serves every surface. Item 6's word edges were refined (CSP-800): a word
+also ends beside a wide character, so CJK text is cut between its
+characters, and a cut whose only edge on its side is the one beside the
+match stays between graphemes instead of emptying that side, as the
+fit's documentation already said.
 
 ## Context
 

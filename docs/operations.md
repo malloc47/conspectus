@@ -560,8 +560,10 @@ call`, `tool output`, and so on, as in the TUI. Per-message rows run in
 turn order within a session (`flat` rows run newest first across all
 sessions, so the `SESSION` column says where each one lives). The snippet is cut to fit `--width`
 the way the TUI cuts it: the match stays, two thirds of the room it
-leaves goes to the text after it, cuts fall on word boundaries where they
-can, and a cut side ends in `…`. Every character of the snippet is kept,
+leaves goes to the text after it, cuts fall on word boundaries (a blank,
+or beside a CJK or other two-cell character) where they can, a side whose
+only word is wider than its room shows the part of it that fits rather
+than nothing, and a cut side ends in `…`. Every character of the snippet is kept,
 so the table reads as the JSON's `snippet.text`. When nothing matches, the
 table is empty and stderr says `No sessions match "<query>"`.
 
@@ -727,8 +729,10 @@ empty query; `Ctrl-R` brings back earlier search strings. The modal shows
 the query, a status line (grouping, the kinds searched, how many places are
 scanned, the skipped count), the best results so far, and a footer naming
 the keys it understands. Each row says where the match is (`session` or
-`pane`), and each snippet is cropped around the match, on word boundaries,
-with the match picked out in the theme's `match_highlight` color. The keys:
+`pane`), and each snippet is cropped around the match as the `conspectus
+search` table crops it (on word boundaries, keeping text on both sides of
+the match when there is room), with the match picked out in the theme's
+`match_highlight` color. The keys:
 
 - Type to search. The scan starts when the query has rested for about
   200 ms and restarts whenever the query, the reach, or an option changes.
