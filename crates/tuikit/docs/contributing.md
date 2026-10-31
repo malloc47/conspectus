@@ -251,7 +251,20 @@ and fails when:
 - the module map in [architecture.md](architecture.md) lacks a public
   module or its page, or lists a module that is not public;
 - a relative link in the documentation names a file or a heading that does
-  not exist.
+  not exist;
+- the decision log's index and its records disagree (a record without a
+  row, a row without a record, or a different title, status, or set of
+  origins), or a record lacks a section or an `## Origin` that names its
+  host records or says it has none
+  ([decisions/README.md](decisions/README.md#reading-a-record)).
+
+While the crate lives in its host's repository the same test also holds the
+log to the host's decision records: every host record a record names
+exists, the host's index marks exactly those records framework-owned, and
+every record of the host index's interface section is either restated or
+listed as left out. The host counts as present when the workspace manifest
+two directories up names this crate as a member; when the crate stands
+alone, those checks print a note and pass.
 
 ## Adding a control
 

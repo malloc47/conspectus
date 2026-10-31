@@ -22,7 +22,23 @@
 //! - the module map does not list a public module or link its page, or
 //!   lists as a module something that is not one;
 //! - a relative link in the README or a page names a file that does not
-//!   exist, or a heading the file does not have.
+//!   exist, or a heading the file does not have;
+//! - the decision log's index (`docs/decisions/README.md`) and its records
+//!   disagree: a record without a row, a row without a record, or a row
+//!   whose number, title, status, or origins differ from its record's;
+//! - a record lacks its title, its status, one of the record sections in
+//!   order, or an `## Origin` section that names its host records
+//!   (`- host ADR NNNN ...` items) or says it has none (`None: ...`).
+//!
+//! While the crate lives in its host's repository the log is also held to
+//! the host's decision records (`../../docs/adr` from the crate root): every
+//! record number the log names exists there, the host's index marks exactly
+//! the records the log restates as framework-owned, and every record in the
+//! index's Interactive TUI section is either restated or listed as left out.
+//! The host is taken to be present when the manifest two directories up
+//! names this crate as a workspace member. When the crate stands alone
+//! there is no such manifest, so those checks print a note and pass: the
+//! log is then canonical and the host numbers are history.
 //!
 //! Each check is a pure function over text, so the self-tests at the end
 //! feed it a broken page or module list from memory and see it fail; no
@@ -50,6 +66,34 @@ const DOC_PAGES: &str = "src/doc_pages.rs";
 /// pointed at the wrong directory fails instead of passing empty. There
 /// are 36 today.
 const MIN_PAGES: usize = 27;
+/// The decision log: its directory and its index.
+const DECISIONS: &str = "docs/decisions/";
+const DECISIONS_INDEX: &str = "docs/decisions/README.md";
+/// The `##` sections every record keeps, in this order.
+const RECORD_SECTIONS: &[&str] = &[
+    "## Decision",
+    "## Rationale",
+    "## Consequences",
+    "## Alternatives considered",
+    "## Origin",
+];
+/// The section of the record that names where the decision came from.
+const ORIGIN: &str = "## Origin";
+/// The index's section that lists the host records the log leaves out.
+const NOT_INCLUDED: &str = "## Host records not included";
+/// Fewest records the checks may find, a tripwire like `MIN_PAGES`. There
+/// are 70 today.
+const MIN_RECORDS: usize = 52;
+/// The host repository, relative to the crate root: the manifest that names
+/// this crate as a member, the member path it names, and the host's
+/// decision records.
+const HOST_MANIFEST: &str = "../../Cargo.toml";
+const HOST_MEMBER: &str = "\"crates/tuikit\"";
+const HOST_RECORDS: &str = "../../docs/adr";
+/// What the host index's status cell says of a record the log restates.
+const OWNED_MARK: &str = "framework-owned";
+/// The host index's section every record of which the log accounts for.
+const HOST_SECTION: &str = "## Interactive TUI";
 
 // ---------------------------------------------------------------------------
 // Reading the tree.
@@ -711,6 +755,464 @@ fn broken_links(markdown: &[(String, String)], exists: impl Fn(&str) -> bool) ->
     problems
 }
 
+// ---------------------------------------------------------------------------
+// The decision log.
+// ---------------------------------------------------------------------------
+
+/// A four-digit record number at the start of `text`.
+fn leading_number(text: &str) -> Option<String> {
+    let number: String = text.chars().take_while(char::is_ascii_digit).collect();
+    (number.len() == 4).then_some(number)
+}
+
+/// Every four-digit number in `text` that stands alone (not part of a
+/// longer run of digits), in order.
+fn numbers_in(text: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut run = String::new();
+    for c in text.chars().chain(std::iter::once(' ')) {
+        if c.is_ascii_digit() {
+            run.push(c);
+            continue;
+        }
+        if run.len() == 4 {
+            found.push(run.clone());
+        }
+        run.clear();
+    }
+    found
+}
+
+/// The lines of a `##` section, fenced blocks blanked; empty when the text
+/// has no such section.
+fn section_lines<'a>(text: &'a str, heading: &str) -> Vec<&'a str> {
+    let lines = outside_fences(text);
+    let Some(start) = lines.iter().position(|line| line.trim_end() == heading) else {
+        return Vec::new();
+    };
+    lines[start + 1..]
+        .iter()
+        .take_while(|line| !line.starts_with("## "))
+        .copied()
+        .collect()
+}
+
+/// The host records an `## Origin` section names, or why it cannot be
+/// read. An item names one (`- host ADR 0153, "Title": what it decided`,
+/// wrapped lines indented under it); a section with no item says why the
+/// decision has no host record, in a paragraph that starts with `None:`.
+fn origins(text: &str) -> Result<Vec<String>, String> {
+    if !outside_fences(text)
+        .iter()
+        .any(|line| line.trim_end() == ORIGIN)
+    {
+        return Err(format!("has no `{ORIGIN}` section"));
+    }
+    let lines = section_lines(text, ORIGIN);
+    let mut numbers = Vec::new();
+    let mut prose = Vec::new();
+    for line in lines {
+        if let Some(item) = line.strip_prefix("- ") {
+            let number = item.strip_prefix("host ADR ").and_then(leading_number);
+            match number {
+                Some(number) => numbers.push(number),
+                None => {
+                    return Err(format!(
+                        "its origin item `{}` should start with `host ADR NNNN`",
+                        item.trim()
+                    ));
+                }
+            }
+        } else if !line.trim().is_empty() && !line.starts_with(' ') {
+            prose.push(line.trim());
+        }
+    }
+    let says_none = prose.first().is_some_and(|line| line.starts_with("None:"));
+    match (numbers.is_empty(), says_none) {
+        (true, true) => Ok(numbers),
+        (true, false) => Err(format!(
+            "its `{ORIGIN}` names no host record: list `- host ADR NNNN` items, \
+             or say why there is none in a paragraph that starts with `None:`"
+        )),
+        (false, true) => Err(format!(
+            "its `{ORIGIN}` both names host records and says it has none"
+        )),
+        (false, false) => Ok(numbers),
+    }
+}
+
+/// What the checks read of one record.
+struct Record {
+    path: String,
+    /// The number the file name starts with.
+    number: Option<String>,
+    page: Page,
+    origins: Result<Vec<String>, String>,
+}
+
+impl Record {
+    fn parse(path: &str, text: &str) -> Self {
+        let file = path.rsplit('/').next().unwrap_or(path);
+        Self {
+            path: path.to_string(),
+            number: leading_number(file).filter(|_| file.as_bytes().get(4) == Some(&b'-')),
+            page: Page::parse(path, text),
+            origins: origins(text),
+        }
+    }
+
+    /// The title after the number: `# 0001: The title` gives `The title`.
+    fn title(&self) -> Option<&str> {
+        let title = self.page.title.as_deref()?;
+        let number = self.number.as_deref()?;
+        title.strip_prefix(number)?.strip_prefix(": ")
+    }
+
+    fn status(&self) -> Option<&str> {
+        self.page.row("Status")
+    }
+
+    fn origin_numbers(&self) -> BTreeSet<String> {
+        self.origins
+            .as_ref()
+            .map(|numbers| numbers.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
+/// The records: every page under `docs/decisions/` but the index.
+fn records(markdown: &[(String, String)]) -> Vec<Record> {
+    markdown
+        .iter()
+        .filter(|(path, _)| path.starts_with(DECISIONS) && path != DECISIONS_INDEX)
+        .map(|(path, text)| Record::parse(path, text))
+        .collect()
+}
+
+/// A row of the log's index: `| [0001](0001-title.md) | Title | Status |
+/// Origin |`, the origin cell listing host record numbers or `none`.
+struct IndexRow {
+    number: String,
+    target: String,
+    title: String,
+    status: String,
+    origins: BTreeSet<String>,
+}
+
+/// The rows of the log's index that link a record.
+fn index_rows(index: &str) -> Vec<IndexRow> {
+    let mut rows = Vec::new();
+    for line in outside_fences(index) {
+        let Some(row) = cells(line) else {
+            continue;
+        };
+        let Some(link) = row.first() else {
+            continue;
+        };
+        let Some((number, rest)) = link
+            .strip_prefix('[')
+            .and_then(|rest| rest.split_once("]("))
+        else {
+            continue;
+        };
+        let Some(target) = rest.strip_suffix(')') else {
+            continue;
+        };
+        if leading_number(number).as_deref() != Some(number) {
+            continue;
+        }
+        let cell = |at: usize| row.get(at).cloned().unwrap_or_default();
+        rows.push(IndexRow {
+            number: number.to_string(),
+            target: target.to_string(),
+            title: cell(1),
+            status: cell(2),
+            origins: numbers_in(&cell(3)).into_iter().collect(),
+        });
+    }
+    rows
+}
+
+/// The host records the index lists as left out, from the first cell of
+/// each row of its `## Host records not included` table.
+fn not_included(index: &str) -> BTreeSet<String> {
+    section_lines(index, NOT_INCLUDED)
+        .iter()
+        .filter_map(|line| cells(line))
+        .filter_map(|row| row.first().map(|cell| numbers_in(cell)))
+        .flatten()
+        .collect()
+}
+
+/// A record that lacks its title, its status, a record section (in order),
+/// or a readable origin.
+fn record_shape(record: &Record) -> Vec<String> {
+    let mut problems = Vec::new();
+    let path = &record.path;
+    let Some(number) = &record.number else {
+        return vec![format!(
+            "{path}: a record's file name is its number and a short title (`0001-title.md`)"
+        )];
+    };
+    if record.title().is_none() {
+        problems.push(format!(
+            "{path}: should open with `# {number}: ` and the decision's title"
+        ));
+    }
+    match record.status() {
+        Some("Proposed" | "Accepted") => {}
+        Some(status) if status.starts_with("Superseded by ") => {}
+        Some(status) => problems.push(format!(
+            "{path}: status `{status}` is not `Proposed`, `Accepted`, or `Superseded by NNNN`"
+        )),
+        None => problems.push(format!("{path}: the header table lacks its `Status` row")),
+    }
+    let mut at = 0;
+    for heading in RECORD_SECTIONS {
+        match record.page.sections[at..]
+            .iter()
+            .position(|name| name == heading)
+        {
+            Some(found) => at += found + 1,
+            None => problems.push(format!("{path}: lacks `{heading}` (in this order)")),
+        }
+    }
+    if let Err(problem) = &record.origins {
+        problems.push(format!("{path}: {problem}"));
+    }
+    problems
+}
+
+/// A record the index does not list, a row that links no record, and a
+/// row whose number, title, status, or origins differ from its record's.
+fn log_coverage(rows: &[IndexRow], records: &[Record]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let by_file: BTreeMap<String, &Record> = records
+        .iter()
+        .map(|record| {
+            (
+                record.path.trim_start_matches(DECISIONS).to_string(),
+                record,
+            )
+        })
+        .collect();
+    let mut listed: BTreeMap<&str, usize> = BTreeMap::new();
+    for row in rows {
+        *listed.entry(row.target.as_str()).or_default() += 1;
+        let Some(record) = by_file.get(&row.target) else {
+            problems.push(format!(
+                "{DECISIONS_INDEX}: row {} links {}, which is not a record",
+                row.number, row.target
+            ));
+            continue;
+        };
+        let path = &record.path;
+        if record.number.as_deref() != Some(row.number.as_str()) {
+            problems.push(format!(
+                "{DECISIONS_INDEX}: row {} links {path}, a record of another number",
+                row.number
+            ));
+        }
+        if record.title() != Some(row.title.as_str()) {
+            problems.push(format!(
+                "{DECISIONS_INDEX}: row {}'s title `{}` is not {path}'s `{}`",
+                row.number,
+                row.title,
+                record.title().unwrap_or_default()
+            ));
+        }
+        if record.status() != Some(row.status.as_str()) {
+            problems.push(format!(
+                "{DECISIONS_INDEX}: row {}'s status `{}` is not {path}'s `{}`",
+                row.number,
+                row.status,
+                record.status().unwrap_or_default()
+            ));
+        }
+        if record.origins.is_ok() && record.origin_numbers() != row.origins {
+            problems.push(format!(
+                "{DECISIONS_INDEX}: row {}'s origins {:?} are not {path}'s {:?}",
+                row.number,
+                row.origins,
+                record.origin_numbers()
+            ));
+        }
+    }
+    for (file, record) in &by_file {
+        match listed.get(file.as_str()) {
+            None => problems.push(format!(
+                "{}: the index ({DECISIONS_INDEX}) has no row for it",
+                record.path
+            )),
+            Some(1) => {}
+            Some(_) => problems.push(format!(
+                "{}: the index ({DECISIONS_INDEX}) lists it more than once",
+                record.path
+            )),
+        }
+    }
+    let mut numbers: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for record in records {
+        if let Some(number) = &record.number {
+            numbers.entry(number).or_default().push(&record.path);
+        }
+    }
+    for (number, paths) in numbers {
+        if paths.len() > 1 {
+            problems.push(format!(
+                "records share the number {number}: {}",
+                paths.join(", ")
+            ));
+        }
+    }
+    problems
+}
+
+/// A row of the host's index: a record number, its status cell, and the
+/// `##` section it is listed under.
+struct HostRow {
+    number: String,
+    status: String,
+    section: String,
+}
+
+/// What the checks read of the host's decision records.
+struct Host {
+    /// The numbers of the record files.
+    files: BTreeSet<String>,
+    /// The rows of the host's index.
+    rows: Vec<HostRow>,
+}
+
+impl Host {
+    fn parse(file_names: &[String], index: &str) -> Self {
+        let files = file_names
+            .iter()
+            .filter(|name| name.as_bytes().get(4) == Some(&b'-'))
+            .filter_map(|name| leading_number(name))
+            .collect();
+        let mut rows = Vec::new();
+        let mut section = String::new();
+        for line in outside_fences(index) {
+            if line.starts_with("## ") {
+                section = line.trim_end().to_string();
+                continue;
+            }
+            let Some(row) = cells(line) else {
+                continue;
+            };
+            let number = row
+                .first()
+                .and_then(|cell| cell.strip_prefix('['))
+                .and_then(leading_number);
+            if let (Some(number), Some(status)) = (number, row.get(2)) {
+                rows.push(HostRow {
+                    number,
+                    status: status.clone(),
+                    section: section.clone(),
+                });
+            }
+        }
+        Self { files, rows }
+    }
+}
+
+/// The host's decision records, when the crate is in its host's
+/// repository: the manifest two directories up names it as a member.
+/// `None` when the crate stands alone.
+fn host() -> Option<Host> {
+    let manifest = fs::read_to_string(root().join(HOST_MANIFEST)).ok()?;
+    if !manifest.contains(HOST_MEMBER) {
+        return None;
+    }
+    let dir = root().join(HOST_RECORDS);
+    let names: Vec<String> = fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    let index = fs::read_to_string(dir.join("README.md"))
+        .unwrap_or_else(|error| panic!("read {}/README.md: {error}", dir.display()));
+    Some(Host::parse(&names, &index))
+}
+
+/// A host record the log names that the host does not have; one listed
+/// both as an origin and as left out; a host index row whose mark
+/// disagrees with the log; and a record of the host's section the log
+/// neither restates nor lists as left out.
+fn host_agreement(records: &[Record], left_out: &BTreeSet<String>, host: &Host) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut origins: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for record in records {
+        for number in record.origin_numbers() {
+            origins.entry(number).or_default().push(&record.path);
+        }
+    }
+    for (number, paths) in &origins {
+        if !host.files.contains(number) {
+            problems.push(format!(
+                "{}: names host ADR {number}, which {HOST_RECORDS} does not have",
+                paths.join(", ")
+            ));
+        }
+        if left_out.contains(number) {
+            problems.push(format!(
+                "{DECISIONS_INDEX}: lists host ADR {number} as left out, but it is restated \
+                 by {}",
+                paths.join(", ")
+            ));
+        }
+    }
+    for number in left_out {
+        if !host.files.contains(number) {
+            problems.push(format!(
+                "{DECISIONS_INDEX}: lists host ADR {number} as left out, which \
+                 {HOST_RECORDS} does not have"
+            ));
+        }
+    }
+    let marked: BTreeSet<&str> = host
+        .rows
+        .iter()
+        .filter(|row| row.status.to_lowercase().contains(OWNED_MARK))
+        .map(|row| row.number.as_str())
+        .collect();
+    let indexed: BTreeSet<&str> = host.rows.iter().map(|row| row.number.as_str()).collect();
+    for (number, paths) in &origins {
+        if indexed.contains(number.as_str()) && !marked.contains(number.as_str()) {
+            problems.push(format!(
+                "{HOST_RECORDS}/README.md: does not mark ADR {number} `{OWNED_MARK}`, but it \
+                 is restated by {}",
+                paths.join(", ")
+            ));
+        }
+        if !indexed.contains(number.as_str()) && host.files.contains(number) {
+            problems.push(format!(
+                "{HOST_RECORDS}/README.md: does not list ADR {number}, which is restated by {}",
+                paths.join(", ")
+            ));
+        }
+    }
+    for number in marked {
+        if !origins.contains_key(number) {
+            problems.push(format!(
+                "{HOST_RECORDS}/README.md: marks ADR {number} `{OWNED_MARK}`, but no record \
+                 under {DECISIONS} restates it"
+            ));
+        }
+    }
+    for row in host.rows.iter().filter(|row| row.section == HOST_SECTION) {
+        if !origins.contains_key(&row.number) && !left_out.contains(&row.number) {
+            problems.push(format!(
+                "{HOST_RECORDS}/README.md: ADR {} of `{HOST_SECTION}` is neither restated by \
+                 a record nor listed under `{NOT_INCLUDED}` in {DECISIONS_INDEX}",
+                row.number
+            ));
+        }
+    }
+    problems
+}
+
 fn assert_none(what: &str, problems: &[String]) {
     assert!(problems.is_empty(), "{what}:\n  {}", problems.join("\n  "));
 }
@@ -787,6 +1289,47 @@ fn the_module_map_lists_every_module_and_links_every_page() {
 fn every_relative_link_names_a_file_and_heading_that_exist() {
     let problems = broken_links(&markdown_files(), |path| root().join(path).exists());
     assert_none("links", &problems);
+}
+
+#[test]
+fn every_record_keeps_the_record_shape_and_names_its_origin() {
+    let records = records(&markdown_files());
+    assert!(
+        records.len() >= MIN_RECORDS,
+        "found {} records under {DECISIONS}, fewer than {MIN_RECORDS}: is the directory right?",
+        records.len()
+    );
+    let problems: Vec<String> = records.iter().flat_map(record_shape).collect();
+    assert_none("record shape", &problems);
+}
+
+#[test]
+fn the_decision_index_lists_every_record_as_the_record_reads() {
+    let rows = index_rows(&read(DECISIONS_INDEX));
+    let records = records(&markdown_files());
+    assert_none("decision index", &log_coverage(&rows, &records));
+}
+
+#[test]
+fn the_log_agrees_with_the_host_records_while_it_has_a_host() {
+    let Some(host) = host() else {
+        eprintln!(
+            "skipped: no host repository ({HOST_MANIFEST} does not name this crate as a \
+             member), so the log is checked on its own"
+        );
+        return;
+    };
+    let records = records(&markdown_files());
+    let left_out = not_included(&read(DECISIONS_INDEX));
+    assert!(
+        !left_out.is_empty(),
+        "{DECISIONS_INDEX}: `{NOT_INCLUDED}` lists no host record: is the heading right?"
+    );
+    assert!(
+        host.rows.iter().any(|row| row.section == HOST_SECTION),
+        "{HOST_RECORDS}/README.md has no `{HOST_SECTION}` rows: is the heading right?"
+    );
+    assert_none("host records", &host_agreement(&records, &left_out, &host));
 }
 
 // ---------------------------------------------------------------------------
@@ -1052,4 +1595,238 @@ fn slugs_follow_the_heading_anchors_readers_link() {
     assert_eq!(slug("Seams left open"), "seams-left-open");
     let repeated = anchors("# T\n\n## Rows\n\n### Rows\n");
     assert!(repeated.contains("rows") && repeated.contains("rows-1"));
+}
+
+/// A record in the log's shape, with `origin` as its `## Origin` body.
+fn record_text(number: &str, title: &str, origin: &str) -> String {
+    format!(
+        "# {number}: {title}\n\n| | |\n| --- | --- |\n| Status | Accepted |\n\n\
+         ## Decision\n\nD.\n\n## Rationale\n\nR.\n\n## Consequences\n\nC.\n\n\
+         ## Alternatives considered\n\nA.\n\n## Origin\n\n{origin}\n"
+    )
+}
+
+fn record_at(file: &str, text: &str) -> Record {
+    Record::parse(&format!("{DECISIONS}{file}"), text)
+}
+
+#[test]
+fn origins_are_read_from_items_or_a_none_paragraph() {
+    let two = "- host ADR 0153, \"Theme tokens\": decisions 1 and 2,\n  \
+               wrapped under the item.\n- host ADR 0032, \"Theme value\": all of it.";
+    let text = record_text("0001", "T", two);
+    assert_eq!(origins(&text), Ok(vec!["0153".into(), "0032".into()]));
+    let none = record_text("0002", "T", "None: first recorded in this log.");
+    assert_eq!(origins(&none), Ok(Vec::new()));
+
+    let missing = record_text("0003", "T", "").replace("## Origin", "## Source");
+    assert!(origins(&missing).unwrap_err().contains("no `## Origin`"));
+    let empty = record_text("0004", "T", "Some prose.");
+    assert!(
+        origins(&empty)
+            .unwrap_err()
+            .contains("names no host record")
+    );
+    let loose = record_text("0005", "T", "- ADR 0153: no host word.");
+    assert!(origins(&loose).unwrap_err().contains("should start with"));
+    let both = record_text("0006", "T", "None: nothing.\n\n- host ADR 0153, \"T\": x.");
+    assert!(origins(&both).unwrap_err().contains("both"));
+}
+
+#[test]
+fn record_shape_fails_on_a_missing_title_status_section_or_origin() {
+    let whole = record_text("0007", "Title", "- host ADR 0150, \"T\": x.");
+    assert!(record_shape(&record_at("0007-title.md", &whole)).is_empty());
+
+    let unnumbered = record_shape(&record_at("title.md", &whole));
+    assert!(
+        unnumbered[0].contains("file name is its number"),
+        "{unnumbered:?}"
+    );
+
+    let other_number = record_shape(&record_at("0008-title.md", &whole));
+    assert!(
+        other_number
+            .iter()
+            .any(|p| p.contains("should open with `# 0008: `")),
+        "{other_number:?}"
+    );
+
+    let no_status = whole.replace("| Status | Accepted |\n", "");
+    let problems = record_shape(&record_at("0007-title.md", &no_status));
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("lacks its `Status` row")),
+        "{problems:?}"
+    );
+    let odd_status = whole.replace("| Accepted |", "| Maybe |");
+    assert!(!record_shape(&record_at("0007-title.md", &odd_status)).is_empty());
+
+    let no_rationale = whole.replace("## Rationale\n\nR.\n\n", "");
+    let problems = record_shape(&record_at("0007-title.md", &no_rationale));
+    assert!(
+        problems.iter().any(|p| p.contains("lacks `## Rationale`")),
+        "{problems:?}"
+    );
+
+    let no_origin = whole.replace("- host ADR 0150, \"T\": x.", "");
+    let problems = record_shape(&record_at("0007-title.md", &no_origin));
+    assert!(
+        problems.iter().any(|p| p.contains("names no host record")),
+        "{problems:?}"
+    );
+}
+
+const INDEX: &str = "\
+# Framework decisions
+
+| Record | Decision | Status | Origin |
+| --- | --- | --- | --- |
+| [0001](0001-one.md) | One | Accepted | 0150 |
+| [0002](0002-two.md) | Two | Accepted | none |
+
+## Host records not included
+
+| Host records | Why |
+| --- | --- |
+| 0019, 0052 | host content |
+| 0118 | the host's name |
+";
+
+#[test]
+fn the_index_and_its_records_are_read_alike() {
+    let rows = index_rows(INDEX);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].target, "0001-one.md");
+    assert_eq!(rows[0].origins, BTreeSet::from(["0150".to_string()]));
+    assert!(rows[1].origins.is_empty());
+    assert_eq!(
+        not_included(INDEX),
+        BTreeSet::from(["0019".into(), "0052".into(), "0118".into()])
+    );
+    assert_eq!(numbers_in("0150, 0024 and 12345 or 015"), ["0150", "0024"]);
+}
+
+#[test]
+fn log_coverage_fails_when_the_index_and_the_records_disagree() {
+    let one = record_text("0001", "One", "- host ADR 0150, \"T\": x.");
+    let two = record_text("0002", "Two", "None: first recorded here.");
+    let records = vec![
+        record_at("0001-one.md", &one),
+        record_at("0002-two.md", &two),
+    ];
+    assert_none("coverage", &log_coverage(&index_rows(INDEX), &records));
+
+    let renamed = record_text(
+        "0001",
+        "Uno",
+        "- host ADR 0150, \"T\": x.\n- host ADR 0024, \"U\": y.",
+    );
+    let three = record_text("0003", "Three", "None: first recorded here.");
+    let records = vec![
+        record_at("0001-one.md", &renamed),
+        record_at("0003-three.md", &three),
+    ];
+    let problems = log_coverage(&index_rows(INDEX), &records);
+    for expected in [
+        "title `One` is not",
+        "origins {\"0150\"} are not",
+        "links 0002-two.md, which is not a record",
+        "0003-three.md: the index",
+    ] {
+        assert!(
+            problems.iter().any(|p| p.contains(expected)),
+            "{expected}: {problems:?}"
+        );
+    }
+    assert_eq!(problems.len(), 4, "{problems:?}");
+
+    let twice = format!("{INDEX}| [0001](0001-one.md) | One | Accepted | 0150 |\n");
+    let records = vec![
+        record_at("0001-one.md", &one),
+        record_at("0002-two.md", &two),
+        record_at(
+            "0002-again.md",
+            &two.replace("# 0002: Two", "# 0002: Again"),
+        ),
+    ];
+    let problems = log_coverage(&index_rows(&twice), &records);
+    assert!(
+        problems.iter().any(|p| p.contains("more than once")),
+        "{problems:?}"
+    );
+    assert!(
+        problems.iter().any(|p| p.contains("share the number 0002")),
+        "{problems:?}"
+    );
+}
+
+const HOST_INDEX: &str = "\
+# Decision records
+
+## Interactive TUI
+
+| ADR | Decision | Status |
+| --- | --- | --- |
+| [0150](0150-a.md) | A | Accepted; framework-owned |
+| [0151](0151-b.md) | B | Accepted (amended by 0152); framework-owned in part |
+| [0118](0118-c.md) | C | Accepted |
+
+## Elsewhere
+
+| ADR | Decision | Status |
+| --- | --- | --- |
+| [0024](0024-d.md) | D | Accepted |
+";
+
+fn host_of(files: &[&str], index: &str) -> Host {
+    let names: Vec<String> = files.iter().map(|name| (*name).to_string()).collect();
+    Host::parse(&names, index)
+}
+
+#[test]
+fn host_agreement_fails_on_a_missing_number_a_wrong_mark_or_a_record_left_unsorted() {
+    let files = [
+        "0150-a.md",
+        "0151-b.md",
+        "0118-c.md",
+        "0024-d.md",
+        "README.md",
+    ];
+    let host = host_of(&files, HOST_INDEX);
+    assert_eq!(host.files.len(), 4);
+    assert_eq!(host.rows.len(), 4);
+    let a = record_text("0001", "A", "- host ADR 0150, \"A\": x.");
+    let b = record_text("0002", "B", "- host ADR 0151, \"B\": y.");
+    let records = vec![record_at("0001-a.md", &a), record_at("0002-b.md", &b)];
+    let left_out = BTreeSet::from(["0118".to_string()]);
+    assert_none("host", &host_agreement(&records, &left_out, &host));
+
+    // A record that names a host record the host lacks or does not mark,
+    // a left-out record that a record restates, a marked record no record
+    // restates, and a record of the section that is neither.
+    let gone = record_text(
+        "0003",
+        "C",
+        "- host ADR 0999, \"Gone\": x.\n- host ADR 0024, \"D\": y.",
+    );
+    let records = vec![record_at("0001-a.md", &a), record_at("0003-c.md", &gone)];
+    let left_out = BTreeSet::from(["0150".to_string(), "0777".to_string()]);
+    let problems = host_agreement(&records, &left_out, &host);
+    for expected in [
+        "names host ADR 0999, which",
+        "lists host ADR 0150 as left out, but",
+        "lists host ADR 0777 as left out, which",
+        "does not mark ADR 0024 `framework-owned`, but",
+        "marks ADR 0151 `framework-owned`, but no record",
+        "ADR 0151 of `## Interactive TUI` is neither",
+        "ADR 0118 of `## Interactive TUI` is neither",
+    ] {
+        assert!(
+            problems.iter().any(|p| p.contains(expected)),
+            "{expected}: {problems:?}"
+        );
+    }
+    assert_eq!(problems.len(), 7, "{problems:?}");
 }
