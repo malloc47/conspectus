@@ -608,7 +608,11 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   a taken or unusable name on its error line, with the reasons the
   pin edit form gives (a blank name in the form now reads `pin: nothing
   entered`, as in the prompt), and the rename checks the name again
-  before it touches the session.
+  before it touches the session. `conspectus pin rename` had the same
+  order (it renamed the session, pinned the name, and then failed with
+  ``a pin named `x` already exists``); it now checks the new name
+  first, so a taken or unusable name fails with that reason and leaves
+  the tmux session, the pin's overrides, and `pins.toml` as they were.
 - **A file no longer passes for a working directory.** The TUI's path
   fields offered files as completions and marked an existing file `√`, a
   path `mux new`, `mux launch`, and a rebuild then refused. They now

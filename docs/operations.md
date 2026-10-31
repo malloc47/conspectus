@@ -1051,8 +1051,10 @@ conspectus pin show <name>
 `KIND` is `mux`, `session`, `checkout` (also spelled `worktree`), `repo`,
 `pr`, `branch`, `workspace`, or `fork`. `pin rename` on a live mux pin also
 renames the tmux session and pins the `name` override; `--no-mux` renames
-the pin alone. `FIELD=VALUE` lists (such as `argv`) are split like a shell command
-line, as the launch form's `argv` is (see the launch form below), and one that
+the pin alone. It checks the new name first: one another pin has, or one
+that is not a usable pin name, fails with the reason and renames nothing,
+so the session, the overrides, and `pins.toml` stay as they were.
+`FIELD=VALUE` lists (such as `argv`) are split like a shell command line, as the launch form's `argv` is (see the launch form below), and one that
 ends inside a quote is refused. Pinning a live mux, worktree, or repo first records it in
 history so the pin has a stable record to point at. `rm` removes the
 pin and nothing else. `pin add`, `edit`, `rename`, `retarget`,
