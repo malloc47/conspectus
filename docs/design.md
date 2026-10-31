@@ -1094,7 +1094,9 @@ The first cut covers components and design tokens (layer 1) and interaction
 conventions (layer 2): key tables that generate footers and help, the overlay
 and modal-stack contract, focus rules, a feedback model, and a test kit. The
 application runtime (the MVU loop, effects, undo, and terminal hand-off) stays
-in `conspectus`. The control set and the house rules that make the controls
+in `conspectus`: about a ninth of it is generic and no second program uses the
+framework, so it moves only when one does, then as an opt-in layer that no
+control depends on, terminal guard first (ADR 0200). The control set and the house rules that make the controls
 behave alike are ADR 0151; who owns the third-party crates is ADR 0152. The
 planning record, with the inventory, control set, and gap analysis, is
 `docs/plans/tui-framework/`.

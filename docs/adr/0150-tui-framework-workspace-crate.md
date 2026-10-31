@@ -5,6 +5,9 @@
 Accepted. Narrows ADR 0024 (the TUI's module layout) and ADR 0052 (the
 "extractable viewer" boundary): generic widgets and conventions move to the
 framework crate; the transcript model and parsers stay in Conspectus.
+Decision 2's evaluation of the runtime is settled by
+[ADR 0200](0200-tui-the-application-runtime-stays-in-conspectus-until-a-second-program-needs-it.md):
+it stays in Conspectus until a second program needs it.
 
 ## Context
 

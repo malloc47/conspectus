@@ -184,7 +184,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted (amended) |
 | [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted (amended by 0145, 0198) |
 | [0145](0145-state-glyphs-and-words-in-the-left-panel.md) | State Glyphs And Words In The Left Panel | Accepted |
-| [0150](0150-tui-framework-workspace-crate.md) | The TUI Framework Is A Workspace Member Crate | Accepted (separation rehearsal carried out by 0199); framework-owned |
+| [0150](0150-tui-framework-workspace-crate.md) | The TUI Framework Is A Workspace Member Crate | Accepted (separation rehearsal carried out by 0199; runtime evaluation settled by 0200); framework-owned |
 | [0151](0151-tui-framework-control-set-and-house-rules.md) | The Framework Control Set And Its House Rules | Accepted; framework-owned |
 | [0152](0152-tui-framework-dependency-ownership.md) | Who Owns The Framework's Third-Party Crates | Accepted; framework-owned |
 | [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted (amended by 0163, 0180, 0189); framework-owned |
@@ -234,6 +234,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0197](0197-tui-the-main-screens-characters-bind-as-typed-as-the-overlays-do.md) | The Main Screen's Characters Bind As Typed, As The Overlays' Do | Accepted; framework-owned in part |
 | [0198](0198-tui-quick-select-and-reveal-promise-only-a-view-that-lists-the-entity.md) | Quick Select And Reveal Promise Only A View That Lists The Entity | Accepted |
 | [0199](0199-tui-framework-separation-is-rehearsed-in-ci.md) | The Framework's Separation Is Rehearsed In CI | Accepted; framework-owned in part |
+| [0200](0200-tui-the-application-runtime-stays-in-conspectus-until-a-second-program-needs-it.md) | The Application Runtime Stays In Conspectus Until A Second Program Needs It | Accepted; framework-owned in part |
 
 ## Transcript viewer
 

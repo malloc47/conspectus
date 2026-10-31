@@ -57,7 +57,7 @@ host's index marks each of them as framework-owned.
 | Record | Decision | Status | Origin |
 | --- | --- | --- | --- |
 | [0001](0001-a-crate-of-its-own.md) | The framework is a crate of its own, and its host depends on it one way | Accepted | 0150, 0152 |
-| [0002](0002-components-and-conventions-not-the-runtime.md) | The framework holds components and conventions; the runtime stays with the host | Accepted | 0150 |
+| [0002](0002-components-and-conventions-not-the-runtime.md) | The framework holds components and conventions; the runtime stays with the host | Accepted | 0150, 0200 |
 | [0003](0003-independence-is-tested.md) | Independence from the host is enforced by guard tests | Accepted | 0150, 0152 |
 | [0004](0004-controls-return-intents-and-read-no-global-state.md) | A control performs no effect and reads no global state | Accepted | 0024, 0085, 0150 |
 | [0005](0005-consistency-first.md) | A control that moves in unifies on the best variant and catalogs what users see change | Accepted | 0150, 0151 |
