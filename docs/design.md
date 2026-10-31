@@ -1084,10 +1084,10 @@ depth.
 
 ### TUI Framework
 
-The TUI's widgets, design tokens, and interaction conventions are being
-separated into a workspace member crate, `tuikit` at `crates/tuikit/`
-(ADR 0150), that `conspectus` depends on by path and that depends on nothing
-from `conspectus`. It is for internal reuse and can move to its own repository
+The TUI's widgets, design tokens, and interaction conventions live in a
+workspace member crate, `tuikit` at `crates/tuikit/` (ADR 0150), that
+`conspectus` depends on by path and that depends on nothing from
+`conspectus`. It is for internal reuse and can move to its own repository
 at any time; it is not published and promises no stable API.
 
 The first cut covers components and design tokens (layer 1) and interaction
@@ -1193,9 +1193,11 @@ standard table and carry whether an action is available now), the footer
 grammar (keys and a short verb, no "to"), one key notation, the roles the
 modal key convention is checked by, and the standard tables for menus,
 dialogs, pagers, prompts, checklists, and forms; `conspectus` keeps the
-tables of its own overlays (search, Controls, Messages, the viewers) and the
-main view's keymap. A letter in an overlay fires plain or shifted, never as
-a chord, and every list moves with `Ctrl-N`/`Ctrl-P`. Every modal draws its
+tables of its own overlays (the searches, the forms' own keys, the help and
+value modal's openers, Messages' opener and copy, the pane and transcript
+contents) and the bindings of its scoped keymap. A letter in an overlay
+fires plain or shifted, never as a chord, and every list moves with
+`Ctrl-N`/`Ctrl-P`. Every modal draws its
 footer through one `ModalFooter` (ADR 0193): its keys recede in the theme's
 `muted`, as the status bar's do, on the frame's last rows under a blank row,
 the keys that leave last; a footer too tall for its frame gives up the
@@ -1207,8 +1209,8 @@ the description wrapped beside them, legends for marks, a scrollbar, and a
 footer generated from the keys that scroll and close it) and generates a
 page from a key table and a description per action, so a viewer's page
 lists every key its table binds and a key with no description fails a test.
-The keymap help keeps its hand-written rows and legends as annotations until
-the program-wide keymap carries help text; every page pages by the rows it
+The keymap help is generated from the program's scoped keymap, with its prose
+and legends as annotations (ADR 0192); every page pages by the rows it
 shows.
 
 Text entry starts with one line editor (ADR 0165). Every text field (the
@@ -1416,9 +1418,9 @@ link leads, the breadcrumb tag, the left-pane selection a frame saves),
 and answers each key with an outcome whose effects (the copy as
 `Effect::Copy`, the value modal, the left-pane mirror, the focus change)
 and words stay in `conspectus`. A refresh keeps the drill while the left
-selection is unchanged. The right pane's keys are one table resolved
-before the global keymap when it has focus; its help section and its
-status hint are generated from it, the hint's `Enter` verb following
+selection is unchanged. The right pane's keys are one table, the right
+pane's scope of the program's scoped keymap (ADR 0192); its help section
+and its status hint are generated from it, the hint's `Enter` verb following
 the cursor's row (`copy`, `follow`, `fold`). The breadcrumb, the tab
 strip, and the status bar share one rule for what gives way on a narrow
 line (`tuikit::text::elide`). The breadcrumb draws through it
@@ -1504,7 +1506,7 @@ rebuild the same snapshot in process.
 The output renderers
 (`src/output/{agent,mux,union,prs,forks,node_show,table}.rs`)
 and the TUI row builders (`src/tui/rows/*.rs`,
-`src/tui/{detail,explorer}.rs`) consume `&GraphSnapshot`
+`src/tui/explorer.rs`) consume `&GraphSnapshot`
 directly and iterate the typed model. `src/query/` and the
 internal `materialize_snapshot` SQLite engine are gone
 (CSP-448.02/CSP-448.03/CSP-448.04, ADR 0082); `rusqlite` survives only for

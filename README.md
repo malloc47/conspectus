@@ -74,7 +74,7 @@ are all valid, not errors. Projections never assume things connect.
 [0026](docs/adr/0026-checkout-context-model.md),
 [0047](docs/adr/0047-runtime-process-nodes-candidate.md),
 [0084](docs/adr/0084-first-class-pin-nodes.md),
-[0141](docs/adr/0141-pin-pins.md))
+[0141](docs/adr/0141-pin-slots.md))
 
 ### 2. Evidence first, resolution second
 
@@ -88,7 +88,7 @@ instead of being silently collapsed.
 ([ADR 0002](docs/adr/0002-graphlink-and-typed-relationships.md),
 [0006](docs/adr/0006-session-mux-link-candidates.md),
 [0041](docs/adr/0041-resolver-stays-in-rust.md),
-[0077](docs/adr/0077-resolver-ambiguous-pin-preservation.md))
+[0077](docs/adr/0077-resolver-ambiguous-slot-preservation.md))
 
 ### 3. Attribution without touching your agents
 
@@ -162,7 +162,7 @@ Conspectus doesn't own your tmux server or impose a window layout. It records
 what it saw and rebuilds only when you ask.
 ([ADR 0018](docs/adr/0018-intra-harness-session-lineage.md),
 [0140](docs/adr/0140-history-and-presence.md),
-[0141](docs/adr/0141-pin-pins.md),
+[0141](docs/adr/0141-pin-slots.md),
 [0142](docs/adr/0142-rebuild-plans-and-executors.md))
 
 ### 6. A bounded mutation envelope
@@ -690,6 +690,7 @@ the work moved from building to hardening.
 | See why things are the way they are | [docs/adr/](docs/adr/README.md) |
 | Understand how sessions get attributed to tmux panes | [docs/mux-link-resolution.md](docs/mux-link-resolution.md) |
 | Add a harness, mux, forge, or orchestrator adapter | [docs/provider-adapter-guide.md](docs/provider-adapter-guide.md) |
+| Build or change a TUI screen, control, or key | [crates/tuikit/README.md](crates/tuikit/README.md), the TUI framework's guide and control pages |
 | Use Conspectus as a library | [docs/library-api.md](docs/library-api.md) |
 | See what's being worked on | [backlog/](backlog/) (`backlog board`) |
 | Find every document | [docs/index.md](docs/index.md) |
@@ -715,6 +716,11 @@ cargo run --features snapshot -- tui --fixture tests/fixtures/showcase.json   # 
 `just demo` runs that last command, which is the easiest way to show the TUI
 without exposing your own sessions. `just screenshots` re-renders the images in
 this README from the same showcase world.
+
+The TUI's controls, theme, and key tables are the framework crate
+[`crates/tuikit`](crates/tuikit/README.md), a member of this Cargo workspace;
+`just separation-rehearsal --self-test` checks that it still stands alone (CI
+runs it).
 
 [docs/dev-scenarios.md](docs/dev-scenarios.md) covers the fixture workflow,
 the three test-world surfaces (`ReplayWorld`, the captured-fixture corpus,
