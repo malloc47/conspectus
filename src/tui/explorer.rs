@@ -810,8 +810,9 @@ impl NodeView {
 /// frame's node kind in its kind color (ADR 0073; a PR's glyph takes
 /// the `pr_open` hue, since the frame holds no PR state), the tag from
 /// the frame's `kind:tag` short label with the `kind:` dropped (the
-/// glyph carries the kind), and the last four characters of the node's
-/// id, which the breadcrumb shows only when two hops have one tag.
+/// glyph carries the kind), and four characters of the `id` row the
+/// node's pane shows, which the breadcrumb shows only when two hops have
+/// one tag.
 pub fn breadcrumb_hops(frames: &[Frame<Graph>], theme: &Theme) -> Vec<Hop> {
     frames
         .iter()
@@ -823,9 +824,25 @@ pub fn breadcrumb_hops(frames: &[Frame<Graph>], theme: &Theme) -> Vec<Hop> {
                 .map_or(frame.tag.as_str(), |(_, tag)| tag);
             Hop::new(tag)
                 .glyph(Span::styled(kind.glyph, Style::default().fg(kind.color)))
-                .suffix(text::clip_start(&frame.id.to_string(), 4))
+                .suffix(hop_suffix(&frame.id))
         })
         .collect()
+}
+
+/// What tells a hop from another with its tag: four characters of the
+/// `id` row the right pane shows for the node. A session's key, a mux's
+/// name, and a pin's name differ at their ends, so the suffix is the end;
+/// every other kind's `id` row is its short id (a hash of the node id),
+/// so the suffix is its start. The end of the node id would not do for
+/// those: a repo, checkout, workspace, or branch is tagged by the end of
+/// its path or ref, which two of them in different places share.
+fn hop_suffix(id: &NodeId) -> String {
+    match id {
+        NodeId::AgentSession(_) | NodeId::MuxSession(_) | NodeId::Pin(_) => {
+            text::clip_start(&id.to_string(), 4)
+        }
+        _ => node_short_id(id).chars().take(4).collect(),
+    }
 }
 
 /// Borrowed view of the Preview-zone content for a single cursor row.
@@ -933,6 +950,17 @@ pub fn short_node_label(node: &GraphNode) -> String {
             .find(|seg| !seg.is_empty())
             .unwrap_or(path)
     }
+    /// A repo's name: the working directory of a non-bare repo, whose
+    /// common dir is its `.git` (`~/repos/project/.git` is `project`),
+    /// and a bare repo's own directory (`/srv/git/project.git`).
+    fn repo_dir_name(common_dir: &str) -> &str {
+        let mut segments = common_dir.rsplit(['/', '\\']).filter(|seg| !seg.is_empty());
+        match (segments.next(), segments.next()) {
+            (Some(".git"), Some(work_dir)) => work_dir,
+            (Some(dir), _) => dir,
+            (None, _) => common_dir,
+        }
+    }
     match node {
         GraphNode::AgentSession(s) => {
             let tag =
@@ -959,7 +987,7 @@ pub fn short_node_label(node: &GraphNode) -> String {
             let tag = f.name.as_deref().unwrap_or(f.provider_source_key.as_str());
             format!("fork:{}", text::truncate_end(tag, 16))
         }
-        GraphNode::Repo(r) => format!("repo:{}", basename(&r.common_dir)),
+        GraphNode::Repo(r) => format!("repo:{}", repo_dir_name(&r.common_dir)),
         GraphNode::Checkout(c) => format!("co:{}", basename(&c.root)),
         GraphNode::Workspace(w) => {
             let tag = w.name.as_deref().unwrap_or_else(|| basename(&w.root));

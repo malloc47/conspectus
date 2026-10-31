@@ -1269,6 +1269,95 @@ fn breadcrumb_hops_tag_a_frame_by_its_short_label_and_suffix_it_by_its_id() {
     assert_ne!(tail(&first), tail(&last));
 }
 
+fn repo_at(common_dir: &str) -> GraphNode {
+    GraphNode::Repo(RepoNode {
+        id: RepoId::new(common_dir),
+        common_dir: common_dir.to_string(),
+        source_paths: vec![],
+        remotes: vec![],
+    })
+}
+
+/// The drill frame a repo leaves, tagged as the explorer tags it.
+fn repo_hop(common_dir: &str) -> Frame<Graph> {
+    let node = repo_at(common_dir);
+    breadcrumb_hop(&short_node_label(&node), node.id())
+}
+
+#[test]
+fn a_repo_hop_is_named_by_its_directory_whether_bare_or_not() {
+    assert_eq!(
+        short_node_label(&repo_at("/home/op/repos/project/.git")),
+        "repo:project",
+        "a non-bare repo is its working directory, not `.git`"
+    );
+    assert_eq!(
+        short_node_label(&repo_at("/home/op/repos/project/.git/")),
+        "repo:project"
+    );
+    assert_eq!(
+        short_node_label(&repo_at("/srv/git/project.git")),
+        "repo:project.git",
+        "a bare repo keeps its own directory's name"
+    );
+}
+
+#[test]
+fn two_repos_with_one_directory_name_carry_suffixes_that_differ() {
+    let theme = Theme::default();
+    let (work, oss) = ("/home/op/work/project/.git", "/home/op/oss/project/.git");
+    let hops = breadcrumb_hops(
+        &[
+            repo_hop(work),
+            breadcrumb_hop(
+                "mux:editor",
+                NodeId::MuxSession(MuxSessionId::new("editor")),
+            ),
+            repo_hop(oss),
+        ],
+        &theme,
+    );
+    let plain = Breadcrumb::new(&hops, &theme)
+        .line(80)
+        .expect("non-empty")
+        .to_string();
+    // Each suffix is the start of the `id` row the right pane shows for
+    // that repo, so the two read apart and each matches its own pane.
+    let id_row = |dir: &str| node_short_id(&NodeId::Repo(RepoId::new(dir)));
+    let (first, last) = (id_row(work), id_row(oss));
+    let repo = NodeKind::Repo.default_glyph();
+    let mux = NodeKind::MuxSession.default_glyph();
+    assert_eq!(
+        plain,
+        format!(
+            "{repo} project·{} › {mux} editor › {repo} project·{}",
+            &first[..4],
+            &last[..4]
+        )
+    );
+    assert_ne!(first[..4], last[..4]);
+}
+
+#[test]
+fn a_repo_named_once_in_the_chain_shows_no_suffix() {
+    let theme = Theme::default();
+    let hops = breadcrumb_hops(
+        &[
+            repo_hop("/home/op/repos/project/.git"),
+            repo_hop("/srv/git/tools.git"),
+        ],
+        &theme,
+    );
+    let repo = NodeKind::Repo.default_glyph();
+    assert_eq!(
+        Breadcrumb::new(&hops, &theme)
+            .line(80)
+            .expect("non-empty")
+            .to_string(),
+        format!("{repo} project › {repo} tools.git")
+    );
+}
+
 /// A drill frame of the explorer, kept when it drilled away from
 /// `focused`, tagged `short_label`.
 fn breadcrumb_hop(short_label: &str, focused: NodeId) -> Frame<Graph> {
