@@ -624,6 +624,34 @@ fn a_field_without_an_override_follows_the_value_it_has_now() {
     assert!(request.set.is_empty() && request.unset.is_empty());
 }
 
+/// The one name check both rename UIs use: blank, not a pin id, or
+/// another pin's name is refused, each with its reason; the pin's own
+/// name and a free one pass.
+#[test]
+fn the_name_check_refuses_blank_invalid_and_taken_names() {
+    let known = ["work".to_string(), "other".to_string()];
+    assert_eq!(
+        check_name("work", &known, "   "),
+        Err("pin: nothing entered".to_string())
+    );
+    let invalid = check_name("work", &known, "two\rlines").unwrap_err();
+    assert!(invalid.contains("isn't a usable pin name"), "{invalid}");
+    assert_eq!(
+        check_name("work", &known, " other "),
+        Err("a pin named `other` already exists".to_string())
+    );
+    assert_eq!(check_name("work", &known, "work"), Ok(()));
+    assert_eq!(check_name("work", &known, "fresh"), Ok(()));
+
+    let mut form = PinEditForm::new(mux_init());
+    clear_text(&mut form, 4);
+    assert_eq!(
+        form.request().unwrap_err(),
+        "pin: nothing entered",
+        "the form's blank name says what the prompt says"
+    );
+}
+
 /// A refused save says why on the error line directly above the keys and
 /// moves the focus to the field it is about (it stayed where `Enter` was
 /// pressed).

@@ -621,7 +621,25 @@ fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_nam
     let Some(handle) = app.snapshot_handle().cloned() else {
         return;
     };
-    let snapshot = handle.snapshot();
+    let outcome = rename_slot_with(handle.snapshot(), &store, tmux, slot, new_name);
+    finish_slot_write(app, outcome);
+}
+
+/// Rename pin `slot` in `store` to `new_name`; a live mux pin in
+/// `snapshot` renames its session through `tmux` and pins the name
+/// override. The summary to log, or why it failed. A name the store
+/// would refuse is refused before anything is renamed, so the session
+/// and the override stay as they were.
+pub(super) fn rename_slot_with(
+    snapshot: &crate::model::GraphSnapshot,
+    store: &crate::pin_slots::SlotStore,
+    tmux: &dyn MuxBackend,
+    slot: &str,
+    new_name: &str,
+) -> Result<String, String> {
+    store
+        .check_rename(slot, new_name)
+        .map_err(|err| format!("rename failed: {err}"))?;
     let mut notes = Vec::new();
     let live_mux = crate::tui::rows::pin_nodes(snapshot)
         .into_iter()
@@ -640,7 +658,7 @@ fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_nam
         match crate::rename::plan_mux_rename(snapshot, &mux, new_name.to_string()) {
             Ok(plan) => {
                 for (slot, result) in
-                    crate::rename::apply_pin_slot_updates(&store, &plan.pin_slot_updates)
+                    crate::rename::apply_pin_slot_updates(store, &plan.pin_slot_updates)
                 {
                     if let Err(err) = result {
                         notes.push(format!("pin update failed: {slot}: {err}"));
@@ -648,30 +666,26 @@ fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_nam
                 }
                 match rename_mux_via_backend(tmux, &plan.mux_rename) {
                     Ok(()) => notes.push(format!("renamed the mux to `{new_name}`")),
-                    Err(reason) => {
-                        finish_slot_write(app, Err(format!("rename failed: {reason}")));
-                        return;
-                    }
+                    Err(reason) => return Err(format!("rename failed: {reason}")),
                 }
                 let name = (
                     "name".to_string(),
                     crate::model::FieldValue::Text(new_name.to_string()),
                 );
-                if let Err(err) = crate::pin_ops::edit(&store, slot, &[name], &[]) {
+                if let Err(err) = crate::pin_ops::edit(store, slot, &[name], &[]) {
                     notes.push(format!("name override not set: {err}"));
                 }
             }
             Err(err) => notes.push(format!("the mux keeps its name: {err}")),
         }
     }
-    let outcome = crate::pin_ops::rename(&store, slot, new_name)
+    crate::pin_ops::rename(store, slot, new_name)
         .map(|_| {
             let mut parts = vec![format!("renamed pin `{slot}` to `{new_name}`")];
             parts.extend(notes);
             parts.join(" · ")
         })
-        .map_err(|err| format!("rename failed: {err}"));
-    finish_slot_write(app, outcome);
+        .map_err(|err| format!("rename failed: {err}"))
 }
 
 /// Executor branch for `StoreOp::SavePin`: apply the form's overrides,
@@ -772,3 +786,7 @@ fn execute_reap_records(app: &mut App, ids: std::collections::BTreeSet<String>) 
 #[cfg(test)]
 #[path = "executor_undo_tests.rs"]
 mod undo_tests;
+
+#[cfg(test)]
+#[path = "executor_rename_tests.rs"]
+mod rename_tests;

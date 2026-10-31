@@ -523,12 +523,17 @@ fn hint(
     }
 }
 
-/// Refuses a new pin name that is not a valid pin id or that another pin
-/// has. The name the pin has now is always fine.
-fn check_name(pin: &str, known: &[String], text: &str) -> Result<(), String> {
+/// Refuses a new name for pin `pin` that is blank, is not a valid pin
+/// id, or another pin of `known` has. The name the pin has now is always
+/// fine. Both rename UIs (this form's first row and the Rename… prompt)
+/// check with it, so they refuse the same names for the same reasons.
+pub(crate) fn check_name(pin: &str, known: &[String], text: &str) -> Result<(), String> {
     let name = text.trim();
     if name == pin {
         return Ok(());
+    }
+    if name.is_empty() {
+        return Err("pin: nothing entered".to_string());
     }
     crate::pin_slots::validate_id(name).map_err(|err| err.to_string())?;
     if known.iter().any(|known| known == name) {

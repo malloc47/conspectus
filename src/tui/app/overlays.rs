@@ -132,23 +132,39 @@ impl App {
         self.rename_node = Some(node);
     }
 
-    /// Open the prompt that renames the pin `slot`: blank input is
-    /// refused in the prompt, and a name commits the slot's rename.
+    /// Open the prompt that renames the pin `slot`. It checks the new
+    /// name as the pin edit form's name row does (blank, not a pin id, or
+    /// another pin's) and refuses in the prompt, so a refused name renames
+    /// nothing; a name it takes commits the slot's rename.
     pub(crate) fn open_pin_rename(&mut self, slot: String) {
         use crate::tui::Msg;
         use tuikit::text_prompt::{PromptResult, TextPrompt};
         let initial = slot.clone();
-        self.open_rename_overlay(TextPrompt::new(
-            "Rename pin",
-            initial,
-            move |text: &str| match text.trim() {
-                "" => PromptResult::Reject("pin: nothing entered".into()),
-                name => PromptResult::Commit(Msg::CommitSlotRename {
+        let known = self.pin_names();
+        self.open_rename_overlay(TextPrompt::new("Rename pin", initial, move |text: &str| {
+            match crate::tui::widgets::pin_edit::check_name(&slot, &known, text) {
+                Err(why) => PromptResult::Reject(why),
+                Ok(()) => PromptResult::Commit(Msg::CommitSlotRename {
                     slot: slot.clone(),
-                    new_name: name.to_string(),
+                    new_name: text.trim().to_string(),
                 }),
-            },
-        ));
+            }
+        }));
+    }
+
+    /// The names of every pin in the graph, legacy pins included: the
+    /// names a pin cannot be renamed to.
+    fn pin_names(&self) -> Vec<String> {
+        self.snapshot_handle()
+            .map(|handle| {
+                handle
+                    .snapshot()
+                    .pins
+                    .iter()
+                    .map(|pin| pin.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Open a menu that unpins whichever of `slots` is chosen.
@@ -614,7 +630,7 @@ impl App {
             effective: pin.effective.clone(),
             overrides: pin.overrides.clone(),
             inherited,
-            known_pin_names: snapshot.pins.iter().map(|p| p.id.clone()).collect(),
+            known_pin_names: self.pin_names(),
             known_harness_keys: crate::tui::runtime::known_harness_keys(),
             cwd_candidates: crate::tui::runtime::known_cwd_candidates(self, cwd.as_deref()),
             defaults: Some(crate::launch_default::LaunchDefaults::new(

@@ -454,6 +454,30 @@ fn an_empty_pin_rename_says_nothing_was_entered() {
     says_in_the_prompt(&mut app, "pin: nothing entered");
 }
 
+/// Both rename UIs refuse another pin's name before anything is renamed,
+/// in their own frame and with one reason.
+#[test]
+fn a_taken_pin_name_says_why_in_the_prompt_and_in_the_edit_form() {
+    let taken = "a pin named `config-agent3` already exists";
+    let mut app = opened(open_rename);
+    clear(&mut app);
+    type_text(&mut app, "config-agent3");
+    let effects = send(&mut app, press(KeyCode::Enter));
+    assert!(!acts(&effects), "nothing is renamed: {effects:?}");
+    assert!(app.rename_overlay().is_some(), "the prompt stays open");
+    says_in_the_prompt(&mut app, taken);
+
+    let mut app = opened(|app| {
+        app.update(Msg::OpenSlotEdit("conspectus-main".into()));
+        focus_pin_row(app, "pin name");
+    });
+    clear(&mut app);
+    type_text(&mut app, "config-agent3");
+    let effects = send(&mut app, press(KeyCode::Enter));
+    assert!(!acts(&effects), "nothing is saved: {effects:?}");
+    says_in_the_prompt(&mut app, taken);
+}
+
 // ---- paste -----------------------------------------------------------------
 
 /// A bracketed paste, the way the live loop types it into the field that

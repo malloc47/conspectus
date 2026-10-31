@@ -268,6 +268,19 @@ impl SlotStore {
         })
     }
 
+    /// The names [`SlotStore::rename`] would refuse, checked without
+    /// writing: a new id that is not a pin id or that another slot has. A
+    /// caller that renames something else first (a live mux's session)
+    /// asks this before it does; the rename checks again under the file's
+    /// lock.
+    pub fn check_rename(&self, id: &str, new_id: &str) -> Result<(), SlotError> {
+        validate_id(new_id)?;
+        if id != new_id && self.load().slots.iter().any(|slot| slot.id == new_id) {
+            return Err(SlotError::DuplicateId(new_id.to_string()));
+        }
+        Ok(())
+    }
+
     /// Rename a slot, keeping its place.
     pub fn rename(&self, id: &str, new_id: &str) -> Result<SlotWrite, SlotError> {
         validate_id(new_id)?;
