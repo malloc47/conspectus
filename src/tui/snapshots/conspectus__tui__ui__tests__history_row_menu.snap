@@ -1,6 +1,6 @@
 ---
 source: src/tui/ui_tests.rs
-assertion_line: 6117
+assertion_line: 6222
 expression: "trimmed(pinned_frame(&mut app, 100))"
 ---
 updated 0s ago · 1 sessions · 1 mux
@@ -18,11 +18,11 @@ updated 0s ago · 1 sessions · 1 mux
 │                 │     point it at another entity of the same kind             █│                 │
 │                 │  Refresh snapshot                                           █│                 │
 │                 │     copy the entity's current recipe into the pin           █│                 │
-│                 │  Reveal in its view                                         █│                 │
-│                 │     jump to the entity in Sessions, Mux, PRs, or History    ║│                 │
-│                 │  Unpin config-agent3                                        ║│                 │
-│                 │     remove the pin; the entity and its history stay         ▼│                 │
-│                 │  Forget                                                      │                 │
+│                 │  Unpin config-agent3                                        █│                 │
+│                 │     remove the pin; the entity and its history stay         █│                 │
+│                 │  Forget                                                     ║│                 │
+│                 │     remove the record; config-agent3 would lose its target  ▼│                 │
+│                 │  Clean up…                                                   │                 │
 │                 │                                                              │                 │
 │                 │↑/↓ move · Enter pick · Esc close                             │                 │
 └─────────────────└──────────────────────────────────────────────────────────────┘─────────────────┘

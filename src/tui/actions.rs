@@ -467,20 +467,23 @@ pub fn slots_pinning(snapshot: &GraphSnapshot, subject: &PinSubject) -> Vec<Stri
     pins_for(snapshot, &subject)
 }
 
-/// The view an entity lives in: the one that lists it, where a gone
-/// entity is only listed in History. An entity no view lists (a live
-/// fork, say) answers Sessions, where revealing it reports that it
-/// isn't there.
-pub fn natural_view(snapshot: &GraphSnapshot, node: &NodeId) -> crate::tui::View {
+/// The view an entity of its kind lives in: the one that lists that
+/// kind, where a gone entity is only listed in History. `None` for the
+/// kinds no view lists (forks, branches, and processes, which only the
+/// right pane shows). Whether that view lists this entity (a repo with
+/// no sessions, a row its filter hides) is `App::reveal_view`'s
+/// question.
+pub fn natural_view(snapshot: &GraphSnapshot, node: &NodeId) -> Option<crate::tui::View> {
     use crate::tui::View;
     let live = snapshot.is_live(node);
-    match node {
+    Some(match node {
+        NodeId::Fork(_) | NodeId::Branch(_) | NodeId::RuntimeProcess(_) => return None,
         NodeId::MuxSession(_) => View::Mux,
         NodeId::Pin(_) => View::Pinned,
         NodeId::ForgePr(_) if live => View::Prs,
         _ if !live => View::History,
         _ => View::Sessions,
-    }
+    })
 }
 
 /// The entities pin `name` could point at instead: the other live
@@ -747,7 +750,12 @@ pub fn row_menu_for(app: &App) -> Option<ActionMenu<crate::tui::Msg>> {
         }
     }
     if let Some(name) = pins.first() {
-        pin_management_entries(snapshot, &subject, name, app.active_view(), &mut entries);
+        // Reveal goes where the pin's entity is listed; a view that does
+        // not list it (no view lists a fork) gets no entry to fail in.
+        let reveals_elsewhere = app
+            .slot_reveal_view(name)
+            .is_some_and(|view| view != app.active_view());
+        pin_management_entries(name, reveals_elsewhere, &mut entries);
         for extra in pins.iter().skip(1) {
             entries.push(unpin_entry(extra));
         }
@@ -806,12 +814,10 @@ pub fn mux_menu() -> ActionMenu<crate::tui::Msg> {
 }
 
 /// The verbs on a pin: edit, rename, retarget, refresh its snapshot,
-/// reveal its entity, unpin.
+/// reveal its entity (when another view lists it), unpin.
 fn pin_management_entries(
-    snapshot: &GraphSnapshot,
-    subject: &Subject,
     name: &str,
-    current_view: crate::tui::View,
+    reveals_elsewhere: bool,
     entries: &mut Vec<Entry<crate::tui::Msg>>,
 ) {
     use crate::tui::Msg;
@@ -831,11 +837,7 @@ fn pin_management_entries(
         Entry::new("Refresh snapshot", Msg::RefreshSlot(name.to_string()))
             .detail("copy the entity's current recipe into the pin"),
     );
-    let elsewhere = subject
-        .node
-        .as_ref()
-        .is_some_and(|node| natural_view(snapshot, node) != current_view);
-    if elsewhere {
+    if reveals_elsewhere {
         entries.push(
             Entry::new("Reveal in its view", Msg::RevealSlot(name.to_string()))
                 .detail("jump to the entity in Sessions, Mux, PRs, or History"),

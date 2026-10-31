@@ -6170,6 +6170,9 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
     assert!(app.update(Msg::OpenRowMenu).is_empty());
     let menu = app.row_menu().expect("the menu opened");
     let labels: Vec<&str> = menu.entries().iter().map(|e| e.label.as_str()).collect();
+    // No Reveal: with no tmux probe this world's Mux view lists no ghost,
+    // so the gone mux's pin has no row to reveal (the menus check holds
+    // the entry to where a reveal lands).
     assert_eq!(
         labels,
         [
@@ -6179,7 +6182,6 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
             "Rename…",
             "Retarget…",
             "Refresh snapshot",
-            "Reveal in its view",
             "Unpin config-agent3",
             "Forget",
             "Clean up…"

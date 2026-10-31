@@ -415,8 +415,11 @@ fn history_hides_a_pinned_record_unless_following_it_asks_for_it() {
 fn natural_views_follow_the_kind_and_whether_it_is_running() {
     let app = app_in(View::Mux);
     let snapshot = app.snapshot_handle().expect("data").snapshot();
-    assert_eq!(natural_view(snapshot, &mux("scratch")), View::Mux);
-    assert_eq!(natural_view(snapshot, &mux("config-agent3")), View::Mux);
+    assert_eq!(natural_view(snapshot, &mux("scratch")), Some(View::Mux));
+    assert_eq!(
+        natural_view(snapshot, &mux("config-agent3")),
+        Some(View::Mux)
+    );
     let pr = crate::model::NodeId::ForgePr(crate::model::ForgePrId::new(
         "github",
         "github.com",
@@ -424,11 +427,19 @@ fn natural_views_follow_the_kind_and_whether_it_is_running() {
         "conspectus",
         42,
     ));
-    assert_eq!(natural_view(snapshot, &pr), View::Prs);
+    assert_eq!(natural_view(snapshot, &pr), Some(View::Prs));
     let session = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "solo000001"));
-    assert_eq!(natural_view(snapshot, &session), View::Sessions);
+    assert_eq!(natural_view(snapshot, &session), Some(View::Sessions));
     let pin = NodeId::Pin(crate::model::PinId::new("solo"));
-    assert_eq!(natural_view(snapshot, &pin), View::Pinned);
+    assert_eq!(natural_view(snapshot, &pin), Some(View::Pinned));
+    // Only the right pane shows a fork or a branch: no view lists them.
+    let fork = NodeId::Fork(crate::model::ForkId::new("atelier/fork-1"));
+    assert_eq!(natural_view(snapshot, &fork), None);
+    let branch = NodeId::Branch(crate::model::BranchId::new(
+        crate::model::RepoId::new("/home/op/src/conspectus/.git"),
+        "refs/heads/main",
+    ));
+    assert_eq!(natural_view(snapshot, &branch), None);
 }
 
 #[test]

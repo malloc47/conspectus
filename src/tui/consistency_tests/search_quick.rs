@@ -109,7 +109,7 @@ fn select_node(app: &mut App, node: &NodeId) {
 
 fn plan(app: &App, node: &NodeId) -> OpenPlan {
     let reach = app.search_reachability();
-    app.open_plan(reach.as_ref(), node)
+    app.open_plan(reach.as_ref(), None, node)
 }
 
 fn selected_node(app: &App) -> Option<NodeId> {
@@ -504,4 +504,58 @@ fn quick_select_picks_rows_of_the_pinned_view() {
 #[test]
 fn quick_select_picks_rows_of_the_history_view() {
     quick_select_picks_every_row_of(View::History);
+}
+
+/// Every entity the wider reach finds, from each view: the outcome word
+/// the list draws (from the listing built when the reach widened) is the
+/// plan Enter follows, a view it names lists the entity (Enter switches
+/// there), and an entity no view lists says so and stays put. The world
+/// holds a fork, which no view lists, and pins of every kind.
+#[test]
+fn the_outcome_word_promises_a_view_only_where_enter_finds_the_row() {
+    use crate::tui::search_entities::EntityIndex;
+    let world = crate::tui::rows::pinned::all_kinds_world();
+    let index = EntityIndex::build(&world, true);
+    let (mut views_named, mut unlisted) = (0, 0);
+    for from in [View::Sessions, View::Mux, View::Pinned] {
+        let app = app_over(from, &world);
+        let listing = app.listing();
+        let reach = app.search_reachability();
+        for entity in index.entities() {
+            let node = &entity.node;
+            let drawn = app.open_plan(reach.as_ref(), Some(&listing), node);
+            assert_eq!(
+                drawn,
+                app.open_plan(reach.as_ref(), None, node),
+                "{node} from {from:?}: the word is Enter's plan"
+            );
+            let mut opened = app_over(from, &world);
+            opened.update(Msg::OpenEntity(node.clone()));
+            match drawn {
+                OpenPlan::View(view) => {
+                    views_named += 1;
+                    assert_eq!(opened.active_view(), view, "{node} from {from:?}");
+                    assert!(
+                        opened.status_message().is_none(),
+                        "{node}: {:?}",
+                        opened.status_message()
+                    );
+                }
+                OpenPlan::Unlisted => {
+                    unlisted += 1;
+                    assert_eq!(opened.active_view(), from, "{node}: stays put");
+                    let status = opened.status_message().unwrap_or_default();
+                    assert!(status.contains("isn't listed"), "{node}: {status}");
+                }
+                OpenPlan::Here | OpenPlan::Path(_) => {}
+            }
+        }
+    }
+    assert!(views_named > 0 && unlisted > 0, "both answers are covered");
+    let fork = NodeId::Fork(crate::model::ForkId::new("atelier/fork-1"));
+    let app = app_over(View::Sessions, &world);
+    assert_eq!(
+        app.open_plan(None, Some(&app.listing()), &fork).word(),
+        "not listed"
+    );
 }

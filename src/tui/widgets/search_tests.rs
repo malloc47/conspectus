@@ -350,6 +350,7 @@ fn page_keys_move_by_the_rows_shown_and_stop_at_the_ends() {
         items: &items,
         content: &[],
         entities: None,
+        listing: None,
     };
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {

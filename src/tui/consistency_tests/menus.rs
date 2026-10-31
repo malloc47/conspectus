@@ -252,3 +252,33 @@ fn no_menu_shows_a_shortcut_it_cannot_reach() {
         );
     }
 }
+
+/// A pin's menu offers **Reveal in its view** exactly when revealing the
+/// pin lands on its entity's row in another view: not for a fork, which
+/// no view lists, nor for a pin with nothing to reveal.
+#[test]
+fn reveal_is_offered_only_where_it_lands() {
+    let world = crate::tui::rows::pinned::all_kinds_world();
+    let (mut offered, mut withheld) = (Vec::new(), Vec::new());
+    for pin in world.pins.iter().map(|pin| pin.id.clone()) {
+        let mut app = app_over(View::Pinned, &world);
+        app.set_selection(RowId::Pin {
+            pin_id: pin.clone(),
+        });
+        let offers = menu_labels(&mut app)
+            .iter()
+            .any(|label| label == "Reveal in its view");
+        let lands = app.reveal_slot(&pin).is_ok() && app.active_view() != View::Pinned;
+        assert_eq!(offers, lands, "{pin}");
+        if offers {
+            offered.push(pin);
+        } else {
+            withheld.push(pin);
+        }
+    }
+    assert!(!offered.is_empty(), "some pins reveal: {withheld:?}");
+    assert!(
+        withheld.iter().any(|pin| pin == "fork-live"),
+        "a fork's pin offers no reveal: {offered:?}"
+    );
+}

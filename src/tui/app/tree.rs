@@ -137,13 +137,20 @@ impl App {
 /// Group rows match when their `primary_node` (when set) equals
 /// `target`.
 pub(super) fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool {
+    row_primary_node(row) == Some(target)
+}
+
+/// The entity `row` stands for in the left-pane tree: a group's node
+/// (when it has one), a session, mux, PR, pin, or a pinned or History
+/// row's entity. A search hit or pane row stands for none.
+pub(super) fn row_primary_node(row: &crate::tui::rows::Row) -> Option<&NodeId> {
     match &row.kind {
-        RowKind::Group(group) => group.primary_node.as_ref() == Some(target),
-        RowKind::AgentSession(s) => &s.primary_node == target,
-        RowKind::MuxSession(m) => &m.primary_node == target,
-        RowKind::Pr(p) => &p.primary_node == target,
-        RowKind::Mixed(m) => &m.primary_node == target,
-        RowKind::Hit(_) | RowKind::Pane(_) | RowKind::PaneHit(_) => false,
+        RowKind::Group(group) => group.primary_node.as_ref(),
+        RowKind::AgentSession(s) => Some(&s.primary_node),
+        RowKind::MuxSession(m) => Some(&m.primary_node),
+        RowKind::Pr(p) => Some(&p.primary_node),
+        RowKind::Mixed(m) => Some(&m.primary_node),
+        RowKind::Hit(_) | RowKind::Pane(_) | RowKind::PaneHit(_) => None,
     }
 }
 

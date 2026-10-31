@@ -47,15 +47,18 @@ impl Overlay<Msg, App> for SearchOverlayState {
         } else {
             Vec::new()
         };
-        // Widening for the first time needs every entity indexed.
+        // Widening for the first time needs every entity indexed, and what
+        // each view lists for their outcome words.
         let entities = widens
             .then(|| app.snapshot_handle())
             .flatten()
             .map(|handle| EntityIndex::build(handle.snapshot(), app.config().live_preview_enabled));
+        let listing = entities.is_some().then(|| app.listing());
         let cx = SearchContext {
             items: &items,
             content: &content,
             entities,
+            listing,
         };
         self.handle_in(cx, key)
     }
@@ -78,7 +81,11 @@ impl Overlay<Msg, App> for SearchOverlayState {
         let reach = (self.reach() == Reach::All && self.mode() == SearchMode::Quick)
             .then(|| app.search_reachability())
             .flatten();
-        let outcome = |node: &crate::model::NodeId| app.open_plan(reach.as_ref(), node).word();
+        let listing = self.listing();
+        let outcome = |node: &crate::model::NodeId| {
+            app.open_plan(reach.as_ref(), listing.as_deref(), node)
+                .word()
+        };
         let mut widget =
             SearchOverlayWidget::new(self, &items, app.theme()).with_outcomes(&outcome);
         if let Some(view) = &view {

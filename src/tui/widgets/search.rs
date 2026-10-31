@@ -307,6 +307,9 @@ pub struct SearchOverlayState {
     matches: Vec<SearchMatch>,
     /// Every entity, built the first time the wider reach is chosen.
     entities: Option<EntityIndex>,
+    /// What each view lists, built with the entities, so a result's
+    /// outcome word promises a view only where Enter finds its row.
+    listing: Option<std::sync::Arc<crate::tui::app::Listing>>,
     entity_matches: Vec<EntityMatch>,
     group: Grouping,
     kinds: ContentKinds,
@@ -324,6 +327,7 @@ impl SearchOverlayState {
             palette: Palettes::Quick(quick_palette("")),
             matches: Vec::new(),
             entities: None,
+            listing: None,
             entity_matches: Vec::new(),
             group: Grouping::default(),
             kinds: ContentKinds::default(),
@@ -588,6 +592,12 @@ impl SearchOverlayState {
     /// Hand the overlay the entity index the wider reach searches.
     pub fn set_entities(&mut self, entities: EntityIndex) {
         self.entities.get_or_insert(entities);
+    }
+
+    /// What each view lists, for the wider reach's outcome words: handed
+    /// over with the entity index.
+    pub fn listing(&self) -> Option<std::sync::Arc<crate::tui::app::Listing>> {
+        self.listing.clone()
     }
 
     fn set_reach(&mut self, reach: Reach) {
@@ -917,6 +927,8 @@ pub struct SearchContext<'a> {
     /// Every entity, supplied when the key about to be handled widens the
     /// reach for the first time.
     pub entities: Option<EntityIndex>,
+    /// What each view lists, supplied with `entities`.
+    pub listing: Option<crate::tui::app::Listing>,
 }
 
 impl SearchOverlayState {
@@ -926,6 +938,10 @@ impl SearchOverlayState {
         self.set_content(ctx.content);
         if let Some(entities) = ctx.entities {
             self.set_entities(entities);
+        }
+        if let Some(listing) = ctx.listing {
+            self.listing
+                .get_or_insert_with(|| std::sync::Arc::new(listing));
         }
         let outcome = self.handle_key(key);
         self.refresh_matches(ctx.items);

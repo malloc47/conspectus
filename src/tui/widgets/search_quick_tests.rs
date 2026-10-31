@@ -265,6 +265,7 @@ fn the_overlay_commits_an_open_entity_message() {
             items: &[],
             content: &[],
             entities: None,
+            listing: None,
         },
         press(KeyCode::Enter),
     );

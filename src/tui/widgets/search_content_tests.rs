@@ -72,6 +72,7 @@ fn ctx<'a>(content: &'a [ContentRow]) -> SearchContext<'a> {
         items: &[],
         content,
         entities: None,
+        listing: None,
     }
 }
 

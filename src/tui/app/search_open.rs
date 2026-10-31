@@ -1,6 +1,7 @@
 //! Opening a quick-select result: what Enter does for an entity, and the
 //! word that says so before it is pressed.
 
+use super::listing::Listing;
 use super::tree::row_matches;
 use super::*;
 use crate::model::NodeKind;
@@ -16,6 +17,9 @@ pub enum OpenPlan {
     Path(Vec<NodeId>),
     /// Somewhere else: switch to the view that lists it.
     View(crate::tui::View),
+    /// No view lists it (a fork, or a repo with no sessions) and nothing
+    /// focused leads to it: Enter says so and stays put.
+    Unlisted,
 }
 
 impl OpenPlan {
@@ -34,6 +38,7 @@ impl OpenPlan {
                     crate::tui::widgets::controls::view_label(*view)
                 )
             }
+            Self::Unlisted => "not listed".to_string(),
         }
     }
 }
@@ -92,26 +97,39 @@ impl App {
     }
 
     /// What opening `node` would do now. `reach` comes from
-    /// [`Self::search_reachability`], computed once for many results.
-    pub(crate) fn open_plan(&self, reach: Option<&Reachability>, node: &NodeId) -> OpenPlan {
+    /// [`Self::search_reachability`] and `listing` from [`Self::listing`],
+    /// each computed once for many results; with no `listing` the one view
+    /// that matters is built. A view is promised only when, as switching
+    /// to it would show it, it lists the entity.
+    pub(crate) fn open_plan(
+        &self,
+        reach: Option<&Reachability>,
+        listing: Option<&Listing>,
+        node: &NodeId,
+    ) -> OpenPlan {
         if self.row_index_for_node(node).is_some() {
             return OpenPlan::Here;
         }
         if let Some(path) = reach.and_then(|reach| reach.path_to(node)) {
             return OpenPlan::Path(path.to_vec());
         }
-        let view = self
-            .snapshot_handle()
-            .map_or(crate::tui::View::Sessions, |handle| {
-                crate::tui::actions::natural_view(handle.snapshot(), node)
-            });
-        OpenPlan::View(view)
+        let view = match listing {
+            Some(listing) => self
+                .snapshot_handle()
+                .and_then(|handle| crate::tui::actions::natural_view(handle.snapshot(), node))
+                .filter(|view| {
+                    let record = self.reveal_record(node, None);
+                    listing.lists(*view, node, record.as_deref())
+                }),
+            None => self.reveal_view(node, None),
+        };
+        view.map_or(OpenPlan::Unlisted, OpenPlan::View)
     }
 
     /// Open a quick-select result by the plan its outcome word promised.
     pub(crate) fn open_entity(&mut self, node: &NodeId) {
         let reach = self.search_reachability();
-        match self.open_plan(reach.as_ref(), node) {
+        match self.open_plan(reach.as_ref(), None, node) {
             OpenPlan::Here => {
                 if let Some(index) = self.row_index_for_node(node) {
                     self.expand_to_and_select(index);
@@ -122,7 +140,8 @@ impl App {
                     self.reveal_entity(node);
                 }
             }
-            OpenPlan::View(_) => self.reveal_entity(node),
+            // An unlisted entity's reveal refuses, which says why.
+            OpenPlan::View(_) | OpenPlan::Unlisted => self.reveal_entity(node),
         }
     }
 

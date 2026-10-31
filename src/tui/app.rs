@@ -26,6 +26,7 @@ mod content;
 mod content_history;
 mod controls;
 mod explorer_nav;
+mod listing;
 mod msg;
 mod overlays;
 mod search_open;
@@ -37,6 +38,7 @@ pub(crate) use content::MAX_DETAIL_SESSIONS;
 pub use content::{
     ContentSearch, ContentStatus, DetailRequest, PaneScope, ScanRequest, grouping_description,
 };
+pub use listing::Listing;
 pub use msg::Msg;
 #[cfg(test)]
 pub(crate) use search_open::OpenPlan;

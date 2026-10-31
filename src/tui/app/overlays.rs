@@ -182,23 +182,7 @@ impl App {
     /// Switch to the native view of the entity pin `slot` points at and
     /// select its row.
     pub(crate) fn reveal_slot(&mut self, slot: &str) -> Result<(), String> {
-        let node = self
-            .snapshot_handle()
-            .and_then(|handle| {
-                crate::tui::rows::pin_nodes(handle.snapshot())
-                    .into_iter()
-                    .find(|pin| pin.id.id == slot)
-                    .and_then(|pin| pin.target_node.clone())
-            })
-            .ok_or_else(|| format!("pin `{slot}` has no entity to reveal"))?;
-        let record = self.snapshot_handle().and_then(|handle| {
-            crate::tui::rows::pin_nodes(handle.snapshot())
-                .into_iter()
-                .find(|pin| pin.id.id == slot)
-                .and_then(|pin| pin.target.as_deref())
-                .and_then(|target| target.strip_prefix(crate::model::PinSlot::HISTORY_PREFIX))
-                .map(str::to_string)
-        });
+        let (node, record) = self.slot_target(slot)?;
         self.reveal_node(&node, record)
             .map_err(|why| format!("`{slot}` {why}"))
     }
@@ -270,25 +254,11 @@ impl App {
         let Some(handle) = self.snapshot_handle() else {
             return Err("isn't listed: nothing is loaded yet".to_string());
         };
-        let snapshot = handle.snapshot();
-        let view = crate::tui::actions::natural_view(snapshot, node);
+        let Some(view) = crate::tui::actions::natural_view(handle.snapshot(), node) else {
+            return Err("isn't listed in any view".to_string());
+        };
         // History lists a gone entity by its record rather than by node.
-        let record = record_hint
-            .or_else(|| {
-                snapshot
-                    .history
-                    .by_key(&node.to_string())
-                    .map(|(_, meta)| meta.id.clone())
-            })
-            .or_else(|| match node {
-                NodeId::MuxSession(mux) => snapshot
-                    .history
-                    .muxes
-                    .iter()
-                    .find(|record| record.recipe.native_id() == mux.native_id)
-                    .map(|record| record.meta.id.clone()),
-                _ => None,
-            });
+        let record = self.reveal_record(node, record_hint);
         let previous = self.active_view;
         let previous_filter = self.filter.clone();
         self.switch_to_view(view);
@@ -299,7 +269,7 @@ impl App {
         }
         self.rebuild_tree_in_place();
         let Some(index) = self.tree.rows.iter().position(|row| {
-            crate::tui::rows::row_node(&row.id) == Some(node)
+            super::tree::row_matches(row, node)
                 || matches!(&row.id, RowId::History { record_id } if Some(record_id) == record.as_ref())
         }) else {
             // Stay where the operator was.
