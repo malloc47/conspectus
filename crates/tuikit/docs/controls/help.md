@@ -223,7 +223,8 @@ Every width follows one grid, so every help page of a program lines up:
   rule every framed pager follows.
 - When the page is taller than the frame, the pager's scrollbar takes a
   1-column gutter on the right and the text is laid out one cell
-  narrower.
+  narrower, once the body has the rows the bar needs to draw
+  (`ScrollGutter::carves`).
 
 ### Scrolling
 

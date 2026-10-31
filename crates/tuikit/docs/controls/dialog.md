@@ -18,8 +18,8 @@ forms (`Kind<M>`):
   it will affect. `Enter` or `y` commits the host's message; `Esc` or `n`
   closes without it.
 - **Choice** (`Dialog::choice`): a question with several named answers,
-  each a `Verb<M>` on its own key (`m merge & close`, `d discard &
-  close`). Its verb's key commits that verb's message; `Esc` or `n` closes
+  each a `Verb<M>` on its own key (`a archive`, `d delete`). Its verb's
+  key commits that verb's message; `Esc` or `n` closes
   without choosing. A choice has no default, so `Enter` and `y` do nothing
   in one.
 - **Notice** (`Dialog::notice`): something to read that needs no answer.
@@ -107,7 +107,9 @@ with `Stay` and the menu stays open; the host builds the dialog from the
 message and opens it with `ModalStack::push_step`. `Esc` or `n` in the
 dialog closes it and the menu has its keys again, with its cursor where
 it was; a commit there, or `Ctrl-C` or `q`, closes the dialog and the
-menu together. The same dialog opened on its own (`ModalStack::push`) is
+menu together. While the dialog is open the stack draws the menu with
+`render_under_step`, so its cursor row takes the inactive selection look
+(house rule 10). The same dialog opened on its own (`ModalStack::push`) is
 an overlay of its own, and `Esc` closes it.
 
 ### Rows
@@ -154,7 +156,8 @@ that leave stay. The body scrolls in a `ScrollWindow` the dialog keeps
 between draws: the arrows and `k`/`j` scroll it a row, down to any footer
 rows that spilled after it. A body that overflows gives its last column to
 the shared scrollbar (`ScrollGutter`) and is laid out again one cell
-narrower, and so is the footer.
+narrower, and so is the footer, once it has the rows the bar needs to draw
+(`ScrollGutter::carves`).
 `Dialog::window` is the window of the last draw.
 
 ## Key table
@@ -208,7 +211,7 @@ field), 17 (every word is the host's), and 18 (pagers).
 
 - **A default verb.** A choice has no default, so `Enter` and `y` do
   nothing in one. A verb marked as the default would take them and show
-  them in its segment (`m/Enter merge & close`).
+  them in its segment (`a/Enter archive`).
 - **Paging.** A body that scrolls moves a row at a time; a dialog long
   enough to need pages would gain `PgUp`/`PgDn` in `DIALOG_KEYS`, moving
   by `Dialog::window`'s page.
@@ -219,6 +222,3 @@ field), 17 (every word is the host's), and 18 (pagers).
   cursor moves over; a pointer-driven host would want them as hit areas.
 - **Mouse hit testing.** The dialog's rect is the frame's for the rows it
   measured (`DIALOG_SIZE.rect`), which a click would be tested against.
-- **An unfocused menu under a step.** The menu under a dialog keeps its
-  active cursor look; a stack that told lower entries they lost focus
-  would let it draw `selection_inactive`.

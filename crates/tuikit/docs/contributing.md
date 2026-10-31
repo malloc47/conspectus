@@ -205,7 +205,7 @@ code.
 
 `src/lib.rs` carries three crate-level attributes:
 
-```rust
+```text
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::private_intra_doc_links)]
@@ -232,6 +232,26 @@ code.
 A module's `//!` docs say what the module is for; the page under
 `docs/controls/` is the full reference for a control. Neither replaces the
 other.
+
+### The pages and the code stay in step
+
+`tests/doc_sync.rs` reads `src/lib.rs`, the pages, and `src/doc_pages.rs`,
+and fails when:
+
+- a public module has no page under `docs/controls/` (a page names its
+  module in the `Module` row of its header table), or a page names a module
+  that is not public;
+- a page lacks a row of the header table or one of the template's sections,
+  in the template's order, or its usage example has no `rust` block;
+- a module behind a cargo feature has a page that does not name the
+  feature;
+- a page under `docs/` is not included by `src/doc_pages.rs`, whose
+  includes make every `rust` block a doctest, or an include names a page
+  that is gone;
+- the module map in [architecture.md](architecture.md) lacks a public
+  module or its page, or lists a module that is not public;
+- a relative link in the documentation names a file or a heading that does
+  not exist.
 
 ## Adding a control
 
@@ -300,11 +320,14 @@ Work through this list in order. Each step names the rule it applies.
     and record it on the page. Do not build the feature.
 11. **Document it.** Module docs and doc comments on every public item (the
     lint requires them). Copy [controls/_template.md](controls/_template.md)
-    to `docs/controls/<control>.md` and fill in every section. Flip the
-    control's row in the module map in [architecture.md](architecture.md) to
-    landed in the same change.
+    to `docs/controls/<module>.md`, fill in every section, and add the page
+    to `src/doc_pages.rs` so its examples compile as doctests. Add the
+    module's row, linking the page, to the module map in
+    [architecture.md](architecture.md) in the same change. The doc-sync
+    test (`tests/doc_sync.rs`) fails until all three are done.
 12. **Test it.** Unit tests for behavior, rendered-buffer tests for layout, and
-    the test kit's conformance suite once it exists (see [Testing](#testing)).
+    a case in the test kit's conformance suite for anything that opens as a
+    modal (see [Testing](#testing)).
 13. **Move the host onto it in the same change, when the control comes from
     the host.** Unify on the best variant instead of copying the host's
     disagreements, and catalog every visible difference
@@ -317,31 +340,14 @@ dependencies, or independence rules gets a record in
 
 ## The house rules
 
-The design language every control follows. Each change that extracts or
-alters a control applies these, and each control page lists which ones it
-follows and how. The rules the test kit can check mechanically become its
-conformance checks; until then review enforces them.
-
-| # | Topic | Rule |
-| --- | --- | --- |
-| 1 | List cursor and highlight | Every list highlights the full selected row from the theme's `selection_active` (`selection_inactive` when the list is unfocused) and draws the `marks::POINTER` marker in a 2-cell gutter. The marker keeps the selection visible without color. |
-| 2 | List ends | Short choice lists (menus, pickers, checklists, palettes) wrap at the ends. Scrollable content (trees, property lists, pagers, logs) clamps. |
-| 3 | Confirmation | An inline arm (`Enter` again) on a menu entry when there is nothing more to say; a `Dialog` (`y`/`Enter` confirms, `n`/`Esc` cancels) when a body helps. A reversible action needs neither. |
-| 4 | Close keys | `Esc` steps back one level. `Ctrl-C` and `q` dismiss the overlay (`q` only where nothing is typed). |
-| 5 | Close feedback | Cancelling is silent: it is not an event worth a message. |
-| 6 | Forms | `Enter` submits from any row. `Tab`/`Down` move to the next row and `Shift-Tab`/`Up` to the previous over one ring. |
-| 7 | Validation errors | One error line in the modal's footer slot, set by a failed confirm and cleared by the next edit. No input is rejected silently. |
-| 8 | Footers and hints | Every modal footer and the status-bar hints are generated from key tables, in one grammar: a short imperative verb with no "to". |
-| 9 | Focus cue | The focused pane's border and title marker take `panel_focus_accent`. |
-| 10 | Unfocused cursor | Every list shows the active or inactive selection pair, so an unfocused list still shows where its cursor is. |
-| 11 | Feedback severity | `Feedback` has info, success, warning, and error. Each channel (status line, toast, message log) styles from the theme, and errors stay longer. |
-| 12 | Paging | Viewport-sized `PgUp`/`PgDn`; `Home`/`End`/`g`/`G` on every list taller than a screen; half-page `Ctrl-D`/`Ctrl-U` in pagers; scroll offsets clamped. |
-| 13 | Theme | Every control takes `&Theme` and uses no raw `Color::` value. Muted text uses the `muted` and `inert` tokens instead of an ad hoc dim style. |
-| 14 | Width | All truncation and padding measure terminal cells, not `char`s. `…` marks cut ends; paths and identifiers use a middle ellipsis. |
-| 15 | Text editing | Editing is correct for cell width, bracketed paste is on (a multi-line paste cannot submit), and word motion works. |
-| 16 | Path fields | A path field has a kind (directory or file), expands `~` on commit, and completes through a source behind a cache. |
-| 17 | Labels | One vocabulary: the shorter form. A field carries the same short label in every control (`name`, not a qualified `<kind> name`). |
-| 18 | Pagers | `Esc` steps back (help, then find, then leave) and `q` leaves. Confirming a find scrolls to the match. A `[ n/m ]` position chip in screen mode, a scrollbar in modal and embedded modes. |
+The design language every control follows is in
+[house-rules.md](house-rules.md): the eighteen rules, why each exists, and
+the pages of the controls that carry it out. Each change that adds or alters
+a control applies them, and each control page lists which ones it follows
+and how. The rules every modal shares (the cursor look, the close keys,
+generated footers, the theme's title, nothing cut at the frame's edge) are
+the test kit's conformance checks; the rest are each control's own tests and
+review.
 
 ## Cataloging visible changes
 
@@ -376,9 +382,9 @@ The rules for the catalog:
   there are none, say so explicitly ("Regressions: none. Consistency wins:
   none.").
 - Verify with rendered output, not by reading code: the test kit's frame
-  driver once it exists, and until then a ratatui `TestBackend` buffer or the
-  host's own snapshot facility. Check a normal width and a narrow width, and
-  the focused and unfocused states.
+  driver (`testkit::render::FrameDriver`) and its style-aware goldens, or a
+  host's own way of printing a frame. Check a normal width and a narrow
+  width, and the focused and unfocused states.
 - Update the tests and snapshots that encode the old behavior deliberately,
   and say so in the summary. A test that fails for any other reason is a bug
   in the change.
@@ -394,8 +400,12 @@ outcome plus a rendered buffer. Test it through exactly those.
   test module of 100 lines or more lives in a sibling `<module>_tests.rs`
   file.
 - **Layout and styling:** render into a buffer and compare it, at a normal and
-  a narrow width, empty and overfull, with wide characters. Snapshot tests may
-  use `insta`, which is on the development allowlist.
+  a narrow width, empty and overfull, with wide characters. A frame whose
+  colors matter is a style-aware golden (`testkit::golden`); `insta` is on
+  the development allowlist for snapshots of other values.
+- **Documentation:** every `rust` block in the pages under `docs/` is a
+  doctest, so an example that stops compiling or asserting fails
+  `cargo test -p tuikit --doc`.
 - **No host:** tests in this crate import nothing from the host and use no
   host fixtures. A control that cannot be tested without them is not generic
   yet.
@@ -426,36 +436,32 @@ crate's own tests always have) packages the repeated parts. Its page,
 
 ## Checks before you finish
 
-Run from the workspace root. While iterating, run the narrowest relevant
-test, for example `cargo test -p tuikit --test independence`.
+While iterating, run the narrowest relevant test, for example
+`cargo test -p tuikit --test independence` or `cargo test -p tuikit --test
+doc_sync`. Before finishing, build the crate alone, with its features off and
+then with `richtext`, so nothing outside `richtext` comes to need the feature
+and no item only that module uses is left without its
+`#[cfg(feature = "richtext")]` (it warns as unused when the feature is off).
+`cargo test` without a target filter runs the doctests too, the pages'
+examples among them:
 
 ```text
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-targets --all-features
-RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
-git diff --check
-```
-
-A workspace build turns `richtext` on, because the host's dependency on the
-crate does, so the workspace checks above cannot see code outside
-`richtext` that comes to need the feature, or an item only that module uses
-left without its `#[cfg(feature = "richtext")]` (it warns as unused when the
-feature is off). The host's `just tuikit-features`, which its `just check`
-and its CI run, builds the crate alone, with its features off and then with
-`richtext` alone:
-
-```text
+cargo fmt -p tuikit -- --check
 cargo clippy -p tuikit --no-default-features -- -D warnings
 cargo clippy -p tuikit --no-default-features --all-targets -- -D warnings
 cargo clippy -p tuikit --no-default-features --features richtext -- -D warnings
 cargo clippy -p tuikit --no-default-features --features richtext --all-targets -- -D warnings
 cargo test -p tuikit --no-default-features
 cargo test -p tuikit --no-default-features --features richtext
+RUSTDOCFLAGS='-D warnings' cargo doc -p tuikit --no-deps --features richtext
+git diff --check
 ```
 
-`-p tuikit` keeps the host's features out of the build. The lib-only lints
-also build without `testkit`, which this crate's own tests always turn on.
+`-p tuikit` keeps a host's features out of the build: a build of the whole
+repository turns on whatever features the host's dependency on the crate
+names, so it cannot see the feature-off build. The lib-only lints also build
+without `testkit`, which this crate's own tests always turn on. A repository
+that hosts the crate runs its own checks over every member as well.
 
 If a guard fails, fix the design. Add an allowlist entry only through the
 process above.

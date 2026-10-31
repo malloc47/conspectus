@@ -317,9 +317,9 @@ opens in the host's `Pager`, which follows it).
 
 ## Seams left open
 
-- **Several sections.** The rules and the tests take any number of
-  sections, but the one host has a single `Other` section; a host with
-  nested sections would need a header's `under` to name its parent.
+- **Nested sections.** The rules and the tests take any number of
+  sections side by side, each a header and the rows under it; a section
+  inside another would need a header's `under` to name its parent.
 - **Mouse.** `lines` returns the grid's `GridLines`, one line per row or
   heading before any wrap; a host maps a click through its wrapped rows
   to a line, and a later step can map a line to an entry for it.

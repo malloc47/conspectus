@@ -1,10 +1,13 @@
 # `ControlName`
 
-> Template for a control's reference page. Copy this file to
-> `docs/controls/<control_name>.md`, replace every placeholder, and delete the
-> quoted hints. Keep every heading even when a section's answer is "none": the
-> documentation checks and readers rely on one shape. Write without the host's
-> domain vocabulary; the independence guard scans this directory (see
+> Template for a public module's reference page. Copy this file to
+> `docs/controls/<module>.md`, replace every placeholder, delete the quoted
+> hints, and add the page to `src/doc_pages.rs`. Keep every heading and every
+> row of the table below, in this order, even when the answer is "none": the
+> doc-sync test (`tests/doc_sync.rs`) and readers rely on one shape. Detail
+> of your own (an API table, layout rules) goes in `###` sections under the
+> usage example, or in `##` sections after the seams. Write without the
+> host's domain vocabulary; the independence guard scans this directory (see
 > [../contributing.md](../contributing.md#independence-guards)).
 
 | | |
@@ -26,6 +29,9 @@
 > A complete, minimal example that builds the control, feeds it a key,
 > handles its outcome, and renders it. Define small local types for `M` and
 > `Cx` so the example stands on its own, and show the theme being passed in.
+> Every `rust` block on the page compiles and runs as a doctest, so assert
+> what the example shows; a block that is not Rust takes another tag
+> (`text`, `toml`).
 
 ```rust
 // Build the control, pass it a key and the host context, and act on the
@@ -58,7 +64,7 @@
 > One row per house rule that applies, with how the control follows it. List
 > the rules that do not apply with a reason, so a reader can tell "does not
 > apply" from "forgotten". The rules are in
-> [../contributing.md](../contributing.md#the-house-rules).
+> [../house-rules.md](../house-rules.md).
 
 | # | Rule | How this control follows it |
 | --- | --- | --- |

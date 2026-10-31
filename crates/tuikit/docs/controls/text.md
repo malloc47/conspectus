@@ -95,6 +95,7 @@ assert_eq!(painted.iter().filter(|span| span.style == bold).count(), 3);
 | `find_ci`, `find_all_ci` | find matches, ASCII letters without case | offsets stay valid for highlighting |
 | `paint` | restyle byte ranges of a span list | the one match painter |
 | `paint_matches` | patch every occurrence of a query in a row, after a gutter it skips | `find_all_ci` and `paint` together, for a reader's rows |
+| `strip_ansi` | drop ANSI escape sequences from text | for comparing captured or written output as plain text; the test kit re-exports it |
 
 ### Cutting rules
 

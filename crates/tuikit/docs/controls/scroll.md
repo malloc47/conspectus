@@ -307,9 +307,10 @@ trivially: the module names no color.
 
 - **Scrollbar tokens.** The bar uses ratatui's default look. Thumb and
   track roles in the theme would style it; `render` would take `&Theme`.
-- **Half pages.** House rule 12's half-page `Ctrl-D`/`Ctrl-U` in pagers is
-  a step of half the window's `page()`; a pager adds the keys when it
-  lands.
+- **Half pages outside a pager.** House rule 12's half-page
+  `Ctrl-D`/`Ctrl-U` is the pager's (it steps half the window's `page()`,
+  at least one row); a window has no half-page step of its own, so a list
+  that wants one steps by `page() / 2` itself.
 - **The end that sticks.** A region counting from the bottom keeps its
   distance from the end, and the pager keeps its window at the end once
   `G` sticks it; a plain `ScrollWindow` has neither, and a flag that

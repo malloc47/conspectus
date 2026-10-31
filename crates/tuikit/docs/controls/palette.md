@@ -281,7 +281,8 @@ stay. The results scroll in a
 cursor needs (so the cursor rides the bottom row as it moves down, and
 moving back up stays in the window). Results that overflow give the last
 column to the shared scrollbar (`ScrollGutter`) and are laid out one cell
-narrower. A palette built with `reserve_scrollbar()` keeps that column
+narrower, once the list has the rows the bar needs to draw
+(`ScrollGutter::carves`). A palette built with `reserve_scrollbar()` keeps that column
 while they fit too, blank, so its rows have one width whether or not the
 list overflows: a list a provider streams into does not shift its
 columns as it grows past the frame. `window()` is the window of the last

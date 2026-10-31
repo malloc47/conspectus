@@ -215,9 +215,11 @@ rows and steps cursors; the controls that use it follow those rules.
   made of. A list that wants a bar across its full width pads its last
   span to the width; a width argument on `row` would do it for every
   list.
-- **Disabled rows.** A choice that cannot be picked today is left out of
-  its list. A disabled look (and a step that skips such rows) would join
-  `Cursor` and `Ends`.
+- **Disabled rows.** The action menu and the checklist keep an entry that
+  cannot run in their list, draw it in `keys::unavailable_style`, and step
+  over it themselves. A disabled look and a step that skips such rows here
+  would let every list (a settings panel's rows, a palette's results) do
+  the same through `Cursor` and `Ends`.
 - **More than one selected row.** A checklist marks its checked rows
   with its own marks; a multi-row selection (a range, a set) would need
   a look of its own beside the cursor's.

@@ -182,7 +182,8 @@ the keys that leave stay. The sections scroll in a `ScrollWindow` the
 panel keeps between draws, moving no further than the cursor needs. Moving onto the
 first row of a section brings its heading into view with it. Lines that
 overflow give their last column to the shared scrollbar (`ScrollGutter`)
-and are laid out again one cell narrower, and so is the footer.
+and are laid out again one cell narrower, and so is the footer, once they
+have the rows the bar needs to draw (`ScrollGutter::carves`).
 `SettingsPanel::window` is the
 window of the last draw; `PgUp` and `PgDn` move the cursor by its rows,
 onto the row nearest the line a page away.

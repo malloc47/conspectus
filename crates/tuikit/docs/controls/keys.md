@@ -24,7 +24,7 @@ one scope could match one key event.
 The module replaces what a program grows overlay by overlay: hand-written
 `match` arms on key codes, footers typed as strings that drift from the
 keys, four ways to write a key's name, three footer dialects (`Esc close`,
-`Esc to close`, `m = merge`), the same letter matched with and without its
+`Esc to close`, `d = delete`), the same letter matched with and without its
 chords in different overlays (so `Ctrl-G` jumped to the top of one pager
 and not another), movement rows copied into every pager, and convention
 checks that matched action names as strings. Its keymap replaces a
@@ -375,13 +375,10 @@ pager's stepping is the pager's; its keys come from here).
   the overlay rule, so a program that adopts the rule holds its keymap to
   it in a test; the build does not refuse a loose key, so a program with
   a rule of its own can still build.
-- **Generated help pages.** `rows` and `key_label` are what the `help`
-  module's generator reads: `help::sections_for` turns a table and a
-  description per action into a help page, and `help::undescribed` finds
-  a key it would leave out (see [help.md](help.md)).
 - **Key notation round trip.** `key_label` writes keys; parsing the same
-  notation back into a matcher (for configuration or a test key DSL) would
-  sit beside it.
+  notation back into a matcher (for a configuration file) would sit beside
+  it. The test kit's key scripts (`j<Tab><C-r>`) are a notation of their
+  own, for presses rather than matchers.
 - **User remapping.** Tables are `const`; a remapped table is a copy with
   other matchers, built the way `with_availability` builds its copy. A
   keymap binding's stable id names it for a remap with no change to the

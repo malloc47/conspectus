@@ -327,77 +327,64 @@ the host's).
 - **Mouse.** No mouse wheel; the scroll calls are public for a host that
   routes one.
 
-## Ports
+## Common readers
 
-How each reader a host has moves onto the pager, as a check that the
-content trait carries what each needs. Those marked built are; the rest
-are sketches.
+How the usual readers sit on the content trait, as a check that it
+carries what each needs. Each is a `PagerContent` of the host's; the
+pager supplies the rest.
 
-- **A snapshot of a terminal's scrollback** (built). `layout` numbers the
-  lines in a five-cell gutter and wraps them under it
-  (`WrappedRows::hanging`), or cuts them (`WrappedRows::cut`) when a `w`
-  toggle (`Relayout`) says so; `find` lists the lines that hold the query
-  and `paint` paints after the gutter, marking the current line's number;
-  `header` names the source and counts the lines; `chips` shows the wrap
-  toggle; one content key asks the host to attach (`Request`). The opener
-  calls `land(query, line)` and, with no match, `set_note` and `at_row`.
-- **A rich document of entries** (built; rendered from Markdown, with
-  tables, and kinds of entry a toggle shows or hides). `layout` composes
-  and caches the rows for the width and the toggles (the cache key is the
-  width and the toggle states); `rows` slices the cache; `find` matches
-  entries among the kinds the toggles show, and `find_detail` counts the
-  matches in the hidden ones (`3 in hidden entries`); `match_rows` is an
-  entry's rows up to the next entry's (a run of entries folded into one
-  summary row shares it); `paint` paints every row of a matching entry
-  after its gutter through `text::paint_matches`, the current entry's in
-  the current-match look, and never a folded summary row; `chips` are the
-  toggles' `ToggleChip`s, most important first, each naming its key, so
-  the toggles' rows are aliases; each toggle key returns `Relayout`, so
-  the find stays on its entry while it is shown, and a window kept to the
-  end stays there. It opens `at_end`. Opening at a match found elsewhere:
-  the host switches on the toggles that show the entry, calls
-  `refresh` and `land(query, entry)`, and notes what it switched on in
-  the info tone, or that the query is gone in the warning tone. Host
-  roles in its header (a source's color) are named styles read from the
-  theme it is given; `describe` keeps its own words for the ends and the
-  find (`a match in hidden content turns that content on`); `empty` tells
-  a document with no entries from one whose entries the toggles all hide.
-  The content sends nothing, so it is generic over the pager's message,
-  as the help page is.
-- **A long value** (built; a framed reader opened by `o`).
-  `Modal(ModalSize::WIDE)` with a table of `PAGER_KEYS`, `o` as another
-  close, and `y` bound to `PagerKey::Copy`; `layout` wraps each line of the
-  value at the width and keeps the rows while the width is the same,
-  drawing a plan's command lines in the accent (the host's own hook, in
-  its layout); `header` is the value's label; `copy` returns the host's
-  copy message, carrying what to copy and the words its notice uses; no
-  find and no help, since the table binds neither. The footer is the
-  pager's order, `j/k/PgDn/PgUp scroll · y copy · Esc/q/o close`.
-- **The help page** (built). `help::HelpPage` is itself the content:
-  `layout` is the page's grid at the width, kept while the width is the
-  same, and `header` its title (`Help`); it has no keys. A page opened by
-  a key is `HelpPage::new(sections).pager(table)`, framed at
-  `HelpPage::SIZE`, with the pager's keys and that key as another close
-  (`PAGER_KEYS` and `?`): its footer, `j/k/PgDn/PgUp scroll · Esc/q/?
-  close`, and its frames are the ones the page drew on its own. A
-  pager's `?` level is the same page over `PAGER_HELP_KEYS`. A reader not
-  yet on the pager keeps such a page and routes its own movement keys to
-  the page's scroll calls.
-- **A log's detail** (built; the framework's own `log_list::LogList`).
-  `Embedded` under the log's list: `layout` wraps the selected entry's
-  text a line at a time (`WrappedRows`); the list routes its detail keys
-  (`J`/`K` to `scroll_by`, `PgDn` to `page_down`, `PgUp` to `page_up`),
-  goes back to the top when the selection moves (`to_top`), and replaces
-  the text when the selected entry's detail changes (`content_mut`,
-  `refresh`). A footer too tall for the list's frame scrolls its first
-  rows after the detail's last row, by the framed pager's rule.
-- **A preview region** (built, but not on the pager). A preview is drawn
-  from a shared borrow of its host's state every frame, over whatever the
-  selection points at (a source the host rebuilds as it changes), keeps
-  its place counted from the newest rows or from a match it opened on,
-  and paints the matches of a search the host derives; the pager owns its
-  content, draws through `&mut`, counts from the top with a sticky end,
-  and paints its own find. So it is a `scroll::ScrollRegion` (see
-  [scroll.md](scroll.md#the-region)): the host places it from the top, the
-  bottom, or the match, cuts and paints the rows it shows, draws them under
-  its banner, and keeps the region the frame drew. Keys stay the host's.
+- **A terminal's captured screen.** `layout` numbers the lines in a gutter
+  and wraps them under it (`WrappedRows::hanging`), or cuts them
+  (`WrappedRows::cut`) while a wrap toggle (a content key that answers
+  `Relayout`) says so; `find` lists the lines that hold the query, and
+  `paint` paints after the gutter (`text::paint_matches`), marking the
+  current line's number; `header` names the source and counts the lines;
+  `chips` shows the wrap toggle as a `ToggleChip`; a content key that asks
+  the host to act on the source answers `Request(M)`. A host that opens
+  it at a match found elsewhere calls `land(query, line)`, and with no
+  match `set_note` and `at_row`.
+- **A long document of entries** (rendered from Markdown with
+  `richtext`, with kinds of entry a toggle shows or hides). `layout`
+  composes the rows for the width and the toggles and keeps them while
+  neither changes; `rows` slices what it kept; `find` matches the entries
+  the toggles show, and `find_detail` counts the matches in the hidden
+  ones (`3 in hidden entries`); `match_rows` is an entry's rows up to the
+  next entry's; `paint` paints every row of a matching entry, the current
+  one in the current-match look; `chips` are the toggles' `ToggleChip`s,
+  most important first, each naming its key, so the toggles' own rows
+  are aliases; each toggle answers `Relayout`, so the find stays on its
+  entry while it shows and a window kept to the end stays there. It opens
+  `at_end`. A host that opens it at a match switches on the toggles that
+  show the entry, calls `refresh` and `land(query, entry)`, and notes in
+  the info tone what it switched on. Colors only the host knows (a source
+  of an entry) are named styles read from the theme the content is given;
+  `describe` keeps the content's own words for the ends and the find, and
+  `empty` tells a document with no entries from one whose entries the
+  toggles all hide. A content that sends nothing is generic over the
+  pager's message, as the help page is.
+- **A long value** (a framed reader opened by a key). `Modal(ModalSize::WIDE)`
+  with a table over `PagerKey` that includes `PAGER_KEYS`, the opening key
+  as another close, and a copy key bound to `PagerKey::Copy`; `layout`
+  wraps each line of the value at the width and keeps the rows while the
+  width is the same; `header` is the value's label; `copy` returns the
+  host's copy message. The table binds no find and no help, so the pager
+  offers neither, and the footer reads `j/k/PgDn/PgUp scroll · y copy ·
+  Esc/q/o close` for a copy key `y` and an opening key `o`.
+- **A help page.** `help::HelpPage` is itself a content: `layout` is the
+  page's grid at the width, kept while the width is the same, and
+  `header` its title; it has no keys. A page opened by a key is
+  `HelpPage::new(sections).pager(table)`, framed at `HelpPage::SIZE`, with
+  `PAGER_KEYS` and that key as another close. A pager's own `?` level is
+  the same page over `PAGER_HELP_KEYS` (see [help.md](help.md)).
+- **A log's detail.** `Embedded` under a list: `layout` wraps the selected
+  entry's text a line at a time (`WrappedRows`); the list routes its
+  detail keys (`scroll_by`, `page_down`, `page_up`), goes back to the top
+  when the selection moves (`to_top`), and replaces the text when the
+  selected entry changes (`content_mut`, then `refresh`). The framework's
+  own `log_list::LogList` is built this way.
+
+A preview drawn from a shared borrow of its host's state every frame,
+whose place counts from the newest rows or from a match it opened on, is
+not a pager: the pager owns its content, draws through `&mut`, and counts
+from the top with a sticky end. Such a body is a `scroll::ScrollRegion`
+(see [scroll.md](scroll.md#the-region)), and its keys stay the host's.

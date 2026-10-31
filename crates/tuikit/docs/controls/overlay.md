@@ -147,7 +147,8 @@ impl Overlay<Msg, Model> for Modal {
     fn render(&mut self, area: Rect, buf: &mut Buffer, model: &Model, theme: &Theme) {
         match self {
             Self::Menu(menu) => menu.render(area, buf, model, theme),
-            Self::Help(help) => help.render(area, buf, model, theme),
+            // `Help` is an overlay for every message type, so name this one.
+            Self::Help(help) => Overlay::<Msg, Model>::render(help, area, buf, model, theme),
         }
     }
 }
@@ -234,7 +235,8 @@ follows (house rule 4), and the outcome each produces:
 | `q` | Dismiss | as `Ctrl-C` wherever nothing is typed: a menu, a checklist, a dialog, a settings list, a pager, a log, a reader; typed into a prompt, a form, a query, or a find prompt |
 
 The standard tables in [`keys`](keys.md) bind them: `Ctrl-C` first in every
-table, and `q` in the menu, dialog, checklist, and pager tables.
+table, and `q` in every table where nothing is typed (the menu, dialog,
+checklist, settings, pager, log list, and palette options tables).
 
 ## Theme tokens
 
@@ -277,6 +279,8 @@ rule 4 through `Consumed`).
   frame. The conformance suite does not need it to find a step drawn
   exactly over the entry under it: it takes the smallest frame around what
   changed (see [testkit.md](testkit.md)).
-- **A conformance suite.** The test kit's `assert_conventions` walks a
-  host's registry of overlays and checks the close keys above against
-  each; a step is checked as a case of its own opened over its flow.
+- **Close checks for a host's own overlays.** The test kit's
+  `assert_conventions` already walks a host's registry of overlays and
+  checks the close keys above against each, a step as a case of its own
+  opened over its flow; an overlay a host leaves out of its registry is
+  checked by nothing.

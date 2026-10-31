@@ -157,9 +157,11 @@ pager), and 9 (the focus cue is the pane frame's, around the layout).
 - **The list's room.** The room the list may take is private: a host that
   wraps its own rows before calling `areas` counts them at the area's
   width. Exposing the room would let it wrap exactly as `render` does.
-- **Side by side.** The split pane (planned in `frame`) puts two panes side
-  by side above a width and stacks them below it; this layout is the
-  stacked form of one pane and would be one of its children.
+- **Side by side.** The split pane (`frame::SplitPane`) puts two panes
+  side by side above a width and stacks them below it; this layout is the
+  stacked form inside one pane. A master-detail pane that set its list
+  beside its detail on a wide screen would take a split's areas for its
+  zones.
 - **A divider of more rows.** The divider is one row. A taller one (a
   heading with a summary line) would be a height parameter, with the rule
   above unchanged.

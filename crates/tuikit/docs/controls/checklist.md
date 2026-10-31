@@ -131,8 +131,9 @@ row giving way first and then its first rows, so the keys that leave
 stay. The items scroll in a `ScrollWindow` the checklist keeps between
 draws, moving no further than the cursor needs. Items that overflow give
 their last column to the shared scrollbar (`ScrollGutter`) and are laid
-out again one cell narrower, and so is the footer. `Checklist::window` is the window of the last draw; `PgUp` and
-`PgDn` move the cursor by its rows.
+out again one cell narrower, and so is the footer, once they have the rows
+the bar needs to draw (`ScrollGutter::carves`). `Checklist::window` is the
+window of the last draw; `PgUp` and `PgDn` move the cursor by its rows.
 
 ### Items that cannot change
 

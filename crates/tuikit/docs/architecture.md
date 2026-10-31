@@ -15,11 +15,11 @@ host application
 tuikit
 ├─ foundations    theme · glyphs · text · scroll · chip · age · frame · selection
 ├─ controls       text entry · choice and command · reading · data display · chrome · feedback
-├─ conventions    keys · overlay · help · focus · feedback · testkit
+├─ conventions    keys · overlay · help · feedback · testkit
 └─ (feature) richtext    markdown · tables · syntax
         │  depends on
         ▼
-ratatui · crossterm · unicode-width · tui-input   (+ optional rich-text crates)
+ratatui (with its crossterm backend) · unicode-width · tui-input   (+ optional rich-text crates)
 ```
 
 The framework covers two of three layers.
@@ -38,11 +38,12 @@ The framework covers two of three layers.
 
 ## Module map
 
-The map lists the target set. A row's status is **planned** until the module
-lands and **landed** after; the change that lands a module flips its row and
-adds its page under [controls/](controls/_template.md) in the same change.
-Foundations and conventions are modules; controls are types, and the page for
-each names its module path.
+The map lists every public module. A row's status is **planned** until the
+module lands and **landed** after; the change that adds a module adds its row
+and its page under [controls/](controls/_template.md) in the same change, and
+`tests/doc_sync.rs` fails until it does. Foundations and conventions are
+modules; controls are types, and the page for each names its module path. The
+[usage guide](guide.md) shows how a program puts them together.
 
 ### Foundations (layer 1)
 
@@ -94,9 +95,20 @@ each names its module path.
 | `keys` | The key-table model: matchers with one rule for characters, rows that can include another table and carry availability, hints, resolving a key against a table, footers in one grammar (dimming what cannot act now), one key-label notation, the `KeyRole` classifier and the modal key convention checked by it, and checks for mislabeled, shadowed, and loosely bound rows; standard tables and action enums for menus, dialogs (one table for every form), pagers (the scroll rows, a reader's find and help keys, the help level, and the find prompt), text input, checklists, log lists, palettes and their options pane, settings panels, and forms; footers that show only some of a table's actions or take a control's own segments; and the scoped keymap a program's own keys live in: bindings in scopes (the program, a pane with focus, an overlay mode) with stable ids, keys, an action, a verb, help, a status rank, and an availability predicate, looked up most particular scope first, a control's table taken in as a pane's scope, and built only when no two keys of a scope can match one key event. Page: [controls/keys.md](controls/keys.md) | landed |
 | `overlay` | The `Overlay<M, Cx>` contract (`handle` and `render`, how an overlay draws under a step of its own, and whether it fills the screen), `Outcome<M>` (consumed, close, dismiss, commit, step back with a message, stay), and `ModalStack<E>` over the host's entry type, which the host owns and passes its state to as `&Cx`, which routes a key to the top entry, opens an entry as a step of the one under it, closes the top for a close or a step back and its whole flow of steps for a dismissal or a commit, and draws every entry from bottom to top. Page: [controls/overlay.md](controls/overlay.md) | landed |
 | `help` | `HelpPage`, the one help page and a pager's content: bold headings, keys in an accent column with descriptions wrapped beside them, and legend rows for marks, read in a `Pager` framed at the reader size (`HelpPage::pager`), which scrolls it, draws its scrollbar, and generates its footer from the key table that scrolls and closes it; `sections_for`, which generates a page from a key table and a `HelpAction` description per action, and `undescribed`, which finds a key the page would leave out; `keymap_sections`, which generates a program's page from its scoped keymap, with `HelpAnnotation`s for what a binding cannot say and `unanchored` to find one whose binding is gone. Page: [controls/help.md](controls/help.md) | landed |
-| `focus` | Declared focus rules: the pane focus cue, the modal focus lock, the Tab cycle | planned |
 | `feedback` | `Severity` (info, success, warning, error: each with its theme color, chip tone, mark, and toast lifetime) and one `Feedback { severity, text, ttl }` type feeding three channels: the status line (`Feedback::span`), `Toasts` (bottom-centered boxes bordered in the severity's color, replaced or stacked, each gone after its lifetime, errors last longest), and `Log<T>` (bounded, newest-last, repeat-collapsing, counting unseen warnings and errors, over the host's payload `T`, an entry's summary read with its repeat count, and read back in a `LogList`); `clipboard::copy`, which writes OSC 52 to a sink the host supplies. Page: [controls/feedback.md](controls/feedback.md) | landed |
 | `testkit` | Behind the `testkit` feature. The key-script notation (`j<Tab><C-r>`) and press constructors; `FrameDriver`, the one-frame driver over the host's draw callback; buffer probes (text, token columns, the style under a piece of text, a modal's frame rectangle and the text inside it); the ANSI writer and `strip_ansi`; style-aware goldens that keep every color, checked against files and accepted through an environment variable; the conformance suite, `assert_conventions` over a host's `Registry` of modals and its `Rig` (a level's tables include parts consulted after its first); the source-scan helpers (the crate's lexer, word-start matching, a read-only walk); and `MemoryPaths`, an in-memory file system for path fields that counts the questions asked of it. Page: [controls/testkit.md](controls/testkit.md) | landed |
+
+### Focus
+
+Focus has no module of its own. Its rules live with the pieces that carry
+them: the pane focus cue is `frame::PaneFrame`'s (house rule 9); the modal
+focus lock is the overlay contract's, since an open overlay owns every key and
+`ModalStack::route` gives each to the top entry; the keys of the pane with
+focus are a scope of the keymap (`keys::Scope::Pane`, looked up through
+`keys::ActiveScopes`); and a list without focus draws its cursor inactive
+(`selection::Cursor`, house rule 10). Which pane has focus, and what `Tab`
+moves it to, is the host's state. A declared focus cycle is on the
+[roadmap](roadmap.md).
 
 ## The one-way dependency rule
 
@@ -149,17 +161,44 @@ value that says what the user meant, which the host interprets in its own
 runtime.
 
 ```rust
-// The overlay contract's outcome (`tuikit::overlay::Outcome`); a control
-// that is not an overlay reports its own result type the same way.
-match prompt.handle(key, &cx) {
-    Outcome::Commit(message) => {
-        host.close_top_overlay();
-        host.dispatch(message);
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tuikit::overlay::{ModalStack, Outcome, Overlay};
+use tuikit::text_prompt::{PromptResult, TextPrompt};
+
+/// The host's message: what a confirmed prompt asks the host to do.
+#[derive(Debug, PartialEq)]
+enum Msg {
+    Rename(String),
+}
+
+let rename = || {
+    TextPrompt::new("Rename", "draft", |text: &str| {
+        PromptResult::Commit(Msg::Rename(text.trim().to_string()))
+    })
+};
+let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+
+// A host that holds one control matches the outcome itself
+// (`tuikit::overlay::Outcome`; a control that is no overlay reports a
+// result type of its own the same way).
+let mut prompt = rename();
+match Overlay::<Msg, ()>::handle(&mut prompt, enter, &()) {
+    Outcome::Commit(message) | Outcome::Back(message) => {
+        // Close the prompt, then do what `message` asks.
+        assert_eq!(message, Msg::Rename("draft".into()));
     }
-    Outcome::Stay(message) => host.dispatch(message),
-    Outcome::Close => host.close_top_overlay(),
+    Outcome::Stay(_message) => {} // do what it asks; the prompt stays open
+    Outcome::Close | Outcome::Dismiss => {} // close it, saying nothing
     Outcome::Consumed => {}
 }
+
+// A host with a modal stack lets the stack do its part.
+let mut stack = ModalStack::new();
+stack.push(rename());
+let outcome = stack.route(enter, &()).expect("a prompt has the key");
+let settled = stack.settle(outcome);
+assert_eq!(settled.message, Some(Msg::Rename("draft".into())));
+assert!(stack.is_empty());
 ```
 
 - A commit carries the host's `M`. What a commit does (rename something, start
@@ -184,7 +223,9 @@ processes) in one place, the host runtime.
   or delete a file. Read-only filesystem access is allowed where a control
   needs it (completion, for example), behind a source the host can replace.
 - Read global state. A control gets what it needs through its parameters, so
-  two instances never share hidden state.
+  two instances never share hidden state. (The test kit's golden check reads
+  one environment variable, the switch that accepts new goldens; it is no
+  control, and production builds leave it out.)
 - Own the event loop, terminal setup and teardown, the effect lifecycle, or
   undo.
 - Use raw colors. Every control takes `&Theme`.
@@ -195,8 +236,7 @@ processes) in one place, the host runtime.
 
 | Dependency | Why | Reach |
 | --- | --- | --- |
-| `ratatui` | Rendering library every control draws with | always |
-| `crossterm` | Key and mouse event types the interaction layer maps | always |
+| `ratatui` | Rendering library every control draws with; its crossterm backend's key event types (`ratatui::crossterm::event`) are the keys every control handles | always |
 | `unicode-width` | Display-width arithmetic for truncation, padding, wrapping | always |
 | `tui-input` | The single-line edit engine behind the text-entry controls | always |
 | `ansi-to-tui`, `tui-markdown`, `comfy-table` | ANSI text, Markdown with syntax highlighting, and tables as styled lines | `richtext` feature only |
@@ -212,23 +252,32 @@ which a host's tests and dev tools use and its production build leaves out.
 The crate depends on itself by path in its dev-dependencies so its own
 integration tests and doctests have the module.
 
-The complete allowlist, with the reason for each entry, is in the independence
-guard (`tests/independence.rs`); a dependency that is not listed there fails
-the guard.
+The crate names no `crossterm` dependency of its own: it reaches the event
+types through ratatui's re-export, so the two cannot disagree on a version.
+The allowlist still names `crossterm`, so a direct dependency on it would need
+no new decision. The complete allowlist, with the reason for each entry, is in
+the independence guard (`tests/independence.rs`); a dependency that is not
+listed there fails the guard.
 
 ## Layout of the crate
 
 ```text
-crates/tuikit/
+tuikit/
 ├─ Cargo.toml
 ├─ README.md             crate summary; also the crate-level API documentation
 ├─ src/                  the library (documentation is mandatory)
 ├─ scripts/              glyph-widths.py, which measures glyphs in common fonts
 ├─ tests/                independence guards, documentation checks, integration tests
-├─ examples/             previews of controls, once the first one lands
 └─ docs/
    ├─ architecture.md    this guide
-   ├─ contributing.md    independence rules, adding a control, house rules
-   ├─ controls/          one page per control, from _template.md
+   ├─ guide.md           building a program on the framework
+   ├─ house-rules.md     the design rules every control follows, and why
+   ├─ contributing.md    independence rules, adding a control, testing
+   ├─ roadmap.md         controls and capabilities that may come later
+   ├─ controls/          one page per public module, from _template.md
    └─ decisions/         framework-scoped decision records
 ```
+
+Every `rust` code block in these pages compiles and runs as a doctest
+(`src/doc_pages.rs` includes them), and `tests/doc_sync.rs` holds the pages
+to the modules, the template, and their links.

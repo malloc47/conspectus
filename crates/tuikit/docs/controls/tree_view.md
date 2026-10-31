@@ -232,11 +232,6 @@ tree handles no key itself.
 
 ## Seams left open
 
-- **Rows on a schema.** `RowColumns` and `TreeColumns` lay rows out from
-  column schemas ([columns.md](columns.md)): one measure pass over the
-  whole tree and one narrow-width policy. A host moves one kind of row at
-  a time and keeps a producer of its own, or `TreeColumns::line_then`,
-  for the rest.
 - **A key table.** A `TREE_KEYS` table over a tree action enum would let a
   host take the keys above into a pane's scope of its keymap
   (`KeymapBuilder::table`) and generate its help from them.

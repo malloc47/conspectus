@@ -136,8 +136,8 @@ character left, with its line. `VettedGlyphs::unvetted` keeps the ones the
 table does not hold.
 
 The scanner is pure: it reads no file. The host's test walks its trees (the
-workspace's shared source-tree helper does that for the host) and decides
-which files are test code. The framework's own guard
+test kit's read-only walk, `testkit::source`, does that) and decides which
+files are test code. The framework's own guard
 (`tests/glyph_literals.rs`) scans its `src/` the same way and fails on:
 
 - any non-ASCII character in code outside the `glyphs` module, vetted or
@@ -191,5 +191,5 @@ the checks on them.
 - **Another source language.** `drawn_glyphs` lexes Rust. A host whose
   glyphs live in data files can call `glyph_risk` on each glyph directly.
 - **More marks.** A mark is a constant plus a line in `marks::ALL` and a
-  table entry in `src/glyphs/vetted.rs`; the key arrows are vetted already
-  and have no constant yet.
+  table entry in `src/glyphs/vetted.rs`, so a glyph a second control comes
+  to share (a box-drawing piece a frame draws today) can become one.
