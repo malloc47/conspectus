@@ -114,9 +114,10 @@ standard checks.
 - The TUI's controls, key tables, and look come from the framework crate
   `tuikit` (`crates/tuikit`, ADRs 0150 and 0151), and a new view, menu,
   or key uses them instead of a widget of its own. A menu is an
-  `ActionMenu`, a question a `Dialog` or `TextPrompt`, and a form, list,
-  picker, settings panel, reader, or tree the matching control, opened on
-  the App's modal stack; a row is laid out from a column schema. Keys are
+  `ActionMenu` and a question a `Dialog` or `TextPrompt`; a form,
+  checklist, picker, settings panel, or reader is the matching control.
+  Each opens on the App's modal stack, and a pane's rows are laid out
+  from a column schema. Keys are
   rows of a key table (`src/tui/keybindings/overlay.rs` for overlays) or
   bindings of the scoped keymap (`src/tui/keybindings.rs`), from which
   footers, status hints, and help pages are generated, so no hint or help
