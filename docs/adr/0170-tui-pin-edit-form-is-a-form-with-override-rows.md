@@ -8,7 +8,12 @@ detail lines, and the pin edit form, the last form that laid out its own
 rows, is a `Form`. Finishes what
 [ADR 0169](0169-tui-launch-form-is-a-form-and-one-grammar-splits-every-argv.md)
 left for it (its own launch-option rule). The pin slot semantics of
-[ADR 0141](0141-pin-slots.md) are unchanged.
+[ADR 0141](0141-pin-slots.md) are unchanged. The check decision 7
+left for later is done (CSP-778): the **Rename…** prompt refuses a new
+name with the form's name check (blank, not a pin id, or another pin's
+name, each with the form's reason, a blank one reading `pin: nothing
+entered` in both), and the store write checks the name again before a
+live mux's session is renamed.
 
 ## Context
 

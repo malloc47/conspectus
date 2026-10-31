@@ -567,6 +567,14 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 
 ### Fixed
 
+- **Renaming a live mux pin to a taken name renames nothing.** The
+  TUI's **Rename…** prompt let a pin take another pin's name and left
+  the refusal to the pin store, which came after the tmux session had
+  been renamed and the pin's name pinned to it. The prompt now refuses
+  a taken or unusable name on its error line, with the reasons the
+  pin edit form gives (a blank name in the form now reads `pin: nothing
+  entered`, as in the prompt), and the rename checks the name again
+  before it touches the session.
 - **A file no longer passes for a working directory.** The TUI's path
   fields offered files as completions and marked an existing file `√`, a
   path `mux new`, `mux launch`, and a rebuild then refused. They now

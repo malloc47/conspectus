@@ -1688,6 +1688,10 @@ your next edit: an invalid max age (`max age: missing unit (expected
 ms/s/m/h/d)`), an empty branch name for a new worktree (`worktree:
 branch name is required`), and renaming a pin or a tmux session to
 nothing (`pin: nothing entered`, `mux rename: name cannot be empty`).
+The pin rename prompt also refuses a name another pin has (``a pin named
+`x` already exists``) or that is not a usable pin name, with the reasons
+the edit form's name row gives, so a live mux pin's tmux session keeps
+its name when the pin cannot take the new one.
 The new tmux session and launch forms say why on an error line just above
 their keys, until your next edit, and move the cursor to the field to fix:
 an empty name or cwd in the new tmux session form (`mux: name is

@@ -192,7 +192,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0167](0167-tui-path-fields-complete-behind-a-source-and-expand-tilde-on-commit.md) | Path Fields Complete Behind A Source, Ask For A Kind, And Expand `~` On Commit | Accepted |
 | [0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md) | Forms Move On One Ring, Submit From Any Field, And Keep Their Keys In View | Accepted (amended by 0170, 0193) |
 | [0169](0169-tui-launch-form-is-a-form-and-one-grammar-splits-every-argv.md) | The Launch Form Is A `Form`, And One Grammar Splits Every Argv | Accepted |
-| [0170](0170-tui-pin-edit-form-is-a-form-with-override-rows.md) | The Pin Edit Form Is A `Form` With Override Rows | Accepted |
+| [0170](0170-tui-pin-edit-form-is-a-form-with-override-rows.md) | The Pin Edit Form Is A `Form` With Override Rows | Accepted (decision 7's prompt check done) |
 | [0171](0171-tui-menus-one-control-entries-as-data.md) | Menus Are One Control Whose Entries Are Data | Accepted (amended by 0172, 0193) |
 | [0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md) | Dialogs Are One Control, And A Menu's Questions Are Steps On The Stack | Accepted (amended by 0176, 0193) |
 | [0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md) | Checklists Are One Control That Selects All Or None And Counts | Accepted (amended by 0193) |
