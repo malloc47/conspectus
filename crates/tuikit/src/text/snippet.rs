@@ -30,7 +30,12 @@ pub struct Snippet {
 ///   favoring the text after the match (two thirds of the spare cells);
 /// - each cut side ends in the ellipsis mark, inside the budget;
 /// - a cut that would split a word moves to the word's edge, unless that
-///   would give up the room next to the match;
+///   would give up the room next to the match: when the only edge on
+///   that side is the one beside the match, the cut stays between
+///   graphemes and the side keeps its context;
+/// - words end at blanks and beside wide characters: Chinese and
+///   Japanese text puts no spaces between its words, so a cut may fall
+///   between any two of its characters;
 /// - a match wider than the budget shows as much of its start as fits,
 ///   followed by the mark;
 /// - without a valid match, the text is cut at its end.
@@ -125,6 +130,38 @@ fn cells_of(cells: &[Cluster<'_>]) -> usize {
     cells.iter().map(|cell| cell.width).sum()
 }
 
+/// Whether a cut just before `cells[at]` falls on a word's edge rather
+/// than inside a word: at either end of the text, beside a blank, or
+/// beside a wide character. Scripts set in wide characters (Chinese,
+/// Japanese) write a sentence with no spaces between its words, and a
+/// line may break between any two of their characters, so a cut may too.
+fn is_edge(cells: &[Cluster<'_>], at: usize) -> bool {
+    match (at.checked_sub(1).and_then(|i| cells.get(i)), cells.get(at)) {
+        (Some(before), Some(after)) => {
+            before.is_blank() || after.is_blank() || before.is_wide() || after.is_wide()
+        }
+        _ => true,
+    }
+}
+
+/// `from` moved forward past blanks, stopping at `limit`.
+fn skip_blanks(cells: &[Cluster<'_>], from: usize, limit: usize) -> usize {
+    let mut at = from;
+    while at < limit && cells[at].is_blank() {
+        at += 1;
+    }
+    at
+}
+
+/// `to` moved back past the blanks before it, stopping at `limit`.
+fn trim_blanks(cells: &[Cluster<'_>], limit: usize, to: usize) -> usize {
+    let mut at = to;
+    while at > limit && cells[at - 1].is_blank() {
+        at -= 1;
+    }
+    at
+}
+
 fn crop(text: &str, highlight: &Range<usize>, budget: usize) -> Snippet {
     let cells = clusters(text);
     let first = cells.partition_point(|cell| cell.at < highlight.start);
@@ -176,28 +213,28 @@ fn crop(text: &str, highlight: &Range<usize>, budget: usize) -> Snippet {
         end += 1;
     }
 
-    // Start and stop on word boundaries when the cut would split a word,
-    // unless that would trade away the room next to the match.
-    if start > 0
-        && !cells[start - 1].is_blank()
-        && !cells[start].is_blank()
-        && let Some(offset) = cells[start..first].iter().position(Cluster::is_blank)
+    // Start and stop on a word's edge when the cut would split a word,
+    // unless the only edge on that side is the one next to the match:
+    // moving there would give up all the context on that side, so the
+    // cut stays between graphemes instead.
+    if !is_edge(&cells, start)
+        && let Some(edge) = (start + 1..=first).find(|&at| is_edge(&cells, at))
     {
-        start += offset;
+        let kept = skip_blanks(&cells, edge, first);
+        if kept < first {
+            start = kept;
+        }
     }
-    while start < first && cells[start].is_blank() {
-        start += 1;
-    }
-    if end < cells.len()
-        && !cells[end - 1].is_blank()
-        && !cells[end].is_blank()
-        && let Some(offset) = cells[last..end].iter().rposition(Cluster::is_blank)
+    start = skip_blanks(&cells, start, first);
+    if !is_edge(&cells, end)
+        && let Some(edge) = (last..end).rev().find(|&at| is_edge(&cells, at))
     {
-        end = last + offset;
+        let kept = trim_blanks(&cells, last, edge);
+        if kept > last {
+            end = kept;
+        }
     }
-    while end > last && cells[end - 1].is_blank() {
-        end -= 1;
-    }
+    end = trim_blanks(&cells, last, end);
 
     let mut out = String::new();
     if start > 0 {

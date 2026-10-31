@@ -54,10 +54,29 @@ impl Gen {
     }
 
     fn text(&mut self) -> String {
-        let len = self.below(20);
-        (0..len).map(|_| ATOMS[self.below(ATOMS.len())]).collect()
+        self.text_of(ATOMS, 20)
+    }
+
+    /// Up to `longest - 1` pieces drawn from `atoms`.
+    fn text_of(&mut self, atoms: &[&str], longest: usize) -> String {
+        let len = self.below(longest);
+        (0..len).map(|_| atoms[self.below(atoms.len())]).collect()
     }
 }
+
+/// Kinds of text for the snippet context checks: wide characters with an
+/// occasional space, emoji, letters with combining accents, and long
+/// narrow tokens; [`ATOMS`] mixes them all.
+const CJK_ATOMS: &[&str] = &["東", "京", "語", "の", "テ", "ス", " "];
+const EMOJI_ATOMS: &[&str] = &[
+    "\u{1f600}",
+    "\u{26a0}\u{fe0f}",
+    "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}",
+    "o",
+    " ",
+];
+const COMBINING_ATOMS: &[&str] = &["e\u{301}", "a\u{308}", "n\u{303}", "o", " "];
+const TOKEN_ATOMS: &[&str] = &["a", "b", "/", ".", "-", "7"];
 
 /// A few hundred generated texts plus the fixed edge cases.
 fn samples() -> Vec<String> {
@@ -319,6 +338,66 @@ fn snippets_never_exceed_the_budget_and_keep_the_match() {
                 assert!(target.starts_with(shown), "{text:?} at {budget}: {shown:?}");
                 if width(&target) + 1 < budget {
                     assert_eq!(shown, target, "{text:?} at {budget}");
+                }
+            }
+        }
+    }
+}
+
+/// The cells from the match back to the nearest grapheme of `side` that
+/// is not a blank, or `None` when it has only blanks. `side` is the text
+/// before the match, or the text after it when `after` is set.
+fn reach_to_context(side: &str, after: bool) -> Option<usize> {
+    let mut cells = measure::clusters(side);
+    if !after {
+        cells.reverse();
+    }
+    let mut used = 0;
+    cells.iter().find_map(|cell| {
+        used += cell.width;
+        (!cell.is_blank()).then_some(used)
+    })
+}
+
+/// Whether `piece` holds something besides blanks and the mark.
+fn has_context(piece: &str) -> bool {
+    piece.chars().any(|c| !c.is_whitespace() && c != '…')
+}
+
+#[test]
+fn snippets_keep_context_beside_the_match_when_room_allows() {
+    let mut generator = Gen(0x2468_ace0);
+    for atoms in [CJK_ATOMS, EMOJI_ATOMS, COMBINING_ATOMS, TOKEN_ATOMS, ATOMS] {
+        for _ in 0..100 {
+            // A blank on each side of the match half the time, so the
+            // edge beside the match is often the only one on that side.
+            let pad = if generator.below(2) == 0 { " " } else { "" };
+            let before = format!("{}{pad}", generator.text_of(atoms, 40));
+            let target = format!("x{}y", generator.text_of(atoms, 4).trim());
+            let after = format!("{pad}{}", generator.text_of(atoms, 40));
+            let text = format!("{before}{target}{after}");
+            let range = before.len()..before.len() + target.len();
+            for budget in 0..=width(&text) + 1 {
+                let snippet = fit_snippet(&text, range.clone(), budget, &[]);
+                let case = format!("{text:?} at {budget}: {snippet:?}");
+                assert!(width(&snippet.text) <= budget, "{case}");
+                let body = snippet.text.trim_start_matches('…').trim_end_matches('…');
+                assert!(text.contains(body), "{case}");
+                if width(&target) + 1 >= budget {
+                    continue;
+                }
+                let shown = snippet.highlight.clone().expect("the match fits");
+                assert_eq!(&snippet.text[shown.clone()], target, "{case}");
+                // The fewest cells each side is sure of: its share of the
+                // spare cells, less the mark when that side is cut.
+                let spare = budget - width(&target);
+                let after_room = (spare * 2 / 3).saturating_sub(1);
+                let before_room = (spare - spare * 2 / 3).saturating_sub(1);
+                if reach_to_context(&before, false).is_some_and(|cells| cells <= before_room) {
+                    assert!(has_context(&snippet.text[..shown.start]), "before: {case}");
+                }
+                if reach_to_context(&after, true).is_some_and(|cells| cells <= after_room) {
+                    assert!(has_context(&snippet.text[shown.end..]), "after: {case}");
                 }
             }
         }

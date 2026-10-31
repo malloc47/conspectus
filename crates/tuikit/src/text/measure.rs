@@ -50,6 +50,12 @@ impl Cluster<'_> {
             .chars()
             .all(|c| c.is_whitespace() && !matches!(c, '\u{a0}' | '\u{2007}' | '\u{202f}'))
     }
+
+    /// Whether the grapheme takes two cells: a CJK character, a
+    /// full-width form, or an emoji.
+    pub fn is_wide(&self) -> bool {
+        self.width > 1
+    }
 }
 
 /// The graphemes of `text`, in order, covering every byte.

@@ -142,6 +142,15 @@ word moves to the word's edge unless that gives up the room next to the
 match, and a match wider than the budget shows as much of its start as
 fits. The highlight is widened to whole graphemes.
 
+A word ends at a blank and beside a wide character: Chinese and Japanese
+text puts no spaces between its words, and a line may break between any
+two of its characters, so a cut may too. When the only edge on a side is
+the one beside the match (a long path or address there, or narrow text
+with no blank), moving to it would leave that side empty, so the cut
+stays between graphemes and the side shows the part that fits. A side
+with room for one grapheme past the blanks beside the match therefore
+never comes back empty.
+
 ### Giving way
 
 A line of pieces that can go one by one (the hops of a breadcrumb, the
@@ -272,7 +281,9 @@ that draw it follow those rules.
 - **Hyphenation and language-aware breaking.** Words break at spaces and,
   when too long, between graphemes. Scripts written without spaces (Chinese,
   Japanese, Thai) wrap between graphemes; a line-breaking table would plug
-  in where a row's break is chosen.
+  in where a row's break is chosen. A snippet's cut has one piece of such
+  a table, the edge beside a wide character; Thai, set in narrow
+  characters, is cut between graphemes.
 - **Folding beyond ASCII.** `find_ci` could take a folding mode that keeps a
   byte map from folded text back to the source, which a highlight would then
   read.

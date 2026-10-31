@@ -236,9 +236,15 @@ fn a_cropped_snippet_keeps_the_match_and_cuts_on_word_edges() {
             !inner.starts_with(' ') && !inner.ends_with(' '),
             "{cropped}"
         );
-        for word in inner.split(' ') {
+        let shown: Vec<&str> = inner.split(' ').collect();
+        let at = shown.iter().position(|word| *word == "needle").unwrap();
+        for (i, word) in shown.iter().enumerate() {
+            // A side whose only word is too wide for its room shows the
+            // part that fits rather than nothing.
+            let alone_on_its_side =
+                (i == 0 && at == 1) || (i + 1 == shown.len() && at + 2 == shown.len());
             assert!(
-                words.contains(&word),
+                words.contains(word) || (alone_on_its_side && text.contains(word)),
                 "{budget}: `{word}` is cut: {cropped}"
             );
         }
@@ -250,6 +256,7 @@ fn a_cropped_snippet_keeps_the_match_and_cuts_on_word_edges() {
         cropped.starts_with('…') && cropped.ends_with('…'),
         "{cropped}"
     );
+    assert_eq!(fit_snippet(text, &range, Some(14), false), "…a needle eps…");
     let whole = fit_snippet(text, &range, Some(text.len()), false);
     assert_eq!(whole, text, "a snippet that fits is not cut");
 }
@@ -289,8 +296,19 @@ fn a_wide_character_snippet_is_cropped_by_cells_without_splitting() {
             "{budget}: a cut falls between characters: {cropped}"
         );
         let bold = fit_snippet(text, &range, Some(budget), true);
-        assert_eq!(split_at_match(&bold).1, "needle", "{budget}: {bold:?}");
+        let (before, matched, after) = split_at_match(&bold);
+        assert_eq!(matched, "needle", "{budget}: {bold:?}");
+        // From 16 cells on there is room for a two-cell character and the
+        // blank before the match, and the text on both sides shows.
+        if budget >= 16 {
+            let context = |side: &str| side.chars().any(|c| !c.is_whitespace() && c != '…');
+            assert!(context(before) && context(after), "{budget}: {bold:?}");
+        }
     }
+    assert_eq!(
+        fit_snippet(text, &range, Some(24), false),
+        "…スト needle もっと日本…"
+    );
     // A wide match: the cut never halves a two-cell character.
     let at = text.find("テキスト").unwrap();
     let wide = at..at + "テキスト".len();
