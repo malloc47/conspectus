@@ -134,6 +134,7 @@ The TUI framework extraction (`docs/plans/tui-framework/`) is a directory,
 not a file: its `README.md` indexes the inventory, control set, gap analysis,
 workspace-impact notes, and the research behind them, and lists the
 milestone's stories and follow-ups with their status. `execution-brief.md` is
-the contract the stories followed, and `operator-review.md` the judgment calls
-awaiting the operator's review. ADRs 0150 to 0152 record its decisions, and
+the contract the stories followed, `operator-review.md` the judgment calls
+awaiting the operator's review, and `backlog-impact.md` the milestone's
+effect on every story still open at its close. ADRs 0150 to 0152 record its decisions, and
 milestone m-25 carries the stories.
