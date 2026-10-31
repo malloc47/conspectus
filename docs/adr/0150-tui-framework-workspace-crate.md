@@ -95,6 +95,20 @@ keeps a widget from importing `crate::tui::Msg` or a harness color.
   framework and the transcript model stays.
 - Conspectus's conventions in `CLAUDE.md` for new views, menus, and keys now
   describe framework controls; a closing story updates them.
+- The framework keeps its own decision log in `crates/tuikit/docs/decisions/`:
+  one short record per framework decision, written without Conspectus
+  vocabulary, each naming the ADRs it came from. The ADR index marks those
+  ADRs framework-owned, wholly or in part. **Before separation**, while the
+  framework lives in this repository, the ADRs here are canonical for every
+  decision that originated here; a framework record restates the decision and
+  points at its ADR, and when they disagree the ADR wins and the record is
+  corrected. A decision that also changes Conspectus gets an ADR and a
+  framework record in the same change; a decision about the framework alone
+  (its documentation, tests, or internal conventions) may be a framework
+  record alone. **After separation**, the framework's log is canonical: the
+  ADR numbers in its records become history, and these ADRs keep pointers to
+  the framework's records. The framework's doc-sync test holds the log, its
+  index, and the marks here to one another while the two share a repository.
 
 ## Alternatives Considered
 

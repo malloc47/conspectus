@@ -1099,6 +1099,12 @@ behave alike are ADR 0151; who owns the third-party crates is ADR 0152. The
 planning record, with the inventory, control set, and gap analysis, is
 `docs/plans/tui-framework/`.
 
+The framework keeps its own decision log, `crates/tuikit/docs/decisions/`,
+which restates each framework decision without Conspectus vocabulary and names
+the ADRs it came from; the ADR index marks those ADRs framework-owned. Until
+the framework leaves the repository the ADRs are canonical for those decisions;
+after it leaves, its log is (ADR 0150).
+
 Row builders, harness colors, state-word meanings, the transcript model, and
 preview sources stay in `conspectus` as adapters over the framework's
 controls. The framework starts no processes and writes no files, so it adds no

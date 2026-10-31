@@ -10,6 +10,18 @@ To add one, take the next number, follow the template, link related
 ADRs, and update `docs/design.md` when the decision changes the intended
 model. The [ADR corpus audit](../adr-audit.md) reviews the set as a whole.
 
+**Framework-owned** in a Status cell marks an ADR that governs the TUI
+framework crate, `crates/tuikit` (ADR 0150); **framework-owned in part**
+marks one that also decides what Conspectus does, of which only the
+framework's part is restated. The framework keeps its own decision log,
+[`crates/tuikit/docs/decisions/`](../../crates/tuikit/docs/decisions/README.md),
+which restates each of these decisions in its own terms and names the ADR it
+came from. Until the framework leaves this repository the ADRs here are
+canonical for those decisions; after it leaves, its log is canonical and
+these ADRs keep pointers to it. A framework decision that also changes
+Conspectus gets an ADR here and a framework record in the same change.
+`crates/tuikit/tests/doc_sync.rs` fails when the marks and the log disagree.
+
 ## Graph model, evidence, and resolution
 
 The provider-neutral node model, evidence-preserving `GraphLink` candidates, and the resolver that picks preferred relationships without discarding the rest.
@@ -123,7 +135,7 @@ Tables, color, previews, and graph visualization.
 | --- | --- | --- |
 | [0020](0020-width-aware-table-rendering.md) | Width-Aware Table Rendering | Accepted |
 | [0021](0021-table-command-and-config-schema.md) | `conspectus table <ROWS>` Command And Config Schema | Accepted |
-| [0022](0022-terminal-color-and-styling.md) | Terminal Color And Styling For Table Output | Accepted |
+| [0022](0022-terminal-color-and-styling.md) | Terminal Color And Styling For Table Output | Accepted; framework-owned in part |
 | [0023](0023-agent-session-last-message-preview.md) | Agent Session Last-Message Preview | Accepted |
 | [0050](0050-graph-visualization-exports.md) | Graph Visualization Exports | Accepted |
 
@@ -133,16 +145,16 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 
 | ADR | Decision | Status |
 | --- | --- | --- |
-| [0024](0024-tui-runtime-and-architecture.md) | TUI Runtime, App Architecture, And Dependency Policy | Accepted |
-| [0025](0025-tui-preview-ansi-rendering-dependency.md) | TUI Preview ANSI Rendering Dependency | Accepted (amended by 0181) |
-| [0030](0030-tui-text-input-primitive.md) | TUI Text-Input Primitive | Accepted (narrowed by 0165, 0166) |
+| [0024](0024-tui-runtime-and-architecture.md) | TUI Runtime, App Architecture, And Dependency Policy | Accepted; framework-owned in part |
+| [0025](0025-tui-preview-ansi-rendering-dependency.md) | TUI Preview ANSI Rendering Dependency | Accepted (amended by 0181); framework-owned in part |
+| [0030](0030-tui-text-input-primitive.md) | TUI Text-Input Primitive | Accepted (narrowed by 0165, 0166); framework-owned in part |
 | [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149, 0173, 0176, 0182) |
-| [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted (amended by 0153, 0159) |
+| [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted (amended by 0153, 0159); framework-owned in part |
 | [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Superseded by 0074 |
 | [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
 | [0045](0045-sessions-graph-lineage-and-repo-default.md) | Sessions Graph Lineage And Repo Default | Accepted |
 | [0055](0055-sessions-graph-default.md) | Sessions Graph Default | Accepted |
-| [0056](0056-tui-clipboard-backend-osc52.md) | TUI Clipboard Backend via OSC 52 | Accepted (amended by 0163) |
+| [0056](0056-tui-clipboard-backend-osc52.md) | TUI Clipboard Backend via OSC 52 | Accepted (amended by 0163); framework-owned in part |
 | [0061](0061-drop-workspace-grouping-from-non-workspaces-views.md) | Drop Workspace Grouping From Non-Workspaces Views | Accepted (mux view refined by 0139) |
 | [0062](0062-workspaces-view-polish.md) | Workspaces View Polish — Inline Members, Drop Related | Superseded by 0065 |
 | [0063](0063-drop-workspace-cross-reference-chip.md) | Drop The Workspace Cross-Reference Chip | Accepted |
@@ -151,14 +163,14 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0071](0071-ambiguous-mux-scope-and-detail.md) | Ambiguous Mux Surface Moves From Session Row To Group Detail | Accepted (detail-pane section superseded by 0074) |
 | [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted (amended by 0145) |
 | [0120](0120-mux-rows-drop-the-ambiguity-glyph.md) | Mux Rows Drop The Ambiguity Glyph | Accepted |
-| [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted (amended by 0144, 0145, 0154) |
+| [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted (amended by 0144, 0145, 0154); framework-owned in part |
 | [0074](0074-detail-pane-related-entities-flatten.md) | Detail-Pane Related-Entities Flatten | Accepted (amended by 0187, narrowed by 0188) |
 | [0075](0075-edge-state-visual-language.md) | Edge-State Visual Language In The Detail-Pane Other Zone | Accepted (amended by 0187) |
-| [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted (amended by 0155, 0156, 0189) |
+| [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted (amended by 0155, 0156, 0189); framework-owned |
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted (amended by 0190, 0191) |
-| [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161, 0188) |
-| [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179) |
-| [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181) |
+| [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161, 0188); framework-owned in part |
+| [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179); framework-owned in part |
+| [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181); framework-owned in part |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
 | [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (see 0147) |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
@@ -168,58 +180,58 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0117](0117-capability-manifest-and-traced-backstop.md) | A Capability Manifest With A Traced Backstop | Accepted |
 | [0118](0118-csp-short-name.md) | `csp` Is The Short Name | Accepted |
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
-| [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted (amended by 0160, 0161, 0191) |
+| [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted (amended by 0160, 0161, 0191); framework-owned |
 | [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted (amended) |
 | [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted (amended by 0145, 0198) |
 | [0145](0145-state-glyphs-and-words-in-the-left-panel.md) | State Glyphs And Words In The Left Panel | Accepted |
-| [0150](0150-tui-framework-workspace-crate.md) | The TUI Framework Is A Workspace Member Crate | Accepted |
-| [0151](0151-tui-framework-control-set-and-house-rules.md) | The Framework Control Set And Its House Rules | Accepted |
-| [0152](0152-tui-framework-dependency-ownership.md) | Who Owns The Framework's Third-Party Crates | Accepted |
-| [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted (amended by 0163, 0180, 0189) |
-| [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted (amended by 0168, 0179, 0181, 0187) |
-| [0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md) | Text Is Measured, Cut, And Wrapped In Terminal Cells By One Module | Accepted |
-| [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161, 0177, 0182) |
-| [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted (decision 8's status-bar segments carried out by 0190) |
-| [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted (amended by 0166, 0174, 0193; decision 7 carried out by 0189) |
-| [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted (amended by 0186) |
-| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176, 0177, 0179, 0180, 0188, 0191, 0192, 0193, 0197) |
-| [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted (amended by 0172, 0176, 0177, 0180, 0191) |
-| [0162](0162-tui-help-pages-one-page-generated-from-key-tables.md) | Help Pages Are One Page, Generated From The Key Tables | Accepted (amended by 0177, 0178, 0180, 0192) |
-| [0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md) | Feedback Is One Type With Four Severities, And Toasts Are In-Tree | Accepted (amended by 0179) |
-| [0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md) | The Test Kit Drives Frames, Keeps Colors In Goldens, And Holds Every Modal To The Conventions | Accepted (amended by 0176, 0177, 0191, 0194) |
-| [0165](0165-tui-text-entry-one-line-editor-and-one-text-field.md) | Text Entry Has One Line Editor And One Text Field | Accepted |
-| [0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md) | Text Prompts Are One Overlay That Explains Its Refusals | Accepted (amended by 0176, 0193) |
-| [0167](0167-tui-path-fields-complete-behind-a-source-and-expand-tilde-on-commit.md) | Path Fields Complete Behind A Source, Ask For A Kind, And Expand `~` On Commit | Accepted |
-| [0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md) | Forms Move On One Ring, Submit From Any Field, And Keep Their Keys In View | Accepted (amended by 0170, 0193) |
+| [0150](0150-tui-framework-workspace-crate.md) | The TUI Framework Is A Workspace Member Crate | Accepted; framework-owned |
+| [0151](0151-tui-framework-control-set-and-house-rules.md) | The Framework Control Set And Its House Rules | Accepted; framework-owned |
+| [0152](0152-tui-framework-dependency-ownership.md) | Who Owns The Framework's Third-Party Crates | Accepted; framework-owned |
+| [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted (amended by 0163, 0180, 0189); framework-owned |
+| [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted (amended by 0168, 0179, 0181, 0187); framework-owned |
+| [0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md) | Text Is Measured, Cut, And Wrapped In Terminal Cells By One Module | Accepted; framework-owned |
+| [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161, 0177, 0182); framework-owned |
+| [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted (decision 8's status-bar segments carried out by 0190); framework-owned |
+| [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted (amended by 0166, 0174, 0193; decision 7 carried out by 0189); framework-owned |
+| [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted (amended by 0186); framework-owned |
+| [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted (amended by 0168, 0172, 0173, 0174, 0176, 0177, 0179, 0180, 0188, 0191, 0192, 0193, 0197); framework-owned |
+| [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted (amended by 0172, 0176, 0177, 0180, 0191); framework-owned |
+| [0162](0162-tui-help-pages-one-page-generated-from-key-tables.md) | Help Pages Are One Page, Generated From The Key Tables | Accepted (amended by 0177, 0178, 0180, 0192); framework-owned |
+| [0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md) | Feedback Is One Type With Four Severities, And Toasts Are In-Tree | Accepted (amended by 0179); framework-owned |
+| [0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md) | The Test Kit Drives Frames, Keeps Colors In Goldens, And Holds Every Modal To The Conventions | Accepted (amended by 0176, 0177, 0191, 0194); framework-owned |
+| [0165](0165-tui-text-entry-one-line-editor-and-one-text-field.md) | Text Entry Has One Line Editor And One Text Field | Accepted; framework-owned |
+| [0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md) | Text Prompts Are One Overlay That Explains Its Refusals | Accepted (amended by 0176, 0193); framework-owned |
+| [0167](0167-tui-path-fields-complete-behind-a-source-and-expand-tilde-on-commit.md) | Path Fields Complete Behind A Source, Ask For A Kind, And Expand `~` On Commit | Accepted; framework-owned |
+| [0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md) | Forms Move On One Ring, Submit From Any Field, And Keep Their Keys In View | Accepted (amended by 0170, 0193); framework-owned |
 | [0169](0169-tui-launch-form-is-a-form-and-one-grammar-splits-every-argv.md) | The Launch Form Is A `Form`, And One Grammar Splits Every Argv | Accepted |
-| [0170](0170-tui-pin-edit-form-is-a-form-with-override-rows.md) | The Pin Edit Form Is A `Form` With Override Rows | Accepted (decision 7's prompt check done) |
-| [0171](0171-tui-menus-one-control-entries-as-data.md) | Menus Are One Control Whose Entries Are Data | Accepted (amended by 0172, 0193) |
-| [0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md) | Dialogs Are One Control, And A Menu's Questions Are Steps On The Stack | Accepted (amended by 0176, 0193) |
-| [0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md) | Checklists Are One Control That Selects All Or None And Counts | Accepted (amended by 0193) |
-| [0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md) | Palettes Are One Control, A Query Over Results The Host Ranks | Accepted (amended by 0175, 0193) |
-| [0175](0175-tui-search-is-two-palettes-and-a-hit-is-one-column-plan.md) | Search Is Two Palettes, And A Hit's Cells Are One Column Plan | Accepted (amended by 0185, 0196) |
-| [0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md) | Settings Panels Are One Control That Applies Each Change As It Is Made, And Their Editors Are Steps | Accepted (amended by 0193) |
-| [0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md) | Readers Are One Pager Over Content The Host Lays Out | Accepted (amended by 0178, 0181) |
-| [0178](0178-tui-help-pages-and-long-values-are-pager-contents.md) | Help Pages And Long Values Are Pager Contents, And A Framed Footer Scrolls What Does Not Fit | Accepted (amended by 0180; decision 3 generalised by 0193) |
-| [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted (amended by 0193) |
-| [0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) | The Transcript Viewer Is A Pager Content, And The Viewer Boundary Keeps Only The Transcript | Accepted |
-| [0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md) | Rich Text Is A Framework Feature, And The Preview Scrolls In A Region Counted From An Anchor | Accepted |
-| [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted (amended by 0183, 0186, 0195) |
-| [0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md) | Rows Come From Column Schemas, And One Rule Decides What Gives Way | Accepted (amended by 0184, 0185, 0186, 0195, 0196) |
-| [0184](0184-tui-pr-pinned-and-history-rows-come-from-schemas-and-headers-carry-two-cells.md) | PR, Pinned, And History Rows Come From Schemas, And Group Headers Carry Two Cells | Accepted |
-| [0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md) | A Search Hit Is One Column Schema In The Modal And The Search View | Accepted |
-| [0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md) | The Tree Marks Its Cursor Row In A Gutter Before Every Row | Accepted |
-| [0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md) | Detail Rows Are A Property Grid, And A Row Reports What It Asks For | Accepted |
-| [0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md) | The Explorer Is A Framework Control Over A Host Source, And The Right Pane's Keys Are One Table | Accepted (carried out by CSP-789, CSP-790, CSP-791, CSP-756; decision 6's tab bar and priority line by 0190; decision 5's scoped keymap by 0192) |
-| [0189](0189-tui-the-screen-is-an-app-frame-and-the-focused-pane-is-framed-in-the-focus-accent.md) | The Screen Is An App Frame, The Panes Split By One Rule, And The Focused Pane Is Framed In The Focus Accent | Accepted |
-| [0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an-empty-slot-says-so-one-way.md) | The Tab Strip, The Header, And The Status Bar Give Way By One Rule, And An Empty Slot Says So One Way | Accepted (decision 6's hints generated by 0191) |
-| [0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md) | The Status Bar Names The Keys Of The Scope That Has Them, Generated From Its Key Tables | Accepted (amended by 0192) |
-| [0192](0192-tui-the-main-screens-keys-are-one-scoped-keymap-and-the-help-page-is-generated-from-it.md) | The Main Screen's Keys Are One Scoped Keymap, And The Help Page Is Generated From It | Accepted (decision 6 amended by 0197) |
-| [0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) | Every Modal Footer Is One Footer: One Look Under A Blank Row, And One Fit That Keeps The Keys That Leave | Accepted |
-| [0194](0194-tui-a-step-drawn-exactly-over-its-entry-is-found-by-what-changed-inside-its-frame.md) | A Step Drawn Exactly Over Its Entry Is Found By What Changed Inside Its Frame | Accepted |
-| [0195](0195-tui-a-tree-row-keeps-its-layout-when-its-list-overflows.md) | A Tree Row Keeps Its Layout When Its List Overflows | Accepted |
-| [0196](0196-tui-quick-selects-entity-rows-come-from-a-column-schema.md) | Quick Select's Entity Rows Come From A Column Schema | Accepted |
-| [0197](0197-tui-the-main-screens-characters-bind-as-typed-as-the-overlays-do.md) | The Main Screen's Characters Bind As Typed, As The Overlays' Do | Accepted |
+| [0170](0170-tui-pin-edit-form-is-a-form-with-override-rows.md) | The Pin Edit Form Is A `Form` With Override Rows | Accepted (decision 7's prompt check done); framework-owned in part |
+| [0171](0171-tui-menus-one-control-entries-as-data.md) | Menus Are One Control Whose Entries Are Data | Accepted (amended by 0172, 0193); framework-owned |
+| [0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md) | Dialogs Are One Control, And A Menu's Questions Are Steps On The Stack | Accepted (amended by 0176, 0193); framework-owned |
+| [0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md) | Checklists Are One Control That Selects All Or None And Counts | Accepted (amended by 0193); framework-owned |
+| [0174](0174-tui-palettes-one-control-a-query-over-ranked-results.md) | Palettes Are One Control, A Query Over Results The Host Ranks | Accepted (amended by 0175, 0193); framework-owned |
+| [0175](0175-tui-search-is-two-palettes-and-a-hit-is-one-column-plan.md) | Search Is Two Palettes, And A Hit's Cells Are One Column Plan | Accepted (amended by 0185, 0196); framework-owned in part |
+| [0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md) | Settings Panels Are One Control That Applies Each Change As It Is Made, And Their Editors Are Steps | Accepted (amended by 0193); framework-owned |
+| [0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md) | Readers Are One Pager Over Content The Host Lays Out | Accepted (amended by 0178, 0181); framework-owned |
+| [0178](0178-tui-help-pages-and-long-values-are-pager-contents.md) | Help Pages And Long Values Are Pager Contents, And A Framed Footer Scrolls What Does Not Fit | Accepted (amended by 0180; decision 3 generalised by 0193); framework-owned |
+| [0179](0179-tui-log-lists-read-the-hosts-log-over-an-embedded-pager.md) | Log Lists Read The Host's Log, And The Detail Is An Embedded Pager | Accepted (amended by 0193); framework-owned |
+| [0180](0180-tui-the-transcript-viewer-is-a-pager-content.md) | The Transcript Viewer Is A Pager Content, And The Viewer Boundary Keeps Only The Transcript | Accepted; framework-owned in part |
+| [0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md) | Rich Text Is A Framework Feature, And The Preview Scrolls In A Region Counted From An Anchor | Accepted; framework-owned |
+| [0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md) | The Tree Keeps Its State By Identity, And Draws Lines Its Host Lays Out | Accepted (amended by 0183, 0186, 0195); framework-owned |
+| [0183](0183-tui-rows-come-from-column-schemas-and-one-rule-decides-what-gives-way.md) | Rows Come From Column Schemas, And One Rule Decides What Gives Way | Accepted (amended by 0184, 0185, 0186, 0195, 0196); framework-owned |
+| [0184](0184-tui-pr-pinned-and-history-rows-come-from-schemas-and-headers-carry-two-cells.md) | PR, Pinned, And History Rows Come From Schemas, And Group Headers Carry Two Cells | Accepted; framework-owned in part |
+| [0185](0185-tui-a-search-hit-is-one-column-schema-in-the-modal-and-the-search-view.md) | A Search Hit Is One Column Schema In The Modal And The Search View | Accepted; framework-owned in part |
+| [0186](0186-tui-the-tree-marks-its-cursor-row-in-a-gutter-before-every-row.md) | The Tree Marks Its Cursor Row In A Gutter Before Every Row | Accepted; framework-owned |
+| [0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md) | Detail Rows Are A Property Grid, And A Row Reports What It Asks For | Accepted; framework-owned |
+| [0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md) | The Explorer Is A Framework Control Over A Host Source, And The Right Pane's Keys Are One Table | Accepted (carried out by CSP-789, CSP-790, CSP-791, CSP-756; decision 6's tab bar and priority line by 0190; decision 5's scoped keymap by 0192); framework-owned |
+| [0189](0189-tui-the-screen-is-an-app-frame-and-the-focused-pane-is-framed-in-the-focus-accent.md) | The Screen Is An App Frame, The Panes Split By One Rule, And The Focused Pane Is Framed In The Focus Accent | Accepted; framework-owned |
+| [0190](0190-tui-the-chrome-gives-way-by-one-rule-and-an-empty-slot-says-so-one-way.md) | The Tab Strip, The Header, And The Status Bar Give Way By One Rule, And An Empty Slot Says So One Way | Accepted (decision 6's hints generated by 0191); framework-owned |
+| [0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md) | The Status Bar Names The Keys Of The Scope That Has Them, Generated From Its Key Tables | Accepted (amended by 0192); framework-owned |
+| [0192](0192-tui-the-main-screens-keys-are-one-scoped-keymap-and-the-help-page-is-generated-from-it.md) | The Main Screen's Keys Are One Scoped Keymap, And The Help Page Is Generated From It | Accepted (decision 6 amended by 0197); framework-owned |
+| [0193](0193-tui-every-modal-footer-is-one-footer-one-look-under-a-blank-row-and-one-fit.md) | Every Modal Footer Is One Footer: One Look Under A Blank Row, And One Fit That Keeps The Keys That Leave | Accepted; framework-owned |
+| [0194](0194-tui-a-step-drawn-exactly-over-its-entry-is-found-by-what-changed-inside-its-frame.md) | A Step Drawn Exactly Over Its Entry Is Found By What Changed Inside Its Frame | Accepted; framework-owned |
+| [0195](0195-tui-a-tree-row-keeps-its-layout-when-its-list-overflows.md) | A Tree Row Keeps Its Layout When Its List Overflows | Accepted; framework-owned |
+| [0196](0196-tui-quick-selects-entity-rows-come-from-a-column-schema.md) | Quick Select's Entity Rows Come From A Column Schema | Accepted; framework-owned in part |
+| [0197](0197-tui-the-main-screens-characters-bind-as-typed-as-the-overlays-do.md) | The Main Screen's Characters Bind As Typed, As The Overlays' Do | Accepted; framework-owned in part |
 | [0198](0198-tui-quick-select-and-reveal-promise-only-a-view-that-lists-the-entity.md) | Quick Select And Reveal Promise Only A View That Lists The Entity | Accepted |
 
 ## Transcript viewer
@@ -229,11 +241,11 @@ Opening and rendering harness transcripts.
 | ADR | Decision | Status |
 | --- | --- | --- |
 | [0019](0019-session-transcript-viewer.md) | Session Transcript Viewer Integration | Accepted (amended) |
-| [0051](0051-tui-transcript-preview-markdown-dependency.md) | TUI Transcript Preview Markdown Rendering Dependency | Accepted (amended, and by 0181) |
+| [0051](0051-tui-transcript-preview-markdown-dependency.md) | TUI Transcript Preview Markdown Rendering Dependency | Accepted (amended, and by 0181); framework-owned in part |
 | [0052](0052-native-session-viewer.md) | Native In-Tree Multi-Harness Session Transcript Viewer | Accepted (boundary narrowed by 0180) |
 | [0053](0053-viewer-abort-filter-default-harness-ux.md) | Aborted-Message Filtering In The Native Viewer | Accepted |
 | [0122](0122-viewer-harness-hidden-records-toggle.md) | Harness-Hidden Records Behind A Viewer Toggle | Accepted |
-| [0054](0054-viewer-table-rendering-comfy-table.md) | Markdown Table Rendering Via comfy-table | Accepted (amended by 0181) |
+| [0054](0054-viewer-table-rendering-comfy-table.md) | Markdown Table Rendering Via comfy-table | Accepted (amended by 0181); framework-owned in part |
 
 ## Process, tooling, and distribution
 
@@ -251,12 +263,12 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0016](0016-distribution-policy.md) | Distribution Policy | Accepted (amended) |
 | [0110](0110-pinned-rust-toolchain.md) | Pinned Rust Toolchain | Accepted |
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
-| [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164) |
+| [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164); framework-owned in part |
 | [0068](0068-snapshot-fixture-mode.md) | Fixture Mode For The Snapshot Tool | Accepted |
 | [0069](0069-interactive-fixture-mode-for-tui.md) | Interactive Fixture Mode For The TUI | Accepted |
 | [0070](0070-showcase-scenario.md) | Showcase Scenario For Comprehensive Functionality Exercise | Accepted |
-| [0100](0100-comments-carry-rationale-not-backlog-ids.md) | Comments Carry Rationale, Not Backlog IDs | Accepted |
-| [0124](0124-sibling-test-files.md) | Large Unit-Test Modules Live In Sibling Files | Accepted |
+| [0100](0100-comments-carry-rationale-not-backlog-ids.md) | Comments Carry Rationale, Not Backlog IDs | Accepted; framework-owned in part |
+| [0124](0124-sibling-test-files.md) | Large Unit-Test Modules Live In Sibling Files | Accepted; framework-owned in part |
 | [0125](0125-opencode-2-reference-findings.md) | OpenCode 2.x Reference Findings | Accepted |
 | [0126](0126-opencode-2-pane-attribution.md) | OpenCode 2.x Session-To-Pane Attribution | Accepted |
 | [0127](0127-launches-keep-the-tui-drawn-behind-a-spinner.md) | Launches Keep The TUI Drawn Behind A Spinner | Accepted |
