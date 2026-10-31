@@ -4,6 +4,7 @@ title: 'Release history, rebuild, and pin slots as 0.2.0'
 status: To Do
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-31 08:16'
 labels:
   - history-pins
 milestone: m-23
@@ -52,3 +53,9 @@ The change retires most of the `pin` CLI and the `[[pins.entries]]` schema. Give
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): the version to bump is the root `conspectus` package's (`[package] version` in the root `Cargo.toml`); `crates/tuikit` keeps its own `0.1.0` and `publish = false` (ADR 0150). `CHANGELOG.md`'s `[Unreleased]` section now also carries the TUI framework milestone's operator-visible changes (keys, close and paging rules, generated footers and help, theme keys and aliases; summarized in `docs/operations.md`, "What changed in the TUI"). The 0.2.0 entry either covers them too, or they ship in a release of their own; decide before cutting it.
+<!-- SECTION:NOTES:END -->

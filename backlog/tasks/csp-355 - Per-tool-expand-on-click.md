@@ -4,6 +4,7 @@ title: Per-tool expand on click
 status: To Do
 assignee: []
 created_date: '2026-06-03 13:09'
+updated_date: '2026-10-31 08:15'
 labels:
   - h-viewer-native
 milestone: m-11
@@ -41,3 +42,9 @@ ordinal: 221000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `H-VIEWER-NATIVE-016`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): `ViewerState` is gone; per-turn overrides go on the `Transcript<M>` content (`src/viewer/state.rs`, ADR 0180), and `t` (tool detail) is one of `TRANSCRIPT_KEYS`, which lay the content out again. Click targets depend on CSP-344's mouse routing.
+<!-- SECTION:NOTES:END -->

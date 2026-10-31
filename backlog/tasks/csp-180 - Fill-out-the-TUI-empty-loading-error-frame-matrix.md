@@ -4,6 +4,7 @@ title: Fill out the TUI empty/loading/error frame matrix
 status: To Do
 assignee: []
 created_date: '2026-05-19 23:23'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -29,3 +30,9 @@ ordinal: 407000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-003`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): an empty or waiting slot now says so through `tuikit::empty_state::EmptyState` (CSP-758, ADR 0190), status chips are `tuikit::chip::StatusChip` (the provider chips in `src/tui/ui/header.rs`), and the busy spinner is `StatusChip::busy`. `render_to_buffer` and `buffer_to_string` are still in `src/tui/ui.rs`; for a frame whose colors matter, `tuikit::testkit::golden` keeps styles (ADR 0164). Re-check which of the listed states already render before adding snapshots.
+<!-- SECTION:NOTES:END -->

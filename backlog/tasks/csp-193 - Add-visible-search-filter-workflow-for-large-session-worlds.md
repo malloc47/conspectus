@@ -4,6 +4,7 @@ title: Add visible search/filter workflow for large session worlds
 status: To Do
 assignee: []
 created_date: '2026-05-20 03:28'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -31,3 +32,9 @@ ordinal: 443000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-017`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): `/` now opens quick select, a `tuikit::palette` instance over entity rows laid out from a column schema (ADR 0174, 0175, 0196, 0198), and content search is the second palette; active filters show as status-bar chips with counts (CSP-256). Re-check what is left against those before planning: this story may already be delivered (flagged in `docs/plans/tui-framework/backlog-impact.md`).
+<!-- SECTION:NOTES:END -->

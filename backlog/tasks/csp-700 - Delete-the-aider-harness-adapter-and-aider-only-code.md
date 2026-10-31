@@ -4,6 +4,7 @@ title: Delete the aider harness adapter and aider-only code
 status: To Do
 assignee: []
 created_date: '2026-10-24 03:19'
+updated_date: '2026-10-31 08:16'
 labels:
   - h-aider-removal
 milestone: m-24
@@ -40,3 +41,9 @@ When filed, aider was referenced from: `src/discovery/harness/{aider,mod,fixture
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): the TUI's aider references moved with the framework extraction. `src/tui/widgets/badge.rs` no longer names aider (its tests, `badge_tests.rs`, do). The harness color table is `HARNESS_COLORS` and the `harness_aider` alias a row of `ALIASES`, both in `src/tui/theme.rs`, registered with the framework theme as the role `harness.aider` (ADR 0153; `theme_tests.rs` checks one entry per registered adapter). `crates/tuikit/tests/independence.rs` lists `aider` in its domain word list; that file is outside AC #1's pathspec and the word should stay (see the CSP-699 note). `examples/pantry.rs` still names aider. Re-run `git grep -i aider -- src tests examples docs/tui-columns.md` when starting; nothing under `crates/tuikit/src` or its docs can name it.
+<!-- SECTION:NOTES:END -->

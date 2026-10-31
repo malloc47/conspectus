@@ -4,6 +4,7 @@ title: Document and verify the v1 TUI workflow
 status: To Do
 assignee: []
 created_date: '2026-05-19 03:51'
+updated_date: '2026-10-31 08:15'
 labels:
   - p8
 milestone: m-13
@@ -32,3 +33,9 @@ ordinal: 402000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `P8-013`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): the main screen's keys are listed by the `?` page, generated from the scoped keymap (`src/tui/keybindings.rs`, ADR 0192), and each overlay's footer and help come from its key table (ADR 0162, ADR 0193); `docs/operations.md` gained "What changed in the TUI" (CSP-764). Point operators at `?` rather than copying key tables into the docs.
+<!-- SECTION:NOTES:END -->

@@ -4,12 +4,12 @@ title: 'Migrate rename, search, and view-switch prompts into the minibuffer'
 status: To Do
 assignee: []
 created_date: '2026-06-05 18:40'
+updated_date: '2026-10-31 08:15'
 labels:
   - h-cmd
 milestone: m-17
 dependencies:
   - CSP-393
-  - CSP-193
 ordinal: 519000
 ---
 
@@ -33,3 +33,9 @@ ordinal: 519000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `H-CMD-005`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): re-scoped. The prompts it would migrate have moved: rename is a `TextPrompt<M>` (ADR 0166), `/` opens quick select (a `Palette`, ADR 0175 and 0198), and `v` now opens the selection's transcript, while views switch with `1` to `4` and `]`/`[` (ADR 0192). What is left: route the rename prompt, and a view-switch prompt completing over the registered views, through the CSP-393 minibuffer host if CSP-390 keeps the minibuffer; quick select stays a palette unless that ADR says otherwise. The dependency on CSP-193 is dropped: the `/` prompt exists as quick select, and CSP-193's remaining scope does not gate this migration.
+<!-- SECTION:NOTES:END -->

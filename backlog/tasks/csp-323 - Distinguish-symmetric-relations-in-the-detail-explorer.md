@@ -4,6 +4,7 @@ title: Distinguish symmetric relations in the detail explorer
 status: To Do
 assignee: []
 created_date: '2026-06-01 15:17'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -38,3 +39,9 @@ ordinal: 428000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-037`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): the explorer's cursor walk is the framework's (`tuikit::explorer`, ADR 0188) over the zones the host's source returns (`ExplorerSource::zones` in `src/tui/explorer/source.rs`); a third zone is one more `Zone` under a `SectionRule` heading, and the walk follows the zone order. The pane already titles its relationship rows `Related` (`related_rule`), so the symmetric zone needs another name. The `Direction` split (Upstream, Downstream) stays in `src/tui/explorer.rs`. The breadcrumb is `tuikit::breadcrumb`, whose hops name nodes, not zones.
+<!-- SECTION:NOTES:END -->

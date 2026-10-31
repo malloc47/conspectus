@@ -4,6 +4,7 @@ title: 'Compress project, path, and mux display labels'
 status: To Do
 assignee: []
 created_date: '2026-05-20 03:28'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -44,3 +45,9 @@ ordinal: 414000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-012`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): group headers carry their name and detail as two cells (`GroupRow.label`, `GroupRow.detail`; `GroupRow::at_path` in `src/tui/rows/mod.rs`, ADR 0184), laid out by the views' column schemas, whose one give-way rule cuts or drops the detail when narrow (`tuikit::columns`, ADR 0183). Cutting goes through `tuikit::text`, in cells (`truncate_middle` for paths and ids, ADR 0155). The mux label helpers are `compact_mux_label` and `compact_mux_native_id` in `src/tui/ui/compact.rs`; `src/tui/ui/text.rs` is gone. Duplicate-basename disambiguation is still open and belongs with the header builders; sharing helpers with the CLI tables is CSP-179.
+<!-- SECTION:NOTES:END -->

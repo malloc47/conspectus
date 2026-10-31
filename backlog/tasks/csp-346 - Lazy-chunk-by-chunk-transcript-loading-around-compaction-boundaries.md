@@ -4,6 +4,7 @@ title: Lazy / chunk-by-chunk transcript loading around compaction boundaries
 status: To Do
 assignee: []
 created_date: '2026-06-03 12:44'
+updated_date: '2026-10-31 08:15'
 labels:
   - h-viewer-native
 milestone: m-11
@@ -45,3 +46,9 @@ ordinal: 223000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `H-VIEWER-NATIVE-014`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): `ViewerState` is gone; the viewer's state is the `Transcript<M>` content (`src/viewer/state.rs`, ADR 0180) inside the framework's `Pager`, and Markdown turns render through `tuikit::richtext::markdown` (`src/viewer/render.rs`, ADR 0181). A chunk seam and load-on-scroll would live in the content (`PagerContent`); check how the pager keeps its position when the content's line count changes under it.
+<!-- SECTION:NOTES:END -->

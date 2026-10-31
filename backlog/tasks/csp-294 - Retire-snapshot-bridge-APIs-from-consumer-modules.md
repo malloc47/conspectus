@@ -4,6 +4,7 @@ title: Retire snapshot bridge APIs from consumer modules
 status: To Do
 assignee: []
 created_date: '2026-05-28 02:52'
+updated_date: '2026-10-31 08:15'
 labels:
   - p10-fu
 milestone: m-15
@@ -34,3 +35,9 @@ ordinal: 486000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `P10-FU-001`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): `tui::detail::build_node_detail` went with the sectioned detail model (`src/tui/detail.rs`, deleted by CSP-710); the right pane's explorer reads the graph through its source (`src/tui/explorer/source.rs`, ADR 0188) and has no snapshot-taking entry point. Drop it from the candidate list; the other candidates are unchanged by the framework work.
+<!-- SECTION:NOTES:END -->

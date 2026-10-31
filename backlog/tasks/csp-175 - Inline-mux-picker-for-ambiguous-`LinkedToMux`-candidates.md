@@ -4,6 +4,7 @@ title: Inline mux-picker for ambiguous `LinkedToMux` candidates
 status: To Do
 assignee: []
 created_date: '2026-05-19 12:49'
+updated_date: '2026-10-31 08:15'
 labels:
   - p8
 milestone: m-13
@@ -44,3 +45,9 @@ ordinal: 403000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `P8-014`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): the menu-first home is an entry in the Mux menu, whose entries are data drawn by `tuikit::action_menu::ActionMenu` (ADR 0171), offered only when the selection has more than one active candidate. A pick-one list is the host's picker (`src/tui/widgets/picker.rs`, a `tuikit::palette` instance over items, ADR 0174): its arrows and `Ctrl-N`/`Ctrl-P` move and `j`/`k` type into the query, so "the same j/k navigation as the search overlay" no longer holds; use the palette's keys. Status hints are generated from the key tables (ADR 0191).
+<!-- SECTION:NOTES:END -->

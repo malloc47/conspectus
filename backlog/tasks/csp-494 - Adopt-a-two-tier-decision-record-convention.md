@@ -4,6 +4,7 @@ title: Adopt a two-tier decision-record convention
 status: To Do
 assignee: []
 created_date: '2026-07-01 22:56'
+updated_date: '2026-10-31 08:15'
 labels:
   - h-adr
 milestone: m-11
@@ -28,3 +29,9 @@ ordinal: 179000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `H-ADR-005`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): there are now 200 ADRs, and 51 of them (0150 to 0200) record the TUI framework extraction, most of them at the level this story calls pixel-level UI. The framework also keeps its own decision log (`crates/tuikit/docs/decisions/`, record 0070), which restates the framework's part of those ADRs and becomes canonical once the crate leaves the repository (`crates/tuikit/docs/separation.md`, step 6). A two-tier convention should say where a UI decision goes now that framework decisions have a home of their own: a framework control's rule in the framework's log, a Conspectus screen's in an ADR or the lighter tier.
+<!-- SECTION:NOTES:END -->

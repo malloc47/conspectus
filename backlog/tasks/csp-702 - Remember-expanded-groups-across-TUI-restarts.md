@@ -4,6 +4,7 @@ title: Remember expanded groups across TUI restarts
 status: To Do
 assignee: []
 created_date: '2026-10-24 03:20'
+updated_date: '2026-10-31 08:16'
 labels:
   - tui
 milestone: m-23
@@ -40,3 +41,9 @@ Things to handle: group `RowId`s are keyed on graph `NodeId`s, so a persisted id
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): the expanded set moved. `ViewStateSlot` (`src/tui/app.rs`) keeps each view's tree state as `tree: TreeState<RowId>` from `tuikit::tree` (CSP-750, ADR 0182); the expanded group ids are `TreeState::expanded()`, and a restore is `TreeState::set_expanded(..)`. `TreeState` keeps whatever ids it is given, so dropping ids whose node is gone (AC #3) is the host's job when it builds `PersistedViewSlot` (`src/tui_state.rs`): keep only the ids a row of the rebuilt tree carries. `App::restore_persisted_state` and `App::build_persisted_state` are still the two ends.
+<!-- SECTION:NOTES:END -->
