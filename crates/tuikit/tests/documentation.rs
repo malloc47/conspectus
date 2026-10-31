@@ -5,7 +5,8 @@
 //! tidy-up could delete without anything failing, so these tests fail when
 //! it, the include that makes the README the crate-level documentation, or a
 //! page the contribution guide promises goes missing. The lint and the
-//! pages are described in `docs/contributing.md`.
+//! pages are described in `docs/contributing.md`; what the pages say is
+//! held to the code by `tests/doc_sync.rs`.
 
 use std::fs;
 use std::path::Path;
@@ -21,8 +22,11 @@ const REQUIRED_ATTRIBUTES: &[&str] = &[
 /// Pages of the documentation set, relative to the crate root.
 const PAGES: &[&str] = &[
     "README.md",
+    "docs/guide.md",
     "docs/architecture.md",
+    "docs/house-rules.md",
     "docs/contributing.md",
+    "docs/roadmap.md",
     "docs/controls/_template.md",
     "docs/decisions/README.md",
 ];

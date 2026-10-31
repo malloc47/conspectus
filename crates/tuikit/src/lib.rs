@@ -60,3 +60,8 @@ pub mod tree;
 pub mod testkit;
 
 mod lex;
+
+// The pages under `docs/` as doctests, so every example in them compiles
+// and runs; `tests/doc_sync.rs` keeps the list complete.
+#[cfg(doctest)]
+mod doc_pages;
