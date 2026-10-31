@@ -1,9 +1,12 @@
 # TUI Architecture Review
 
-Status: draft review, 2026-07-01. Its pins overlay and pin-CRUD findings
+Status: draft review, 2026-07-01; every finding is now resolved, as
+[Where the findings stand](#where-the-findings-stand) records (2026-10-31).
+Its pins overlay and pin-CRUD findings
 describe the TUI before ADR 0141 and ADR 0144 replaced the pins modal with
 the Pinned and History views and a row action menu; read them as
-historical. A fresh-eyes read of the TUI as
+historical, as are the file and field names below, which describe the code
+of July 2026. A fresh-eyes read of the TUI as
 implemented today — deliberately ignoring prior ADRs and design history per
 the review request — evaluated against the common interactive-UI
 architectures, with recommendations for making further TUI development
@@ -146,6 +149,23 @@ None of this is exotic damage — it is exactly the residue of building
 each feature as a vertical slice without a declared UI architecture to
 slot into. The foundations (reducer, immutable snapshot, view-models,
 immediate mode, async discovery, snapshot tests) are the right ones.
+
+### Where the findings stand
+
+Checked against the code on 2026-10-31. F1, F2, F3, and F6 were fixed by
+the convergence stories below (ADR 0085) before the TUI framework
+extraction (milestone m-25, ADRs 0150 and 0151); that milestone resolved
+F4, F5, and F7 and closed the residue F1 still had.
+
+| Finding | Status | Resolved by | Where it stands |
+| --- | --- | --- | --- |
+| F1, effects interleaved with input | Resolved | CSP-496 (ADR 0085 contract 2); the residue by CSP-729 (ADR 0161) | `App::update` returns `Vec<Effect>`, run by a pure and a live executor. An overlay's key handler takes the App, the key, and a send callback (`runtime::overlay_keys::modal_key`); only the live executor sees the terminal and the mux backend. |
+| F2, projection changes re-fetch the world | Resolved | CSP-495 | View, grouping, filter, and sort changes rebuild the row tree from the held snapshot; only `r`, the timer, and mutations refresh. |
+| F3, `RunConfig` doubles as live UI state | Resolved | CSP-495 | The config seeds the App when it is built; the App's per-view state is the source of truth after that. |
+| F4, modality is implicit | Resolved by the milestone | CSP-729 (ADR 0161), then CSP-740 and CSP-744 | One `tuikit::overlay::ModalStack` that the App owns and lends out for each key and draw: the top entry gets every key, every entry draws bottom to top, and a follow-up question is a step on the stack. A new modal is a `Modal` variant implementing the `Overlay` contract; nothing in the keymap or the loops changes for it. |
+| F5, the renderer mutates state | Resolved by the milestone | CSP-724 (ADR 0156), then CSP-749 and CSP-750 | The `Cell` fields and the viewport messages sent from the draw are gone. `ui::draw` works each window out from the App and the area it measured and returns a `ViewportReport`, which the App keeps after the frame (`App::keep_viewports`). The draw still borrows the App mutably to warm the transcript Preview's wrapped lines and to let the modals keep the windows they drew, which no message reports. |
+| F6, loop duplication | Resolved | CSP-498 | One `run_loop` over a `LoopMode` (live and fixture); snapshot mode drives the same routing and draw. |
+| F7, overlays are hand-rolled proto-components | Resolved by the milestone | CSP-726 and CSP-729 (ADRs 0158 and 0161), then the control stories CSP-734 to CSP-748 | Every overlay implements `tuikit::overlay::Overlay` (`handle` and `render` over the host's context, `hints`, `fills_screen`), draws in the one `ModalFrame` at a named size, and is a framework control (`ActionMenu`, `Dialog`, `TextPrompt`, `Form`, `Checklist`, `Palette`, `SettingsPanel`, `Pager`, `LogList`) over a Conspectus adapter. |
 
 ## Recommendations
 
