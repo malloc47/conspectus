@@ -137,4 +137,6 @@ milestone's stories and follow-ups with their status. `execution-brief.md` is
 the contract the stories followed, `operator-review.md` the judgment calls
 awaiting the operator's review, and `backlog-impact.md` the milestone's
 effect on every story still open at its close. ADRs 0150 to 0152 record its decisions, and
-milestone m-25 carries the stories.
+milestone m-25 carries the stories. To review the finished milestone, start
+with [`review-guide.md`](plans/tui-framework/review-guide.md), which condenses
+the rest and links them.

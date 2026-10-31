@@ -15,6 +15,11 @@ framework's own log,
 `crates/tuikit/docs/decisions/`, restates the framework's part. The
 framework's documentation starts at `crates/tuikit/README.md`.
 
+To review the branch, start with [`review-guide.md`](review-guide.md): the
+milestone in numbers, the 25 decisions most likely to need the operator's
+call, the remaining review rows by theme, the open follow-ups, merge notes,
+and how the work was verified.
+
 Two files ran the milestone and stay with it:
 
 - [`execution-brief.md`](execution-brief.md): the contract every story
