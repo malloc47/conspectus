@@ -42,8 +42,10 @@ rendered example frames. Tests keep it in step with the code.
 
 Purpose: user-facing runtime reference covering the environment variables
 that gate discovery providers, the harness state-root overrides, the
-config-file precedence, the current CLI surface, and session content search
-(`conspectus search`).
+config-file precedence, the current CLI surface, session content search
+(`conspectus search`), the TUI's keys and dialogs, and what changed in the
+TUI when its controls moved onto the framework crate, with the notes for
+moving a `[tui.theme]` across.
 
 ## `docs/pins-walkthrough.md`
 
@@ -107,10 +109,13 @@ layers and module map (`crates/tuikit/docs/architecture.md`), the house rules
 with their rationale (`crates/tuikit/docs/house-rules.md`), one reference
 page per public module (`crates/tuikit/docs/controls/`), independence rules
 and how to add a control (`crates/tuikit/docs/contributing.md`), the roadmap
-of controls that may come later (`crates/tuikit/docs/roadmap.md`), and the
-framework-scoped decision index. Written to stand alone so the crate can leave
-this repository; its code samples run as doctests, and a doc-sync test holds
-the pages to the modules. ADRs 0150 to 0152 record the decisions behind it.
+of controls that may come later (`crates/tuikit/docs/roadmap.md`), leaving
+this repository (`crates/tuikit/docs/separation.md`), and the framework's own
+decision log (`crates/tuikit/docs/decisions/`). Written to stand alone so the
+crate can leave this repository; its code samples run as doctests, and a
+doc-sync test holds the pages to the modules and the log to the ADR index.
+ADRs 0150 to 0152 record the decisions behind it, and ADRs 0153 to 0199 the
+decisions its stories made.
 
 ## `docs/implementation/`
 
@@ -127,5 +132,8 @@ later ADR will need to settle.
 
 The TUI framework extraction (`docs/plans/tui-framework/`) is a directory,
 not a file: its `README.md` indexes the inventory, control set, gap analysis,
-workspace-impact notes, and the research behind them. ADRs 0150 to 0152 record
-its decisions, and milestone m-25 carries the stories.
+workspace-impact notes, and the research behind them, and lists the
+milestone's stories and follow-ups with their status. `execution-brief.md` is
+the contract the stories followed, and `operator-review.md` the judgment calls
+awaiting the operator's review. ADRs 0150 to 0152 record its decisions, and
+milestone m-25 carries the stories.
