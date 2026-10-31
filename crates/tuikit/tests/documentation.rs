@@ -27,6 +27,7 @@ const PAGES: &[&str] = &[
     "docs/house-rules.md",
     "docs/contributing.md",
     "docs/roadmap.md",
+    "docs/separation.md",
     "docs/controls/_template.md",
     "docs/decisions/README.md",
 ];

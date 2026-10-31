@@ -171,6 +171,7 @@ host's index marks each of them as framework-owned.
 | [0068](0068-pages-are-doctests.md) | Every page's Rust code compiles and runs as a doctest | Accepted | none |
 | [0069](0069-code-hygiene.md) | Comments carry rationale, large test modules live beside their code, and drawn text cites no developer artifact | Accepted | 0100, 0124 |
 | [0070](0070-the-decision-log.md) | The framework keeps its own decision log, canonical once it leaves | Accepted | 0150 |
+| [0071](0071-the-separation-is-rehearsed.md) | The move to a repository of its own is rehearsed on every change | Accepted | 0199 |
 
 ## Host records not included
 

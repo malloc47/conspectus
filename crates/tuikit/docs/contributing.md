@@ -16,6 +16,7 @@ Contents:
 - [The house rules](#the-house-rules)
 - [Cataloging visible changes](#cataloging-visible-changes)
 - [Testing](#testing)
+- [Keeping the crate liftable](#keeping-the-crate-liftable)
 - [Checks before you finish](#checks-before-you-finish)
 
 ## Independence guards
@@ -446,6 +447,25 @@ crate's own tests always have) packages the repeated parts. Its page,
   registers it, in the change that adds it, with the suite in this crate's
   tests and in each host's.
 - `testkit::source`: the lexer and walk the source guards use.
+
+## Keeping the crate liftable
+
+The host rehearses the crate's move to a repository of its own on every
+change ([separation.md](separation.md)): it exports the crate with its
+history, makes the manifest stand alone, and runs the checks below there,
+with nothing of the host reachable. These pass inside the host and fail the
+rehearsal:
+
+- A path that climbs out of the crate: an `include_str!`, a `#[path]`, or a
+  test that reads `../..`. Keep every file the crate needs inside it, or
+  have the caller pass the content in.
+- A test that assumes where the crate sits on disk. Compare paths below the
+  crate's root, never whole paths.
+- A manifest that inherits from the workspace in a spelling the export does
+  not rewrite ([separation.md](separation.md#what-the-export-changes)).
+- A cargo feature the export's checks do not build. The host's export
+  script lists the feature sets it lints and tests; a new feature changes
+  that list in the same change.
 
 ## Checks before you finish
 

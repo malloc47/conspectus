@@ -82,7 +82,7 @@ const ORIGIN: &str = "## Origin";
 /// The index's section that lists the host records the log leaves out.
 const NOT_INCLUDED: &str = "## Host records not included";
 /// Fewest records the checks may find, a tripwire like `MIN_PAGES`. There
-/// are 70 today.
+/// are 71 today.
 const MIN_RECORDS: usize = 52;
 /// The host repository, relative to the crate root: the manifest that names
 /// this crate as a member, the member path it names, and the host's

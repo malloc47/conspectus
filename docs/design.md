@@ -1105,6 +1105,13 @@ the ADRs it came from; the ADR index marks those ADRs framework-owned. Until
 the framework leaves the repository the ADRs are canonical for those decisions;
 after it leaves, its log is (ADR 0150).
 
+"Can move at any time" is checked, not assumed: on every change CI exports
+the crate with its history into a scratch repository of its own, makes its
+manifest stand alone, and runs its formatting, lint, test, and doc checks
+there with no Conspectus file reachable; a deliberate host-relative leak must
+fail that rehearsal (ADR 0199). The real move is
+`crates/tuikit/docs/separation.md`.
+
 Row builders, harness colors, state-word meanings, the transcript model, and
 preview sources stay in `conspectus` as adapters over the framework's
 controls. The framework starts no processes and writes no files, so it adds no
@@ -1818,7 +1825,8 @@ migration helper and harmless if it fails.
   crate, which depends on nothing from `conspectus` (ADR 0150). Its control set
   and the house rules every control follows are ADR 0151, and it owns the TUI's
   third-party widget crates, replacing three shims with in-tree code
-  (ADR 0152).
+  (ADR 0152). CI rehearses moving it into a repository of its own on every
+  change (ADR 0199).
 
 ## Remaining Design Questions
 

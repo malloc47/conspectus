@@ -31,7 +31,9 @@ chosen to carry none of the host's vocabulary, so renaming it is mechanical.
 The crate is built to leave its current repository by a directory lift, so its
 documentation has to stand alone: someone who has never seen the host should
 be able to learn what the framework is, add a control, and find the rules that
-keep it independent from these pages.
+keep it independent from these pages. The host rehearses the lift on every
+change, and [`docs/separation.md`](docs/separation.md) gives the real move
+step by step.
 
 Every module the control set names has landed: the foundations (theme,
 glyphs, text, scroll, chips, ages, frames, selection), the controls (text
@@ -103,6 +105,9 @@ process exists for the rare exception. The rules and the process are in
   a change catalogs visible differences, and how to test.
 - [`docs/roadmap.md`](docs/roadmap.md): controls and capabilities other
   frameworks ship that may come later, and what is deliberately left out.
+- [`docs/separation.md`](docs/separation.md): leaving the host repository:
+  what the rehearsal of the move checks, how to read its failures, and the
+  real move, step by step.
 - [`docs/decisions/README.md`](docs/decisions/README.md): the index of
   framework-scoped decisions and the policy for adding to it.
 

@@ -78,7 +78,7 @@ keeps a widget from importing `crate::tui::Msg` or a harness color.
 
 - Moving the framework to its own repository later is a directory lift plus a
   separation rehearsal story that proves it builds, tests, and documents itself
-  alone.
+  alone. ADR 0199 makes the rehearsal a CI job that runs on every change.
 - Each extraction is a sequence of small, reviewable stories rather than one
   rewrite. Each leaves `main` releasable.
 - The compiler rejects `Msg`, `App`, `RowKind`, and domain theme fields inside

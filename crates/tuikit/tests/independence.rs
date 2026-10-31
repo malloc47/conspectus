@@ -65,9 +65,9 @@ const LOCK_FILES: &[&str] = &["Cargo.lock", "flake.lock"];
 /// Fewest manifests the manifest scan may visit.
 const MIN_MANIFESTS: usize = 1;
 /// Fewest files the vocabulary scan may visit. The manifest, the README,
-/// the 113 pages under `docs` (70 decision records among them), the glyph
+/// the 115 pages under `docs` (71 decision records among them), the glyph
 /// script, 236 files under `src` (20 goldens among them), and six test
-/// files besides this one make 358 today; the minimum is a little under
+/// files besides this one make 360 today; the minimum is a little under
 /// three quarters of that.
 const MIN_VOCABULARY_FILES: usize = 260;
 /// Fewest non-test Rust files the process and write scan may visit: 140
