@@ -80,7 +80,7 @@ pub fn verdict(name: &str, scan: &Scan, minimum: usize) -> Result<(), String> {
     }
     Err(format!(
         "the {name} guard failed:\n{}\n\nFix the design first. To request a \
-         reviewed exception, follow the process in crates/tuikit/docs/contributing.md.",
+         reviewed exception, follow the process in the crate's docs/contributing.md.",
         problems.join("\n")
     ))
 }

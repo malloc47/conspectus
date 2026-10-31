@@ -101,10 +101,13 @@ fn the_walk_lists_files_sorted_and_skips_build_and_hidden_directories() {
     );
     assert_eq!(files(&root.join("src/lib.rs")), [root.join("src/lib.rs")]);
     assert!(files(&root.join("no-such-directory")).is_empty());
+    // Only the part below the root counts: the crate itself may sit under a
+    // directory named `target`.
     let crate_files = files(root);
-    assert!(
-        crate_files
-            .iter()
-            .all(|path| !path.components().any(|part| part.as_os_str() == "target"))
-    );
+    assert!(crate_files.iter().all(|path| {
+        let below = path
+            .strip_prefix(root)
+            .expect("walked paths stay under the root");
+        !below.components().any(|part| part.as_os_str() == "target")
+    }));
 }

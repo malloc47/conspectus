@@ -29,11 +29,11 @@ snippet from memory, so no leaking fixture ever sits on disk.
 | Guard | What it checks |
 | --- | --- |
 | Manifest | Every `Cargo.toml` under the crate is parsed. A dependency on the host (by key or by a `package =` rename) or on any crate outside the runtime and development allowlists fails. Build dependencies are never allowed: a build script is arbitrary code. The one dependency not on a list is the crate itself, by path `.`, as a development dependency: that is how its own tests turn on its `testkit` feature, and it adds no package. |
-| Vocabulary | No file in the crate (source, documentation, tests, manifest, README) uses a word from the `DOMAIN_TERMS` list, except the reviewed `VOCABULARY_EXCEPTIONS`. The guard file itself is the one file skipped, because it has to contain the words it tests for. |
+| Vocabulary | No file in the crate (source, documentation, tests, manifest, README) uses a word from the `DOMAIN_TERMS` list, except the reviewed `VOCABULARY_EXCEPTIONS`. The guard file itself is skipped, because it has to contain the words it tests for, and so are lock files by name (`LOCK_FILES`: `Cargo.lock`, `flake.lock`), because they list third-party package names the crate does not choose. A repository of its own commits both. |
 | Process and write | Non-test Rust source starts no process and writes, renames, or deletes no file. Read-only filesystem access (`File::open`, `fs::read`, `fs::read_dir`, `fs::metadata`) is allowed. Hosts supply sinks (a clipboard `Write`) and sources (path completion) instead. |
 
 The policy lists are constants at the top of the guard file:
-`RUNTIME_DEPENDENCIES`, `DEV_DEPENDENCIES`, `DOMAIN_TERMS`,
+`RUNTIME_DEPENDENCIES`, `DEV_DEPENDENCIES`, `DOMAIN_TERMS`, `LOCK_FILES`,
 `VOCABULARY_EXCEPTIONS`, `CAPABILITY_NEEDLES`, `CAPABILITY_EXCEPTIONS`, and
 the file-count minimums described below. Documentation cannot quote the word
 list without tripping the guard, so it points at the constant instead.

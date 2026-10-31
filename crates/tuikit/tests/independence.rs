@@ -9,7 +9,8 @@
 //!    dependencies off the allowlist.
 //! 2. **Vocabulary** (`vocabulary_scan`): host-domain words anywhere in the
 //!    crate, this file excepted (`GUARD_FILE`) because it has to contain the
-//!    words to test for them.
+//!    words to test for them, and lock files (`LOCK_FILES`) because they
+//!    list third-party package names.
 //! 3. **Process and write** (`capability_scan`): process spawning and file
 //!    writes in non-test source.
 //!
@@ -54,6 +55,12 @@ use source_scan::{
 /// path, because the word list and the self-test snippets must contain the
 /// words they test for.
 const GUARD_FILE: &str = "tests/independence.rs";
+
+/// Machine-written files the vocabulary scan skips, by file name: a lock
+/// file lists third-party package names and where they come from, which
+/// are not the crate's words to choose. The crate holds none while it
+/// shares a workspace; a repository of its own commits its lockfiles.
+const LOCK_FILES: &[&str] = &["Cargo.lock", "flake.lock"];
 
 /// Fewest manifests the manifest scan may visit.
 const MIN_MANIFESTS: usize = 1;
@@ -407,12 +414,21 @@ fn term_hits(text: &str, listed: &[&'static str]) -> Vec<(usize, &'static str)> 
     hits
 }
 
-/// Scans every file except `GUARD_FILE` for the listed words.
+/// Whether `path` is a lock file by its file name, at any depth.
+fn is_lock_file(path: &str) -> bool {
+    LOCK_FILES.contains(&path.rsplit('/').next().unwrap_or(path))
+}
+
+/// Scans every file except `GUARD_FILE` and the lock files for the listed
+/// words.
 fn vocabulary_scan(sources: &[Source], listed: &[&'static str], exceptions: &[Exception]) -> Scan {
     let mut used = vec![false; exceptions.len()];
     let mut violations = Vec::new();
     let mut visited = 0;
-    for source in sources.iter().filter(|source| source.path != GUARD_FILE) {
+    for source in sources
+        .iter()
+        .filter(|source| source.path != GUARD_FILE && !is_lock_file(&source.path))
+    {
         visited += 1;
         for (line, term) in term_hits(&source.text, listed) {
             let excused = exceptions
@@ -741,6 +757,28 @@ fn vocabulary_scan_skips_only_the_guard_file_by_name() {
     assert_eq!(scan.visited, 2, "the guard file is excluded from the count");
     assert_eq!(scan.violations.len(), 2);
     assert!(scan.violations.iter().all(|p| !p.starts_with(GUARD_FILE)));
+}
+
+#[test]
+fn vocabulary_scan_skips_lock_files_by_their_exact_name() {
+    let leak = "name = \"pin-project-lite\"\n";
+    let sources = [
+        Source::new("Cargo.lock", leak),
+        Source::new("examples/demo/flake.lock", leak),
+        Source::new("docs/Cargo.lock.md", leak),
+        Source::new("Cargo.toml", leak),
+        Source::new("src/cargo.lock", leak),
+    ];
+    let scan = vocabulary_scan(&sources, DOMAIN_TERMS, &[]);
+    assert_eq!(scan.visited, 3, "lock files are excluded from the count");
+    assert_eq!(
+        scan.violations,
+        [
+            "docs/Cargo.lock.md:1: uses the host-domain word `pin`",
+            "Cargo.toml:1: uses the host-domain word `pin`",
+            "src/cargo.lock:1: uses the host-domain word `pin`",
+        ]
+    );
 }
 
 #[test]
