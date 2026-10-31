@@ -567,6 +567,15 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 
 ### Fixed
 
+- **The right pane's breadcrumb names a repo by its directory.** A hop
+  for a non-bare repo read `.git` (the last part of its `.git`
+  directory's path), and two such repos in one chain read `.git·.git`
+  twice. A repo is now its working directory's name (`project`; a bare
+  repo keeps `project.git`), and two hops with one name carry the start
+  of the short id their panes show (`project·c955`, `project·41f0`)
+  where a repo, checkout, workspace, or branch carried the end of its
+  path, which two in different places share. A checkout and its repo
+  often share a name now, so both carry that suffix.
 - **A refresh keeps the Preview where you scrolled it.** The periodic
   refresh, `r`, and a filter or sort change put a Preview scrolled with
   `J`/`K` (up a transcript, down a pane capture or a PR body) back at

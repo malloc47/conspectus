@@ -1488,6 +1488,14 @@ fold · Backspace back`), with `Enter`'s word for what it does on the
 cursor's row: `copy` on a field, `follow` on a related row, `fold` on
 the `Other` header. The help page (`?`) lists every key above.
 
+A drilled pane's title shows the chain that led there (`◄ ● claude ›
+◇ project › ◆ tools · depth 3`), each hop named after its node: a repo
+by its working directory (`project` for `~/repos/project/.git`), a bare
+repo by its own directory (`project.git`). Two hops with one name carry
+four characters of the `id` field each pane shows (a session's key or a
+mux's name ends with them; a repo's, checkout's, or branch's short id
+starts with them), so `◆ project·c955` and `◆ project·41f0` read apart.
+
 ## The status bar's hints
 
 The status bar names the keys of whatever has them, worded for where you
