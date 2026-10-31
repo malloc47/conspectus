@@ -558,8 +558,11 @@ the first eight characters of its id. Turns count from 1, as in the
 viewer; roles read `you` and `ai`, and kinds read `message`, `tool
 call`, `tool output`, and so on, as in the TUI. Per-message rows run in
 turn order within a session (`flat` rows run newest first across all
-sessions, so the `SESSION` column says where each one lives). The snippet is cut around the match, on
-word boundaries where it can, to fit `--width`. When nothing matches, the
+sessions, so the `SESSION` column says where each one lives). The snippet is cut to fit `--width`
+the way the TUI cuts it: the match stays, two thirds of the room it
+leaves goes to the text after it, cuts fall on word boundaries where they
+can, and a cut side ends in `…`. Every character of the snippet is kept,
+so the table reads as the JSON's `snippet.text`. When nothing matches, the
 table is empty and stderr says `No sessions match "<query>"`.
 
 A session with more matching messages than a search keeps (the newest

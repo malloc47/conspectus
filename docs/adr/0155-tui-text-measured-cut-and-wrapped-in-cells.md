@@ -8,6 +8,9 @@ and Smart wraps break rows by the shared rule below, so a word that ends
 exactly at the preview's edge stays on its row. Amends ADR 0076 (scrollbar
 choice): a scrolled pane's content length is the row count it draws, not an
 estimate. ADR 0147's ASCII-only matcher moves into the framework unchanged.
+Item 8's follow-up is done (CSP-774): the CLI search table crops its
+snippet with `fit_snippet`, keeping every character, so one snippet fit
+serves every surface.
 
 ## Context
 

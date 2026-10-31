@@ -77,7 +77,13 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   snippet, in the TUI and in `conspectus search --json` (`snippet.text`),
   is at most 160 terminal cells with its `…` marks (it was 160 characters
   plus the marks) and spends two thirds of its room after the match,
-  cutting on word edges, instead of centering the match.
+  cutting on word edges, instead of centering the match. The
+  `conspectus search` table now cuts its snippet column to `--width` the
+  same way (it centered the match): at 80 columns a long message reads
+  `…eight nine wombat ten eleven twelve…` where it read `…seven eight
+  nine wombat ten eleven…`. A snippet of text without spaces near the
+  match (CJK) can show only the match once cut, as it already did in the
+  TUI. The JSON is unchanged.
 - **Ages read one way across the TUI.** The Search view's match, pane,
   and pane-line rows color their age by how recent it is, as every other
   row does (they were all gray). The search status says `scanned 0s ago`
