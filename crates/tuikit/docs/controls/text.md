@@ -138,18 +138,38 @@ count and the drawing cannot disagree.
 highlight with the text, and, when the text is wider than the budget, keeps
 the match and spends the rest on context: two thirds after the match, the
 rest before it. Each cut side ends in the mark, a cut that would split a
-word moves to the word's edge unless that gives up the room next to the
-match, and a match wider than the budget shows as much of its start as
-fits. The highlight is widened to whole graphemes.
+word moves to the word's edge toward the match, and a match wider than the
+budget shows as much of its start as fits. The highlight is widened to
+whole graphemes.
 
 A word ends at a blank and beside a wide character: Chinese and Japanese
 text puts no spaces between its words, and a line may break between any
-two of its characters, so a cut may too. When the only edge on a side is
-the one beside the match (a long path or address there, or narrow text
-with no blank), moving to it would leave that side empty, so the cut
-stays between graphemes and the side shows the part that fits. A side
-with room for one grapheme past the blanks beside the match therefore
-never comes back empty.
+two of its characters, so a cut may too.
+
+When the only edge on a side is the one beside the match, past the blanks
+there, moving to it leaves that side empty. For a word that is the better
+result: a cut word (`…ine wombat ten…`) reads worse than none (`…wombat
+ten…`), so prose, the common case, is only ever cut at whole words. A
+token keeps the part that fits instead, cut between its graphemes
+(`…oml wombat https:/…`). A stretch of text between blanks is a token
+when it
+
+- holds a wide character: unspaced Chinese or Japanese, an emoji;
+- is wider than 24 cells, which no word in common use reaches with its
+  punctuation (`"internationalization",` is 23) and a commit hash (40) or
+  a dashed id (36) passes; or
+- has a `/`, `\`, `_`, `.`, or `:` with a character before it and two
+  letters after it: a path, a file name, an address, a code name
+  (`docs/notes.md`, `example.com`, `snake_case`, `std::fmt`).
+  Abbreviations (`e.g.`, `U.S.`), figures (`3.14`, `10:30`, `24/7`), and
+  closing punctuation do not count; `and/or` does.
+
+A side with room for one grapheme past the blanks beside the match
+therefore comes back empty only when the stretch there is a word too wide
+for its room. A cut with no edge between it and the match (a match inside
+a word) stays between graphemes. The fits of a generated English corpus at
+every budget are held to a golden (`src/text/goldens/prose_snippets.golden`),
+so a change to how prose is cut shows there line by line.
 
 ### Giving way
 
@@ -282,8 +302,10 @@ that draw it follow those rules.
   when too long, between graphemes. Scripts written without spaces (Chinese,
   Japanese, Thai) wrap between graphemes; a line-breaking table would plug
   in where a row's break is chosen. A snippet's cut has one piece of such
-  a table, the edge beside a wide character; Thai, set in narrow
-  characters, is cut between graphemes.
+  a table, the edge beside a wide character. Thai, set in narrow
+  characters with no spaces between its words, is a word to the cut until
+  it runs past 24 cells, so a shorter Thai phrase too wide for its room
+  leaves its side empty; a script-aware token rule would keep part of it.
 - **Folding beyond ASCII.** `find_ci` could take a folding mode that keeps a
   byte map from folded text back to the source, which a highlight would then
   read.

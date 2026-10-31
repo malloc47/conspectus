@@ -236,15 +236,9 @@ fn a_cropped_snippet_keeps_the_match_and_cuts_on_word_edges() {
             !inner.starts_with(' ') && !inner.ends_with(' '),
             "{cropped}"
         );
-        let shown: Vec<&str> = inner.split(' ').collect();
-        let at = shown.iter().position(|word| *word == "needle").unwrap();
-        for (i, word) in shown.iter().enumerate() {
-            // A side whose only word is too wide for its room shows the
-            // part that fits rather than nothing.
-            let alone_on_its_side =
-                (i == 0 && at == 1) || (i + 1 == shown.len() && at + 2 == shown.len());
+        for word in inner.split(' ') {
             assert!(
-                words.contains(word) || (alone_on_its_side && text.contains(word)),
+                words.contains(&word),
                 "{budget}: `{word}` is cut: {cropped}"
             );
         }
@@ -256,7 +250,9 @@ fn a_cropped_snippet_keeps_the_match_and_cuts_on_word_edges() {
         cropped.starts_with('…') && cropped.ends_with('…'),
         "{cropped}"
     );
-    assert_eq!(fit_snippet(text, &range, Some(14), false), "…a needle eps…");
+    // A side whose only word is too wide for its room shows nothing
+    // rather than a piece of the word.
+    assert_eq!(fit_snippet(text, &range, Some(14), false), "…needle…");
     let whole = fit_snippet(text, &range, Some(text.len()), false);
     assert_eq!(whole, text, "a snippet that fits is not cut");
 }

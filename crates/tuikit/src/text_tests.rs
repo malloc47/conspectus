@@ -364,6 +364,49 @@ fn has_context(piece: &str) -> bool {
     piece.chars().any(|c| !c.is_whitespace() && c != '…')
 }
 
+/// Whether `run`, a stretch between blanks, is a token by the rule the
+/// fit documents: it holds a wide character, it is wider than 24 cells,
+/// or a separator in it has a character before it and two letters after.
+fn is_token(run: &str) -> bool {
+    let cells = measure::clusters(run);
+    let letter =
+        |cell: &measure::Cluster<'_>| cell.text.chars().next().is_some_and(char::is_alphabetic);
+    let joins_names = (1..cells.len()).any(|at| {
+        ["/", "\\", "_", ".", ":"].contains(&cells[at].text)
+            && cells
+                .get(at + 1..at + 3)
+                .is_some_and(|next| next.iter().all(letter))
+    });
+    joins_names || cells.iter().any(measure::Cluster::is_wide) || width(run) > 24
+}
+
+/// Whether the fit must show context on `side` (the text before the
+/// match, or after it when `after` is set) given `room` cells there: the
+/// room reaches the nearest grapheme that is not a blank, and the stretch
+/// between blanks it belongs to touches the match, is a token, or fits
+/// the room whole. A word that does not fit, apart from the match, may
+/// leave the side empty.
+fn context_due(side: &str, after: bool, room: usize) -> bool {
+    if !reach_to_context(side, after).is_some_and(|cells| cells <= room) {
+        return false;
+    }
+    let (run, far) = if after {
+        let lead = side.len() - side.trim_start_matches(' ').len();
+        let end = side[lead..].find(' ').map_or(side.len(), |at| lead + at);
+        (&side[lead..end], width(&side[..end]))
+    } else {
+        let trimmed = side.trim_end_matches(' ');
+        let start = trimmed.rfind(' ').map_or(0, |at| at + 1);
+        (&trimmed[start..], width(&side[start..]))
+    };
+    let touches = if after {
+        !side.starts_with(' ')
+    } else {
+        !side.ends_with(' ')
+    };
+    touches || is_token(run) || far <= room
+}
+
 #[test]
 fn snippets_keep_context_beside_the_match_when_room_allows() {
     let mut generator = Gen(0x2468_ace0);
@@ -393,10 +436,10 @@ fn snippets_keep_context_beside_the_match_when_room_allows() {
                 let spare = budget - width(&target);
                 let after_room = (spare * 2 / 3).saturating_sub(1);
                 let before_room = (spare - spare * 2 / 3).saturating_sub(1);
-                if reach_to_context(&before, false).is_some_and(|cells| cells <= before_room) {
+                if context_due(&before, false, before_room) {
                     assert!(has_context(&snippet.text[..shown.start]), "before: {case}");
                 }
-                if reach_to_context(&after, true).is_some_and(|cells| cells <= after_room) {
+                if context_due(&after, true, after_room) {
                     assert!(has_context(&snippet.text[shown.end..]), "after: {case}");
                 }
             }

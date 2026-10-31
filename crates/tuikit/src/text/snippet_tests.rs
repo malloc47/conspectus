@@ -142,9 +142,94 @@ fn a_cut_still_moves_to_a_word_edge_that_keeps_context() {
         at(63),
         "…then chose the quokka design for the upgrade steps after…"
     );
-    // The word before the match is wider than the room, and its edge is
-    // the one beside the match: the word is cut rather than dropped.
-    assert_eq!(at(16), "…he quokka desi…");
+    // The words on both sides are wider than their room, and their edges
+    // are the ones beside the match: they go whole rather than show a
+    // piece.
+    assert_eq!(at(16), "…quokka…");
+}
+
+/// Numbers spelled out, around a match.
+const COUNTING: &str = "one two three four five six seven eight nine wombat ten eleven twelve thirteen fourteen fifteen sixteen";
+
+#[test]
+fn a_word_too_wide_for_its_room_leaves_its_side_empty() {
+    let at = |budget| fit_snippet(COUNTING, wombat(COUNTING), budget, &[]).text;
+    // Up to 21 cells the room before the match is narrower than `nine`.
+    assert_eq!(at(14), "…wombat ten…");
+    assert_eq!(at(21), "…wombat ten…");
+    assert_eq!(at(22), "…nine wombat ten…");
+    assert_eq!(at(24), "…nine wombat ten eleven…");
+    // At every budget, every word shown is whole.
+    for budget in 8..width(COUNTING) {
+        let fitted = fit_snippet(COUNTING, wombat(COUNTING), budget, &[]);
+        for word in fitted.text.trim_matches('…').split_whitespace() {
+            assert!(
+                COUNTING.split_whitespace().any(|whole| whole == word),
+                "{budget}: `{word}` is cut in {:?}",
+                fitted.text
+            );
+        }
+    }
+}
+
+#[test]
+fn a_token_beside_the_match_keeps_its_part_where_a_word_goes() {
+    // The same budget, the same widths: a file name and a word of eleven
+    // cells before the match, a long name and a long word after it.
+    let token = "see config.toml wombat averyveryverylongidentifiername and on";
+    let word = "see conformance wombat incomprehensibilities and more and on";
+    let at = |text| fit_snippet(text, wombat(text), 24, &[]).text;
+    assert_eq!(at(token), "…toml wombat averyveryv…");
+    assert_eq!(at(word), "…wombat…");
+}
+
+#[test]
+fn a_token_is_told_from_a_word_by_its_characters_and_width() {
+    let token = |run: &str| is_token(&clusters(run));
+    for run in [
+        "/usr/local/share",
+        "docs/notes.md",
+        "config.toml",
+        "https://example.com/a",
+        r"C:\Users\me",
+        "snake_case",
+        "std::fmt",
+        "26f38b8e93bb039e8117b54a4f6b9a015b27ba5e",
+        "11111111-aaaa-2222-bbbb-333333333333",
+        "日本語のテキスト",
+        "見てwombat",
+        "\u{1f600}",
+        // Reads as prose, but joins two names as a path does.
+        "and/or",
+    ] {
+        assert!(token(run), "`{run}` is a token");
+    }
+    for run in [
+        "wombat",
+        "release,",
+        "(notes).",
+        "\"internationalization\",",
+        "state-of-the-art",
+        "mother-in-law's",
+        "don't",
+        "e.g.",
+        "i.e.,",
+        "U.S.",
+        "Ph.D.",
+        "3.14",
+        "$12.99",
+        "10:30",
+        "24/7",
+        "end...",
+        "_emphasis_",
+        "naïve",
+        "garden\u{2014}river",
+    ] {
+        assert!(!token(run), "`{run}` is a word");
+    }
+    // Wider than 24 cells, a run with no separator is a token.
+    assert!(!token(&"a".repeat(24)));
+    assert!(token(&"a".repeat(25)));
 }
 
 #[test]

@@ -29,10 +29,16 @@ pub struct Snippet {
 /// - the cut keeps the match and spends the room left on context,
 ///   favoring the text after the match (two thirds of the spare cells);
 /// - each cut side ends in the ellipsis mark, inside the budget;
-/// - a cut that would split a word moves to the word's edge, unless that
-///   would give up the room next to the match: when the only edge on
-///   that side is the one beside the match, the cut stays between
-///   graphemes and the side keeps its context;
+/// - a cut that would split a word moves to the word's edge toward the
+///   match, even when the only edge on that side is the one beside the
+///   match and the side shows nothing: a cut word reads worse than none;
+/// - a token is the exception: when the only edge is the one beside the
+///   match, a token there keeps the part that fits, cut between
+///   graphemes. A token is a stretch between blanks that holds a wide
+///   character, is wider than 24 cells (a hash, a long id), or has a
+///   `/`, `\`, `_`, `.`, or `:` with a character before it and two
+///   letters after it (a path, an address, a code name; not `e.g.`,
+///   `3.14`, or `10:30`);
 /// - words end at blanks and beside wide characters: Chinese and
 ///   Japanese text puts no spaces between its words, so a cut may fall
 ///   between any two of its characters;
@@ -144,6 +150,48 @@ fn is_edge(cells: &[Cluster<'_>], at: usize) -> bool {
     }
 }
 
+/// The widest an ordinary word runs, in cells. Words in common use stay
+/// within it with the punctuation and quotes around them
+/// (`"internationalization",` is 23 cells), while a token with no
+/// separator in it is wider: a commit hash is 40 cells, a dashed id 36.
+const WORD_CELLS: usize = 24;
+
+/// The separators that join the names of a path, an address, or a code
+/// name.
+const SEPARATORS: &[&str] = &["/", "\\", "_", ".", ":"];
+
+/// Whether `run`, a stretch of text between blanks, reads as a token
+/// rather than a word: it holds a wide character (unspaced Chinese or
+/// Japanese, an emoji), it is wider than [`WORD_CELLS`], or it joins
+/// names with a separator. A separator joins names when a character
+/// comes before it and two letters after it (`docs/notes.md`,
+/// `snake_case`, `example.com`, `std::fmt`); abbreviations (`e.g.`),
+/// figures (`3.14`, `10:30`, `24/7`), and a word's closing punctuation
+/// do not.
+fn is_token(run: &[Cluster<'_>]) -> bool {
+    let is_letter = |cell: &Cluster<'_>| cell.text.chars().next().is_some_and(char::is_alphabetic);
+    let joins_names = (1..run.len()).any(|at| {
+        SEPARATORS.contains(&run[at].text)
+            && run
+                .get(at + 1..at + 3)
+                .is_some_and(|next| next.iter().all(is_letter))
+    });
+    joins_names || run.iter().any(Cluster::is_wide) || cells_of(run) > WORD_CELLS
+}
+
+/// The stretch of text between blanks around `cells[at]`.
+fn run_around<'a, 'b>(cells: &'b [Cluster<'a>], at: usize) -> &'b [Cluster<'a>] {
+    let mut from = at;
+    while from > 0 && !cells[from - 1].is_blank() {
+        from -= 1;
+    }
+    let mut to = at;
+    while to < cells.len() && !cells[to].is_blank() {
+        to += 1;
+    }
+    &cells[from..to]
+}
+
 /// `from` moved forward past blanks, stopping at `limit`.
 fn skip_blanks(cells: &[Cluster<'_>], from: usize, limit: usize) -> usize {
     let mut at = from;
@@ -213,15 +261,17 @@ fn crop(text: &str, highlight: &Range<usize>, budget: usize) -> Snippet {
         end += 1;
     }
 
-    // Start and stop on a word's edge when the cut would split a word,
-    // unless the only edge on that side is the one next to the match:
-    // moving there would give up all the context on that side, so the
-    // cut stays between graphemes instead.
+    // Start and stop on a word's edge when the cut would split a word.
+    // When the only edge on that side is the one next to the match, past
+    // the blanks there, moving to it gives up all the context on that
+    // side: a word goes whole, but a token (a path, an address, unspaced
+    // CJK text) keeps the part that fits, the cut staying between its
+    // graphemes. A cut with no edge between it and the match stays put.
     if !is_edge(&cells, start)
         && let Some(edge) = (start + 1..=first).find(|&at| is_edge(&cells, at))
     {
         let kept = skip_blanks(&cells, edge, first);
-        if kept < first {
+        if kept < first || (edge < first && !is_token(run_around(&cells, start))) {
             start = kept;
         }
     }
@@ -230,7 +280,7 @@ fn crop(text: &str, highlight: &Range<usize>, budget: usize) -> Snippet {
         && let Some(edge) = (last..end).rev().find(|&at| is_edge(&cells, at))
     {
         let kept = trim_blanks(&cells, last, edge);
-        if kept > last {
+        if kept > last || (edge > last && !is_token(run_around(&cells, end - 1))) {
             end = kept;
         }
     }
@@ -256,3 +306,7 @@ fn crop(text: &str, highlight: &Range<usize>, budget: usize) -> Snippet {
 #[cfg(test)]
 #[path = "snippet_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "snippet_prose_tests.rs"]
+mod prose_tests;

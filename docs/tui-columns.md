@@ -745,18 +745,18 @@ a hit row, so it names its session first.
 | 2 | Name | the session's alias, title, or mux name, or the start of its id | always; narrows to 8 cells when the row is narrow | a fifth of the row's width, 12 to 32 cells |
 | 3 | Turn | `turn N · kind`, counting from 1; the kind is `message`, `summary`, `tool call`, `tool output`, or `thinking` | always | dim; 22 cells in a row of 100 or more, 20 from 78, else 14 |
 | 4 | Age | time since the turn was written, or a dash | gives way after the chip | see [Age](#age) |
-| 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries (at a blank, or beside a two-cell character such as CJK); a side whose only word is wider than its room shows the part that fits; the match in the theme's match style (bold, underlined) | always: the cells before it give way so it keeps 20 cells | dim italic |
+| 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries (at a blank, or beside a two-cell character such as CJK); a side whose only word is wider than its room shows nothing, unless that word is a token (a path, an address, a long name, CJK text), which shows the part that fits; the match in the theme's match style (bold, underlined) | always: the cells before it give way so it keeps 20 cells | dim italic |
 
 <!-- frame: keys="6sthe<BackTab><C-f>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
 │►   project 0.0   line 17           0s ready once they pass.   │
-│    project 0.0   line 6            0s …xpand the notes into a…│
+│    project 0.0   line 6            0s …the notes into a…      │
 │    claude-code…  turn 3 · mess…  107d Expand the notes into a…│
 │    claude-code…  turn 4 · mess…  107d …since the last release…│
 │    pi in ateli…  turn 1 · mess…  107d …cover the fork index…  │
-│    pi in ateli…  turn 2 · mess…  107d …sing, the empty index,…│
+│    pi in ateli…  turn 2 · mess…  107d …the empty index,…      │
 ```
 
 <!-- frame: keys="6sthe<C-f>f<Up><Space><Esc>" width=150 height=20 -->
@@ -815,10 +815,10 @@ column, then the mux's name and the pane's place, then:
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
 │►   project 0.0   line 16           0s from feature/extra into…│
 │    project 0.0   line 7            0s feature/extra.          │
-│    project 0.0   line 3            0s …mit, feature notes,…   │
+│    project 0.0   line 3            0s …feature notes,…        │
 │    project 0.0   line 1            0s …on feature/extra…      │
 │    claude-code…  turn 1 · mess…  107d …on feature/extra…      │
-│    claude-code…  turn 2 · mess…  107d …mit, feature notes,…   │
+│    claude-code…  turn 2 · mess…  107d …feature notes,…        │
 │    claude-code…  turn 3 · mess…  107d …PR from feature/extra. │
 │    claude-code…  turn 4 · mess…  107d …from feature/extra…    │
 ```
