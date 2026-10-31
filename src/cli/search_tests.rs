@@ -147,7 +147,7 @@ fn color_bolds_the_match_and_a_cut_keeps_it_in_view() {
     assert!(cut.contains("\x1b[1mneedle\x1b[0m"), "{cut:?}");
     assert!(cut.starts_with('…') && cut.ends_with('…'), "{cut:?}");
     // A match wider than the line is cut to what fits.
-    let (wide, _) = crop_around(text, &range, 4);
+    let wide = fit_snippet(text, &range, Some(4), false);
     assert!(display_width(&wide) <= 4, "{wide:?}");
     let empty = fit_snippet(text, &(0..0), None, true);
     assert_eq!(empty, text);
@@ -213,41 +213,103 @@ fn an_unnamed_session_shows_eight_characters_of_its_key() {
     assert!(!text.contains("012345678"), "{text}");
 }
 
+/// Where the bold match sits in a fitted snippet: the plain text before
+/// it, the match, and the text after it.
+fn split_at_match(fitted: &str) -> (&str, &str, &str) {
+    let (before, rest) = fitted.split_once("\x1b[1m").expect("a bold match");
+    let (matched, after) = rest.split_once("\x1b[0m").expect("the bold ends");
+    (before, matched, after)
+}
+
 #[test]
 fn a_cropped_snippet_keeps_the_match_and_cuts_on_word_edges() {
     let text = "alpha beta gamma delta needle epsilon zeta eta theta iota kappa";
+    let words: Vec<&str> = text.split(' ').collect();
     let start = text.find("needle").unwrap();
     let range = start..start + 6;
-    for budget in [14, 20, 30, 40] {
-        let (cropped, hl) = crop_around(text, &range, budget);
+    for budget in [8, 14, 20, 30, 40, 60] {
+        let cropped = fit_snippet(text, &range, Some(budget), false);
         assert!(display_width(&cropped) <= budget, "{budget}: {cropped}");
-        assert_eq!(&cropped[hl], "needle", "{budget}: {cropped}");
+        assert!(cropped.contains("needle"), "{budget}: {cropped}");
+        let inner = cropped.trim_matches('…');
+        assert!(
+            !inner.starts_with(' ') && !inner.ends_with(' '),
+            "{cropped}"
+        );
+        for word in inner.split(' ') {
+            assert!(
+                words.contains(&word),
+                "{budget}: `{word}` is cut: {cropped}"
+            );
+        }
+        let bold = fit_snippet(text, &range, Some(budget), true);
+        assert_eq!(split_at_match(&bold).1, "needle", "{budget}: {bold:?}");
     }
-    let (cropped, _) = crop_around(text, &range, 30);
+    let cropped = fit_snippet(text, &range, Some(30), false);
     assert!(
         cropped.starts_with('…') && cropped.ends_with('…'),
         "{cropped}"
     );
-    let inner = cropped.trim_matches('…');
-    assert!(!inner.starts_with(' '), "{cropped}");
-    let bold = fit_snippet(text, &range, Some(30), true);
-    assert!(bold.contains("\x1b[1mneedle\x1b[0m"), "{bold:?}");
+    let whole = fit_snippet(text, &range, Some(text.len()), false);
+    assert_eq!(whole, text, "a snippet that fits is not cut");
+}
+
+#[test]
+fn a_cut_gives_the_text_after_the_match_more_room() {
+    // The TUI's fit: two thirds of the cells the match leaves go after it,
+    // so a cut snippet reads on from the match rather than up to it.
+    let text = "one two three four five six seven needle eight nine ten eleven twelve thirteen";
+    let start = text.find("needle").unwrap();
+    let range = start..start + 6;
+    for budget in [24, 30, 40, 50] {
+        let bold = fit_snippet(text, &range, Some(budget), true);
+        let (before, _, after) = split_at_match(&bold);
+        assert!(
+            display_width(after) > display_width(before),
+            "{budget}: {bold:?}"
+        );
+    }
+    assert_eq!(
+        fit_snippet(text, &range, Some(30), false),
+        "…seven needle eight nine ten…"
+    );
 }
 
 #[test]
 fn a_wide_character_snippet_is_cropped_by_cells_without_splitting() {
     let text = "日本語のテキスト needle もっと日本語のテキスト";
     let start = text.find("needle").unwrap();
-    let (cropped, hl) = crop_around(text, &(start..start + 6), 24);
-    assert!(display_width(&cropped) <= 24, "{cropped}");
-    assert_eq!(&cropped[hl], "needle");
+    let range = start..start + 6;
+    for budget in [8, 12, 16, 20, 24, 30] {
+        let cropped = fit_snippet(text, &range, Some(budget), false);
+        assert!(display_width(&cropped) <= budget, "{budget}: {cropped}");
+        assert!(cropped.contains("needle"), "{budget}: {cropped}");
+        assert!(
+            text.contains(cropped.trim_matches('…')),
+            "{budget}: a cut falls between characters: {cropped}"
+        );
+        let bold = fit_snippet(text, &range, Some(budget), true);
+        assert_eq!(split_at_match(&bold).1, "needle", "{budget}: {bold:?}");
+    }
+    // A wide match: the cut never halves a two-cell character.
+    let at = text.find("テキスト").unwrap();
+    let wide = at..at + "テキスト".len();
+    for budget in [3, 5, 7, 9] {
+        let cropped = fit_snippet(text, &wide, Some(budget), false);
+        assert!(display_width(&cropped) <= budget, "{budget}: {cropped}");
+        assert!(cropped.ends_with('…'), "{budget}: {cropped}");
+        assert!(text.contains(cropped.trim_end_matches('…')), "{cropped}");
+    }
 }
 
 #[test]
 fn a_match_wider_than_the_budget_is_itself_cut() {
     let text = format!("{} tail", "n".repeat(50));
-    let (cropped, _) = crop_around(&text, &(0..50), 10);
+    let cropped = fit_snippet(&text, &(0..50), Some(10), false);
     assert!(display_width(&cropped) <= 10, "{cropped}");
+    assert!(cropped.ends_with('…'), "{cropped}");
+    let bold = fit_snippet(&text, &(0..50), Some(10), true);
+    assert_eq!(split_at_match(&bold).1, "n".repeat(9), "{bold:?}");
 }
 
 #[test]

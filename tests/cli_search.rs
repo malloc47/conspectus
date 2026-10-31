@@ -196,6 +196,73 @@ fn the_table_has_a_header_one_row_per_session_and_exit_zero() {
     assert!(lines.iter().all(|l| l.chars().count() <= 100), "{out}");
 }
 
+/// A sentence that mentions "wombat" in its middle, long enough that a
+/// narrow table has to cut its snippet.
+const LONG_SENTENCE: &str = "one two three four five six seven eight nine wombat ten eleven \
+                             twelve thirteen fourteen fifteen sixteen seventeen eighteen";
+
+/// One more session, whose only message is [`LONG_SENTENCE`].
+fn long_message_world() -> World {
+    let world = world();
+    let dir = world.claude.join("projects").join("-home-user-project");
+    let line = record(
+        "cccccccc-0000-0000-0000-000000000003",
+        "user",
+        "c1",
+        "null",
+        "2026-10-03T08:00:00.000Z",
+        &text(LONG_SENTENCE),
+    );
+    fs::write(
+        dir.join("cccccccc-0000-0000-0000-000000000003.jsonl"),
+        line + "\n",
+    )
+    .unwrap();
+    world
+}
+
+#[test]
+fn a_cut_table_snippet_keeps_the_match_and_reads_on_after_it() {
+    let world = long_message_world();
+    for width in [80, 100, 120] {
+        let out = stdout_of({
+            let mut cmd = world.search();
+            cmd.args(["wombat", "--width", &width.to_string(), "--color", "never"]);
+            cmd
+        });
+        let row = out.lines().nth(1).unwrap_or_else(|| panic!("a row: {out}"));
+        assert!(row.chars().count() <= width, "{width}: {row}");
+        let snippet = &row[out.lines().next().unwrap().find("SNIPPET").unwrap()..];
+        assert!(snippet.ends_with('…'), "{width}: {snippet}");
+        let (before, after) = snippet.split_once("wombat").expect("the match shows");
+        assert!(
+            after.chars().count() > before.chars().count(),
+            "{width}: more of what follows the match: {snippet}"
+        );
+        for word in snippet.trim_matches('…').split(' ') {
+            assert!(
+                !word.is_empty() && LONG_SENTENCE.split(' ').any(|whole| whole == word),
+                "{width}: `{word}` is cut mid-word: {snippet}"
+            );
+        }
+    }
+    // The JSON keeps the stored snippet whole whatever the width.
+    let json = stdout_of({
+        let mut cmd = world.search();
+        cmd.args(["wombat", "--format", "json", "--width", "60"]);
+        cmd
+    });
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let snippet = &value["results"][0]["snippet"];
+    assert!(
+        snippet["text"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("one two") && text.ends_with("eighteen")),
+        "{json}"
+    );
+    assert_eq!(snippet["highlight"], serde_json::json!([45, 51]), "{json}");
+}
+
 #[test]
 fn no_match_exits_one_with_nothing_on_stdout() {
     let world = world();

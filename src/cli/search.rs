@@ -27,7 +27,7 @@ use crate::content_search::{
     search_blocking, session_detail, sockets_in,
 };
 use crate::model::{GraphNode, GraphSnapshot, NodeId};
-use crate::output::render::{display_width, format_relative_age, truncate_to_width};
+use crate::output::render::{display_width, format_relative_age};
 use crate::viewer::model::{TurnKind, TurnRole};
 use crate::viewer::search::{
     ContentKinds, ContentQuery, Grouping, Hit, SessionHits, cmp_hits_across_sessions, cmp_sessions,
@@ -966,8 +966,11 @@ fn render_grid(table: &Table, width: Option<usize>, color: bool) -> String {
     out
 }
 
-/// The snippet cut to `budget` columns (when set) around the match, on
-/// word boundaries where it can, with the match in bold when `color` is
+/// The snippet cut to `budget` cells (when set) by the one snippet fit the
+/// TUI uses (`tuikit::text::fit_snippet`): the match stays, two thirds of
+/// the spare cells go to the text after it, cuts fall on word edges, and
+/// each cut side ends in `…`. Every character is kept, so the text reads
+/// as the JSON's `snippet.text` does. The match is bold when `color` is
 /// on.
 fn fit_snippet(
     snippet: &str,
@@ -975,13 +978,16 @@ fn fit_snippet(
     budget: Option<usize>,
     color: bool,
 ) -> String {
-    let (text, range) = match budget {
-        Some(budget) => crop_around(snippet, highlight, budget),
-        None => (snippet.to_string(), highlight.clone()),
+    let fitted = tuikit::text::fit_snippet(
+        snippet,
+        highlight.clone(),
+        budget.unwrap_or(usize::MAX),
+        &[],
+    );
+    let Some(range) = fitted.highlight.filter(|_| color) else {
+        return fitted.text;
     };
-    if !color || range.is_empty() || range.end > text.len() {
-        return text;
-    }
+    let text = fitted.text;
     let bold = Style::new().effects(Effects::BOLD);
     format!(
         "{}{bold}{}{Reset}{}",
@@ -989,99 +995,6 @@ fn fit_snippet(
         &text[range.clone()],
         &text[range.end..],
     )
-}
-
-/// `snippet` cropped to at most `budget` display columns, keeping
-/// `highlight` (a byte range) visible, with `…` on a cut side. Context is
-/// spread to both sides of the match and each cut moves to the nearest
-/// space that doesn't lose the match. Returns the text and where the
-/// highlight is in it. A match wider than the budget is itself cut.
-fn crop_around(
-    snippet: &str,
-    highlight: &std::ops::Range<usize>,
-    budget: usize,
-) -> (String, std::ops::Range<usize>) {
-    if display_width(snippet) <= budget {
-        return (snippet.to_string(), highlight.clone());
-    }
-    let chars: Vec<(usize, char)> = snippet.char_indices().collect();
-    let width = |c: char| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-    let valid = !highlight.is_empty()
-        && highlight.end <= snippet.len()
-        && snippet.is_char_boundary(highlight.start)
-        && snippet.is_char_boundary(highlight.end);
-    if !valid {
-        return (truncate_to_width(snippet, budget), 0..0);
-    }
-    let first = chars.partition_point(|&(at, _)| at < highlight.start);
-    let last = chars.partition_point(|&(at, _)| at < highlight.end);
-    let marker = 1;
-    let mut left = first;
-    let mut right = last;
-    let mut used: usize = chars[first..last].iter().map(|&(_, c)| width(c)).sum();
-    // The cells a candidate window costs: its text plus a marker on each
-    // side that is cut.
-    let cost = |used: usize, left: usize, right: usize| {
-        used + marker * (usize::from(left > 0) + usize::from(right < chars.len()))
-    };
-    if cost(used, left, right) > budget {
-        // The match alone fills the line: cut it to fit.
-        let room = budget.saturating_sub(marker * (usize::from(first > 0) + 1));
-        let mut cut = first;
-        let mut cells = 0;
-        while cut < last && cells + width(chars[cut].1) <= room {
-            cells += width(chars[cut].1);
-            cut += 1;
-        }
-        let text: String = chars[first..cut].iter().map(|&(_, c)| c).collect();
-        let head = if first > 0 { "…" } else { "" };
-        let tail = if cut < chars.len() { "…" } else { "" };
-        let end = head.len() + text.len();
-        return (format!("{head}{text}{tail}"), head.len()..end);
-    }
-    // Grow outward one character at a time, alternating sides.
-    let mut grow_left = true;
-    loop {
-        let can_left = left > 0 && cost(used + width(chars[left - 1].1), left - 1, right) <= budget;
-        let can_right =
-            right < chars.len() && cost(used + width(chars[right].1), left, right + 1) <= budget;
-        if !can_left && !can_right {
-            break;
-        }
-        if (grow_left && can_left) || !can_right {
-            left -= 1;
-            used += width(chars[left].1);
-        } else {
-            used += width(chars[right].1);
-            right += 1;
-        }
-        grow_left = !grow_left;
-    }
-    // Move each cut to a word edge when that keeps the match.
-    if left > 0 {
-        let mut edge = left;
-        while edge < first && chars[edge - 1].1 != ' ' {
-            edge += 1;
-        }
-        if edge < first || chars[edge - 1].1 == ' ' {
-            left = edge;
-        }
-    }
-    if right < chars.len() {
-        let mut edge = right;
-        while edge > last && chars[edge].1 != ' ' {
-            edge -= 1;
-        }
-        if edge > last || chars[edge].1 == ' ' {
-            right = edge;
-        }
-    }
-    let head = if left > 0 { "…" } else { "" };
-    let tail = if right < chars.len() { "…" } else { "" };
-    let body: String = chars[left..right].iter().map(|&(_, c)| c).collect();
-    let start = head.len() + chars[first].0 - chars[left].0;
-    let end = start + (highlight.end - highlight.start);
-    (format!("{head}{body}{tail}"), start..end)
 }
 
 #[cfg(test)]
