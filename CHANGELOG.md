@@ -8,7 +8,9 @@ onward (pre-1.0, so minor versions may break).
 ## [Unreleased]
 
 Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
-(ADRs 0140 to 0144) rework how pinning works.
+(ADRs 0140 to 0144) rework how pinning works, and the TUI moves onto a
+framework crate of its own (ADRs 0150 to 0199), so its menus, dialogs,
+forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
@@ -51,8 +53,12 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `conspectus tui --view union|forks` now fails and lists the valid
   views, and `[tui] default_view = "union"` or `"forks"`, or a
   `[tui.views.union]` or `[tui.views.forks]` table, is reported as a
-  config diagnostic and ignored. `conspectus table union|forks` is
-  unchanged.
+  config diagnostic and ignored, and a `union` or `forks` view remembered
+  in the TUI state file starts the TUI in the default view.
+  `conspectus table union|forks` is unchanged.
+- **`e` does nothing on the left pane.** It flipped a flag nothing drew
+  (or said `detail: no linked entities to expand`). On the right pane it
+  still opens and closes `Other`.
 - **`[tui.theme]` has two muted keys instead of five, and reaches the
   forms.** `muted` (a modifier, `dim`) and `inert` (a color, dark gray)
   replace `placeholder`, `divider`, `mux_unmuxed`, `secondary_text`, and
@@ -64,8 +70,12 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `field_active`, `field_cursor`, and `command_badge_text`; a style may
   name a background (`white on dark_gray`). The mux launch, new mux, and
   pin edit forms, the previews, and the transcript viewer now follow the
-  theme; the default look is unchanged. `docs/operations.md` lists every
-  key, its default, and the older names.
+  theme; the default look is unchanged. `link_id` loads as an alias of
+  `link`. Within one file a `[tui.theme.harness]` entry now beats the
+  flat `harness_<name>` key (the flat key won by alphabetical order), and
+  info entries in Messages take `info` rather than `success` (both green
+  by default). `docs/operations.md` lists every key, its default, and the
+  older names, with notes for moving a theme across.
 - **Wrapping follows one rule across the TUI.** A word that ends exactly
   at a row's edge stays on that row (help, the viewers, modals, and
   previews used to move it down a row); key hints wrap between hints, so
@@ -98,13 +108,14 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   side: the Messages and value titles are no longer bold) and takes one of
   five sizes. Menus are 64 columns (the row menu was 72, the mux menu 62,
   the worktree menu 56), forms 80 (the pin edit form was 84, the others
-  76), the picker and the value modal the help's size, and the help two
-  rows taller. Every modal now leaves two columns and a row clear around
-  it, so a menu or form on a short terminal no longer covers the header
-  and status line (it scrolls), and a menu on a narrow one no longer
-  touches the screen's edges. A short worktree menu is only as tall as
-  its entries. Below 44 columns the forms fit their key hints to the
-  frame instead of cutting them, and the empty Clean up wraps its text.
+  76), the value modal the help's size (the picker takes the searches'
+  size, below), and the help two rows taller. Every modal now leaves two
+  columns and a row clear around it, so a menu or form on a short
+  terminal no longer covers the header and status line (it scrolls), and
+  a menu on a narrow one no longer touches the screen's edges. A short
+  worktree menu is only as tall as its entries. Below 44 columns the
+  forms fit their key hints to the frame instead of cutting them, and the
+  empty Clean up wraps its text.
   `[tui.theme] surface` now also paints the modals' background.
 - **Every list shows its cursor the same way.** The row the cursor is on
   is marked `►` in the two cells before it and drawn with
@@ -120,17 +131,20 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   the mark, the search lists' cursor row keeps its dimmed context, a
   form's focused row highlights its label around the field's own fill, a
   conflict row in the right pane's Other zone shows its `▲` two cells
-  further in, and the checklists cut a long label with `…`. The left
+  further in, the armed row menu entry's `►` is no longer red (its label
+  still is), and the checklists cut a long label with `…`. The left
   pane's tree marks its cursor row the same way, focused or not, so its
   rows start two cells further right; each row gives the two cells up
   from its end (the preview, snippet, or content first, then, in a narrow
   pane, the next cell its order lets go), the mux names keep their widths,
-  and a row a view lists twice is marked and highlighted once.
+  and a row a view lists twice is marked and highlighted once. The Search
+  view's header line and the Pinned banner stay at the border, two cells
+  left of the rows.
 - **The focused pane is framed in the accent.** The pane with focus draws
   its border in `[tui.theme] panel_focus_accent` (cyan by default, and it
   follows `accent`), beside the `►` before its title that was already
-  that color; the other pane keeps the plain border. Nothing else on the
-  screen changes.
+  that color, also while a dialog is open over it; the other pane keeps
+  the plain border. Nothing else on the screen changes.
 - **The header gives way by importance on a narrow screen.** The header
   line used to run off the right edge, cutting `4 stopped` to `4` at 40
   columns and a harness chip mid-name when `show_harness_chips` is on.
@@ -164,8 +178,13 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   forms) becomes `Enter rebuild` (the Preview keeps the sentence), a live
   PR pin says `Enter show URL`, a row that cannot attach says `a attach:
   <why>` dimmed instead of `attach: <why>`, and an ambiguous row names
-  `Tab` once. A narrow bar keeps more hints, since each gives way on its
-  own, and a status message too long for the bar ends with `…`.
+  `Tab` once (with the right pane focused it reads `Tab focus`). The
+  unseen-messages chip reads `▲ N` while a dialog is open, where `!` does
+  not reach the log, and `▲ N · ! messages` otherwise. A narrow bar keeps
+  more hints, since each gives way on its own (a dialog's keys outrank
+  the view's settings, and under quick select and content search at 60
+  columns `Esc close`, now their last key, gives way before the filter
+  chip), and a status message too long for the bar ends with `…`.
 - **The help page lists every key the main screen binds, one key per
   row.** The `?` page is generated from the keys themselves, so it always
   matches them. Rows that described two keys at once now have a row
@@ -244,7 +263,7 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   reads `Tab search current/all`, `S-Tab list sessions/messages`,
   `Ctrl-R recall search`, `Ctrl-O set options`, and `Ctrl-S open Search
   view`, and the forms read `←/→/Space change`. The value viewer's footer
-  lists its keys in the help page's order and names `PgDn`/`PgUp`.
+  names `PgDn`/`PgUp`.
 - **Every modal's keys look and fit one way.** The keys at the bottom of
   every menu, dialog, checklist, form, search, picker, help page, value
   viewer, Messages, and Controls recede (the `muted` look of
@@ -270,19 +289,25 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `Ctrl-B`/`Ctrl-F`, `Ctrl-W`, `Ctrl-K`, `Ctrl-Y`), and `Ctrl-U` there
   clears the whole query instead of only what precedes the cursor. Every
   field also moves by word on `Alt-←`/`Alt-→` and deletes the next word on
-  `Alt-D`. The prompts' and find prompts' cursor cell takes the
-  `field_cursor` style of `[tui.theme]` (black on white), as the forms'
-  did, instead of reverse video.
+  `Alt-D`, and `Shift` with `←`, `→`, `Home`, `End`, `Backspace`, or
+  `Delete` no longer swallows the key. The prompts' and find prompts'
+  cursor cell takes the `field_cursor` style of `[tui.theme]` (black on
+  white), as the forms' did, instead of reverse video. An unfocused empty
+  form field's `-` takes the `field` gray, a value of spaces shows its
+  spaces instead of `-`, and a field narrower than 5 cells shows the text
+  around the cursor rather than only the character under it.
 - **Prompts explain a refusal inside themselves and show their keys.**
   The rename, worktree branch, and controls max-age and contents prompts
   show `Enter confirm · Esc cancel` on their bottom border (the branch,
   max-age, and contents prompts showed no keys; the renames showed them
   on the status line, which now stays as it was). Input a prompt refuses
-  is explained on an error line inside it, which grows the prompt by one
-  row until the next edit: an invalid max age and an empty branch name
-  used to post a toast, and renaming a pin or a tmux session to nothing
-  closed the prompt with a toast (`pin: nothing entered`, `mux rename:
-  name cannot be empty`) where it now stays open for a fix.
+  is explained on a red error line inside it, which grows the prompt by
+  one row until the next edit (on a screen of five rows or fewer the
+  reason takes the keys' place on the border): an invalid max age and an
+  empty branch name used to post a toast, and renaming a pin or a tmux
+  session to nothing closed the prompt with a toast (`pin: nothing
+  entered`, `mux rename: name cannot be empty`) where it now stays open
+  for a fix.
 - **Path fields show one hint, and give the path the rest of the row.**
   The new tmux session and launch forms kept 32 cells after every path
   for a `Tab: …` hint, so a 60-column form showed four characters of the
@@ -315,7 +340,9 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   the same fields and the name gets the whole row; the `socket` field
   still appears under it while it is on. A launch the form refuses moves
   the cursor to the field it is about, as the new tmux session form
-  does.
+  does; with the name and the harness both empty it names the name
+  first, and `←`/`→` inside a text field no longer clear the error line
+  (only an edit does).
 - **One way to split an argv.** The launch form's `argv`, the pin edit
   form's `argv` (its checkboxes and its save), `pin edit --set argv=…`,
   and the previews of a tmux pane's start command split text the same
@@ -336,7 +363,8 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   the rows. `Ctrl-R` acts on the field rows only (on the pin name it no
   longer puts back the old name), and on a field that had no value of
   your own it puts back the value the field had and shows where that
-  comes from again (it said `will follow`).
+  comes from again (it said `will follow`). A kept value with nothing to
+  follow explains `Ctrl-R drops it; there is nothing to follow yet`.
 - **Menus work one way.** The row menu (`.`), the mux menu (`m`), the
   worktree menu's list, and the menu `p` opens when several pins point
   at a row are one control. An entry's own key sits in a column before
@@ -411,12 +439,11 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   scrolls only as far as the cursor needs and shows a section's heading
   with its first row. `PgUp`/`PgDn` move by a screen and `Home`/`End` (or
   `g`/`G`) go to the first or last row. A row too long for the dialog
-  ends with `…`, and the keys are drawn plain rather than dimmed. On a
-  short terminal the keys take their rows, so fewer lines of settings
-  show at once (three at 40x10, where six showed). Leaving a filter's
-  editor clears the status line, as leaving a worktree menu's question
-  does. Every setting, its words, and what `Space`, `Enter`, `Esc`, `q`,
-  and `Ctrl-C` do are unchanged.
+  ends with `…`. On a short terminal the keys take their rows, so fewer
+  lines of settings show at once. Leaving a filter's editor clears the
+  status line, as leaving a worktree menu's question does. Every setting,
+  its words, and what `Space`, `Enter`, `Esc`, `q`, and `Ctrl-C` do are
+  unchanged.
 - **The pane scrollback viewer reads like the transcript viewer.** Long
   lines wrap under their line number instead of being cut off at the
   edge, and the new `w` cuts them at the edge again (ending in `…`); the
@@ -427,10 +454,11 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   the transcript viewer, and its line number stays in the accent color.
   The footer names its keys in the one grammar
   (`j/k/PgDn/PgUp scroll · / find · ? help · a attach · Esc/q close`) and
-  drops the scroll keys first when narrow, and the `[ n/m ]` chip counts
-  screen rows. `n` before any find says `nothing to find yet: press / to
-  search`; a find that matches nothing says so in its chip only; a wrap
-  note is green, not yellow.
+  drops the scroll keys first when narrow, then `/ find · ? help`, and
+  the `[ n/m ]` chip counts screen rows. `G` keeps the view at the end,
+  as in the transcript viewer, until a key moves it. `n` before any find
+  says `nothing to find yet: press / to search`; a find that matches
+  nothing says so in its chip only; a wrap note is green, not yellow.
 - **The viewers' help pages name what their keys do.** Their footer read
   `Esc/q/? close`, though `q` leaves the viewer there; it now reads
   `j/k/PgDn/PgUp scroll · Esc/? back · q close`. `Ctrl-D`/`Ctrl-U` page
@@ -440,7 +468,7 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   dimmed like the help's and lists `y copy` before the keys that close it
   (`j/k/PgDn/PgUp scroll · y copy · Esc/q/o close`), and on a narrow
   terminal it wraps onto a second line instead of losing `y copy` at the
-  edge.
+  edge. An empty value says `nothing to show` instead of a blank body.
 - **Messages (`!`) scrolls like the other lists and readers.** A record
   longer than its pane shows a scrollbar (and wraps a column narrower
   beside it), a log longer than its list shows one too, and moving back
@@ -472,7 +500,9 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   many presses as had gone past, and a match on the transcript's last
   page did not move on the first `K`. When a search appears or goes on
   the row shown, the Preview starts at the match or at the newest turns
-  rather than at an older offset. What the Preview shows is unchanged.
+  rather than at an older offset. A loading or unavailable transcript's
+  note taller than the Preview reads from its top. What the Preview shows
+  is unchanged.
 - **Group headers, session rows, and mux rows give way by one rule when
   the left pane is narrow.** A cut label, project, path, or mux name ends
   in `…` instead of stopping at the pane's edge. A session row lets its
@@ -483,16 +513,19 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   cells leaves the row, and a preview, snippet, or stopped mux's
   directory needs 7. A stopped mux in the Mux view is drawn as a ghost
   whole, its `▣` included, and a mux with several agents keeps its age
-  in line with the others. A row that fits its pane looks as before,
-  apart from those last two. `docs/tui-columns.md` describes the rule.
+  in line with the others: its chips are a column as wide as the widest
+  row's, two chips and `+N` wherever they fit (it showed one chip and
+  `+2` below 76 cells). A row that fits its pane looks as before, apart
+  from those last two. `docs/tui-columns.md` describes the rule.
 - **PR, Pinned, and History rows give way by the same rule.** A narrow
   PR row cuts its `owner/repo` and keeps its `#N` whole, lets its title,
   then its branch, then its age and tracking mark go, and keeps its
   state glyph, which a narrow pane used to cut off. A Pinned or History
   row lets its chip go first (as before), then its content, then narrows
   its name and lets its age go, and keeps its name and state word in
-  line at every depth. A PR title or a Pinned or History row's content
-  needs 7 cells (it showed from 1). Rows that fit look as before.
+  line at every depth (a nested name may narrow below 8 cells to keep
+  them there). A PR title or a Pinned or History row's content needs 7
+  cells (it showed from 1). Rows that fit look as before.
 - **Search hits read alike in the contents modal and the Search view.**
   The Search view's hit, pane, and pane line rows take the modal's
   columns (without its `session` or `pane` word): the harness chip or a
@@ -501,9 +534,10 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   order (the chip, then the age, then the name narrows) instead of being
   cut at the pane's edge, so a narrow pane shows the snippet it used to
   lose. A matching turn no longer shows who spoke (`you`, `ai`); a pane
-  row lists its command first and its hit count before its age. In the
-  modal the ages are tinted by how recent they are and the snippets are
-  gray italics, as in the lists.
+  row lists its command first and its hit count before its age. The
+  view's hit and pane names are no longer bold. In the modal the ages are
+  tinted by how recent they are and the snippets are gray italics, as in
+  the lists.
 - **Empty lists say so one way.** The Messages log with nothing in it
   shows its note in the receding look every other empty slot has (it was
   drawn like an entry), and an empty search or picker wraps its note
@@ -524,7 +558,10 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   level of nesting. In a narrow pane its count stays in line too.
 - **Quick select lists a group header as its row reads it**: its name,
   then its path or members (`repo-a  ~/atelier-demo/repo-a`), where it
-  listed the bare path.
+  listed the bare path. Its rows give way like every other row: with no
+  context on any listed entity the name takes the row up to its outcome
+  word, and a name cut across its match marks the part of the match that
+  shows.
 - **The right pane's breadcrumb gives way one hop at a time.** A drill
   chain too long for the title used to jump straight to its first and
   last hops (`a › … › e`). It now keeps as many hops as fit: the oldest
@@ -558,8 +595,10 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   every key the pane binds (the stale `e` text went), and the status
   bar's right-pane hint reads `↑/↓ move · Enter copy · e fold ·
   Backspace back`, `Enter`'s word following the cursor's row (`copy`,
-  `follow`, `fold`). See "Keys on the right pane" in
-  `docs/operations.md`.
+  `follow`, `fold`). A fold key on a row in no section (`h` on a field)
+  says there is nothing to expand there instead of doing nothing, and
+  `Enter`'s copy disarms an armed `Backspace` as every other key does.
+  See "Keys on the right pane" in `docs/operations.md`.
 - **`Backspace` on the left pane only returns from a reveal.** With no
   reveal to return from it used to pop the right pane's drill, which the
   status bar never said; it now says there is nothing to return from,
@@ -568,6 +607,15 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   drill frame whose node a refresh removed took a press of its own (a
   warning, and the pane stayed); `Backspace` now skips it and goes back
   to the frame before it, and says so only when every frame is gone.
+- **The TUI is built on a framework crate of its own.** Its controls,
+  theme, glyphs, key tables, and test kit are `tuikit`, a crate of the
+  repository's Cargo workspace under `crates/tuikit` that Conspectus
+  depends on by path, and the `tui-popup`, `ratatui-cheese`, and
+  `ratatui-comfy-toaster` dependencies are gone.
+  `cargo install --locked --path .` installs `conspectus` and `csp` as
+  before. The changes above are what moving each control onto it
+  changed; `docs/operations.md` lists them by area under "What changed in
+  the TUI".
 
 ### Fixed
 
@@ -652,7 +700,8 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   cut at the right pane's 48-cell budget instead of wrapping, an emoji
   written with a variation selector (`⚠️`) no longer pushes its row a
   cell past its column, and no cut separates a letter from its accent.
-  A value just over that budget now offers `o` for the full value too.
+  A value just over that budget now offers `o` for the full value too,
+  and a find chip shows a 17-character query whole (it cut it at 16).
 - **The rows the TUI counts are the rows it draws.** The right pane, the
   preview, the left pane's notices, and the worktree menu wrap their text
   before measuring it, so a scrollbar matches its content, the right

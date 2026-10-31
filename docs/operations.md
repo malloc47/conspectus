@@ -1852,6 +1852,250 @@ surfaces all leave it byte-identical, enforced by
 (tempfile + rename) and skip-on-unchanged so quiet TUI sessions
 produce no mtime churn.
 
+## What changed in the TUI
+
+This release moves every control of the TUI onto one shared toolkit, so
+menus, dialogs, forms, lists, readers, and keys behave alike wherever they
+appear. Most of what follows is a key or a look that now matches the rest
+of the TUI. The sections above describe the current behavior in full;
+`CHANGELOG.md` lists the same changes with more detail.
+
+### Views and the command line
+
+- **The hidden `union` and `forks` views are gone.** `--view union` and
+  `--view forks` fail and list the valid views; a `default_view` of
+  either, a `[tui.views.union]` or `[tui.views.forks]` table, and a
+  remembered `last_view` of either are reported or ignored, and the TUI
+  starts in the default view. `conspectus table union|forks` is unchanged.
+- **Quick select and Reveal promise only a view that lists the entity.**
+  A result no view lists (a fork, a repo with no sessions, a row a
+  filter hides) reads `not listed`, and a pin's menu offers **Reveal in
+  its view** only where that view lists its entity.
+- **`conspectus search` cuts snippets like the TUI.** The table's snippet
+  column favors the text after the match and cuts at word edges, or inside
+  a path, URL, or CJK text beside the match; the stored snippet
+  (`snippet.text` in `--format json`) is at most 160 terminal cells with
+  its marks. The JSON's shape is unchanged.
+- **`conspectus pin rename` checks the new name first**, so a taken or
+  unusable name renames no tmux session. **`pin edit --set argv=…`**
+  refuses an argv that ends inside a quote or on a lone backslash, and
+  previews read a backslash inside double quotes as a shell does (see
+  [Pinning from the other views](#pinning-from-the-other-views)).
+- **`tui --fixture` and `dev scenario tui`** take the live TUI's keys in
+  every menu, prompt, and form, which close as usual; an entry that would
+  write or launch says it isn't available in this mode.
+
+### Keys on the main screen
+
+- **A letter means the letter**, typed alone or with Shift, never a
+  `Ctrl`, `Alt`, Super, or Meta chord of it. The chords the help names
+  (`Ctrl-R`, `Ctrl-G`, `Ctrl-/`, `Ctrl-L`, `Ctrl-O`, `Ctrl-F`, `Ctrl-C`,
+  `Shift+Enter`, `Alt+Enter`) still work. Stopped working: `Alt` with `f`,
+  `!`, `?`, `a`, `i`, `o`, `w`, `v`, `r`, `n`, `m`, `p`, `u`, `]`, `[`,
+  `/`, `s`, `<`, or `>` (so `Alt-a` no longer attaches and `Alt-p` no
+  longer pins); `Alt` with the tree's `h`, `l`, or `g`; and every chord
+  but Shift of the tree's `j`, `k`, and `G` and the Preview's `J` and `K`
+  (`Ctrl-j`, which many terminals send for `Ctrl+Enter`, no longer moves
+  the tree). `q`, `.`, and `1` to `6` now work when a terminal reports
+  them with Shift.
+- **`Enter` on the left pane means `Enter` alone**: `Ctrl+Enter` no longer
+  runs the row's default action.
+- **`Backspace` on the left pane only returns from a reveal.** It no
+  longer pops the right pane's drill, and says so when there is nothing to
+  return from.
+- **`PgUp` and `PgDn` move the tree by the rows it shows** (they stepped
+  by the terminal's height).
+- **`e` does nothing on the left pane** (it flipped a flag nothing
+  showed); on the right pane it still opens and closes `Other`.
+- **`o` opens the right pane's cursor value from either pane**, and the
+  `?` page, generated from the keys themselves, lists every key on a row
+  of its own.
+
+### Keys on the right pane
+
+[Keys on the right pane](#keys-on-the-right-pane) has the full table.
+
+- **`PgUp` and `PgDn` page** by the rows the explorer zone shows (they
+  moved one row).
+- **`h`/`l` and `←`/`→` open and close `Other`**, from its header or a
+  row inside it (they did nothing); on a row in no section they say there
+  is nothing to expand.
+- **`Esc` backs out of a drill**, as `Backspace` does (it did nothing).
+- **Chords of `j`, `k`, `g`, `G`, `h`, and `l` do nothing** (`Alt-j` moved
+  the tree behind the pane), and the pane binds no `Ctrl-N`/`Ctrl-P`.
+- **`Backspace` to a frame whose node is gone** skips it in the same
+  press, and warns only when every frame is gone.
+- **A refresh keeps your place.** The periodic refresh, `r`, and a filter
+  or sort change keep a drill (its breadcrumb, `Other` fold, Expanded Node
+  Detail, and cursor) and keep the Preview where `J`/`K` scrolled it.
+- **`Enter` on a field with no value** (`—`) copies nothing, and on
+  evidence that names no node it says the Preview shows the evidence.
+
+### Keys in dialogs and text fields
+
+[Keys in dialogs](#keys-in-dialogs) and
+[Editing text in fields](#editing-text-in-fields) describe each in full.
+
+- **One way out of every dialog.** `Esc` steps back one level, `Ctrl-C`
+  closes the whole dialog, and so does `q` wherever nothing is typed: the
+  menus, Clean up, Controls and its checklists, the worktree questions,
+  the search options, the help, Messages, and the viewers (`q` used to do
+  nothing in most of them and backed out of the close-down choice).
+  Cancelling posts no `…: cancelled`, leaving the transcript viewer no
+  `viewer closed`, and closing a dialog clears the status line.
+- **A letter in a dialog is the letter.** `Ctrl-G` and `Alt-G` (top and
+  bottom of the help, the value viewer, Messages, and the viewers),
+  `Ctrl-D` (discard in the close-down choice), `Ctrl-Y` (confirm a
+  worktree action; copy in the value viewer), and `Alt-Y` (copy in
+  Messages) stopped working; the plain letters still do.
+- **Every list moves with `Ctrl-N`/`Ctrl-P`** as well as the arrows, and
+  `PgUp`/`PgDn` move the picker, quick select, content search, the
+  checklists, and Controls by the rows shown; `Home`/`End` and `g`/`G`
+  reach the ends of the checklists and Controls.
+- **Menus wrap** from their last entry to their first and back. An entry
+  with a key of its own shows it in a column before its label and takes
+  it from anywhere in the menu (`p` on **Pin**, `n` and `N` in the mux
+  menu).
+- **Checklists** take `a` to check and `n` to uncheck every item, and say
+  on their border how many are checked.
+- **Dialogs** go ahead on `Enter` or `y` and go back on `Esc` or `n` (the
+  close-down choice gains `n`). The worktree menu's prompt and questions
+  open over the menu, and `Esc` returns to it.
+- **Forms submit from any field**: `Enter` in the new tmux session form
+  creates the session from its name field (it moved to the cwd first).
+- **Readers**: the pane viewer wraps long lines under their number and
+  `w` cuts them at the edge instead; `G` keeps either viewer at the end;
+  `Ctrl-D`/`Ctrl-U` page by half in the help and the value viewer too; in
+  a viewer's help, `?` and `Esc` go back and `q` leaves the viewer.
+- **Every text field edits one way.** `Alt-←`/`Alt-→` move by word and
+  `Alt-D` deletes the next word in every field; the find prompts take
+  every field's editing keys, and `Ctrl-U` there clears the whole query;
+  `Shift` with an arrow, `Home`, `End`, `Backspace`, or `Delete` no longer
+  drops the key. A paste is typed as one line into the field with the
+  cursor and is ignored anywhere else, so it cannot submit a prompt or
+  press a menu's keys.
+- **Path fields** complete only by extending what you typed (typing `src`
+  no longer jumps to `~/work/src/app`), offer only directories, mark a
+  file or a missing path `▲` (it was `!`), show the `Tab:` hint only while
+  `Tab` has something to add, and expand a leading `~` when the form
+  commits.
+
+### How the screen looks
+
+- **One cursor look.** Every list marks its cursor row with `►` in the
+  two cells before it, drawn with `selection_active` while it has focus
+  and `selection_inactive` while it does not. That includes the left
+  pane's tree, whose rows start two cells further right, and the right
+  pane, which keeps its cursor visible while the tree has focus.
+- **The focused pane's border** takes `panel_focus_accent`, as its `►`
+  already did.
+- **One frame for every dialog**: one title form (plain, a space each
+  side), one of five sizes, and a margin of two columns and a row around
+  it. Menus are 64 columns and forms 80; the picker takes the searches'
+  size. A dialog opened over another shows the one under it around its
+  frame, and a toast shows over the full-screen viewers.
+- **One footer.** A dialog's keys sit at its bottom, receding in `muted`
+  under a blank row, generated from the keys it takes and ending with the
+  key that closes it; a screen too short for all of them keeps the last
+  rows. A prompt shows its keys on its bottom border, and a checklist its
+  count.
+- **Rows give way by one rule on a narrow pane.** A cut ends in `…`,
+  each kind of row lets its columns go in a fixed order
+  ([`docs/tui-columns.md`](tui-columns.md)), and a list that grows past
+  the pane keeps its columns. Nested group headers line up with their
+  parents, PR rows keep their `#N`, and Pinned and History rows keep
+  their name and state word. The header drops its least important parts
+  first, and the tab strip and the right pane's breadcrumb keep what fits
+  and end with `…`.
+- **Search hits read alike** in the contents modal and the Search view
+  (`turn N · kind`, no longer who spoke), and every snippet favors the
+  text after the match and cuts at word edges.
+- **Text wraps one way.** A word that ends exactly at the edge stays on
+  its row, key hints wrap between hints, and the transcript viewer keeps
+  the blank lines between Markdown blocks.
+- **Scrollbars.** Menus, lists, and readers that overflow show the shared
+  scrollbar and scroll only as far as the cursor needs; one too short for
+  a bar (under five rows) keeps its last column.
+- **Empty places recede.** An empty list, an empty Messages log, and a
+  Preview with nothing to show are drawn in the dim look; a Preview that
+  failed keeps the plain look.
+- **Ages read one way**: the Search view's rows tint their age by how
+  recent it is, the search status says `scanned 0s ago`, and Clean up
+  counts days (`21d ago`).
+
+### Messages and hints
+
+[The status bar's hints](#the-status-bars-hints) and
+[TUI messages](#tui-messages) describe each in full.
+
+- **Each message has a severity**: hints and confirmations are green,
+  refusals yellow, failures red, on the status line, a toast's border, and
+  in Messages. A warning toast stays 3 seconds and an error toast 5. A
+  failed copy says `copy failed: …`.
+- **The status bar names only keys that do what it says**: the selected
+  row's (`↑/↓ move · ←/→ fold`, `Enter rebuild` on a gone pin, `Ctrl-R
+  hard refresh` in the PRs view), the right pane's, or the open dialog's
+  own. A key that cannot act is dimmed with the reason, and a message too
+  long for the bar ends with `…`. Menus and searches no longer copy their
+  footer into the status line when they open.
+- **Prompts and forms explain a refusal** on an error line inside them,
+  where a toast or nothing used to say it, and stay open for a fix.
+
+### Forms and pins
+
+- **The launch form**: the own-socket checkbox is a `server` row of its
+  own under the name; its fields read `name`, `socket`, and `argv`; its
+  pin choice is drawn `(•) don't pin ( ) launch, then pin ( ) pin, don't
+  launch`; and its worktree repo completes and is marked like the cwd.
+- **The pin edit form** labels its rows `branch` and `resume in`, says
+  why a save is refused just above its keys, and takes `Ctrl-R` on its
+  field rows only.
+- **Renaming a pin**: the **Rename…** prompt and the edit form's name row
+  refuse the same names with the same reasons, before anything is
+  renamed, and a blank name reads `pin: nothing entered` in both.
+- **One argv grammar** for the forms, `pin edit --set argv=…`, and the
+  previews ([Pinning from the other views](#pinning-from-the-other-views));
+  the forms write an argv back quoted as the previews quote it.
+
+### Moving a `[tui.theme]` across
+
+A theme from an earlier version loads unchanged, and the default look is
+unchanged. The `[tui.theme]` section above lists every key with its default
+and the older names. What a custom theme may notice:
+
+- **Five muted keys became two.** `muted` (a modifier, `dim`) takes
+  `placeholder`, `divider`, and `mux_unmuxed`; `inert` (a color, dark
+  gray) takes `secondary_text` and `ghost`. The older keys still load, so
+  setting only `placeholder` now also restyles rules and the unlinked
+  `∘`, and setting only `secondary_text` also recolors gone rows. Older
+  keys set differently in one file merge by the precedence of the
+  older-key table, with a warning for each that lost. To keep two looks
+  apart, set `muted` and `inert` themselves.
+- **Renamed and joined keys.** `link_id` sets `link`. `accent` also sets
+  `panel_focus_accent` unless the file sets that too, and
+  `panel_focus_accent` alone still sets both; it now colors the focused
+  pane's border as well as its `►`.
+- **Harness colors.** Within one file a `[tui.theme.harness]` entry beats
+  the flat `harness_<name>` key, which used to win.
+- **New keys**, each defaulting to the old look: `accent`, `link`, `info`,
+  `surface` (the background of dialogs and toasts), `toast_text`,
+  `field`, `field_active`, `field_cursor`, `command_badge_text`, and
+  `transcript_compaction`. Values may name a background (`white on
+  dark_gray`) and the color `light_gray`.
+- **Keys that reach further.** `info` colors hints on the status line, in
+  toasts, and in Messages (Messages' info entries took `success`; both are
+  green by default). `selection_active` and `selection_inactive` color the
+  cursor row of every list. `field_cursor` is the cursor cell of every
+  text field, the prompts and find prompts included, which drew reverse
+  video. `disclosure` colors the right pane's `Other` arrow. `badge_width`
+  sizes every chip, the content search's chip column and ` no agent `
+  included.
+- **The transcript viewer** reads its own keys: user turns take `accent`
+  (they took `harness.codex`), the cwd `accent` with `muted` (it took
+  `cwd_mark`), and compaction summaries `transcript_compaction` (they took
+  `pr_merged`). A theme that set those three keys to restyle the viewer
+  sets the new ones instead.
+
 ## Migration from earlier 0.x
 
 Phase 11 (ADRs 0082 + 0083) retired Conspectus's SQLite
