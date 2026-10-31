@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by
+[ADR 0184](0184-tui-pr-pinned-and-history-rows-come-from-schemas-and-headers-carry-two-cells.md):
+a group header carries its name and what follows it (a workspace's
+members and provider) as two cells laid out by the left pane's column
+schema, not as one joined string; the workspace header format below is
+what those two cells read.
 
 ## Context
 
