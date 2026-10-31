@@ -32,6 +32,14 @@ control page sketched, and applies
 [ADR 0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md)'s
 viewports-by-value rule to it.
 
+When the region goes back to its anchor (CSP-792): only when what the
+Preview is pointed at changes (the left selection, the explorer's node,
+or the cursor's row, by its position or by the row there), when it
+drills or backs out, or when a Preview setting changes. A refresh, `r`,
+and a filter or sort change keep its offset, as decision 5's anchors
+already keep their distance as rows arrive; the reset every explorer
+recompute made predated that rule.
+
 ## Context
 
 The inventory for the framework extraction

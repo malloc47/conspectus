@@ -567,6 +567,15 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 
 ### Fixed
 
+- **A refresh keeps the Preview where you scrolled it.** The periodic
+  refresh, `r`, and a filter or sort change put a Preview scrolled with
+  `J`/`K` (up a transcript, down a pane capture or a PR body) back at
+  its start, even when the selection and the right pane had not moved.
+  The Preview now goes back only when it shows something else: another
+  selection, another node in the right pane, or another row under its
+  cursor (a refresh that puts a different row in the cursor's place
+  counts). A key that does not move the selection (`j` on the last row)
+  and a jump to the row already selected leave it in place too.
 - **Renaming a live mux pin to a taken name renames nothing.** The
   TUI's **Rename…** prompt let a pin take another pin's name and left
   the refusal to the pin store, which came after the tmux session had
