@@ -45,6 +45,13 @@ standard checks.
   conclusion as an ADR.
 - Use the existing ADR style: status, context, decision, consequences,
   alternatives considered, and open questions answered when applicable.
+- A decision about the TUI framework crate (`crates/tuikit`) also gets a
+  record in its own log, `crates/tuikit/docs/decisions/`, written without
+  Conspectus vocabulary and naming the ADR it came from; mark that ADR
+  framework-owned in `docs/adr/README.md` in the same change. A decision
+  about the framework alone (its docs, tests, internal conventions) may be
+  a framework record only (ADR 0150). `crates/tuikit/tests/doc_sync.rs`
+  fails when the log and the index disagree.
 - Update `docs/design.md` whenever requirements are introduced or refined, or
   when accepted ADRs change the intended model.
 - Keep `docs/design.md` concise enough to remain useful for phase and story
@@ -79,7 +86,9 @@ standard checks.
 - Start processes only through `exec::command` (`src/exec.rs`). A new
   program, subcommand, socket, signal, or write path needs an entry in
   `docs/capabilities.toml`, citing its ADR, or `tests/capabilities_static.rs`
-  and the traced `tests/capabilities.rs` fail (ADR 0117).
+  and the traced `tests/capabilities.rs` fail (ADR 0117). The framework
+  crate starts no process and writes no file, so it has no entry; the
+  same scan fails on one in `crates/tuikit/src`.
 - `csp` is the sanctioned short name for `conspectus` (ADR 0118). Docs,
   ADRs, and help prose spell out `conspectus`. A runtime message that
   suggests a command gets the name from `invocation::invoked_name()`. Don't
@@ -93,7 +102,7 @@ standard checks.
   Say "pin" for what the operator selects; "slot" is the storage word and
   stays in the file format and the CLI's file-level errors.
   `src/tui/consistency_tests/text.rs` enforces this on rendered screens,
-  help pages, and string literals.
+  help pages, and string literals, the framework's included.
 - A new view, menu, or key reuses the existing action, menu, and
   lifecycle code instead of reimplementing it: the same gesture does the
   same thing to the same entity in every view, a menu lists what applies
@@ -102,6 +111,42 @@ standard checks.
   lifecycle in `tui::effect::lifecycle`, and rows share one column grid.
   `src/tui/consistency_tests/` asserts these across views; extend it when
   adding a view or an effect.
+- The TUI's controls, key tables, and look come from the framework crate
+  `tuikit` (`crates/tuikit`, ADRs 0150 and 0151), and a new view, menu,
+  or key uses them instead of a widget of its own. A menu is an
+  `ActionMenu`, a question a `Dialog` or `TextPrompt`, and a form, list,
+  picker, settings panel, reader, or tree the matching control, opened on
+  the App's modal stack; a row is laid out from a column schema. Keys are
+  rows of a key table (`src/tui/keybindings/overlay.rs` for overlays) or
+  bindings of the scoped keymap (`src/tui/keybindings.rs`), from which
+  footers, status hints, and help pages are generated, so no hint or help
+  row is written by hand. Every control follows the eighteen house rules
+  (`crates/tuikit/docs/house-rules.md`). Start from
+  `crates/tuikit/docs/guide.md` and the control's page under
+  `crates/tuikit/docs/controls/` (a menu: `controls/action_menu.md`). When
+  nothing fits, add the control to the framework by
+  `crates/tuikit/docs/contributing.md` and keep only the Conspectus
+  adapter in `src/tui`. Test with `tuikit::testkit` (key scripts, the
+  frame driver, style-aware goldens), and register a new modal with the
+  framework's conformance suite (`assert_conventions`), which
+  `src/tui/consistency_tests/conventions.rs` runs over the host's
+  registry beside the host's own consistency tests.
+- The repository is a Cargo workspace: the `conspectus` package at the
+  root and `tuikit` under `crates/`, so cargo commands take `--workspace`
+  (or `-p tuikit` for the framework alone). `tuikit` imports nothing from
+  `conspectus`, starts no process, writes no file, and uses no Conspectus
+  domain word (session, mux, harness, pin, worktree, PR, graph node; the
+  list is `DOMAIN_TERMS` in `crates/tuikit/tests/independence.rs`) in its
+  source, docs, tests, or manifest: domain meaning enters through type
+  parameters, closures, traits, and the theme's named styles. The guard
+  tests in `crates/tuikit/tests/` enforce this; when one fails, fix the
+  design, and ask for an allowlist entry only by the process in
+  `crates/tuikit/docs/contributing.md`. Every public module has a page
+  under `crates/tuikit/docs/controls/`, whose `rust` blocks run as
+  doctests. `just tuikit-features` checks the framework with its cargo
+  features off and with `richtext` alone, and
+  `just separation-rehearsal --self-test` exports it to a repository of
+  its own and checks it there (`crates/tuikit/docs/separation.md`).
 - Avoid making Conspectus depend on Atelier command modules directly. Shared
   code should be pure discovery/parsing/model code with a clean boundary.
 - Track implementation work as Backlog.md tasks under `backlog/` (ADR 0109);
@@ -166,6 +211,11 @@ Before a feature branch, squash merge, or direct commit lands on `main`:
   `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
 - Rustdoc passes with warnings as errors:
   `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps`.
+- The framework builds, lints, and tests on its own with its cargo features
+  off and with `richtext` alone: `just tuikit-features` (CI runs the same
+  commands).
+- The framework still leaves this repository cleanly:
+  `just separation-rehearsal --self-test` (CI runs it).
 - `git diff --check` passes for every change.
 - Documentation is updated when behavior, architecture, workflow, or commands
   change.
