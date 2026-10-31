@@ -182,6 +182,7 @@ specification before relying on it.
   each carry a *seam left open* acceptance item for the Tier 1 and Tier 2
   entries that touch them, so adding the control later does not break the
   API.
-- The framework's roadmap document (a story in the separation-readiness
-  wave) is this matrix, trimmed to the framework's own terms.
+- The framework's roadmap document, `crates/tuikit/docs/roadmap.md`
+  (CSP-761), is this matrix, trimmed to the framework's own terms, with
+  each Tier 1 item marked done or open.
 - Tier 3 and Skip rows get no stories.

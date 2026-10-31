@@ -101,12 +101,16 @@ them by theme with their status.
 
 ## `crates/tuikit/README.md`
 
-Purpose: entry point to the TUI framework crate's own documentation set:
-layers and module map (`crates/tuikit/docs/architecture.md`), independence
-rules, house rules, and how to add a control
-(`crates/tuikit/docs/contributing.md`), the per-control page template, and the
+Purpose: entry point to the TUI framework crate's own documentation set: a
+usage guide for building a program on it (`crates/tuikit/docs/guide.md`),
+layers and module map (`crates/tuikit/docs/architecture.md`), the house rules
+with their rationale (`crates/tuikit/docs/house-rules.md`), one reference
+page per public module (`crates/tuikit/docs/controls/`), independence rules
+and how to add a control (`crates/tuikit/docs/contributing.md`), the roadmap
+of controls that may come later (`crates/tuikit/docs/roadmap.md`), and the
 framework-scoped decision index. Written to stand alone so the crate can leave
-this repository; ADRs 0150 to 0152 record the decisions behind it.
+this repository; its code samples run as doctests, and a doc-sync test holds
+the pages to the modules. ADRs 0150 to 0152 record the decisions behind it.
 
 ## `docs/implementation/`
 
