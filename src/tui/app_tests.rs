@@ -2322,6 +2322,106 @@ fn backspace_with_every_frame_gone_says_so_and_keeps_the_pane() {
 }
 
 // ------------------------------------------------------------------
+// The Preview's scroll across a refresh.
+// ------------------------------------------------------------------
+
+/// Scroll the Preview `rows` away from its anchor: down with `J` from
+/// the top (a mux's pane capture), or up with `K` from a transcript's
+/// newest turns, where `J` stops at once.
+fn scroll_preview(app: &mut App, rows: u16) {
+    app.update(Msg::ScrollPreviewBy(i32::from(rows)));
+    if app.preview_scroll() == 0 {
+        app.update(Msg::ScrollPreviewBy(-i32::from(rows)));
+    }
+    assert_eq!(app.preview_scroll(), rows, "premise: the Preview scrolled");
+}
+
+#[test]
+fn a_refresh_keeps_the_preview_where_it_was_scrolled() {
+    // The left selection, the explorer's node, and its cursor row stay,
+    // so the Preview shows what it showed and keeps its place.
+    let snap = sessions_and_muxes(&["abc"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    scroll_preview(&mut app, 3);
+
+    refresh_with(&mut app, &snap);
+    assert_eq!(app.preview_scroll(), 3, "the refresh and `r` keep it");
+
+    let filter = app.filter().clone();
+    app.update(Msg::SetSort(crate::tui::Sort::Recency));
+    app.update(Msg::SetFilter(filter));
+    assert_eq!(app.preview_scroll(), 3, "a sort or filter change keeps it");
+
+    // A key that does not move the selection, and a jump to the row
+    // already selected, leave the Preview on what it shows.
+    let row = app.selection().cloned().expect("a selection");
+    app.update(Msg::NavDown);
+    assert_eq!(app.selection(), Some(&row), "premise: the last row");
+    assert_eq!(app.preview_scroll(), 3, "a key that moves nothing keeps it");
+    app.update(Msg::SelectRow(Box::new(row)));
+    assert_eq!(app.preview_scroll(), 3, "a jump to the same row keeps it");
+
+    // A drilled pane keeps its Preview's place too.
+    app.update(Msg::CycleFocus);
+    drill_to(&mut app, &mux_node("work"));
+    scroll_preview(&mut app, 4);
+    refresh_with(&mut app, &snap);
+    assert_eq!(app.preview_scroll(), 4);
+}
+
+#[test]
+fn a_refresh_that_changes_what_the_preview_shows_starts_it_at_its_anchor() {
+    // Another left selection: the selected session is gone.
+    let both = sessions_and_muxes(
+        &["abc", "def"],
+        &["work"],
+        &[("abc", "work"), ("def", "work")],
+    );
+    let mut app = app_on_session(&both, "abc");
+    let abc = app.selection().cloned();
+    scroll_preview(&mut app, 3);
+    refresh_with(
+        &mut app,
+        &sessions_and_muxes(&["def"], &["work"], &[("def", "work")]),
+    );
+    assert_ne!(
+        app.selection(),
+        abc.as_ref(),
+        "premise: the selection moved"
+    );
+    assert_eq!(app.preview_scroll(), 0, "another selection");
+
+    // Another focused node: the drilled mux is gone, so the pane opens on
+    // the left selection's session.
+    let mut app = app_on_session(&both, "abc");
+    drill_to(&mut app, &mux_node("work"));
+    scroll_preview(&mut app, 3);
+    refresh_with(&mut app, &sessions_and_muxes(&["abc", "def"], &[], &[]));
+    assert_eq!(
+        app.explorer().expect("explorer state").content().focused,
+        session_node("abc"),
+        "premise: the pane left the gone mux"
+    );
+    assert_eq!(app.preview_scroll(), 0, "another focused node");
+
+    // Another cursor row in the same place: the session's mux is now
+    // another one, whose row takes the cursor's position.
+    let mut app = app_on_session(&both, "abc");
+    put_explorer_cursor_on(&mut app, &mux_node("work"));
+    let state = app.explorer().expect("explorer state");
+    let (position, row) = (state.cursor(), state.cursor_key().cloned());
+    scroll_preview(&mut app, 3);
+    refresh_with(
+        &mut app,
+        &sessions_and_muxes(&["abc", "def"], &["spare"], &[("abc", "spare")]),
+    );
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.cursor(), position, "premise: the same position");
+    assert_ne!(state.cursor_key(), row.as_ref(), "premise: another row");
+    assert_eq!(app.preview_scroll(), 0, "another cursor row");
+}
+
+// ------------------------------------------------------------------
 // Enter-to-copy on Node-zone field rows + `i` for full id.
 // ------------------------------------------------------------------
 

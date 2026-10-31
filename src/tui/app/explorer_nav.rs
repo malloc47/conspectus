@@ -36,8 +36,9 @@ impl App {
     /// is still the row the pane reflects (a refresh, a filter or sort
     /// change, `r`), a drilled pane reloads the node it shows instead,
     /// and opens on the selection's node only when that one is gone.
+    /// The Preview keeps its scroll here: [`App::update`] returns it to
+    /// its anchor when what it is pointed at changed.
     pub(super) fn recompute_explorer(&mut self) {
-        self.reset_preview_scroll();
         let selection = self.tree_state.selected().cloned();
         let reflected = std::mem::replace(&mut self.explorer_reflects, selection.clone());
         let Some(selection) = selection else {

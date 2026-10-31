@@ -42,6 +42,17 @@ pub use msg::Msg;
 pub(crate) use search_open::OpenPlan;
 pub use viewport::ViewportReport;
 
+/// What the Preview zone is pointed at ([`App::preview_focus`]): the left
+/// selection, and the explorer's node with its cursor's position and row.
+type PreviewFocus = (
+    Option<RowId>,
+    Option<(
+        NodeId,
+        Option<usize>,
+        Option<crate::tui::explorer::ExplorerRowKey>,
+    )>,
+);
+
 /// Cheap-to-clone, reference-counted handle to the App's resolved
 /// [`GraphSnapshot`]. Read consumers borrow it via [`Self::snapshot`].
 #[derive(Clone)]
@@ -1074,14 +1085,20 @@ impl App {
     }
 
     /// What the Preview zone is pointed at: the left selection and the
-    /// explorer's focused node and cursor. A change resets the
-    /// Preview's scroll.
-    fn preview_focus(&self) -> (Option<RowId>, Option<(NodeId, Option<usize>)>) {
+    /// explorer's focused node and cursor, by its position and by the
+    /// row there (a refresh can put another row in the cursor's place). A
+    /// change resets the Preview's scroll; nothing else a refresh does
+    /// moves it.
+    fn preview_focus(&self) -> PreviewFocus {
         (
             self.tree_state.selected().cloned(),
-            self.explorer
-                .as_ref()
-                .map(|explorer| (explorer.id().clone(), explorer.cursor())),
+            self.explorer.as_ref().map(|explorer| {
+                (
+                    explorer.id().clone(),
+                    explorer.cursor(),
+                    explorer.cursor_key().cloned(),
+                )
+            }),
         )
     }
 
