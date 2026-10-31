@@ -339,6 +339,12 @@ struct PinRenameArgs {
 impl PinRenameArgs {
     fn run(self) -> Result<()> {
         let store = slot_store()?;
+        // Refuse a name the store would refuse before anything else is
+        // renamed: a live mux's session, the other pins' name overrides
+        // that follow it, and this pin's own override.
+        store
+            .check_rename(&self.name, &self.new_name)
+            .map_err(|e| missing_slot(&self.name, anyhow!("{e}")))?;
         if !self.no_mux {
             // A live mux slot renames its tmux session too, and the
             // plan sets the slot's `name` override so it keeps following
