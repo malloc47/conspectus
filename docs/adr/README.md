@@ -39,7 +39,7 @@ The provider-neutral node model, evidence-preserving `GraphLink` candidates, and
 | [0041](0041-resolver-stays-in-rust.md) | Resolver Stays in Rust | Accepted |
 | [0047](0047-runtime-process-nodes-candidate.md) | Runtime Process Nodes | Accepted |
 | [0059](0059-resolver-rules-engine-evaluation.md) | Resolver Rules-Engine Evaluation | Accepted |
-| [0077](0077-resolver-ambiguous-slot-preservation.md) | Resolver-Side Preservation Of Ambiguous Resolution Slots | Accepted |
+| [0077](0077-resolver-ambiguous-slot-preservation.md) | Resolver-Side Preservation Of Ambiguous Resolution Slots | Accepted (narrowed by 0107) |
 | [0084](0084-first-class-pin-nodes.md) | First-Class Pin Nodes | Accepted (amended by 0141) |
 
 ## Discovery and attribution
@@ -71,7 +71,7 @@ Where user-authored intent lives, what Conspectus may write, and what it must ne
 | --- | --- | --- |
 | [0012](0012-config-file-layout.md) | Conspectus Configuration File Layout | Accepted |
 | [0014](0014-declared-link-storage-schema.md) | Declared Link Storage Schema | Accepted |
-| [0029](0029-session-alias-overlay.md) | Session Alias Overlay | Accepted |
+| [0029](0029-session-alias-overlay.md) | Session Alias Overlay | Accepted (amended by 0141) |
 | [0086](0086-payload-privacy-tenet.md) | Payload Privacy Tenet | Accepted (amended by 0140, 0147, 0148, 0149) |
 | [0087](0087-mutation-envelope.md) | Mutation Envelope | Superseded by 0143 |
 | [0090](0090-pin-store-registry-sidecar.md) | Pin-Store Registry Sidecar | Superseded by 0141 |
@@ -93,7 +93,7 @@ What Conspectus remembers about entities that are gone, the slots the operator p
 | [0097](0097-launch-spec-form-primitive.md) | Shared Launch-Spec Form Primitive | Superseded by 0169 (narrowed by 0167 first) |
 | [0098](0098-pin-resume-preserves-launch-argv.md) | Pin Resume Preserves the Pin's Launch Argv | Accepted (amended by 0142) |
 | [0102](0102-pin-bindings-are-one-to-one.md) | Pin Bindings Are One-To-One | Superseded by 0140 |
-| [0103](0103-launches-keep-failed-panes.md) | Launches Keep Failed Panes And Confirm The Harness Started | Accepted |
+| [0103](0103-launches-keep-failed-panes.md) | Launches Keep Failed Panes And Confirm The Harness Started | Accepted (amended by 0133) |
 | [0140](0140-history-and-presence.md) | History And Presence | Accepted |
 | [0141](0141-pin-slots.md) | Pin Slots | Accepted |
 | [0142](0142-rebuild-plans-and-executors.md) | Rebuild Plans And Executors | Accepted |
@@ -104,7 +104,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 
 | ADR | Decision | Status |
 | --- | --- | --- |
-| [0035](0035-graph-to-view-query-layer.md) | Graph-to-View Query Layer | Accepted (amended) |
+| [0035](0035-graph-to-view-query-layer.md) | Graph-to-View Query Layer | Accepted (amended; Stages 2 and 3 superseded by 0082) |
 | [0036](0036-embedded-query-engine-selection.md) | Embedded Query Engine Selection | Superseded by 0082 |
 | [0037](0037-snapshot-persistence-sqlite.md) | Snapshot Persistence Under SQLite | Superseded by 0082 |
 | [0038](0038-cli-server-transport-wal.md) | CLI / Server Transport Under WAL | Partially superseded by 0082 |
@@ -120,8 +120,8 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0083](0083-zero-copy-snapshot-format.md) | Zero-Copy Snapshot Format Selection | Accepted |
 | [0091](0091-serve-idle-cost-and-class-gated-mutators.md) | Serve Idle Cost And Class-Gated Mutators | Accepted |
 | [0099](0099-caller-owned-discovery-caches.md) | Caller-Owned Discovery Caches | Accepted |
-| [0104](0104-tui-rescans-live-classes-after-tmux-handoffs.md) | The TUI Rescans Live Classes After Tmux Hand-Offs | Accepted |
-| [0108](0108-handoff-refreshes-run-in-the-background.md) | Hand-Off Refreshes Run In The Background | Accepted |
+| [0104](0104-tui-rescans-live-classes-after-tmux-handoffs.md) | The TUI Rescans Live Classes After Tmux Hand-Offs | Accepted (amended by 0108) |
+| [0108](0108-handoff-refreshes-run-in-the-background.md) | Hand-Off Refreshes Run In The Background | Accepted (amended by 0132) |
 | [0146](0146-the-hook-spool-is-the-durable-hook-record.md) | The Hook Spool Is The Durable Hook Record | Accepted |
 | [0147](0147-session-content-search.md) | Session Content Search | Accepted (amended by 0149) |
 | [0148](0148-opt-in-transcript-search-index.md) | Opt-In Transcript Search Index | Accepted (decided, not built) |
@@ -152,7 +152,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted (amended by 0153, 0159); framework-owned in part |
 | [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Superseded by 0074 |
 | [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
-| [0045](0045-sessions-graph-lineage-and-repo-default.md) | Sessions Graph Lineage And Repo Default | Accepted |
+| [0045](0045-sessions-graph-lineage-and-repo-default.md) | Sessions Graph Lineage And Repo Default | Accepted (amended by 0055) |
 | [0055](0055-sessions-graph-default.md) | Sessions Graph Default | Accepted |
 | [0056](0056-tui-clipboard-backend-osc52.md) | TUI Clipboard Backend via OSC 52 | Accepted (amended by 0163); framework-owned in part |
 | [0061](0061-drop-workspace-grouping-from-non-workspaces-views.md) | Drop Workspace Grouping From Non-Workspaces Views | Accepted (mux view refined by 0139) |
@@ -161,22 +161,22 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0064](0064-hybrid-sessions-graph-grouping.md) | Hybrid Workspace+Repo Grouping In Sessions/Graph | Accepted (amended by 0184) |
 | [0065](0065-sessions-workspace-grouping-replaces-workspaces-view.md) | Workspace Grouping In Sessions Replaces The Workspaces View | Accepted |
 | [0071](0071-ambiguous-mux-scope-and-detail.md) | Ambiguous Mux Surface Moves From Session Row To Group Detail | Accepted (detail-pane section superseded by 0074; the several-mux hint revised) |
-| [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted (amended by 0145) |
+| [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted (extended by 0120, amended by 0145) |
 | [0120](0120-mux-rows-drop-the-ambiguity-glyph.md) | Mux Rows Drop The Ambiguity Glyph | Accepted |
 | [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted (amended by 0144, 0145, 0154); framework-owned in part |
-| [0074](0074-detail-pane-related-entities-flatten.md) | Detail-Pane Related-Entities Flatten | Accepted (amended by 0187, narrowed by 0188) |
-| [0075](0075-edge-state-visual-language.md) | Edge-State Visual Language In The Detail-Pane Other Zone | Accepted (amended by 0187) |
+| [0074](0074-detail-pane-related-entities-flatten.md) | Detail-Pane Related-Entities Flatten | Accepted (narrowed by 0107, amended by 0187, narrowed by 0188) |
+| [0075](0075-edge-state-visual-language.md) | Edge-State Visual Language In The Detail-Pane Other Zone | Accepted (narrowed by 0107, amended by 0187) |
 | [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted (amended by 0155, 0156, 0189); framework-owned |
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted (amended by 0190, 0191) |
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161, 0188); framework-owned in part |
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179); framework-owned in part |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181); framework-owned in part |
-| [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
-| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (see 0147) |
+| [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended by 0112) |
+| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144; see 0147) |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
 | [0114](0114-prs-view-grouped-by-checkout.md) | A PRs View Grouped By Checkout | Accepted (amended by 0129, 0130, 0151) |
-| [0115](0115-forge-discovery-over-discovered-repos.md) | Forge Discovery Over Every Discovered Repo | Accepted |
-| [0116](0116-lazy-forge-cadence-and-hard-refresh.md) | Lazy Forge Cadence And A Hard Refresh | Accepted |
+| [0115](0115-forge-discovery-over-discovered-repos.md) | Forge Discovery Over Every Discovered Repo | Accepted (amended by 0136) |
+| [0116](0116-lazy-forge-cadence-and-hard-refresh.md) | Lazy Forge Cadence And A Hard Refresh | Accepted (amended by 0136) |
 | [0117](0117-capability-manifest-and-traced-backstop.md) | A Capability Manifest With A Traced Backstop | Accepted |
 | [0118](0118-csp-short-name.md) | `csp` Is The Short Name | Accepted |
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
@@ -254,14 +254,14 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 
 | ADR | Decision | Status |
 | --- | --- | --- |
-| [0007](0007-rust-development-approach.md) | Rust Development Approach | Accepted (amended) |
+| [0007](0007-rust-development-approach.md) | Rust Development Approach | Accepted (amended by 0110) |
 | [0008](0008-beads-work-tracking.md) | Beads Work Tracking | Superseded by 0009 |
 | [0009](0009-lightweight-backlog-tracking.md) | Lightweight Backlog Tracking | Superseded by 0109 |
 | [0109](0109-backlog-md-work-tracking.md) | Backlog.md Work Tracking | Accepted |
 | [0010](0010-task-runner-selection.md) | Task Runner Selection | Accepted |
-| [0015](0015-library-api-surface.md) | Library API Surface | Accepted (amended) |
+| [0015](0015-library-api-surface.md) | Library API Surface | Accepted (amended, and by 0141) |
 | [0101](0101-typed-errors-on-the-library-facade.md) | Typed Errors On The Library Facade | Accepted |
-| [0016](0016-distribution-policy.md) | Distribution Policy | Accepted (amended) |
+| [0016](0016-distribution-policy.md) | Distribution Policy | Accepted (amended by 0110) |
 | [0110](0110-pinned-rust-toolchain.md) | Pinned Rust Toolchain | Accepted |
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
 | [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164); framework-owned in part |
@@ -272,14 +272,14 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0124](0124-sibling-test-files.md) | Large Unit-Test Modules Live In Sibling Files | Accepted; framework-owned in part |
 | [0125](0125-opencode-2-reference-findings.md) | OpenCode 2.x Reference Findings | Accepted |
 | [0126](0126-opencode-2-pane-attribution.md) | OpenCode 2.x Session-To-Pane Attribution | Accepted |
-| [0127](0127-launches-keep-the-tui-drawn-behind-a-spinner.md) | Launches Keep The TUI Drawn Behind A Spinner | Accepted |
+| [0127](0127-launches-keep-the-tui-drawn-behind-a-spinner.md) | Launches Keep The TUI Drawn Behind A Spinner | Accepted (amended by 0133) |
 | [0128](0128-github-hosts-gh-is-signed-in-to.md) | Forge Discovery Queries The GitHub Hosts `gh` Is Signed In To | Accepted |
-| [0129](0129-pr-local-branch-symbol-filter-and-ranking.md) | PRs Show Whether They Have A Local Branch, With A Filter And A Ranking | Accepted |
+| [0129](0129-pr-local-branch-symbol-filter-and-ranking.md) | PRs Show Whether They Have A Local Branch, With A Filter And A Ranking | Accepted (amended by 0130, 0131) |
 | [0130](0130-pr-config-keys-and-no-checkout-catch-all.md) | PR Tracking Config Keys, And No "No checkout" Catch-All | Accepted |
 | [0131](0131-pr-titles-and-the-pr-row-layout.md) | PR Titles And The PR Row Layout | Accepted (amended by 0184) |
-| [0132](0132-refuse-actions-on-rows-awaiting-a-handoff-refresh.md) | Refuse Actions On Rows Awaiting A Hand-Off Refresh | Accepted |
-| [0133](0133-launches-attach-before-they-refresh.md) | Launches Attach Before They Refresh | Accepted |
+| [0132](0132-refuse-actions-on-rows-awaiting-a-handoff-refresh.md) | Refuse Actions On Rows Awaiting A Hand-Off Refresh | Accepted (amended by 0142) |
+| [0133](0133-launches-attach-before-they-refresh.md) | Launches Attach Before They Refresh | Accepted (amended by 0142) |
 | [0134](0134-pr-state-filter.md) | A PR State Filter | Accepted |
-| [0135](0135-pin-commands-skip-forge-discovery.md) | Pin Commands Skip Forge Discovery | Accepted |
+| [0135](0135-pin-commands-skip-forge-discovery.md) | Pin Commands Skip Forge Discovery | Accepted (amended by 0141, 0142) |
 | [0136](0136-lazy-forge-fetches-outside-the-writer-lock.md) | Lazy Forge Fetches Outside The Writer Lock | Accepted |
 | [0137](0137-forge-fetches-stop-on-shutdown.md) | Forge Fetches Stop On Daemon Shutdown | Accepted |
