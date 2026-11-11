@@ -1,9 +1,11 @@
 //! Forms keep the capabilities the forms before them had: arrow keys
 //! move between fields, Tab completes a directory in a cwd field, the
 //! harness row offers the harness options (including skipping
-//! permissions), and a pin's editable fields are listed, not guessed.
-//! And they follow the form house rules: `Enter` submits from any field,
-//! and the keys stay in view on a short terminal.
+//! permissions), a pin's editable fields are listed, not guessed, and a
+//! new mux's name starts as the next free one in the series of the mux
+//! the operator is looking at. And they follow the form house rules:
+//! `Enter` submits from any field, and the keys stay in view on a short
+//! terminal.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyCode;
@@ -254,4 +256,359 @@ fn the_launch_forms_command_row_is_read_only_and_never_takes_focus() {
         .filter(|(c, _)| !c.is_whitespace() && !matches!(c, '│' | '┃' | '|'))
         .all(|(_, m)| m.contains(Modifier::ITALIC) && m.contains(Modifier::DIM));
     assert!(styled, "the command row is dim italic, unlike input rows");
+}
+
+// ---- the name a new mux starts with ---------------------------------------
+
+/// The name each form opens with over the app `make` builds: the new
+/// tmux session form's, then the launch form's.
+fn seeded_names(make: impl Fn() -> App) -> [String; 2] {
+    let mut app = make();
+    app.update(Msg::OpenNewMuxForm);
+    let bare = app
+        .new_mux_form()
+        .expect("the new tmux session form opens")
+        .values()
+        .text(new_mux::NAME)
+        .to_string();
+    let mut app = make();
+    app.update(Msg::OpenMuxLaunchForm);
+    let launch = app
+        .mux_launch_form()
+        .expect("the launch form opens")
+        .values()
+        .text(mux_launch::NAME)
+        .to_string();
+    [bare, launch]
+}
+
+/// Both forms open with `name`.
+fn both(name: &str) -> [String; 2] {
+    [name.to_string(), name.to_string()]
+}
+
+/// `view` over `world` with the row for `label` selected.
+fn selected(view: View, world: &GraphSnapshot, label: &str) -> App {
+    let mut app = app_over(view, world);
+    select(&mut app, label);
+    app
+}
+
+/// Live muxes named `names`; a session pin for each of `pin_ids`, so the
+/// name is the pin's alone and no mux has it; and a mux in history for
+/// each of `recorded`.
+fn series_world(names: &[&str], pin_ids: &[&str], recorded: &[&str]) -> GraphSnapshot {
+    let mut snapshot = GraphSnapshot::empty();
+    for name in names {
+        let mut mux = MuxSessionNode::new(MuxSessionId::new(format!("tmux:{name}")), "tmux", *name);
+        mux.cwd = Some("/home/op/src/conspectus".into());
+        snapshot.nodes.push(GraphNode::MuxSession(mux));
+    }
+    for (order, id) in (0u32..).zip(pin_ids) {
+        let key = format!("pinned{order:04}");
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode::new(
+                AgentSessionId::new("claude-code", "/state", key.clone()),
+                "claude-code",
+            )));
+        snapshot.pins.push(PinSlot {
+            id: (*id).to_string(),
+            kind: PinKind::Session,
+            target: Some(format!("agent_session:claude-code:/state:{key}")),
+            pinned_at: None,
+            overrides: SlotFields::new(),
+            snapshot: SlotFields::new(),
+            order,
+            legacy: false,
+        });
+    }
+    for (n, name) in recorded.iter().enumerate() {
+        snapshot.history.muxes.push(crate::model::MuxRecord {
+            meta: crate::model::RecordMeta {
+                id: format!("h_rec{n}"),
+                key: format!("mux_session:tmux:{name}"),
+                first_seen: NOW - 9_000,
+                last_seen: NOW - 8_000,
+                origin: Default::default(),
+                display: Default::default(),
+                rebuilt_from: None,
+            },
+            recipe: crate::model::MuxRecipe {
+                backend: "tmux".into(),
+                name: (*name).into(),
+                ..Default::default()
+            },
+            extra: Default::default(),
+        });
+    }
+    resolve_snapshot(snapshot)
+}
+
+/// Focus the right pane and walk its cursor onto the first link to an
+/// entity `wanted` accepts.
+fn focus_right_on(app: &mut App, wanted: impl Fn(&NodeId) -> bool) {
+    app.update(Msg::CycleFocus);
+    assert_eq!(app.focus(), crate::tui::app::Focus::Right);
+    let mut seen = Vec::new();
+    for _ in 0..60 {
+        let target = app.explorer().and_then(|state| {
+            let row = app.explorer_cursor_row()?;
+            state.content().drill_target(&row)
+        });
+        if target.as_ref().is_some_and(&wanted) {
+            return;
+        }
+        seen.extend(target);
+        // A folded section shows its links once opened.
+        app.update(Msg::Explorer(tuikit::explorer::ExplorerKey::OpenSection));
+        app.update(Msg::Explorer(tuikit::explorer::ExplorerKey::Down));
+    }
+    panic!("the right pane links to no such entity, only to {seen:?}");
+}
+
+/// Select the first group row of `app`'s list that stands for a repo,
+/// checkout, or workspace.
+fn select_a_group(app: &mut App) {
+    let id = app
+        .visible_rows()
+        .iter()
+        .find_map(|row| match &row.id {
+            RowId::Group(NodeId::Repo(_) | NodeId::Checkout(_) | NodeId::Workspace(_)) => {
+                Some(row.id.clone())
+            }
+            _ => None,
+        })
+        .expect("the list has a group row");
+    app.set_selection(id);
+}
+
+#[test]
+fn a_numbered_mux_opens_the_forms_on_the_next_free_name_in_its_series() {
+    let world = series_world(&["work-1", "work-2"], &[], &[]);
+    assert_eq!(
+        seeded_names(|| selected(View::Mux, &world, "work-1")),
+        both("work-3"),
+        "`work-2` is live, so `work-1` leads to `work-3`"
+    );
+}
+
+#[test]
+fn a_name_a_pin_or_history_holds_is_skipped() {
+    let world = series_world(&["work-1"], &["work-2"], &["work-3"]);
+    assert_eq!(
+        seeded_names(|| selected(View::Mux, &world, "work-1")),
+        both("work-4"),
+        "a pin is named `work-2` and history has a `work-3`"
+    );
+}
+
+#[test]
+fn a_zero_padded_number_keeps_its_width() {
+    let world = series_world(&["work-007", "work-099"], &[], &[]);
+    assert_eq!(
+        seeded_names(|| selected(View::Mux, &world, "work-007")),
+        both("work-008")
+    );
+    assert_eq!(
+        seeded_names(|| selected(View::Mux, &world, "work-099")),
+        both("work-100")
+    );
+}
+
+#[test]
+fn a_name_without_a_number_gets_a_dash_suffix() {
+    let world = world();
+    assert_eq!(
+        seeded_names(|| selected(View::Mux, &world, "scratch")),
+        both("scratch-2")
+    );
+    assert_eq!(
+        seeded_names(|| selected(View::Mux, &world, "conspectus-main")),
+        both("conspectus-main-2")
+    );
+}
+
+#[test]
+fn a_session_opens_the_forms_on_its_muxs_series() {
+    let world = world();
+    assert_eq!(
+        seeded_names(|| selected(View::Sessions, &world, "e44d01cb")),
+        both("conspectus-main-2"),
+        "the session runs in `conspectus-main`"
+    );
+}
+
+/// A session whose mux has gone takes the one its row shows: the mux
+/// history says hosted it last.
+#[test]
+fn a_session_whose_mux_is_gone_seeds_from_the_one_that_hosted_it_last() {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", "hosted0001"),
+            "claude-code",
+        )));
+    snapshot.history.muxes.push(crate::model::MuxRecord {
+        meta: crate::model::RecordMeta {
+            id: "h_work1".into(),
+            key: "mux_session:tmux:work-1".into(),
+            first_seen: NOW - 9_000,
+            last_seen: NOW - 8_000,
+            origin: Default::default(),
+            display: Default::default(),
+            rebuilt_from: None,
+        },
+        recipe: crate::model::MuxRecipe {
+            backend: "tmux".into(),
+            name: "work-1".into(),
+            hosted: vec![crate::model::HostedSession {
+                harness: "claude-code".into(),
+                session_id: "hosted0001".into(),
+                first_seen: NOW - 9_000,
+                last_seen: NOW - 8_000,
+            }],
+            ..Default::default()
+        },
+        extra: Default::default(),
+    });
+    let world = resolve_snapshot(snapshot);
+    assert_eq!(
+        seeded_names(|| selected(View::Sessions, &world, "hosted")),
+        both("work-2")
+    );
+}
+
+#[test]
+fn a_gone_mux_and_a_mux_pin_seed_from_the_muxs_name() {
+    let world = world();
+    for (view, label, seed) in [
+        (View::Mux, "config-agent3", "config-agent4"),
+        (View::History, "h_old", "old-experiment-2"),
+        (View::Pinned, "config-agent3", "config-agent4"),
+        (View::Pinned, "conspectus-main", "conspectus-main-2"),
+        (View::Pinned, "nightly", "nightly-2"),
+    ] {
+        assert_eq!(
+            seeded_names(|| selected(view, &world, label)),
+            both(seed),
+            "{label} in {view:?}"
+        );
+    }
+}
+
+#[test]
+fn a_row_that_is_no_mux_and_runs_in_none_opens_the_forms_empty() {
+    let world = world();
+    let group = || {
+        let mut app = app_over(View::Sessions, &world);
+        select_a_group(&mut app);
+        app
+    };
+    assert_eq!(seeded_names(group), both(""), "a group row");
+    let pr = || {
+        let mut app = app_over(View::Prs, &world);
+        let id = app
+            .visible_rows()
+            .iter()
+            .find(|row| matches!(row.id, RowId::Pr(_)))
+            .map(|row| row.id.clone())
+            .expect("a PR row");
+        app.set_selection(id);
+        app
+    };
+    assert_eq!(seeded_names(pr), both(""), "a PR row");
+    assert_eq!(
+        seeded_names(|| selected(View::Pinned, &world, "ledger-worktree")),
+        both(""),
+        "a checkout pin"
+    );
+    assert_eq!(
+        seeded_names(|| selected(View::Sessions, &world, "solo")),
+        both(""),
+        "a session outside any mux"
+    );
+    let empty = GraphSnapshot::empty();
+    assert_eq!(
+        seeded_names(|| app_over(View::Mux, &empty)),
+        both(""),
+        "nothing selected"
+    );
+}
+
+fn session_id(key: &str) -> NodeId {
+    NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", key))
+}
+
+/// A session `child00001` in the mux `work-1`, forked from the session
+/// `parent0001` in the mux `build-3`.
+fn lineage_world() -> GraphSnapshot {
+    fn link(
+        id: &str,
+        source: NodeId,
+        target: NodeId,
+        relation: crate::model::RelationKind,
+    ) -> crate::model::GraphLink {
+        let mut link = crate::model::GraphLink::new(
+            id.to_string(),
+            source,
+            crate::model::LinkEndpoint::Node { id: target },
+            relation,
+            crate::model::Provenance::Discovered,
+        );
+        link.state = crate::model::LinkState::Active;
+        link
+    }
+    let mut snapshot = GraphSnapshot::empty();
+    for (key, mux) in [("child00001", "work-1"), ("parent0001", "build-3")] {
+        let id = MuxSessionId::new(format!("tmux:{mux}"));
+        snapshot
+            .nodes
+            .push(GraphNode::MuxSession(MuxSessionNode::new(
+                id.clone(),
+                "tmux",
+                mux,
+            )));
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode::new(
+                AgentSessionId::new("claude-code", "/state", key),
+                "claude-code",
+            )));
+        snapshot.candidate_links.push(link(
+            &format!("in-mux:{key}"),
+            session_id(key),
+            NodeId::MuxSession(id),
+            crate::model::RelationKind::LinkedToMux,
+        ));
+    }
+    snapshot.candidate_links.push(link(
+        "lineage",
+        session_id("child00001"),
+        session_id("parent0001"),
+        crate::model::RelationKind::ParentSession,
+    ));
+    resolve_snapshot(snapshot)
+}
+
+#[test]
+fn with_the_right_pane_focused_the_entity_it_shows_is_the_base() {
+    let world = lineage_world();
+    assert_eq!(
+        seeded_names(|| selected(View::Sessions, &world, "child")),
+        both("work-2"),
+        "the selected session runs in `work-1`"
+    );
+    let parent = session_id("parent0001");
+    let make = || {
+        let mut app = selected(View::Sessions, &world, "child");
+        focus_right_on(&mut app, |node| *node == parent);
+        app
+    };
+    assert_eq!(
+        seeded_names(make),
+        both("build-4"),
+        "the right pane's cursor is on the parent session, which runs in `build-3`"
+    );
 }

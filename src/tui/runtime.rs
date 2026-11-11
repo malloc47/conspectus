@@ -45,6 +45,7 @@ use crate::tui::{RunConfig, ui};
 mod content;
 mod executor;
 mod launch;
+mod mux_name;
 mod overlay_keys;
 mod term;
 mod visibility;
@@ -1492,8 +1493,9 @@ pub(super) fn open_new_mux_form_action(app: &mut App) {
 
 /// The bare-tmux new-session form, seeded: the cwd from the selected
 /// row's cwd when it resolves to a repo, checkout, mux, or agent-session
-/// row, otherwise `$HOME`; the name from [`derive_new_mux_name`] (empty,
-/// so the operator types it); and the known directories the cwd field
+/// row, otherwise `$HOME`; the name from [`derive_new_mux_name`] (the
+/// next free name after the mux the operator is looking at, else empty
+/// for the operator to type); and the known directories the cwd field
 /// completes with.
 pub(crate) fn new_mux_form(app: &App) -> tuikit::form::Form<Msg> {
     let cwd = derive_new_mux_cwd(app).unwrap_or_else(default_new_mux_cwd);
@@ -1614,10 +1616,9 @@ fn strip_tmux_prefix(native_id: &str) -> String {
     }
 }
 
-/// Derive a default mux name for the mux-launch form. Today this
-/// mirrors [`derive_new_mux_name`] (empty — operator picks); a
-/// future refinement (slugify repo basename etc.) has one place to
-/// land.
+/// The mux name the launch form starts with: the same seed as the new
+/// tmux session form's ([`derive_new_mux_name`]), `None` when that is
+/// empty.
 pub(crate) fn derive_mux_launch_name(app: &App) -> Option<String> {
     let name = derive_new_mux_name(app);
     if name.is_empty() { None } else { Some(name) }
@@ -1685,13 +1686,12 @@ fn default_new_mux_cwd() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
 }
 
-/// Derive a default session-name seed from the selected row. Today
-/// this is intentionally empty — the operator picks a name that fits
-/// their workflow, and tmux forbids some of the punctuation we might
-/// derive from a path anyway. Kept as a helper so a future refinement
-/// (e.g. slugify the repo basename) has one place to land.
-fn derive_new_mux_name(_app: &App) -> String {
-    String::new()
+/// The session name both new-mux forms start with: the next free name
+/// in the series of the mux the operator is looking at (`worker-1` gives
+/// `worker-2`), or empty when that is not a mux and runs in none, so
+/// the operator types one ([`mux_name::seed`]).
+fn derive_new_mux_name(app: &App) -> String {
+    mux_name::seed(app)
 }
 
 /// Open the Mux action menu (`m`). Context-free — the menu itself
