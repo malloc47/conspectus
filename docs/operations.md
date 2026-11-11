@@ -1254,6 +1254,19 @@ launch form's `pin` row, is drawn as `(•) chosen ( ) other`; a checkbox is
 `[x]` or `[ ]`. On a terminal too short for the whole form, its fields
 scroll to keep the focused one in view and its keys stay at the bottom.
 
+Opened from a mux, both forms start with the next free name in that mux's
+series: with `worker-1` selected the name reads `worker-2`, or the first
+number after it that is free; zero padding keeps its width (`work-007`
+gives `work-008`, `work-099` gives `work-100`), and a name without a
+number gets `-2`, `-3`, and so on. A name is taken when a mux has it, live
+or gone, when history recorded a mux under it, or when a pin has it. The
+mux is the selected row's: a mux row (live or gone), a session's mux (the
+one its row shows), or a mux pin; while the right pane has focus, the
+entity it shows decides instead. From a repo, checkout, workspace, or PR
+row, a session outside any mux, or nothing, the name starts empty. The
+cursor is at the end of the name, so typing extends it and `Ctrl-U`
+clears it.
+
 Every path field (the forms' cwd, the launch form's worktree repo, and a
 pin's path rows) asks for a directory. `Tab` adds the rest of the best
 completion: directories from the graph come first (the selected row's, then
@@ -2047,6 +2060,11 @@ of the TUI. The sections above describe the current behavior in full;
   own under the name; its fields read `name`, `socket`, and `argv`; its
   pin choice is drawn `(•) don't pin ( ) launch, then pin ( ) pin, don't
   launch`; and its worktree repo completes and is marked like the cwd.
+- **The new tmux session and launch forms name the next mux in the
+  series**: opened from `worker-1` (its row, a session in it, or its pin)
+  they start with `worker-2`, where they started empty (see
+  [Pinning from the other views](#pinning-from-the-other-views)). From
+  anything that is not a mux and runs in none they still start empty.
 - **The pin edit form** labels its rows `branch` and `resume in`, says
   why a save is refused just above its keys, and takes `Ctrl-R` on its
   field rows only.

@@ -619,6 +619,16 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A new mux's name starts as the next one in the series again.** The
+  pin create form filled in `worker-2` when opened from `worker-1`, and
+  the pins that replaced it lost that: the new tmux session form (`n`)
+  and the launch form (`N`) opened with an empty name. Both now start
+  with the next free name after the mux the operator is on (its row, a
+  session in it, or its pin; the right pane's entity while it has
+  focus): the trailing number bumped with its zero padding kept, or
+  `-2`, `-3`, … for a name without one, skipping names a mux (live or
+  gone), history, or a pin already has. From anything else the name
+  still starts empty.
 - **Quick select and the pin menu promise only a view that lists the
   entity.** Since the Forks view went, quick select's All reach said `in
   Sessions view` for a fork and then failed on `Enter`, and a fork's pin
