@@ -76,6 +76,15 @@ forms, lists, readers, and keys look and behave alike.
   start is upgraded in place, and nothing changes until you run it. Each
   event updates the session's entry in `live-state.json`; nothing shows
   it in the TUI yet.
+- **Codex reports what each session is doing.** `conspectus hook init
+  codex` now installs an entry for each of the 11 Codex hook events that
+  say whether a session is working, waiting for an approval, ready,
+  compacting, or ended, and how many subagents it runs, each with a 5 s
+  timeout. To turn it on, re-run `conspectus hook init codex`, then open
+  `/hooks` in Codex and trust the new entries: recent Codex versions skip
+  a hook until you do, and `hook init` reminds you. Each event updates the
+  session's entry in `live-state.json`; nothing shows it in the TUI yet.
+  `hook status codex` reports each event, as for Claude Code.
 - **Discovery binds live state to the graph.** Every discovery (daemon
   cycles, one-shot commands, the daemonless TUI) reads
   `live-state.json` and puts each entry on the agent session it
@@ -98,7 +107,7 @@ forms, lists, readers, and keys look and behave alike.
   event), `silent` (installed and an agent runs, but no events: the hooks
   may be untrusted or disabled, or the agent started before the install),
   `no-events`, `off` (with the command that installs the hooks), or
-  `unsupported` (Codex and Pi hooks report no live state yet).
+  `unsupported` (Pi's hook reports no live state yet).
 
 ### Changed
 
@@ -695,6 +704,21 @@ forms, lists, readers, and keys look and behave alike.
   error instead of replacing a `hooks` value of the wrong type.
 
 ### Fixed
+
+- **`conspectus hook init codex` no longer replaces your Codex hooks.**
+  It replaced `[[hooks.SessionStart]]` tables (the form the Codex docs
+  show) and an inline `hooks = { ... }` table with its own entry,
+  deleting yours. It now edits `config.toml` in place and keeps comments,
+  layout, and your entries in whichever form you wrote them. It refuses a
+  `hooks` value of the wrong type instead of replacing it, never touches
+  `hooks.state` or writes a trust value, and notes a `hooks.json` beside
+  the file without editing it. `hook remove codex` takes out exactly
+  Conspectus's entries, wherever they sit, and `hook status codex` finds
+  them in every form.
+- **`hook init` and `hook remove` keep a settings file's link and mode.**
+  A symlinked settings file is written through to its target, the file
+  keeps its permissions, and a read-only one is refused, where each was
+  replaced with a new file.
 
 - **A mux's rows stop spinning right after a detach.** Coming back from a
   mux froze its row and its sessions' rows (dimmed, with a spinner, and

@@ -164,6 +164,61 @@ are in the research notes and become tests.
     The fixtures that encode these are synthetic until a recording
     confirms them.
 
+### Codex, as built
+
+17. **One group of Conspectus's own per event, in the file's own
+    form.** A group is Conspectus's when every handler in it is a
+    command hook running `hook write codex`. `hook init codex` edits
+    `config.toml` in place through `toml_edit` (already a dependency),
+    so comments, layout, and every other key survive. It appends its
+    group after the operator's for each event, in the form of the table
+    it goes into: an array of tables (`[[hooks.<Event>]]`, the form Codex
+    documents), or inline lists in an inline or dotted hooks table or in
+    one that already holds inline lists. The group has no matcher and one
+    handler with a 5 s timeout. The handler runs synchronously, Codex's
+    default, because an asynchronous hook can finish after the next
+    event's and the store relies on order. An older group of
+    Conspectus's is upgraded in place, a group of the operator's is
+    never edited, and a hooks value or event list of the wrong type is
+    refused. The edited text is parsed back before it replaces the file,
+    and the write follows a symlink and keeps the file's mode. An install
+    never moves an operator's entry, so trust Codex recorded by place
+    stays valid.
+18. **Trust, `hooks.state`, and `hooks.json`.**
+    - Keys of the hooks table that are not event lists, `hooks.state`
+      among them, are never read or written, and no trust value is ever
+      written. `hook init codex` prints the `/hooks` review step on every
+      run.
+    - A `hooks.json` beside the file is read only to say that Codex runs
+      it too. The install stays in `config.toml`, the file ADR 0143
+      category 5 names, and accepts the startup warning Codex may give
+      for a layer with both. It neither edits `hooks.json` nor ships a
+      Codex plugin.
+    - `hook remove codex` takes out every Conspectus handler and the
+      groups and lists that leaves empty. It says when that moved an
+      operator's entry up a place, which may cost a review in `/hooks`.
+    - Status reports per event as for Claude Code. A matcher covers its
+      event only when it is absent or empty, since Codex reads a matcher
+      as a regular expression.
+19. **The mapping where the research left a choice.**
+    - A `Stop` in plan mode is a finished turn (`ready/finished`). `ready`
+      has no detail for a proposed plan, and only
+      `last_assistant_message` could tell whether there was one, which is
+      never read. A detail waits for a recording that shows how often it
+      matters.
+    - `PermissionRequest` is always a permission wait. The question tool
+      (`request_user_input`) is not installed, since `PreToolUse`
+      coverage for it is unverified.
+    - An event that carries `agent_id` is the child's, as for Claude
+      Code: its waits and tools count for the child, and its turn events
+      and paths are dropped. `agent_type`, `tool_name`,
+      `permission_mode`, and `turn_id` are never read.
+    - Tier B (`PreModelRequest`, `PostModelRequest`) is not installed,
+      and every event outside the subscribed set maps to nothing. The
+      shared reducer needed no Codex-specific case.
+
+    These fixtures are synthetic too, until a recording confirms them.
+
 ## Consequences
 
 - Claude Code pays two small spawns per tool call (`PostToolUse` and its
@@ -207,6 +262,10 @@ are in the research notes and become tests.
   `preserve_order` adds a transitive dependency, which needs its own ADR.
   Until then `hook init` keeps values and re-sorts keys, as today, and
   the plan files a story for it.
+- *Codex: Tier A only, synchronous, and where when a `hooks.json`
+  exists?* Tier A, synchronous, 5 s timeouts, and always `config.toml`
+  (decisions 17 and 18). `notify` is never touched, and trust is only
+  ever explained, never written or read.
 - *Which OpenCode and Pi versions?* OpenCode 1.x and 2.x both get a
   reducer. Pi's waiting state needs 0.84.4 or later; older versions
   report the other states.

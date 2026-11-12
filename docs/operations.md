@@ -87,12 +87,15 @@ Install a harness hook automatically:
 
 ```sh
 conspectus hook init claude-code   # 14 hook entries in ~/.claude/settings.json
-conspectus hook init codex         # a hook entry in ~/.codex/config.toml
+conspectus hook init codex         # 11 hook entries in ~/.codex/config.toml
 conspectus hook init pi            # <agent-dir>/extensions/conspectus-hook.ts
 ```
 
 `--scope project` installs into the current project instead
 (`.claude/`, `.codex/`, `.pi/extensions/`). The commands are idempotent.
+A settings file that is a symlink, as a dotfile manager leaves it, is
+written through to its target and keeps its mode; a read-only one is
+refused.
 `conspectus hook status <harness>` reports whether the hook is present
 and ends with a [live-state health line](#live-state-health), and
 `conspectus hook remove <harness>` removes only what Conspectus
@@ -207,6 +210,65 @@ name. Some gaps come with the hooks:
   only. Such a session has no live state, which is not the same as
   idle.
 
+#### Codex live state
+
+`hook init codex` installs one entry for each Codex hook event that says
+whether a session is working, waiting for you, or ready:
+`SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`,
+`Stop`, `Interrupt`, `SessionEnd`, `SubagentStart`, `SubagentStop`,
+`PreCompact`, and `PostCompact`, each its own group with no matcher and a
+5 s timeout:
+
+```toml
+[[hooks.Stop]]
+hooks = [{ type = "command", command = "conspectus hook write codex", timeout = 5 }]
+```
+
+Recent Codex versions skip a hook they don't manage until you trust it, so
+after `conspectus hook init codex`, open `/hooks` in Codex and review the
+Conspectus entries. Do it again after any `hook init` that changed them:
+the trust Codex records covers each entry's command, matcher, and timeout,
+and its place in the list. Conspectus never writes that trust itself, and never touches
+`hooks.state` (where Codex keeps it) or `notify`.
+
+The install edits `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`)
+in place: comments, layout, and your own hooks stay as they were, in
+whichever form you wrote them (`[[hooks.<Event>]]` tables, lists under
+`[hooks]` or in dotted keys, or an inline `hooks = { ... }`). Conspectus's
+groups go after yours, so an install never moves one of your entries. An
+older session-start-only install is upgraded in place when you run
+`conspectus hook init codex` again; nothing changes until you do. A
+`hooks` value or event list of the wrong type stops the install with an
+error instead of being replaced. If a `hooks.json` sits beside
+`config.toml`, Codex reads both; `hook init` says so, installs in
+`config.toml` anyway, and never edits `hooks.json`.
+
+`conspectus hook status codex` prints `installed`, `partial`, or
+`not-installed` for the file and one line per event, as for Claude Code.
+`hook remove codex` takes out every Conspectus entry and nothing else,
+wherever it sits; when that moves one of your entries up a place, it
+warns that Codex may ask you to review that entry again.
+
+Events update the session's entry in `live-state.json` as for Claude Code,
+and a subagent's events count on its parent's session. Only states,
+counts, ids, paths, and times are kept: never a prompt, a tool's input or
+output, a message, an error text, a tool name, or an agent type. Some
+gaps come with the hooks:
+
+- Approving a prompt fires nothing: the session reads `waiting` until the
+  approved tool finishes. Declining one reads `waiting` until a later
+  tool, the end of the turn, or an interrupt.
+- MCP elicitations and sign-in prompts fire no hook, so a session waiting
+  on one reads `working` (quiet after ten minutes).
+- A turn that ends in plan mode reads `ready`, whether or not it proposed
+  a plan you still have to accept.
+- A crashed or killed Codex says nothing; Conspectus finds its pid gone
+  and shows it `exited`.
+- The hooks report nothing until you trust them in `/hooks`, nor with
+  hooks turned off or managed hooks only. Such a session has no live
+  state, which is not the same as idle; `hook status codex` calls an
+  installed hook `silent` while Codex runs and nothing arrives.
+
 #### Live-state health
 
 The last line of `conspectus hook status <harness>` says whether the
@@ -221,10 +283,10 @@ against the running processes. It starts no process and asks no daemon.
 | Health | Meaning |
 |---|---|
 | `receiving` | The file has entries for the harness: `live state: 2 sessions, newest event 12s ago`. |
-| `silent` | The hooks are installed and one of the harness's agents runs, but no event has arrived: the hooks may be untrusted, disabled, or the agent was started before they were installed. Restart the agent after `hook init`, and accept the workspace trust prompt. |
+| `silent` | The hooks are installed and one of the harness's agents runs, but no event has arrived: the hooks may be untrusted, disabled, or the agent was started before they were installed. Restart the agent after `hook init`, and accept the workspace trust prompt (for Codex, trust the entries in `/hooks`). |
 | `no-events` | The hooks are installed, nothing has arrived, and no running agent of the harness is known. Start one, or run a command that discovers, such as `conspectus table sessions`, so the saved graph lists it. |
 | `off` | The hooks are not installed in this scope; the message names the `conspectus hook init` command that installs them. |
-| `unsupported` | The harness's hook reports sessions but no live state (Codex and Pi, for now). |
+| `unsupported` | The harness's hook reports sessions but no live state (Pi, for now). |
 
 ## Configuration File
 

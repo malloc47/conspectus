@@ -348,7 +348,8 @@ noted.
   and the fixtures are fixed (CSP-811); the variable is CSP-837.
 - `hook init` re-sorts the keys of the operator's `settings.json`.
 - `hook init codex` replaces an operator's `[[hooks.SessionStart]]` tables and
-  sets no timeout; hooks may be inert until trusted.
+  sets no timeout; hooks may be inert until trusted. Fixed (CSP-815): the
+  install keeps every form, sets timeouts, and prints the `/hooks` step.
 - The attribution spool key ignores the pane; `ACTIVE_TTL_SECONDS` is dead;
   an ingest leaves two active links for one pane until the next cycle.
 - Socket clients have no timeouts. `hook write`'s ingest call is now bounded
