@@ -4,7 +4,7 @@ title: Record real payloads and verify live state against each harness
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 10:20'
+updated_date: '2026-11-12 11:18'
 labels:
   - live-state
   - ls-docs
@@ -64,4 +64,6 @@ From CSP-815: claims the Codex slice encodes that a recording should confirm. Ea
 - Does `hook remove` renumbering groups really cost a `/hooks` re-review?
 - Is the trust table really at `hooks.state.<key>`?
 - Is the `/hooks` review wording `hook init codex` prints accurate for the recorded version?
+
+From CSP-816 (OpenCode): the event scripts in `tests/fixtures/hooks/opencode-live/` are synthetic; their README lists the shapes to confirm. Also check in the sandbox: that 1.x `permission.asked` and `question.*` reach the plugin's `event` hook; that `dispose` runs when a 1.x TUI quits; that 2.x `ctx.event.subscribe` yields `{type, data, location: {directory}}` and whether a server plugin instance gets other locations' events (the reducer drops them); that the 2.x step and compaction events carry `data.sessionID`; the 2.x `execution.failed` error `type` words; and that a `dist/v2` entry in `opencode.jsonc` loads both entrypoints. The plugin's TypeScript was not compiled when it landed: run `npm install && npm run typecheck` in `plugins/opencode-hook` first.
 <!-- SECTION:NOTES:END -->

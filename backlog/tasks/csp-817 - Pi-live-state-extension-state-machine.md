@@ -4,7 +4,7 @@ title: 'Pi live state: extension state machine'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 10:26'
+updated_date: '2026-11-12 11:19'
 labels:
   - live-state
   - ls-emit
@@ -58,4 +58,6 @@ Planning note (after CSP-810): the writer seam is on `HarnessAdapter` (`src/disc
 From CSP-813: `hook status` reports this harness's live-state health as `unsupported` until its adapter's `HarnessAdapter::reports_live_state` returns true; flip it when the hooks report live state, and update the `unsupported` row of the health table in `docs/operations.md`.
 
 Verification approach (replaces the Rust mirror in the scope): keep the state machine a pure, exported function in `conspectus-hook.ts` with no side effects on import (the `ExtensionAPI` import is `import type`, so Node strips it) and test it with `node --test` (Node 24 strips types; `node` is in the user profile, not the dev shell). Shared event-script fixtures (JSONL: one Pi event per line, with the snapshot expected after it) are consumed by the TypeScript tests and by the Rust tests that feed the expected snapshots through the payload parser and the store. Add a `just` recipe for the plugin tests that reports "node not found" cleanly. ADR 0206 describes this.
+
+From CSP-816: the opencode reducer's pattern is `plugins/opencode-hook/src/live.ts` (pure, no imports) with `test/live.test.ts` replaying `tests/fixtures/hooks/opencode-live/*.jsonl` (each step: an input, the payloads it must `emit`, and a hand-written `shown`); the Rust side replays the emitted payloads in `src/discovery/harness/opencode_live_sequence_tests.rs` with `live_sequences::assert_shown`. `just opencode-plugin-test` runs the opencode tests and fails with a message when node is missing; a Pi recipe can sit beside it or the two can share one.
 <!-- SECTION:NOTES:END -->

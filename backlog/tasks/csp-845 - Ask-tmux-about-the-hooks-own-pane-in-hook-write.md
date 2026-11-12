@@ -4,6 +4,7 @@ title: Ask tmux about the hook's own pane in hook write
 status: To Do
 assignee: []
 created_date: '2026-11-12 10:20'
+updated_date: '2026-11-12 11:18'
 labels:
   - live-state
   - ls-fix
@@ -32,3 +33,9 @@ ordinal: 930000
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+From CSP-816: the opencode plugin now spawns `conspectus hook write opencode` detached (`detached: true`, a new session with no controlling terminal), so a 1.x attribution record's tmux session and pane may depend on this too. The live-state entry takes its pane from `TMUX_PANE` either way.
+<!-- SECTION:NOTES:END -->
