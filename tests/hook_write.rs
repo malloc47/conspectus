@@ -637,14 +637,16 @@ fn plant_all(value: &mut serde_json::Value, key: &str) {
     }
 }
 
-fn claude_fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hooks/claude-code")
+fn fixture_dir(corpus: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/hooks")
+        .join(corpus)
 }
 
-/// Every Claude Code fixture payload in file order: the single payloads,
+/// Every fixture payload of `corpus` in file order: the single payloads,
 /// then each sequence's steps.
-fn claude_fixture_payloads() -> Vec<(String, serde_json::Value)> {
-    let mut names: Vec<PathBuf> = fs::read_dir(claude_fixture_dir())
+fn fixture_payloads(corpus: &str) -> Vec<(String, serde_json::Value)> {
+    let mut names: Vec<PathBuf> = fs::read_dir(fixture_dir(corpus))
         .expect("fixture directory")
         .map(|entry| entry.expect("fixture entry").path())
         .collect();
@@ -686,7 +688,7 @@ fn leaked(text: &str) -> Option<String> {
 #[test]
 fn no_payload_text_of_any_claude_code_fixture_reaches_a_file_or_an_output() {
     let world = World::new();
-    let payloads = claude_fixture_payloads();
+    let payloads = fixture_payloads("claude-code");
     assert!(payloads.len() > 100, "{}", payloads.len());
     for (place, mut payload) in payloads {
         plant_sentinels(&mut payload);
@@ -754,4 +756,159 @@ fn an_event_costs_a_few_milliseconds() {
     // medians are a few milliseconds.
     assert!(start < Duration::from_millis(100), "{start:?}");
     assert!(state < Duration::from_millis(100), "{state:?}");
+}
+
+/// Fields the Codex mapping reads to identify the session; they keep
+/// their fixture value.
+const CODEX_READ_FIELDS: &[&str] = &[
+    "session_id",
+    "cwd",
+    "transcript_path",
+    "hook_event_name",
+    "agent_id",
+    "source",
+];
+
+/// Fields holding a name or an id that the Codex mapping never reads.
+const CODEX_NAME_FIELDS: &[&str] = &[
+    "tool_name",
+    "agent_type",
+    "model",
+    "turn_id",
+    "tool_use_id",
+    "permission_mode",
+];
+
+/// The Codex payload with a sentinel in every field the mapping does not
+/// read, every nested key included, and the documented payload-bearing
+/// fields added where the fixture lacks them.
+fn plant_codex_sentinels(payload: &mut serde_json::Value) {
+    let fields = payload.as_object_mut().expect("payload object");
+    for (key, value) in fields.iter_mut() {
+        if CODEX_READ_FIELDS.contains(&key.as_str()) {
+            continue;
+        }
+        if CODEX_NAME_FIELDS.contains(&key.as_str()) {
+            *value = serde_json::json!(NAME_SENTINEL);
+        } else {
+            plant_all(value, key);
+        }
+    }
+    for key in ["prompt", "last_assistant_message", "error", "summary"] {
+        fields
+            .entry(key)
+            .or_insert_with(|| serde_json::json!(TEXT_SENTINEL));
+    }
+    for key in CODEX_NAME_FIELDS {
+        fields
+            .entry(*key)
+            .or_insert_with(|| serde_json::json!(NAME_SENTINEL));
+    }
+    fields
+        .entry("tool_input")
+        .or_insert_with(|| serde_json::json!({ "command": TEXT_SENTINEL }));
+    fields
+        .entry("tool_response")
+        .or_insert_with(|| serde_json::json!(TEXT_SENTINEL));
+}
+
+/// The first sentinel, or name or id the Codex mapping must not keep, in
+/// `text`.
+fn codex_leaked(text: &str) -> Option<&'static str> {
+    [
+        "SENTINEL",
+        "\"mcp__docs__search\"",
+        "\"apply_patch\"",
+        "\"request_user_input\"",
+        "\"worker\"",
+        "gpt-5.4",
+        "call_",
+        // The fixtures' turn ids.
+        "019a7c3f-1a2b",
+        "019a7c45-6b7c",
+    ]
+    .into_iter()
+    .find(|needle| text.contains(needle))
+}
+
+#[test]
+fn no_payload_text_of_any_codex_fixture_reaches_a_file_or_an_output() {
+    let world = World::new();
+    let payloads = fixture_payloads("codex");
+    assert!(payloads.len() > 80, "{}", payloads.len());
+    for (place, payload) in payloads {
+        // The fixture as it is, its own sentinels in place, then with one
+        // in every field the mapping does not read.
+        let mut planted = payload.clone();
+        plant_codex_sentinels(&mut planted);
+        for (variant, payload) in [("as written", payload), ("planted", planted)] {
+            let text = payload.to_string();
+            // Some events carry no payload text until one is planted.
+            if variant == "planted" {
+                assert!(text.contains(TEXT_SENTINEL), "{place}: nothing planted");
+            }
+            let output = world
+                .hook_in_tmux("codex")
+                .write_stdin(text)
+                .output()
+                .expect("run hook write");
+            assert_eq!(output.status.code(), Some(0), "{place} {variant}");
+            assert!(
+                output.stdout.is_empty() && output.stderr.is_empty(),
+                "{place} {variant} was not silent"
+            );
+            let mut files = Vec::new();
+            collect_files(&world.state, &mut files);
+            collect_files(&world.runtime, &mut files);
+            for file in files {
+                let text = String::from_utf8_lossy(&fs::read(&file).expect("read state file"))
+                    .into_owned();
+                if let Some(needle) = codex_leaked(&text) {
+                    panic!("after {place} {variant}, {} holds {needle}", file.display());
+                }
+            }
+        }
+    }
+
+    // The writes happened: the fixtures' sessions have entries, and their
+    // session starts reached the spool.
+    let store = world.store();
+    let entry = &store["entries"]["codex:019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37"];
+    assert!(entry["observation"]["state"].is_string(), "{store}");
+    assert!(world.spool_path().is_file());
+}
+
+#[test]
+fn a_codex_state_event_touches_no_socket_no_process_and_no_spool() {
+    let world = World::new();
+    let start = fs::read_to_string(fixture_dir("codex").join("sessionstart-startup.json"))
+        .expect("session start");
+    run_silently(world.hook_in_tmux("codex"), start);
+    let spool = fs::read(world.spool_path()).expect("spool");
+    let tmux_calls = world.tmux_calls();
+    let listener = world.stuck_daemon();
+    listener.set_nonblocking(true).expect("nonblocking");
+
+    for name in [
+        "userpromptsubmit",
+        "permissionrequest-bash",
+        "posttooluse-bash",
+        "stop",
+    ] {
+        let payload =
+            fs::read_to_string(fixture_dir("codex").join(format!("{name}.json"))).expect("payload");
+        run_silently(world.hook_in_tmux("codex"), payload);
+    }
+
+    assert_eq!(world.tmux_calls(), tmux_calls, "tmux was not started");
+    assert_eq!(fs::read(world.spool_path()).expect("spool"), spool);
+    assert!(
+        matches!(listener.accept(), Err(err) if err.kind() == std::io::ErrorKind::WouldBlock),
+        "nothing connected to the daemon socket"
+    );
+    let entry = &world.store()["entries"]["codex:019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37"];
+    assert_eq!(entry["observation"]["state"], "ready", "{entry}");
+    assert_eq!(entry["observation"]["detail"], "finished", "{entry}");
+    assert_eq!(entry["tmux"]["session"], "work");
+    assert_eq!(entry["cwd"], "/home/user/projects/my-project");
 }

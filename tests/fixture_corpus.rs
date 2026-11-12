@@ -417,7 +417,7 @@ fn claude_hook_without_a_transcript_handles_null_transcript_path() {
 #[test]
 fn codex_hook_payload_converts_to_record() {
     let payload: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(fixture_path("hooks/codex-sessionstart.json")).unwrap(),
+        &fs::read_to_string(fixture_path("hooks/codex/sessionstart-startup.json")).unwrap(),
     )
     .unwrap();
 
@@ -433,10 +433,17 @@ fn codex_hook_payload_converts_to_record() {
     .expect("convert codex hook payload");
 
     assert_eq!(record.harness_key, "codex");
-    assert_eq!(record.session_key, "eeeeeeee-1111-2222-3333-444444444444");
+    assert_eq!(record.session_key, "019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37");
     assert_eq!(
         record.cwd.as_deref(),
-        Some("/home/user/projects/another-project")
+        Some("/home/user/projects/my-project")
+    );
+    assert_eq!(
+        record.transcript_path.as_deref(),
+        Some(
+            "/home/user/.codex/sessions/2026/11/12/\
+             rollout-2026-11-12T09-14-03-019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37.jsonl"
+        )
     );
     assert_eq!(record.hook_event_name.as_deref(), Some("SessionStart"));
 }

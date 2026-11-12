@@ -1,0 +1,9 @@
+{
+  "session_id": "019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37",
+  "transcript_path": "/home/user/.codex/sessions/2026/11/12/rollout-2026-11-12T09-14-03-019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37.jsonl",
+  "cwd": "/home/user/projects/my-project",
+  "hook_event_name": "Interrupt",
+  "model": "gpt-5.4",
+  "permission_mode": "default",
+  "turn_id": "019a7c3f-1a2b-7c3d-8e4f-5a6b7c8d9e0f"
+}

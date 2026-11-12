@@ -218,3 +218,7 @@ impl<'a> Hook<'a> {
 #[cfg(test)]
 #[path = "codex_live_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "codex_sequence_tests.rs"]
+mod sequence_tests;

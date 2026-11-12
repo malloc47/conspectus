@@ -921,3 +921,6 @@ mod registry_tests {
 #[cfg(test)]
 #[path = "harness_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod live_sequences;
