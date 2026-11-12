@@ -4178,8 +4178,8 @@
         "state_scope": "/fixture/harness/claude",
         "session_key": "showcase-claude"
       },
-      "state": "ready",
-      "detail": "finished",
+      "state": "waiting",
+      "detail": "question",
       "since_ms": 1790766000000,
       "observed_ms": 1790769300000,
       "source": "hook",

@@ -145,6 +145,16 @@ fn assert_layer_coverage(snapshot: &GraphSnapshot) {
         !snapshot.pane_live.is_empty(),
         "showcase missing a pane-only live agent"
     );
+    // Two waiting sessions, so a group header counts more than one.
+    let waiting = snapshot
+        .node_live
+        .values()
+        .filter(|binding| binding.observation.state == LiveState::Waiting)
+        .count();
+    assert!(
+        waiting >= 2,
+        "showcase needs two waiting sessions; has {waiting}"
+    );
 
     // Lineage relation: codex parent → child fork chain.
     let has_lineage = snapshot

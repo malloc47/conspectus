@@ -971,13 +971,13 @@ fn build_showcase(world: &mut ScenarioWorld) -> Result<()> {
 }
 
 /// What the showcase's agents are doing, in the world's own live-state
-/// store, so every live-state mark shows somewhere: a session waiting on
-/// the operator, one working and one gone quiet at it, ready ones (the
-/// pinned session among them), an error, evidence too old to trust, an
-/// exited session, and sessions with none. The `ambiguous` mux's two
-/// candidates are waiting and working, so its row rolls the two up, and
-/// two agents in panes of `project` that no session matches yet count
-/// there.
+/// store, so every live-state mark shows somewhere: sessions waiting on
+/// the operator (two of them in `project`, the pinned session among
+/// them, so its header counts two), one working and one gone quiet at
+/// it, a ready one, an error, evidence too old to trust, an exited
+/// session, and sessions with none. The `ambiguous` mux's two candidates
+/// are waiting and working, so its row rolls the two up, and two agents
+/// in panes of `project` that no session matches yet count there.
 ///
 /// No entry records a process, so each holds for fifteen minutes from its
 /// latest evidence, measured from the showcase's anchor time; the
@@ -1047,10 +1047,12 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
             14 * minute,
             12 * minute,
         ),
+        // The pinned session asked a question at its last activity, so
+        // `project` has two sessions waiting.
         report(
             "showcase-claude",
-            LiveState::Ready,
-            Some(LiveDetail::Finished),
+            LiveState::Waiting,
+            Some(LiveDetail::Question),
             60 * minute,
             5 * minute,
         ),

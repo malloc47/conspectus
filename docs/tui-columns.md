@@ -377,9 +377,9 @@ A Pinned row in a narrow pane keeps its name and its state word:
 │        ●   ambiguous …  waiting    1m│
 │        ●   ambiguous …  working    1m│
 │        ●   hook-super…  working    1m│
-│        ●   claude-cod…  ready      1h│
+│        ●   claude-cod…  waiting    1h│
 │      ▣ ◎ nightly        stopped    2d│
-│      ● ◉ parser-sessi…  ready      1h│
+│      ● ◉ parser-sessi…  waiting    1h│
 │      ◇ ◎ ledger-workt…  removed    3d│
 │      ▣ ◎ weekly-review  planned     —│
 │  ▼ Other                             │
@@ -422,7 +422,7 @@ the repo header's columns:
 │  ▶ ◆   repo-b                   ~/atelier-demo/repo-b     (1)                     │
 │► ▼ ◆   bare-project             ~/checkouts/bare-project  (1)                     │
 │    ▶ ◇   bare-project (linked)  ~/checkouts/bare-project  (1)                     │
-│  ▶ ◆   project                  ~/repos/project           (4)  ! 1  ▲             │
+│  ▶ ◆   project                  ~/repos/project           (4)  ! 2  ▲             │
 │  ▶     Ungrouped                                          (3)                     │
 ```
 
@@ -457,7 +457,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 │  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
 │  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
 │  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
-│  ▶ ◆   project        ~/repos/project                       (4)  ! 1  ▲           │
+│  ▶ ◆   project        ~/repos/project                       (4)  ! 2  ▲           │
 │  ▶     Ungrouped                                            (1)                   │
 ```
 
@@ -469,11 +469,11 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 │  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
 │  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
 │  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
-│  ▼ ◆   project        ~/repos/project                       (4)  ! 1  ▲           │
+│  ▼ ◆   project        ~/repos/project                       (4)  ! 2  ▲           │
 │►     ●   showcase   claude       1m  !  ∘  ambiguous mux candidate A  Showcase: a…│
 │      ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  Showcase: a…│
 │      ●   showcase   claude       1m  »  ∘  hook-supersession current sessi…       │
-│      ● ◉ showcase   claude       1h  ›  ∘  claude-code in project repo  I expande…│
+│      ● ◉ showcase   claude       1h  !  ∘  claude-code in project repo  I expande…│
 │  ▶     Ungrouped                                            (1)                   │
 ```
 
@@ -484,7 +484,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 │    ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  project       │
 │    ●   showcase   claude       1m  ›  ⊸  agent-deck composite launcher  showcase-…│
 │    ●   showcase   claude       1m  »  ∘  hook-supersession current sessi…  project│
-│    ● ◉ showcase   claude       1h  ›  ∘  claude-code in project repo  project     │
+│    ● ◉ showcase   claude       1h  !  ∘  claude-code in project repo  project     │
 │    ●   showcase   pi           2h  ×  ∘  repo-a            Showcase: pi in atelie…│
 │    ●   showcase   opencode     3h  ?  ∘  repo-b            Showcase: opencode in …│
 │    ●   showcase   codex       12h  ·  ⊸  bare-work  bare-project      Showcase: c…│
@@ -553,21 +553,20 @@ lines up with the running ones, and as a ghost, its `▣` included.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▼ ◆   bare-project  ~/checkouts/bare-project                                     │
 │      ▣   bare-work                  codex        2h  ·  ∘  Showcase: codex resume…│
-│  ▶ ◆   project       ~/repos/project  ! 1                                         │
+│  ▶ ◆   project       ~/repos/project  ! 2                                         │
 │  ▶     Ungrouped                                                                  │
 ```
 
 A header counts the waiting agents of its muxes whether or not they are
-listed: the `ambiguous` mux below is where a waiting session runs, and
-lists none of its agents as a row, so `project` reads `! 1` with no
-`(N)`:
+listed: the `ambiguous` mux below is where two waiting sessions run, and
+lists neither as a row, so `project` reads `! 2` with no `(N)`:
 
 <!-- frame: keys="2<C-g><C-g>jjl" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │  ▼ ◆   bare-project  ~/checkouts/bare-project                                     │
 │      ▣   bare-work                  codex        2h  ·  ∘  Showcase: codex resume…│
-│► ▼ ◆   project       ~/repos/project  ! 1                                         │
+│► ▼ ◆   project       ~/repos/project  ! 2                                         │
 │      ▣   ambiguous                  claude      15m  !  ∘                         │
 │      ▣ ◉ project                    claude       5m  »  ⊸                         │
 │      ▣ ◎ nightly-refactor           claude       2d  ·  ⊘  ~/repos/project        │
@@ -623,7 +622,7 @@ two never disagree.
 <!-- frame: keys="3" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│► ▼ ◇   conspectus/project  ~/repos/project  (4)  ! 1  ▲                           │
+│► ▼ ◇   conspectus/project  ~/repos/project  (4)  ! 2  ▲                           │
 │    ▶ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                      │
 │  ▶ ◆   conspectus/project  ~/repos/project  no checkout                           │
 │  ▶     project             conspectus/project                                     │
@@ -634,9 +633,9 @@ The sessions under a PR are session rows, each with its live mark:
 <!-- frame: keys="3jl" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│  ▼ ◇   conspectus/project  ~/repos/project  (4)  ! 1  ▲                           │
+│  ▼ ◇   conspectus/project  ~/repos/project  (4)  ! 2  ▲                           │
 │►   ▼ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                      │
-│        ● ◉ showcase   claude       1h  ›  ∘  I expanded `notes.md` into a release…│
+│        ● ◉ showcase   claude       1h  !  ∘  I expanded `notes.md` into a release…│
 │        ●   showcase   claude       1m  !  ∘  Showcase: ambiguous mux candidate A  │
 │        ●   showcase   claude       1m  »  ∘  Showcase: ambiguous mux candidate B  │
 │        ●   showcase   claude       1m  »  ∘  Showcase: hook-supersession current …│
@@ -647,7 +646,7 @@ The sessions under a PR are session rows, each with its live mark:
 <!-- frame: keys="3<C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│► ▼   Draft   (4)  ! 1  ▲                                                          │
+│► ▼   Draft   (4)  ! 2  ▲                                                          │
 │      ⇄   conspectus/project#8 ⌥    1d  ◐  main  Pin the toolchain and refresh the…│
 │    ▶ ⇄   conspectus/project#7 ⌥    2h  ◐  feature/extra  Release notes for 0.3    │
 │  ▶   Merged                                                                       │
@@ -698,7 +697,7 @@ or the first 8 characters of its key, its status is `in mux` or
 │► ▼ project  ~/repos/project                                                       │
 │    ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/proje…│
 │      ▣ ◎ nightly                         stopped    2d   claude     ~/repos/proje…│
-│      ● ◉ parser-session                  ready      1h   claude     claude-code i…│
+│      ● ◉ parser-session                  waiting    1h   claude     claude-code i…│
 │      ◇ ◎ ledger-worktree                 removed    3d              project · fea…│
 │      ▣ ◎ weekly-review                   planned     —   codex      ~/repos/proje…│
 │  ▼ Other                                                                          │
@@ -713,7 +712,7 @@ or the first 8 characters of its key, its status is `in mux` or
 │      ▣ ◎ nightly                         stopped    2d   claude     ~/repos/proje…│
 │      ▣ ◎ weekly-review                   planned     —   codex      ~/repos/proje…│
 │  ▼ Sessions                                                                       │
-│      ● ◉ parser-session                  ready      1h   claude     claude-code i…│
+│      ● ◉ parser-session                  waiting    1h   claude     claude-code i…│
 │  ▼ Worktrees                                                                      │
 │      ◇ ◎ ledger-worktree                 removed    3d              project · fea…│
 │  ▼ PRs                                                                            │
@@ -725,7 +724,7 @@ or the first 8 characters of its key, its status is `in mux` or
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
 │    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
-│    ● ◉ parser-session                  ready      1h   claude     claude-code in …│
+│    ● ◉ parser-session                  waiting    1h   claude     claude-code in …│
 │    ◇ ◎ ledger-worktree                 removed    3d              project · featu…│
 │    ⇄ ◉ ledger-pr                       merged     5d              conspectus/proj…│
 │    ▣ ◎ weekly-review                   planned     —   codex      ~/repos/project │
@@ -844,7 +843,7 @@ session's last activity, as everywhere else, not the time of the match.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
 │►   ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
-│    ● ◉ showcase   claude       1h  ›  ∘  project        2 hits│
+│    ● ◉ showcase   claude       1h  !  ∘  project        2 hits│
 │    ●   showcase   pi           2h  ×  ∘  repo-a         2 hits│
 ```
 
@@ -854,8 +853,8 @@ session's last activity, as everywhere else, not the time of the match.
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
 │► ▼   Mux panes                                                │
 │      ▣ ◉ project 0.0   2 hits          ready once they pass.  │
-│  ▼   project    (1)  ▲                                        │
-│      ● ◉ showcase   claude       1h  ›  ∘  project      2 hits│
+│  ▼   project    (1)  ! 1  ▲                                   │
+│      ● ◉ showcase   claude       1h  !  ∘  project      2 hits│
 │  ▼   repo-a     (1)                                           │
 │      ●   showcase   pi           2h  ×  ∘  repo-a       2 hits│
 ```
@@ -923,7 +922,7 @@ It takes the [hit row](#hit-row)'s columns after the mux glyph.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
 │►   ▣ ◉ project 0.0   4 hits            0s from feature/extra… │
-│    ● ◉ showcase   claude       1h  ›  ∘  project        4 hits│
+│    ● ◉ showcase   claude       1h  !  ∘  project        4 hits│
 ```
 
 ### Pane hit row
@@ -959,6 +958,6 @@ column, then the mux's name and the pane's place, then:
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/2 "the" · All · 2 sessions · 1 pane · 4 skipped · sca…│
 │►   ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
-│    ● ◉ showcase   claude       1h  ›  ∘  project        2 hits│
+│    ● ◉ showcase   claude       1h  !  ∘  project        2 hits│
 │    ●   showcase   pi           2h  ×  ∘  repo-a         2 hits│
 ```
