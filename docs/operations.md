@@ -178,9 +178,17 @@ usage-limit types), `SubagentStart`, `SubagentStop`, `Stop`,
 `StopFailure`, `PreCompact`, `PostCompact`, and `SessionEnd`, each with a
 5 s timeout. An older install that covered only session start is
 upgraded in place when you run `conspectus hook init claude-code` again;
-nothing changes until you do. Your own hook groups are left as they are
-(the file's keys come back sorted). `--command` sets the command every
+nothing changes until you do. `--command` sets the command every
 Conspectus entry runs.
+
+The install edits `settings.json` in place: it adds or changes only
+Conspectus's entries, in the file's own indentation and line ending, and
+leaves every other byte as you wrote it, your key order and your own
+hook groups included, so a dotfiles diff shows only the new entries.
+`hook remove claude-code` cuts out exactly what the install added and
+gives back the file you had. A file that isn't plain JSON (a comment, a
+trailing comma) is refused rather than rewritten, as is one that names
+the same key twice in an object the install has to change.
 
 `conspectus hook status claude-code` prints `installed`, `partial`, or
 `not-installed` for the file, then one line per event (`installed`,

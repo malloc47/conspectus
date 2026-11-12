@@ -350,7 +350,9 @@ noted.
 - `hook init claude-code` matcher misses `source: "fork"`; `CLAUDE_CODE_VERSION`
   is not a real variable; two fixtures use an invalid `source`. The matcher
   and the fixtures are fixed (CSP-811); the variable is CSP-837.
-- `hook init` re-sorts the keys of the operator's `settings.json`.
+- `hook init` re-sorts the keys of the operator's `settings.json`. Fixed
+  (CSP-819, ADR 0208): the install edits the file's text in place, so
+  order and layout survive and a remove gives the file back.
 - `hook init codex` replaces an operator's `[[hooks.SessionStart]]` tables and
   sets no timeout; hooks may be inert until trusted. Fixed (CSP-815): the
   install keeps every form, sets timeouts, and prints the `/hooks` step.

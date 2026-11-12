@@ -768,6 +768,15 @@ forms, lists, readers, and keys look and behave alike.
   A symlinked settings file is written through to its target, the file
   keeps its permissions, and a read-only one is refused, where each was
   replaced with a new file.
+- **`conspectus hook init claude-code` no longer reorders your
+  `settings.json`.** It rewrote the whole file with every object's keys
+  sorted, two-space indentation, and its own spelling of escapes and
+  numbers, so a settings file kept in a dotfiles repository showed a diff
+  of every line. It now edits the file in place: only Conspectus's
+  entries are added or changed, in the file's own indentation and line
+  ending, and `hook remove claude-code` gives back the file you had, byte
+  for byte. A file that isn't plain JSON (comments, trailing commas) is
+  still refused.
 
 - **A mux's rows stop spinning right after a detach.** Coming back from a
   mux froze its row and its sessions' rows (dimmed, with a spinner, and
