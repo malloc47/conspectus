@@ -67,8 +67,9 @@ Hook sidecar records are optional, local observations written by
 harness hooks through `conspectus hook write`. They refine
 session-to-mux attribution when a harness can report the current
 session id without terminal input. Each observation lands in a
-minimal latest-only spool at `hooks-latest.json`, which every refresh
-replays. With `conspectus serve` running, the hook writer sends the
+minimal latest-only spool at `hooks-latest.json`, one record per tmux
+pane (so agents in split panes of one session keep their own), which
+every refresh replays. With `conspectus serve` running, the hook writer sends the
 observation to the daemon, which writes it to the spool and updates the
 graph at once; with no daemon, the hook writer writes the spool itself.
 It waits at most 2 seconds for the daemon to answer, so a stuck daemon
@@ -79,9 +80,13 @@ The spool lives under:
 2. `$XDG_STATE_HOME/conspectus/hooks`.
 3. `$HOME/.local/state/conspectus/hooks`.
 
-The records are not project intent and should not be committed. Stale
-records are ignored for active mux attribution. Older per-event JSON
-records in the same directory remain readable as a compatibility path.
+The records are not project intent and should not be committed. A
+record counts for its pane until a newer one from that pane replaces it,
+however old it is; it is ignored once its agent process has exited, when
+its tmux session was created after it, or when the session's active
+pane now runs a different harness. The spool keeps at most 256 records, dropping the
+oldest. Older per-event JSON records in the same directory remain
+readable as a compatibility path.
 
 Install a harness hook automatically:
 

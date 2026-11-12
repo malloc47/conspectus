@@ -445,8 +445,11 @@ but they should carry provenance and confidence rather than silently becoming
 facts.
 
 Hook sidecar records are local, rebuildable observations written by opt-in
-harness hooks outside project trees. They may refine mux/session attribution
-when fresh, but stale records should not override active process evidence.
+harness hooks outside project trees. A record refines mux/session attribution
+for its pane until a fresher record for that pane supersedes it; a stale one,
+whose process is gone, whose mux was created after it, or whose mux's active
+pane runs another harness, is ignored rather than overriding process evidence.
+No time limit applies (ADR 0146).
 A record written from a harness's background process, such as opencode 2.x's
 shared service, carries no pane context and never produces mux links; opencode
 2.x pane attribution comes from the plugin's TUI entrypoint, which runs in the
@@ -1674,6 +1677,10 @@ ADR 0082). The socket commands are:
   daemon's cycle output is cached as serialized bytes;
   consumers decode via `snapshot::from_bytes` and use the
   resulting `GraphSnapshot` directly.
+- `hook_ingest` — take one hook record from `conspectus hook
+  write`: write it to the hook spool, apply it to the live graph
+  (superseding the older hook link for its pane), re-resolve, and
+  publish (ADR 0146).
 
 The `conspectus refresh`, `conspectus status`, `conspectus
 table` / `node show` / `graph` CLI commands and the TUI all
@@ -1887,8 +1894,9 @@ migration helper and harmless if it fails.
   they run (ADR 0142). The mutation envelope is ADR 0143.
 - Hook sidecar records are local rebuildable observations written through
   `conspectus hook write`. The spool, which holds only the latest record per
-  mux in `hooks-latest.json`, is the durable hook record and every refresh
-  replays it (ADR 0146). When the daemon is available, it writes the spool
+  pane in `hooks-latest.json` (at most 256, with no time limit), is the
+  durable hook record and every refresh replays it (ADR 0146). When the
+  daemon is available, it writes the spool
   root its discovery reads and ingests the record into `SnapshotState`; when
   no daemon snapshot is available, or the daemon does not answer within
   2 s, the hook writer writes the spool under

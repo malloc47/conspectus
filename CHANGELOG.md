@@ -727,6 +727,16 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **Agents in split panes of one tmux session keep their own
+  attribution.** The hook spool kept one record per tmux session, so a
+  session start in one pane replaced the record of the agent in the
+  other, and after the next refresh only one of them was tied to the
+  mux. It now keeps one record per pane (at most 256), and reads a spool
+  an older version wrote. With `conspectus serve` running, a session
+  start in a pane also replaces that pane's previous session at once,
+  where both stayed tied to the mux until the next refresh. A hook
+  record has no time limit: it counts until a newer one from its pane
+  replaces it, and is ignored once its agent has exited.
 - **An opencode pane no longer names a running subagent.** The opencode
   1.x plugin recorded every session's events for attribution, children
   included, so while a subagent ran its pane briefly showed the child

@@ -351,7 +351,9 @@ noted.
   sets no timeout; hooks may be inert until trusted. Fixed (CSP-815): the
   install keeps every form, sets timeouts, and prints the `/hooks` step.
 - The attribution spool key ignores the pane; `ACTIVE_TTL_SECONDS` is dead;
-  an ingest leaves two active links for one pane until the next cycle.
+  an ingest leaves two active links for one pane until the next cycle. Fixed
+  (CSP-818): the spool keeps one record per pane, the constant is gone (no
+  time limit applies), and an ingest supersedes the pane's older link.
 - Socket clients have no timeouts. `hook write`'s ingest call is now bounded
   at 2 s (CSP-810); the others are CSP-836.
 - The OpenCode 1.x plugin forwards child-session events (a pane briefly names
@@ -361,4 +363,4 @@ noted.
 - Pi's idle cache warming moves the session file's mtime, so
   `last_active_epoch` can look recent on an idle session.
 - Doc drift: ADR 0028 and `docs/operations.md` still describe a TTL and
-  `hooks.sqlite3`; `docs/design.md` omits `hook_ingest`.
+  `hooks.sqlite3`; `docs/design.md` omits `hook_ingest`. Fixed (CSP-818).
