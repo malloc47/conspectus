@@ -1,5 +1,6 @@
 //! The `GraphSnapshot` container and the `SnapshotIndex` lookups built over it.
 
+use super::live::{EffectiveLive, LiveCounts, LiveObservation, Liveness};
 use super::*;
 
 #[derive(
@@ -56,6 +57,20 @@ pub struct GraphSnapshot {
         with = "node_presence_serde"
     )]
     pub node_presence: BTreeMap<NodeId, NodePresence>,
+    /// Live agent state (ADR 0205): the latest observation of what an
+    /// agent is doing, keyed by its agent session, or by a mux for an
+    /// agent seen in one of the mux's panes that no session matched.
+    /// Sparse: no entry means no evidence, never idle. Read it through
+    /// [`Self::live_state_of`] and [`Self::live_counts_of_mux`], which
+    /// apply the read-time rules; a stored state is not shown as it is.
+    /// Serializes as a list, like `node_presence`, and is left out when
+    /// empty.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "node_live_serde"
+    )]
+    pub node_live: BTreeMap<NodeId, LiveObservation>,
     /// The latest probe of each mux backend and socket, keyed by
     /// [`probe_key`]. Kept across cycles that reuse a mux slice (it
     /// rides in `graph.bin`), so gone and unknown stay decidable
@@ -109,6 +124,53 @@ mod node_presence_serde {
         Ok(entries
             .into_iter()
             .map(|entry| (entry.node_id, entry.presence))
+            .collect())
+    }
+}
+
+/// Round-trip helper for `GraphSnapshot::node_live`: a list of entries,
+/// each the node id beside the observation's own fields.
+mod node_live_serde {
+    use std::collections::BTreeMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::{LiveObservation, NodeId};
+
+    #[derive(Serialize, Deserialize)]
+    struct Entry {
+        node_id: NodeId,
+        #[serde(flatten)]
+        observation: LiveObservation,
+    }
+
+    pub fn serialize<S>(
+        map: &BTreeMap<NodeId, LiveObservation>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let entries: Vec<Entry> = map
+            .iter()
+            .map(|(node_id, observation)| Entry {
+                node_id: node_id.clone(),
+                observation: *observation,
+            })
+            .collect();
+        entries.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<BTreeMap<NodeId, LiveObservation>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let entries: Vec<Entry> = Vec::deserialize(deserializer)?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| (entry.node_id, entry.observation))
             .collect())
     }
 }
@@ -351,6 +413,56 @@ impl GraphSnapshot {
         self.node_presence.get(id).copied()
     }
 
+    /// The live state of `id` at `now_ms` (ADR 0205): its `node_live`
+    /// observation read through [`LiveObservation::effective`], or
+    /// `None` when the table has no entry for it, which means no
+    /// evidence, not idle. `id` is an agent session, or a mux for an
+    /// agent seen in one of its panes that no session matched.
+    ///
+    /// `liveness` tells whether the observation's process still runs.
+    /// It is called with the stored observation, and only when there is
+    /// one, so a caller can check the recorded `pid` and `pid_start`
+    /// against the process table. A caller that cannot check answers
+    /// [`Liveness::Unknown`] and the time rules decide alone.
+    pub fn live_state_of(
+        &self,
+        id: &NodeId,
+        now_ms: i64,
+        liveness: impl FnOnce(&LiveObservation) -> Liveness,
+    ) -> Option<EffectiveLive> {
+        let observation = self.node_live.get(id)?;
+        Some(observation.effective(now_ms, liveness(observation)))
+    }
+
+    /// How many of the agents in `mux` are in each live state at
+    /// `now_ms` (ADR 0205). A mux has no state of its own; these counts
+    /// stand for it. Each of these counts once, by its effective state
+    /// as [`Self::live_state_of`] reads it with the same `liveness`:
+    ///
+    /// - every agent session with a `node_live` entry whose preferred
+    ///   mux ([`Self::preferred_mux_for`]) is `mux`;
+    /// - the entry keyed on `mux` itself, an agent seen in one of its
+    ///   panes that no session matched.
+    ///
+    /// A session with no entry is not counted (no evidence is not idle),
+    /// and neither is one whose strongest mux candidate is another mux.
+    pub fn live_counts_of_mux(
+        &self,
+        mux: &MuxSessionId,
+        now_ms: i64,
+        mut liveness: impl FnMut(&LiveObservation) -> Liveness,
+    ) -> LiveCounts {
+        self.node_live
+            .iter()
+            .filter(|(id, _)| match id {
+                NodeId::AgentSession(_) => self.preferred_mux_for(id).as_ref() == Some(mux),
+                NodeId::MuxSession(pane_mux) => pane_mux == mux,
+                _ => false,
+            })
+            .map(|(_, observation)| observation.effective(now_ms, liveness(observation)).state)
+            .collect()
+    }
+
     /// The resolver-preferred live mux for `session`: the strongest
     /// active `linked_to_mux` candidate.
     pub fn preferred_mux_for(&self, session: &NodeId) -> Option<MuxSessionId> {
@@ -439,6 +551,10 @@ impl GraphSnapshot {
             .filter(|node| self.node_presence.is_empty() || self.is_live(&node.id()))
     }
 
+    /// Sort every list into a stable order, so equal graphs compare and
+    /// serialize alike. The node-keyed tables (`node_provenance`,
+    /// `node_presence`, `node_live`) and `mux_probes` are maps kept in
+    /// key order already.
     pub fn canonicalize(&mut self) {
         self.nodes.sort_by_key(GraphNode::id);
         self.candidate_links.sort_by_key(stable_json_key);
@@ -465,7 +581,9 @@ impl GraphSnapshot {
     ///   `source_metadata.adapter` equals `provider`. Declared
     ///   links, cross-link inferences, and other providers' links
     ///   survive untouched.
-    /// * The matching `node_provenance` entries are removed.
+    /// * The matching `node_provenance` entries are removed, and so
+    ///   are the `node_presence` and `node_live` entries of the
+    ///   dropped nodes: a live state stays only while its node does.
     /// * `resolved_relationships` are cleared because the resolver
     ///   runs against `candidate_links` and must re-derive after
     ///   the candidate set changes.
@@ -484,6 +602,7 @@ impl GraphSnapshot {
         self.node_provenance
             .retain(|_, prov| prov.provider != provider);
         self.node_presence.retain(|id, _| !evicted_ids.contains(id));
+        self.node_live.retain(|id, _| !evicted_ids.contains(id));
         // A mux provider's probes go with its nodes: keeping a probe
         // whose sessions were evicted would read every one as gone.
         self.mux_probes.retain(|key, _| {
@@ -508,3 +627,7 @@ pub struct MuxHost {
     /// it as a `was in` chip.
     pub live: bool,
 }
+
+#[cfg(test)]
+#[path = "graph_tests.rs"]
+mod tests;

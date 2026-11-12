@@ -354,11 +354,11 @@ fn evict_provider_clears_resolved_relationships_to_force_re_resolve() {
 
 /// Construct a `GraphSnapshot` populated with one of every
 /// `NodeKind` plus link, resolved-relationship, diagnostic,
-/// alias, pin, and node-provenance entries. The fixture is the
-/// shared input for the rkyv archive round-trip tests below;
-/// putting it here (rather than building a fresh one per test)
-/// keeps the variant coverage in lockstep with what the format
-/// is expected to preserve.
+/// alias, pin, node-provenance, and live-state entries. The
+/// fixture is the shared input for the rkyv archive round-trip
+/// tests below; putting it here (rather than building a fresh
+/// one per test) keeps the variant coverage in lockstep with
+/// what the format is expected to preserve.
 fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
     let repo_id = RepoId::new("/r/.git");
     let checkout_id = CheckoutId::new(repo_id.clone(), "/r");
@@ -561,11 +561,25 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
         },
     );
     snap.node_provenance.insert(
-        NodeId::AgentSession(agent_id),
+        NodeId::AgentSession(agent_id.clone()),
         NodeProvenance {
             provider: "harness::codex".to_string(),
             freshness_epoch: Some(8),
         },
+    );
+
+    snap.node_live.insert(
+        NodeId::AgentSession(agent_id),
+        live::LiveObservation::new(live::LiveState::Waiting, live::LiveSource::Hook, 9)
+            .with_detail(live::LiveDetail::Plan)
+            .with_since_ms(5)
+            .with_subagents(1)
+            .with_pid(42, Some(10))
+            .with_heartbeat_s(30),
+    );
+    snap.node_live.insert(
+        NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        live::LiveObservation::new(live::LiveState::Starting, live::LiveSource::Hook, 11),
     );
 
     snap.canonicalize();

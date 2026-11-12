@@ -264,6 +264,95 @@ fn merge_with_prior_lets_fresh_win_and_keeps_prior_only_nodes() {
 }
 
 #[test]
+fn merge_with_prior_keeps_the_fresh_live_table_and_drops_the_prior_one() {
+    // The prior's live observations are a cycle old and the live-state
+    // pass rebinds the table after the merge (ADR 0205), so none of
+    // them leaks into the merged snapshot, not even for a node that
+    // only the prior has; the fresh table passes through whole.
+    use crate::model::live::{LiveObservation, LiveSource, LiveState};
+
+    let kept = AgentSessionId::new("codex", "/state", "kept");
+    let ended = AgentSessionId::new("codex", "/state", "ended");
+    let pane = MuxSessionId::new("tmux:pane");
+    let session_node = |id: &AgentSessionId| {
+        GraphNode::AgentSession(AgentSessionNode::new(id.clone(), "codex".to_string()))
+    };
+    let observed = |state| LiveObservation::new(state, LiveSource::Hook, 1_000);
+
+    let mut fresh = GraphSnapshot::empty();
+    fresh.nodes.push(session_node(&kept));
+    fresh.nodes.push(GraphNode::MuxSession(MuxSessionNode::new(
+        pane.clone(),
+        "tmux".to_string(),
+        "pane".to_string(),
+    )));
+    fresh.node_live.insert(
+        NodeId::AgentSession(kept.clone()),
+        observed(LiveState::Waiting),
+    );
+    fresh
+        .node_live
+        .insert(NodeId::MuxSession(pane), observed(LiveState::Starting));
+
+    let mut prior = GraphSnapshot::empty();
+    prior.nodes.push(session_node(&kept));
+    prior.nodes.push(session_node(&ended));
+    prior
+        .node_live
+        .insert(NodeId::AgentSession(kept), observed(LiveState::Working));
+    prior.node_live.insert(
+        NodeId::AgentSession(ended.clone()),
+        observed(LiveState::Working),
+    );
+
+    let expected = fresh.node_live.clone();
+    let merged = merge_with_prior(fresh, prior);
+
+    assert!(
+        merged
+            .nodes
+            .iter()
+            .any(|node| node.id() == NodeId::AgentSession(ended.clone())),
+        "the prior-only node survives as usual"
+    );
+    assert_eq!(merged.node_live, expected);
+
+    let only_prior = merge_with_prior(GraphSnapshot::empty(), {
+        let mut prior = GraphSnapshot::empty();
+        prior.nodes.push(session_node(&ended));
+        prior
+            .node_live
+            .insert(NodeId::AgentSession(ended), observed(LiveState::Ready));
+        prior
+    });
+    assert!(only_prior.node_live.is_empty());
+}
+
+#[test]
+fn a_fragment_made_from_a_snapshot_keeps_only_provider_output() {
+    // Providers emit fragments; the live table is bound after the merge,
+    // so the conversion leaves it behind with the other derived fields.
+    use crate::model::live::{LiveObservation, LiveSource, LiveState};
+
+    let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "s1"));
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "s1"),
+            "codex".to_string(),
+        )));
+    snapshot.node_live.insert(
+        session,
+        LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_000),
+    );
+
+    let fragment = GraphFragment::from(snapshot.clone());
+    assert_eq!(fragment.nodes, snapshot.nodes);
+    assert!(fragment.into_snapshot().node_live.is_empty());
+}
+
+#[test]
 fn context_normalizes_and_deduplicates_scan_roots() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let root = temp.path();
@@ -904,6 +993,42 @@ fn slice_fingerprint_ignores_agent_last_message_preview_and_title_churn() {
         mux_or_harness_slice_fingerprint(&cycle_b),
         "last_message_preview and title must not affect the fingerprint"
     );
+}
+
+#[test]
+fn slice_fingerprint_ignores_live_state() {
+    // Live state changes every few seconds and says nothing about
+    // which processes a pane runs, so a change in `node_live` alone
+    // must never reopen the /proc walk (ADR 0205).
+    use crate::model::live::{LiveDetail, LiveObservation, LiveSource, LiveState};
+
+    let quiet = snapshot_with_mux_session("s1", "s1", 1_000);
+    let agent_node = NodeId::AgentSession(AgentSessionId::new("codex", "global", "s1"));
+    let mux_node = NodeId::MuxSession(MuxSessionId::new("tmux:s1"));
+
+    let mut working = quiet.clone();
+    working.node_live.insert(
+        agent_node.clone(),
+        LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_000_000)
+            .with_detail(LiveDetail::Tool)
+            .with_pid(4242, Some(7)),
+    );
+    let mut waiting = working.clone();
+    waiting.node_live.insert(
+        agent_node,
+        LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 2_000_000)
+            .with_detail(LiveDetail::Permission)
+            .with_pid(4242, Some(7)),
+    );
+    waiting.node_live.insert(
+        mux_node,
+        LiveObservation::new(LiveState::Starting, LiveSource::Hook, 2_000_000),
+    );
+
+    let expected = mux_or_harness_slice_fingerprint(&quiet);
+    assert!(expected.is_some());
+    assert_eq!(mux_or_harness_slice_fingerprint(&working), expected);
+    assert_eq!(mux_or_harness_slice_fingerprint(&waiting), expected);
 }
 
 #[test]

@@ -1,3 +1,4 @@
+use conspectus::model::live::{LiveDetail, LiveObservation, LiveSource, LiveState};
 use conspectus::model::{
     AgentSessionId, AgentSessionNode, BranchId, BranchNode, Confidence, ForgePrId, ForgePrNode,
     ForkId, ForkNode, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
@@ -187,6 +188,56 @@ pub fn mux_candidates_graph() -> GraphSnapshot {
         candidate_links: vec![cached_link, convention_link, strong_link],
         ..GraphSnapshot::empty()
     })
+}
+
+/// A mux hosting one session that waits on the operator, beside a
+/// pane-only entry on the mux (an agent no session matched yet) and a
+/// second session with no live state at all.
+pub fn live_state_graph() -> GraphSnapshot {
+    let main = mux_node("tmux:main", "main");
+    let session = |key: &str| {
+        GraphNode::AgentSession(AgentSessionNode {
+            id: agent_id(key),
+            harness_key: "codex".to_string(),
+            cwd: Some("/workspace".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind: None,
+        })
+    };
+    let link = |key: &str| {
+        let mut link = GraphLink::new(
+            format!("mux-{key}"),
+            NodeId::AgentSession(agent_id(key)),
+            LinkEndpoint::Node { id: main.id() },
+            RelationKind::LinkedToMux,
+            Provenance::StrongDiscovered,
+        );
+        link.source_metadata.adapter = "process".to_string();
+        link
+    };
+
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![session("session-a"), session("session-quiet"), main.clone()],
+        candidate_links: vec![link("session-a"), link("session-quiet")],
+        ..GraphSnapshot::empty()
+    };
+    snapshot.node_live.insert(
+        NodeId::AgentSession(agent_id("session-a")),
+        LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 1_790_769_000_000)
+            .with_detail(LiveDetail::Permission)
+            .with_since_ms(1_790_768_940_000)
+            .with_subagents(1)
+            .with_pid(4242, Some(123_456)),
+    );
+    snapshot.node_live.insert(
+        main.id(),
+        LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_790_769_500_000)
+            .with_detail(LiveDetail::Generating)
+            .with_heartbeat_s(30),
+    );
+    resolved(snapshot)
 }
 
 pub fn fork_ancestry_graph() -> GraphSnapshot {
