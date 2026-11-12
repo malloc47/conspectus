@@ -302,8 +302,9 @@ impl HookStatusArgs {
         Ok(overall != "not-installed")
     }
 
-    /// Returns whether a Conspectus extension, current or older, is
-    /// installed.
+    /// One line, `<label>\tpi\t<path>`; on stderr, what an older copy
+    /// lacks and the Pi version live state needs. Returns whether the
+    /// installed extension reports live state.
     fn run_pi_status(&self) -> Result<bool> {
         let path = pi_extension_path(self.scope)?;
         let state = pi_extension_state(&path)?;
@@ -314,10 +315,36 @@ impl HookStatusArgs {
             PiExtensionState::Foreign => "foreign",
         };
         println!("{label}\tpi\t{}", path.display());
-        Ok(matches!(
+        let reports_live_state = match state {
+            PiExtensionState::Installed => true,
+            PiExtensionState::Outdated => {
+                let installed = fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| pi_extension_version(&text));
+                let reports = installed.is_some_and(|version| version >= PI_LIVE_STATE_VERSION);
+                eprintln!(
+                    "{}",
+                    pi_outdated_note(
+                        installed,
+                        reports,
+                        &format!(
+                            "{} hook init pi{}",
+                            crate::invocation::invoked_name(),
+                            self.scope_flag()
+                        )
+                    )
+                );
+                reports
+            }
+            PiExtensionState::Absent | PiExtensionState::Foreign => false,
+        };
+        if matches!(
             state,
             PiExtensionState::Installed | PiExtensionState::Outdated
-        ))
+        ) {
+            eprintln!("{PI_VERSION_NOTE}");
+        }
+        Ok(reports_live_state)
     }
 }
 
@@ -456,6 +483,47 @@ fn codex_config_path(scope: HookScopeFlag) -> Result<PathBuf> {
 pub(super) const PI_EXTENSION_SOURCE: &str =
     include_str!("../../plugins/pi-hook/conspectus-hook.ts");
 
+/// The first extension version that reports live state; an older copy
+/// reports only which session a pane runs.
+pub(super) const PI_LIVE_STATE_VERSION: u32 = 2;
+
+/// What `hook status pi` says about the Pi versions live state needs. Pi
+/// fires its dialog events from 0.84.4, and tells an interrupted run from
+/// a finished one from 1.1.0.
+pub(super) const PI_VERSION_NOTE: &str = "waiting needs Pi 0.84.4 or later (Pi waits only on dialogs \
+     its extensions open), and 1.1.0 or later is recommended; an older Pi never reads as waiting";
+
+/// The version an extension file declares on its `EXTENSION_VERSION`
+/// line, when it declares one.
+pub(super) fn pi_extension_version(text: &str) -> Option<u32> {
+    let rest = text.split_once("const EXTENSION_VERSION = \"")?.1;
+    rest.split_once('"')?.0.parse().ok()
+}
+
+/// What `hook status pi` says about an older copy: its version (when it
+/// names one) and this binary's, the command that replaces it, and, when
+/// the copy predates live state, that it reports none.
+pub(super) fn pi_outdated_note(
+    installed: Option<u32>,
+    reports: bool,
+    init_command: &str,
+) -> String {
+    let carried = pi_extension_version(PI_EXTENSION_SOURCE).unwrap_or(PI_LIVE_STATE_VERSION);
+    let installed = installed.map_or_else(
+        || "an older version".to_string(),
+        |version| format!("version {version}"),
+    );
+    let lacks = if reports {
+        ""
+    } else {
+        "; until then it reports which session a pane runs but no live state"
+    };
+    format!(
+        "the installed Pi extension is {installed} and this build installs version {carried}: \
+         `{init_command}` replaces it, then restart Pi or run /reload{lacks}"
+    )
+}
+
 /// First-line prefix that marks a Pi extension file as Conspectus's own.
 /// `hook init` replaces and `hook remove` deletes only marked files.
 const PI_EXTENSION_MARKER: &str = "// conspectus-hook:";
@@ -581,4 +649,45 @@ fn read_toml_document(path: &Path) -> Result<DocumentMut> {
 fn replace_settings_file(path: &Path, text: &str) -> Result<()> {
     crate::declared::write_atomic(path, text)
         .with_context(|| format!("failed to write {}", path.display()))
+}
+
+#[cfg(test)]
+mod pi_extension_tests {
+    use super::*;
+
+    #[test]
+    fn the_embedded_extension_declares_the_version_that_reports_live_state() {
+        assert_eq!(
+            pi_extension_version(PI_EXTENSION_SOURCE),
+            Some(PI_LIVE_STATE_VERSION)
+        );
+        assert!(PI_EXTENSION_SOURCE.starts_with(PI_EXTENSION_MARKER));
+    }
+
+    #[test]
+    fn an_installed_copys_version_is_read_from_its_version_line() {
+        let first = "// conspectus-hook: installed\nconst EXTENSION_VERSION = \"1\";\n";
+        assert_eq!(pi_extension_version(first), Some(1));
+        assert_eq!(
+            pi_extension_version("const EXTENSION_VERSION = \"x\";"),
+            None
+        );
+        assert_eq!(
+            pi_extension_version("// conspectus-hook: an older version\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_outdated_note_says_what_an_older_copy_lacks() {
+        let first = pi_outdated_note(Some(1), false, "csp hook init pi");
+        assert!(first.contains("version 1"), "{first}");
+        assert!(first.contains("installs version 2"), "{first}");
+        assert!(first.contains("`csp hook init pi`"), "{first}");
+        assert!(first.contains("no live state"), "{first}");
+        let unnamed = pi_outdated_note(None, false, "conspectus hook init pi");
+        assert!(unnamed.contains("an older version"), "{unnamed}");
+        let newer = pi_outdated_note(Some(3), true, "conspectus hook init pi");
+        assert!(!newer.contains("no live state"), "{newer}");
+    }
 }

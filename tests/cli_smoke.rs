@@ -1324,14 +1324,51 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     let body = fs::read_to_string(&installed).expect("installed extension");
     assert!(body.starts_with("// conspectus-hook:"));
     assert!(body.contains(r#"["hook", "write", "pi"]"#));
-    hook(&["status", "pi"]).stdout(predicate::str::contains("installed\tpi"));
+    assert!(body.contains(r#"const EXTENSION_VERSION = "2";"#));
+    hook(&["status", "pi"])
+        .stdout(predicate::str::contains("installed\tpi"))
+        .stdout(predicate::str::contains("no-events\tpi"))
+        .stderr(predicate::str::contains("waiting needs Pi 0.84.4 or later"))
+        .stderr(predicate::str::contains("1.1.0"))
+        .stderr(predicate::str::contains("outdated").not());
     hook(&["init", "pi"]).stdout(predicate::str::contains("already installed"));
 
     // An older copy is reported and replaced.
     fs::write(&installed, "// conspectus-hook: an older version\n").expect("downgrade");
-    hook(&["status", "pi"]).stdout(predicate::str::contains("outdated\tpi"));
+    hook(&["status", "pi"])
+        .stdout(predicate::str::contains("outdated\tpi"))
+        .stderr(predicate::str::contains("is an older version"))
+        .stderr(predicate::str::contains(
+            "`conspectus hook init pi` replaces it",
+        ))
+        .stderr(predicate::str::contains("no live state"))
+        .stderr(predicate::str::contains("0.84.4"));
+    // The first version reports sessions only, so live state is off.
+    fs::write(
+        &installed,
+        "// conspectus-hook: installed by `conspectus hook init pi`\nconst EXTENSION_VERSION = \"1\";\n",
+    )
+    .expect("the first version");
+    hook(&["status", "pi"])
+        .stdout(predicate::str::contains("outdated\tpi"))
+        .stdout(predicate::str::contains("off\tpi"))
+        .stderr(predicate::str::contains(
+            "is version 1 and this build installs version 2",
+        ));
     hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
     assert_eq!(fs::read_to_string(&installed).expect("reinstalled"), body);
+    // A newer version than this build's still reports live state.
+    fs::write(
+        &installed,
+        "// conspectus-hook: installed\nconst EXTENSION_VERSION = \"9\";\n",
+    )
+    .expect("a newer version");
+    hook(&["status", "pi"])
+        .stdout(predicate::str::contains("outdated\tpi"))
+        .stdout(predicate::str::contains("no-events\tpi"))
+        .stderr(predicate::str::contains("is version 9"))
+        .stderr(predicate::str::contains("no live state").not());
+    hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
 
     hook(&["remove", "pi"]).stdout(predicate::str::contains("removed Pi hook extension"));
     assert!(!installed.exists());
