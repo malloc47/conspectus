@@ -7556,6 +7556,7 @@ fn the_tree_window_follows_the_copy_of_a_duplicated_row_the_cursor_is_on() {
         tree: RowTree {
             rows,
             view: ViewLabel::Mux,
+            ..Default::default()
         },
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,

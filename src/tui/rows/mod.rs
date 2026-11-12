@@ -107,6 +107,11 @@ pub struct RowTree {
     /// Which view produced this tree, so renderers and tests can
     /// route accordingly without inspecting the rows themselves.
     pub view: ViewLabel,
+    /// How many agents anywhere in the graph wait on the operator, read
+    /// with the rows' live values (so it changes when they do): every
+    /// session and pane-only agent, listed by this view or not. The
+    /// header's waiting count.
+    pub waiting_anywhere: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]

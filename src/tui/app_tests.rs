@@ -376,6 +376,7 @@ fn nav_down_past_duplicate_row_id_advances_to_the_following_row() {
             group_row(dup_id.clone(), "dup-second"),
             group_row(workspace("c"), "c"),
         ],
+        ..Default::default()
     };
 
     let mut app = App::new(RunConfig::defaults());
@@ -426,6 +427,7 @@ fn a_rebuild_keeps_the_cursor_on_the_copy_of_a_duplicated_row_it_was_on() {
             group_row(workspace("dup"), "dup-second"),
             group_row(workspace("c"), "c"),
         ],
+        ..Default::default()
     };
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {

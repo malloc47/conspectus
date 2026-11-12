@@ -1,8 +1,10 @@
 //! Live state rolls up the same way wherever it is counted: a group
 //! header counts the agents beneath it that wait on the operator, each
-//! once, and agrees with the marks of the rows it counts; a mux's mark is
-//! its agents' state by the operator's order; and the counts follow the
-//! rows when the live state changes, in place.
+//! once, and agrees with the marks of the rows it counts; the header
+//! counts every agent anywhere that waits, whatever the view lists, in
+//! the same chip; a mux's mark is its agents' state by the operator's
+//! order; and the counts follow the rows when the live state changes, in
+//! place.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -363,4 +365,170 @@ fn the_waiting_count_reads_in_the_waiting_mark_style() {
             .iter()
             .all(|(_, count)| count.is_none())
     );
+}
+
+/// The header line of `app` drawn `width` columns wide, without the
+/// blanks after it.
+fn header_line(app: &mut App, width: u16) -> String {
+    frame(app, width, 12)
+        .lines()
+        .next()
+        .expect("the header line")
+        .trim_end()
+        .to_string()
+}
+
+/// The waiting count the header draws, if any.
+fn header_count(app: &mut App) -> Option<usize> {
+    let line = header_line(app, 300);
+    line.split("  ·  ")
+        .find_map(|part| part.strip_prefix(&format!("{} ", crate::tui::icons::live::WAITING)))
+        .map(|count| count.parse().expect("a count is a number"))
+}
+
+#[test]
+fn the_header_counts_every_agent_waiting_anywhere_in_every_view() {
+    // The hosted session and an agent in a pane of `scratch` no session
+    // matches wait.
+    let snapshot = with_table();
+    for view in ALL_VIEWS {
+        let mut app = listing_with(view, &snapshot, LiveOverlay::off());
+        assert_eq!(header_count(&mut app), Some(2), "{view:?}");
+    }
+    // A filter narrows the rows, not the count.
+    let mut app = listing_with(View::Sessions, &snapshot, LiveOverlay::off());
+    app.update(Msg::SetFilter(RowFilter {
+        harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+        ..RowFilter::default()
+    }));
+    assert!(
+        row_id_for(&app, HOSTED).is_none(),
+        "the filter hides the waiting session"
+    );
+    assert_eq!(header_count(&mut app), Some(2));
+    // With nothing waiting the header has no count.
+    let mut quiet = listing_with(View::Sessions, &live_world(), LiveOverlay::off());
+    assert_eq!(header_count(&mut quiet), None);
+    assert!(!header_line(&mut quiet, 300).contains(crate::tui::icons::live::WAITING));
+}
+
+#[test]
+fn the_header_count_sits_before_the_warning_and_after_the_counts() {
+    let snapshot = with_table();
+    let mut app = listing_with(View::Sessions, &snapshot, LiveOverlay::off());
+    let line = header_line(&mut app, 300);
+    let at = |needle: &str| line.find(needle).unwrap_or(usize::MAX);
+    assert!(at(" mux") < at("! 2"), "{line}");
+    assert!(
+        at(" stopped") < at("! 2") || at(" stopped") == usize::MAX,
+        "{line}"
+    );
+    assert!(
+        line.contains("  ·  ! 2"),
+        "set apart as a chip section: {line}"
+    );
+    if line.contains(tuikit::glyphs::marks::WARNING) {
+        assert!(at("! 2") < at(tuikit::glyphs::marks::WARNING), "{line}");
+    }
+}
+
+#[test]
+fn the_header_count_gives_way_after_the_stopped_count_and_before_the_mux_count() {
+    let snapshot = with_table();
+    let mut app = listing_with(View::Sessions, &snapshot, LiveOverlay::off());
+    let full = header_line(&mut app, 300);
+    assert!(
+        full.contains(" stopped"),
+        "the fixture counts stopped muxes: {full}"
+    );
+    let (mut outlasted_stopped, mut gave_way_first) = (false, false);
+    for width in 30..=120 {
+        let shown = header_line(&mut app, width);
+        let has = |needle: &str| shown.contains(needle);
+        let waiting = has("! 2");
+        if has(" stopped") || has(tuikit::glyphs::marks::WARNING) {
+            assert!(
+                waiting,
+                "at {width} a lower part outlasts the count: {shown}"
+            );
+        }
+        if waiting {
+            assert!(
+                has(" mux") && has("updated "),
+                "at {width} the count outlasts a higher part: {shown}"
+            );
+        }
+        outlasted_stopped |= waiting && !has(" stopped");
+        gave_way_first |= !waiting && has(" mux");
+    }
+    assert!(
+        outlasted_stopped,
+        "some width keeps the count and not the stopped count"
+    );
+    assert!(
+        gave_way_first,
+        "some width keeps the mux count and not the waiting count"
+    );
+}
+
+#[test]
+fn the_header_and_a_group_header_draw_one_waiting_chip() {
+    let snapshot = with_table();
+    let theme = crate::tui::Theme::default();
+    let mut app = grouped(View::Sessions, &snapshot, LiveOverlay::off());
+    let buffer = buffer_of(&mut app, 220, 40);
+    let lines = tuikit::testkit::buffer::rows(&buffer);
+    let styles = |y: usize, needle: &str| {
+        let at = lines[y]
+            .find(needle)
+            .unwrap_or_else(|| panic!("no {needle} on line {y}: {}", lines[y]));
+        let x = lines[y][..at].chars().count();
+        (0..needle.chars().count())
+            .map(|dx| {
+                let cell = &buffer[(u16::try_from(x + dx).unwrap(), u16::try_from(y).unwrap())];
+                cell.fg
+            })
+            .collect::<Vec<_>>()
+    };
+    let group = lines
+        .iter()
+        .position(|line| line.contains("/home/op/src/conspectus"))
+        .expect("the repo header");
+    let header = styles(0, "! 2");
+    assert_eq!(header, styles(group, "! 1"), "one look for both counts");
+    assert!(header.iter().all(|fg| *fg == theme.warning));
+}
+
+#[test]
+fn the_header_count_follows_a_store_change_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = written_store(dir.path());
+    let snapshot = live_world();
+    let mut app = listing_with(View::Mux, &snapshot, overlay_over(&store));
+    let selected = app.selection().cloned();
+    assert_eq!(
+        header_count(&mut app),
+        Some(2),
+        "the hosted agent and a pane's agent wait"
+    );
+    for kind in [
+        LiveEventKind::WaitEnded { agent: None },
+        LiveEventKind::TurnEnded { interrupted: false },
+    ] {
+        store
+            .apply_event(&LiveEvent::new("claude-code", HOSTED, now_ms(), kind))
+            .expect("the store takes the event");
+    }
+    let rebuilds = app.tree_rebuilds;
+    app.poll_live(
+        Instant::now() + std::time::Duration::from_secs(5),
+        crate::tui::rows::tree_current_unix_ms(),
+    );
+    assert_eq!(
+        header_count(&mut app),
+        Some(1),
+        "the pane's agent still waits"
+    );
+    assert_eq!(app.tree_rebuilds, rebuilds, "in place");
+    assert_eq!(app.selection().cloned(), selected, "the cursor stays");
 }

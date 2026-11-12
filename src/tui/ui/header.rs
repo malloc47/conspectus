@@ -10,12 +10,14 @@ use crate::tui::keymap::{SelectedDefault, selected_default_action};
 
 /// How long each part of the header holds on as the screen narrows, the
 /// highest longest; the session count has no rank and never gives way.
-/// Freshness and the load-bearing counts outlast the triage chip, which
+/// Freshness and the load-bearing counts outlast the count of agents
+/// waiting on the operator, which outlasts the triage chip, which
 /// outlasts the stopped count, and the opt-in harness chips go first,
 /// from the end (ADR 0078's order of what the header carries).
 mod header_rank {
-    pub(super) const FRESHNESS: u32 = 5;
-    pub(super) const MUX: u32 = 4;
+    pub(super) const FRESHNESS: u32 = 6;
+    pub(super) const MUX: u32 = 5;
+    pub(super) const WAITING: u32 = 4;
     pub(super) const AMBIGUITY: u32 = 3;
     pub(super) const STOPPED: u32 = 2;
     pub(super) const HARNESS_CHIPS: u32 = 1;
@@ -35,6 +37,7 @@ pub(super) fn draw_header(app: &App, buf: &mut Buffer, area: Rect) {
 /// ```text
 /// [updated Ns ago · ] N/M sessions · M mux[ · K stopped]
 ///   [  ·  <opt-in harness chips>]
+///   [  ·  ! N when agents anywhere wait > 0]
 ///   [  ·  ▲ N when ambiguous > 0]
 /// ```
 ///
@@ -69,6 +72,12 @@ pub(super) fn header_line(app: &App) -> PriorityLine {
     let counts = HeaderCounts::from_app(app);
     if app.config().show_harness_chips {
         push_harness_chips(&mut line, &counts, theme);
+    }
+    // The agents waiting on the operator anywhere, whatever the view
+    // lists: read with the rows' live values, so it changes with them.
+    let waiting = app.tree().waiting_anywhere;
+    if waiting > 0 {
+        push_waiting_chip(&mut line, waiting, theme);
     }
     if counts.mux_ambiguous > 0 {
         push_ambiguity_chip(&mut line, counts.mux_ambiguous, theme);
@@ -136,6 +145,18 @@ pub(super) fn push_harness_chips(line: &mut PriorityLine, counts: &HeaderCounts,
                 .gap(gap),
         );
     }
+}
+
+/// Add the count of agents waiting on the operator (`! N`), only called
+/// when N > 0, set apart from what precedes it: the chip a group header
+/// counts the agents beneath it with, so the two read alike.
+pub(super) fn push_waiting_chip(line: &mut PriorityLine, waiting: usize, theme: &Theme) {
+    use crate::tui::widgets::badge::waiting_count_chip;
+    line.push(
+        Segment::new(vec![waiting_count_chip(waiting, theme)])
+            .rank(header_rank::WAITING)
+            .gap(SECTION_SEPARATOR),
+    );
 }
 
 /// Add the ambiguity triage chip (`▲ N`), only called when N > 0, set

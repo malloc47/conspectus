@@ -19,7 +19,7 @@ use crate::model::live::{
 };
 use crate::model::{GraphNode, GraphSnapshot, LiveTables, MuxSessionId, NodeId};
 
-use super::{RowKind, RowTree};
+use super::{LiveMark, LiveSign, RowKind, RowTree};
 
 /// What a session's row knows of its live state: the effective state at
 /// the time the row was filled, and the observation's facts beside it.
@@ -74,16 +74,37 @@ pub enum MixedLive {
 pub(crate) struct LiveValues {
     cells: BTreeMap<NodeId, LiveCell>,
     counts: BTreeMap<MuxSessionId, LiveCounts>,
+    /// Every agent of the tables waiting on the operator.
+    waiting: usize,
 }
 
 impl LiveValues {
     /// `tables`, bound to `snapshot`, read at `now_ms`. A mux counts by
     /// the rule of [`GraphSnapshot::live_counts_of_mux`].
     pub(crate) fn at(snapshot: &GraphSnapshot, tables: LiveTables<'_>, now_ms: i64) -> Self {
+        let cells = cells_at(tables.nodes, now_ms);
+        let waits = |sign: LiveSign| sign.mark == LiveMark::Waiting;
+        let sessions = cells
+            .values()
+            .filter(|cell| waits(LiveSign::of_session(Some(**cell))))
+            .count();
+        let panes = tables
+            .panes
+            .values()
+            .filter(|binding| waits(LiveSign::of_session(Some(LiveCell::of(binding, now_ms)))))
+            .count();
         Self {
-            cells: cells_at(tables.nodes, now_ms),
+            cells,
             counts: snapshot.live_counts_by_mux(tables, now_ms),
+            waiting: sessions + panes,
         }
+    }
+
+    /// How many agents anywhere wait on the operator: every entry of the
+    /// tables, a session's or a pane's no session matches, whichever rows
+    /// a view lists.
+    pub(crate) fn waiting(&self) -> usize {
+        self.waiting
     }
 
     /// The cell of a session, or `None` without evidence.
@@ -122,9 +143,11 @@ pub(crate) fn cells_at<K: Clone + Ord>(
 }
 
 /// Fill in the live value of every session, mux, and mixed row of
-/// `tree` from `values`. A pin's row carries the value of the entity it
-/// points at. Rows of other kinds carry none.
+/// `tree` from `values`, and the tree's count of the agents anywhere
+/// that wait. A pin's row carries the value of the entity it points at.
+/// Rows of other kinds carry none.
 pub(crate) fn annotate(tree: &mut RowTree, snapshot: &GraphSnapshot, values: &LiveValues) {
+    tree.waiting_anywhere = values.waiting();
     for row in &mut tree.rows {
         match &mut row.kind {
             RowKind::AgentSession(session) => {

@@ -119,7 +119,11 @@ fn stopped_mux(name: &str, depth: u8, states: &[LiveState]) -> Row {
 }
 
 fn summaries(view: ViewLabel, rows: Vec<Row>) -> Vec<GroupSummary> {
-    let tree = RowTree { rows, view };
+    let tree = RowTree {
+        rows,
+        view,
+        ..RowTree::default()
+    };
     let summaries = compute_group_summaries(&tree);
     tree.rows
         .iter()

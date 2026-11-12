@@ -241,7 +241,13 @@ fn the_agent_state_legend_explains_the_waiting_count() {
         .map(|at| header + at)
         .expect("the waiting count row");
     assert!(texts[at].starts_with("  ! N "), "{}", texts[at]);
-    assert!(texts[at].contains("group header"), "{}", texts[at]);
+    let blurb = texts[at..(at + 3).min(texts.len())]
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(blurb.contains("group header"), "{blurb}");
+    assert!(blurb.contains("header line"), "{blurb}");
     let chip = lines[at]
         .spans
         .iter()

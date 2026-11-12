@@ -154,6 +154,7 @@ pub(super) fn lay_out_in(
     let tree = crate::tui::rows::RowTree {
         rows: rows.to_vec(),
         view,
+        ..Default::default()
     };
     let columns = LeftColumns {
         theme,

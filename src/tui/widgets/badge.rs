@@ -77,7 +77,8 @@ pub fn was_in_chip(mux: &str, named_after_it: bool, theme: &Theme) -> Span<'stat
 
 /// How many agents wait on the operator: `! N`, the waiting live mark and
 /// the count, in the mark's style, so it reads as the rows it counts do.
-/// A group header shows it for the agents beneath it.
+/// A group header shows it for the agents beneath it, and the header line
+/// for every agent anywhere.
 pub fn waiting_count_chip(count: usize, theme: &Theme) -> Span<'static> {
     waiting_chip(count.to_string(), theme)
 }

@@ -98,7 +98,7 @@ fn icon_legend(theme: &Theme) -> HelpSection {
 /// Legend for the live-state marks: what an agent is doing now, in the
 /// column after the age of session and mux rows. The Pinned and History
 /// views spell the first four as words instead. Then the count of the
-/// waiting agents beneath a group header.
+/// waiting agents beneath a group header, and anywhere in the header.
 fn live_state_legend(theme: &Theme) -> HelpSection {
     use crate::tui::rows::LiveMark;
     LiveMark::ALL.into_iter().fold(
@@ -139,7 +139,7 @@ fn live_state_legend(theme: &Theme) -> HelpSection {
     .legend(
         crate::tui::widgets::badge::waiting_chip("N", theme),
         "Waiting count",
-        "on a group header, how many agents beneath it wait on you",
+        "on a group header, how many agents beneath it wait on you; in the header line, how many wait anywhere, whatever the view shows",
     )
 }
 

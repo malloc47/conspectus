@@ -77,6 +77,7 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
     let mut tree = RowTree {
         rows: Vec::new(),
         view: ViewLabel::Search,
+        ..Default::default()
     };
     let Some(content) = filter.content.clone() else {
         return tree;

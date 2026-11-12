@@ -173,14 +173,19 @@ fn header_parts(full: &str) -> Vec<(&'static str, String)> {
     parts
 }
 
-/// Every width from 40 to 120 columns, both layouts, every view: the
-/// header shows whole parts of the header a wide screen shows, in order,
-/// always the session count, and ends with `…` exactly when it leaves a
-/// part out. It never runs past the screen for the edge to cut.
+/// Every width from 40 to 120 columns, both layouts, every view, with and
+/// without agents waiting: the header shows whole parts of the header a
+/// wide screen shows, in order, always the session count, and ends with
+/// `…` exactly when it leaves a part out. It never runs past the screen
+/// for the edge to cut.
 #[test]
 fn the_header_never_cuts_a_part_at_any_width() {
-    for view in ALL_VIEWS {
-        let mut app = app_in(view);
+    let waiting = super::live::with_table();
+    let apps = ALL_VIEWS
+        .iter()
+        .flat_map(|view| [app_in(*view), app_over(*view, &waiting)]);
+    for mut app in apps {
+        let view = app.active_view();
         let full = header_row(&mut app, 300);
         let parts = header_parts(&full);
         assert!(parts.len() >= 3, "{view:?}: {full}");

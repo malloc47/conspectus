@@ -65,6 +65,7 @@ pub fn build_pinned_tree(inputs: PinnedBuildInputs<'_>) -> RowTree {
     let mut tree = RowTree {
         rows: Vec::new(),
         view: ViewLabel::Pinned,
+        ..Default::default()
     };
     match grouping {
         PinnedGrouping::None => {

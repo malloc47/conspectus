@@ -109,6 +109,7 @@ pub fn build_history_tree(inputs: HistoryBuildInputs<'_>) -> RowTree {
     let mut tree = RowTree {
         rows: Vec::new(),
         view: ViewLabel::History,
+        ..Default::default()
     };
     let push = |tree: &mut RowTree, entry: &Entry<'_>, depth: u8| {
         tree.rows.push(Row {

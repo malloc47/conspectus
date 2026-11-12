@@ -15,8 +15,9 @@ regenerate the frames:
 just tui-columns          # UPDATE_TUI_COLUMNS=1 on the frame test
 ```
 
-The frames show the left pane only, at a terminal width of 170 columns
-unless a frame says otherwise, with ages measured at a fixed time. The
+The frames show the left pane (or, where a frame says so, the header
+line above it), at a terminal width of 170 columns unless a frame says
+otherwise, with ages measured at a fixed time. The
 `►` at the start of a row marks the row the cursor is on. Colors are described in the tables
 because a frame is plain text. For how the views fit into the rest of
 the product, see [design.md](design.md); for keys and menus, see
@@ -384,6 +385,43 @@ A Pinned row in a narrow pane keeps its name and its state word:
 │      ▣ ◎ weekly-review  planned     —│
 │  ▼ Other                             │
 │      ⇄ ◉ ledger-pr      merged     5d│
+```
+
+## Header line
+
+The line above the panes says how fresh the data is and what there is,
+then flags what needs a look, the same in every view. Left to right:
+
+| Part | Shows | Condition | Gives way |
+|---|---|---|---|
+| Freshness | `updated 5s ago` | once a snapshot has loaded | last |
+| Sessions | `11 sessions`, or `matching/total sessions` when the view lists fewer | always | never |
+| Muxes | `4 mux`: the muxes running | always | fifth |
+| Stopped | `4 stopped`: the muxes that have stopped | N > 0 | second |
+| Harness chips | each harness's chip and its session count | `[tui] show_harness_chips` | first, from the end |
+| Waiting | `! N`: agents waiting on you, anywhere | N > 0 | fourth |
+| Warning | `▲ N`: sessions with an ambiguous mux link | N > 0 | third |
+
+The counts are bold and joined by ` · `; the chips are set apart by
+`  ·  `. The waiting count is the group headers' chip, the `!` mark and
+the number in the waiting mark's yellow, but it counts every agent that
+waits on you anywhere: every session with live state and every agent in a
+pane no session matches, whatever the view lists or the filter hides. It
+changes with the rows' marks, within about a second of the agent's
+report.
+
+When the line is too narrow its parts give way whole, in the order above,
+and the line ends with `…`; a part that gave way comes back when it fits
+again.
+
+<!-- frame: pane=header keys="" width=170 height=30 -->
+```text
+updated 0s ago · 11 sessions · 4 mux · 4 stopped  ·  ! 2  ·  ▲ 4
+```
+
+<!-- frame: pane=header keys="" width=50 height=30 -->
+```text
+updated 0s ago · 11 sessions · 4 mux  ·  ! 2 …
 ```
 
 ## Sessions view

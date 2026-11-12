@@ -231,3 +231,61 @@ fn the_rows_read_the_table_they_are_given() {
         .collect();
     assert_eq!(states, vec![(hosted(), LiveState::Error)]);
 }
+
+#[test]
+fn every_view_carries_the_count_of_agents_waiting_anywhere() {
+    // The hosted session waits; so do an agent in a pane no session
+    // matches and a session the views may not list. Ready, exited, and
+    // stale agents, and sessions without evidence, do not count.
+    let mut snapshot = world();
+    let other = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "unlisted"));
+    snapshot
+        .node_live
+        .insert(other, running(LiveState::Waiting, 2));
+    snapshot.node_live.insert(
+        NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "gone")),
+        running(LiveState::Exited, 1),
+    );
+    snapshot.pane_live.insert(
+        crate::model::LivePane::new(main_mux(), Some("%7".into())),
+        running(LiveState::Waiting, 1),
+    );
+    snapshot.pane_live.insert(
+        crate::model::LivePane::new(main_mux(), Some("%8".into())),
+        running(LiveState::Working, 1),
+    );
+    let mut stale = running(LiveState::Waiting, 30);
+    stale.liveness = Liveness::Unknown;
+    stale.observation.pid = None;
+    snapshot.node_live.insert(
+        NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "stale")),
+        stale,
+    );
+    for view in [
+        View::Sessions,
+        View::Mux,
+        View::Prs,
+        View::Pinned,
+        View::History,
+        View::Search,
+    ] {
+        assert_eq!(
+            built(&snapshot, view, NOW_MS).waiting_anywhere,
+            3,
+            "{view:?}"
+        );
+    }
+}
+
+#[test]
+fn the_waiting_count_follows_the_table_the_rows_read() {
+    let snapshot = world();
+    let mut tree = built(&snapshot, View::Sessions, NOW_MS);
+    assert_eq!(tree.waiting_anywhere, 1);
+    annotate(
+        &mut tree,
+        &snapshot,
+        &LiveValues::at(&snapshot, GraphSnapshot::empty().live_tables(), NOW_MS),
+    );
+    assert_eq!(tree.waiting_anywhere, 0, "nothing waits in an empty table");
+}

@@ -62,6 +62,7 @@ fn rows() -> RowTree {
             row(session("s4"), 1, false),
         ],
         view: crate::tui::rows::ViewLabel::Sessions,
+        ..Default::default()
     }
 }
 
@@ -279,6 +280,7 @@ fn an_expanded_group_that_is_gone_by_the_write_is_left_out() {
         RowTree {
             rows: without,
             view: crate::tui::rows::ViewLabel::Sessions,
+            ..Default::default()
         },
     );
     assert!(
