@@ -743,6 +743,11 @@ forms, lists, readers, and keys look and behave alike.
   plugin run theirs detached) is the session's active pane, so an agent
   in another pane could be recorded as running in the active one. It
   now asks about the pane in `TMUX_PANE`.
+- **An idle Pi session no longer looks recently active.** Pi's default
+  cache warming appends `usage` entries to the session file for up to
+  half an hour after a run, and a session's age counted from the newest
+  of them. It now counts from the last other entry, so an idle session
+  shows the age of its last turn.
 - **An opencode pane no longer names a running subagent.** The opencode
   1.x plugin recorded every session's events for attribution, children
   included, so while a subagent ran its pane briefly showed the child

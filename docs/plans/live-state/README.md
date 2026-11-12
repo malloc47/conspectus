@@ -361,6 +361,7 @@ noted.
   fixed (CSP-816): only root sessions' events are attributed, and the dead
   entry is gone.
 - Pi's idle cache warming moves the session file's mtime, so
-  `last_active_epoch` can look recent on an idle session.
+  `last_active_epoch` can look recent on an idle session. Fixed
+  (CSP-820): the adapter takes the newest entry that is not `usage`.
 - Doc drift: ADR 0028 and `docs/operations.md` still describe a TTL and
   `hooks.sqlite3`; `docs/design.md` omits `hook_ingest`. Fixed (CSP-818).
