@@ -4,6 +4,7 @@ title: Record real payloads and verify live state against each harness
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
+updated_date: '2026-11-12 10:20'
 labels:
   - live-state
   - ls-docs
@@ -50,3 +51,17 @@ Blockers: The four harness stories, and the operator running real sessions.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+From CSP-815: claims the Codex slice encodes that a recording should confirm. Each is listed in `tests/fixtures/hooks/codex/README.md` and ADR 0206 decision 19.
+- An approval, granted or declined, fires nothing until the next tool, `Stop`, or `Interrupt`.
+- A subagent's `PostToolUse` carries its `agent_id`.
+- Is `SubagentStop` per child or per child turn?
+- `/clear` fires `SessionStart` (`clear`) with no `SessionEnd` for the old session.
+- What does a plan-mode `Stop` mean? If a proposed plan is common, a `ready` detail may be worth an ADR 0203 amendment.
+- Does `hook remove` renumbering groups really cost a `/hooks` re-review?
+- Is the trust table really at `hooks.state.<key>`?
+- Is the `/hooks` review wording `hook init codex` prints accurate for the recorded version?
+<!-- SECTION:NOTES:END -->
