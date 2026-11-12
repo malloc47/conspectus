@@ -236,8 +236,10 @@ const MAX_PATH_LEN: usize = 4096;
 
 /// Whether `id` looks like an identifier: short, with no whitespace or
 /// control character. Text from a payload rarely does, so an id that
-/// fails is refused rather than stored.
-fn plausible_id(id: &str) -> bool {
+/// fails is refused rather than stored. A mapping that adds an optional
+/// id to a payload's events checks it first, so one odd id does not
+/// cost the rest of the payload.
+pub(crate) fn plausible_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_ID_LEN
         && !id.chars().any(|c| c.is_whitespace() || c.is_control())

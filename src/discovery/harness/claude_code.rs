@@ -56,7 +56,7 @@ use serde_json::json;
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{FileStamp, StampedMap};
 use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
-use crate::live_store::{LiveContext, LiveEvent, LiveEventKind};
+use crate::live_store::{LiveContext, LiveEvent};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
@@ -172,74 +172,26 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     }
 
     /// Only `SessionStart` names the session a process runs, so only it
-    /// is recorded for attribution. A payload without an event name
-    /// comes from a caller older than per-event hooks, all of which ran
-    /// on session start, and is attributed as before.
+    /// is recorded for attribution; every other event reaches only the
+    /// live-state store.
     fn is_attribution_event(&self, payload: &serde_json::Value) -> bool {
-        payload
-            .get("hook_event_name")
-            .is_none_or(|name| name.as_str() == Some(SESSION_START))
+        live::is_attribution_event(payload)
     }
 
+    /// Every event `hook init claude-code` installs; see
+    /// `claude_code_live.rs` for the mapping and its known gaps.
     fn live_events_from_payload(
         &self,
         payload: &serde_json::Value,
         context: &LiveContext,
         observed_ms: i64,
     ) -> Vec<LiveEvent> {
-        let Ok(hook) = LiveHook::deserialize(payload) else {
-            return Vec::new();
-        };
-        let Some(session_id) = hook.session_id.filter(|id| !id.is_empty()) else {
-            return Vec::new();
-        };
-        let kind = match hook.hook_event_name {
-            // A start after compaction resumes the session; every
-            // other source (startup, resume, clear, fork) begins one.
-            Some(SESSION_START) => LiveEventKind::SessionStarted {
-                after_compaction: hook.source == Some("compact"),
-            },
-            _ => return Vec::new(),
-        };
-        let owned = |value: Option<&str>, fallback: &Option<String>| {
-            value
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .or_else(|| fallback.clone())
-        };
-        let context = LiveContext {
-            cwd: owned(hook.cwd, &context.cwd),
-            transcript_path: owned(hook.transcript_path, &context.transcript_path),
-            ..context.clone()
-        };
-        vec![LiveEvent::new(HARNESS_KEY, session_id, observed_ms, kind).with_context(context)]
+        live::live_events(payload, context, observed_ms)
     }
 }
 
-/// The hook event Claude Code fires when a session starts or resumes.
-const SESSION_START: &str = "SessionStart";
-
-/// The fields of a Claude Code hook payload the live-state mapping reads
-/// (ADR 0206 decision 10), borrowed from the parsed payload. Serde skips
-/// every other field without looking inside it, so `prompt`,
-/// `tool_input`, `tool_response`, and `message` are never read, and a
-/// large one costs nothing.
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct LiveHook<'a> {
-    #[serde(borrow)]
-    hook_event_name: Option<&'a str>,
-    #[serde(borrow)]
-    session_id: Option<&'a str>,
-    #[serde(borrow)]
-    cwd: Option<&'a str>,
-    #[serde(borrow)]
-    transcript_path: Option<&'a str>,
-    /// `SessionStart`'s cause: `startup`, `resume`, `clear`, `compact`,
-    /// or `fork`.
-    #[serde(borrow)]
-    source: Option<&'a str>,
-}
+#[path = "claude_code_live.rs"]
+mod live;
 
 fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFragment> {
     let projects = state_root.join("projects");

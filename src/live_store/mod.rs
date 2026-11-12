@@ -41,6 +41,7 @@ mod process;
 mod reducer;
 mod store;
 
+pub(crate) use event::plausible_id;
 pub use event::{FailureClass, LiveContext, LiveEvent, LiveEventKind, LiveSnapshot, WaitKind};
 pub use file::{
     DEAD_RETENTION_MS, EXITED_RETENTION_MS, LIVE_STATE_SCHEMA_VERSION, LiveEntry, LiveFile,
