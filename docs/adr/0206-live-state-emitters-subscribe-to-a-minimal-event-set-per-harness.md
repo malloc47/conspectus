@@ -219,6 +219,90 @@ are in the research notes and become tests.
 
     These fixtures are synthetic too, until a recording confirms them.
 
+### OpenCode, as built
+
+20. **The plugin keeps each session's state and sends snapshots.** The
+    reducer (`plugins/opencode-hook/src/live.ts`) keeps per session its
+    own state with its start, the pending permission, question, and
+    form ids, how a 1.x turn will end, the state compaction interrupted,
+    and the parent. A session shows, first match wins: `exited/ended`
+    when it ended; its own wait (`permission`, then `question`, then
+    `input`: a form other than the question tool's is input, since the
+    vocabulary has no form detail); a descendant's wait, raised with
+    `via_subagent`; `compacting`; `working` (`generating`, `retrying`,
+    `rate_limited`); `error` with its class; `ready` (`finished`,
+    `interrupted`, or none for a session without a turn yet).
+    `subagents` counts the descendants working, waiting, or compacting.
+    A wait shows its own start, and the session's own state its start
+    once the wait ends. Child sessions get entries of their own too. A
+    session nothing has reported sends nothing; one whose only evidence
+    was a raised wait sends `unknown` when that wait ends.
+21. **The payload.** `{session_id, cwd, hook_event_name, attribution?,
+    live: {instance, seq, observed_ms, heartbeat_s, pid, pid_start,
+    state, detail, subagents, via_subagent, since_ms}}`, sent on every
+    change and every 60 s for a session that is working, waiting,
+    compacting, or failed. The writer reads `live` against a whitelist
+    (`src/discovery/harness/opencode_live.rs`): a name outside the closed
+    sets is not copied, counts and the heartbeat are clamped, and no time
+    runs ahead of its clock. The plugin's own pid, with its start time
+    from `/proc/self/stat`, replaces the one the writer's parent walk
+    finds, since the plugin knows which process it runs in.
+22. **Attribution.** A payload takes the attribution path (ADR 0146) when
+    it carries `"attribution": true`, or carries no `live`. The 1.x
+    plugin marks a root session's lifecycle events (created, updated,
+    status, idle, compacted), the events it forwarded before, so
+    attribution still follows an in-app session switch; a child
+    session's are never marked, so a pane no longer names a running
+    subagent. The 2.x server entrypoint marks none, and the TUI
+    entrypoint sends what it sent before, without live state. Snapshots
+    and heartbeats reach only the live-state store. A new plugin with an
+    older binary would attribute every snapshot, so the two are updated
+    together.
+23. **opencode 2.x gets a server entrypoint for state**, amending ADR 0126
+    decision 3. `dist/v2/server.js` runs in the shared service, where
+    every session is visible, including background children and turns
+    that outlive their client. It subscribes through
+    `ctx.event.subscribe` to the 2.x events of decision 3, plus
+    `session.step.started` (to leave retrying) and `session.status` (in
+    case 2.x sends it), keeps only its own location's events, and marks
+    nothing for attribution. Listed once in `opencode.jsonc`, the
+    package also loads the TUI entrypoint; listed only in `cli.json`, it
+    gives attribution and no live state. The research's fallback of
+    snapshots from a TUI's own stores is not built.
+24. **The mapping where the research left a choice.**
+    - Compaction ends in the state it interrupted (a turn with its start,
+      or a ready prompt with its start), as the shared reducer does,
+      rather than always in `working`. A 1.x status event during
+      compaction ends it, since a failed 1.x compaction says nothing.
+    - A 1.x `session.error` during a turn is held until the idle that
+      ends it, and shows at once while idle; one with no session id is
+      dropped. `MessageAbortedError` reads `ready/interrupted`,
+      `ProviderAuthError` auth, and an API error by status: 429 rate
+      limited, 401 and 403 auth, 503 and 529 overloaded. Anything else is
+      failed.
+    - A 2.x failed execution is classed by its error's status as above, a
+      `retryAfterMs` as rate limited, then the words of its type (auth,
+      overload, rate), else failed. A retry is rate limited for a 1.x
+      action reason or a 2.x status 429 or `retryAfterMs`. Neither the
+      reason nor the type is copied.
+    - An execution interrupted by `user`, `superseded`, or `inactivity`
+      reads `ready/interrupted`. One interrupted by `shutdown` ends
+      (`exited/ended`): the vocabulary has no suspended state and the
+      process is going away; the service's next start reports it afresh.
+    - The instance going away (1.x `dispose`, the 2.x plugin unloading)
+      ends every session still working, compacting, or waiting. A ready
+      or failed one stays, and its process's death tells the rest.
+    - A permission `reject` clears every pending permission of its
+      session, as opencode rejects them all. A form whose session is
+      `global` is no session's wait. A wait marks a turn running when
+      none was seen, as when the plugin loaded mid-turn.
+
+    The event scripts that encode these
+    (`tests/fixtures/hooks/opencode-live/`) are synthetic until a
+    recording confirms them. The plugin's tests replay them through the
+    reducer and the Rust tests replay the emitted payloads through the
+    parser and the store.
+
 ## Consequences
 
 - Claude Code pays two small spawns per tool call (`PostToolUse` and its

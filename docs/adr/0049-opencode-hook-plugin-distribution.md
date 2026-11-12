@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Amended for opencode 2.x by ADR 0126; see the amendment below.
+Accepted. Amended for opencode 2.x by ADR 0126 and for live state by
+ADR 0206; see the amendments below.
 
 ## Context
 
@@ -199,3 +200,26 @@ follows; everything else stands.
    nothing from it at runtime, so it loads without resolving any
    package. The 1.x entrypoint keeps its `@opencode-ai/plugin` peer
    dependency.
+
+## Amendment: live state (ADR 0206)
+
+The plugin now reports what each session is doing, not only which
+session a pane shows. Everything above stands except as follows.
+
+1. **Event selection and payload.** The 1.x entrypoint hands every
+   event of ADR 0206 decision 3, the `experimental.session.compacting`
+   hook, and `dispose` to a reducer of its own (`src/live.ts`), and the
+   payload gains `attribution` and a `live` snapshot (ADR 0206 decisions
+   20 to 22). A payload without `live` means what it always meant, so a
+   0.2.0 plugin keeps working. Decision 5's lifecycle events are still
+   recorded for attribution, now only for root sessions: a child
+   session's never are.
+2. **A 2.x server entrypoint.** `dist/v2` holds `server.js` beside
+   `tui.js`, replacing item 3 of the amendment above. Listed in
+   `opencode.jsonc` it loads both; listed in `cli.json` it loads the TUI
+   entrypoint alone, which gives attribution without live state.
+3. **2.x event selection.** The TUI entrypoint no longer forwards
+   `session.compacted` (item 4 above), which 2.x does not publish.
+4. **Tests.** The reducer is a pure module tested with `node --test` on
+   a machine with Node, by hand (ADR 0206). Decision 2 stands: CI builds
+   and runs nothing of the plugin.

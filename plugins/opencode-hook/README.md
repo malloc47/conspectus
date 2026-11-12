@@ -1,41 +1,60 @@
 # @conspectus/opencode-hook
 
-OpenCode plugin that forwards session lifecycle events to `conspectus hook
-write opencode` so [Conspectus](https://github.com/malloc47/conspectus) can
-attribute live mux panes to the operator's current opencode session even
-after in-app session switches. One package serves both opencode majors:
+OpenCode plugin that tells [Conspectus](https://github.com/malloc47/conspectus)
+what each opencode session is doing (working, waiting for you, ready,
+compacting, failed, and how many subagents it runs) and which session each
+pane shows, even after in-app session switches. It reports through
+`conspectus hook write opencode`. One package serves both opencode majors:
 
 - **opencode 1.x** loads the package root (`dist/index.js`). See
   [ADR 0049](../../docs/adr/0049-opencode-hook-plugin-distribution.md).
-- **opencode 2.x** loads the TUI entrypoint in `dist/v2/`. See
-  [ADR 0126](../../docs/adr/0126-opencode-2-pane-attribution.md).
+- **opencode 2.x** loads the server and TUI entrypoints in `dist/v2/`. See
+  [ADR 0126](../../docs/adr/0126-opencode-2-pane-attribution.md) and its
+  amendment.
+
+What each event means is decided in
+[ADR 0206](../../docs/adr/0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md).
 
 ## What it does
 
-The plugin extracts the session id, current working directory, and the
-event name. The Rust writer adds process and tmux context, so the plugin
-must run in the process that sits in the pane. The resulting record lands
-in Conspectus's hook sidecar store and is read on every `conspectus graph`
-and `conspectus tui` invocation.
+The plugin keeps a small state per session (`src/live.ts`) and, whenever
+what a session shows changes, sends that whole state as a snapshot; while
+a session is not ready it sends it again every 60 seconds. The Rust writer
+adds the pane's tmux context and stores it in Conspectus's live-state
+store, `$XDG_STATE_HOME/conspectus/live-state.json`. A wait of a child
+session (a subagent asking for permission or a question) also shows on
+its root session, which is the one you look at.
 
-On **opencode 1.x** the plugin runs inside each TUI and writes a record
-whenever any of these session lifecycle events fires:
+On **opencode 1.x** the plugin runs inside each TUI. It reads
+`session.status`, `session.idle`, `session.error`, `session.created`,
+`session.updated`, `session.deleted`, `session.compacted`,
+`permission.asked`, `permission.updated`, `permission.replied`,
+`question.asked`, `question.replied`, and `question.rejected`, plus the
+`experimental.session.compacting` and `dispose` hooks. A root session's
+`session.created`, `session.updated`, `session.status`, `session.idle`,
+and `session.compacted` are also recorded for attribution (which session
+the pane shows); a child session's never are.
 
-- `session.created`
-- `session.updated`
-- `session.status`
-- `session.idle`
-- `session.compacted`
+On **opencode 2.x** sessions run in one shared background service.
 
-On **opencode 2.x** server plugins run inside one shared background
-service whose environment belongs to whichever client started it, so the
-plugin ships only a TUI entrypoint, which runs inside each client. It
-writes a record when the client starts showing a session (including
-in-app switches, as `tui.route`) and on the 2.x equivalents of the
-events above (`session.created`, `session.renamed`, `session.status`,
-`session.idle`, `session.compacted`) for the session that client is
-showing. Events for other sessions are ignored, since every client
-receives them.
+- The **server entrypoint** (`dist/v2/server.js`) runs there, so it sees
+  every session, including background subagents and turns that go on
+  after their client closed. It reads the `session.execution.*`,
+  `session.retry.scheduled`, `session.step.started`,
+  `session.compaction.*`, `session.created`, `session.deleted`,
+  `session.archived`, `session.status`, `permission.*`, and `form.*`
+  events of its own location and sends live state only. Its writes come
+  from the service, so they never say anything about panes.
+- The **TUI entrypoint** (`dist/v2/tui.js`) runs inside each client and
+  records which session that client shows: whenever the client's route
+  moves to a session (including in-app switches, as `tui.route`), and on
+  `session.created`, `session.renamed`, `session.status`, and
+  `session.idle` of that session. Events for other sessions are ignored,
+  since every client receives them.
+
+Only ids, paths, state names, counts, and times leave the plugin: never a
+title, a message, a permission's patterns or resources, a question, a
+form's fields, or an error's text.
 
 ## Install
 
@@ -46,6 +65,9 @@ cd plugins/opencode-hook
 npm install
 npm run build
 ```
+
+Install the `conspectus` binary from the same checkout: an older binary
+treats every live-state snapshot as an attribution record.
 
 ### opencode 1.x
 
@@ -63,19 +85,35 @@ resolved scope and path.
 
 ### opencode 2.x
 
-opencode 2.x lists TUI plugins in `~/.config/opencode/cli.json` (or
-`$XDG_CONFIG_HOME/opencode/cli.json`), separate from the server plugins
-in `opencode.jsonc`. Add the built `dist/v2` directory there:
+List the built `dist/v2` directory as a server plugin in
+`~/.config/opencode/opencode.jsonc` (or `$XDG_CONFIG_HOME/opencode/opencode.jsonc`).
+opencode loads its server entrypoint in the service and its TUI entrypoint
+in every client:
 
-```json
+```jsonc
 {
-  "plugins": ["/path/to/conspectus/plugins/opencode-hook/dist/v2"]
+  "plugins": [{ "package": "/path/to/conspectus/plugins/opencode-hook/dist/v2" }]
 }
 ```
 
 `opencode plugin add` accepts only npm and Git specifiers, so edit the
-file directly. Restart your opencode clients afterwards. `opencode plugin
-list` shows the entry once it resolves.
+file directly. Then restart the service as well as your clients: the
+service (`opencode serve --service`) outlives the client that started it
+and loads server plugins when it starts, so stop that process and the
+next client starts it again. `opencode plugin list` shows the entry once
+it resolves.
+
+Listing `dist/v2` in `~/.config/opencode/cli.json` instead, as plugin
+0.2.0 asked, loads only the TUI entrypoint: Conspectus learns which
+session each pane shows, but not what the sessions are doing. When you
+move the entry to `opencode.jsonc`, remove it from `cli.json`, or each
+client loads the TUI entrypoint twice.
+
+### Upgrading from 0.2.0
+
+Pull, rebuild (`npm install && npm run build`), install the matching
+`conspectus`, and restart opencode. On 2.x, also move the `dist/v2` entry
+from `cli.json` to `opencode.jsonc` as above.
 
 ### Both majors
 
@@ -96,38 +134,68 @@ this one, for a single invocation:
 opencode --pure
 ```
 
-opencode 2.x has no `--pure`; remove the `cli.json` entry instead.
+opencode 2.x has no `--pure`; remove the `opencode.jsonc` (or `cli.json`)
+entry instead.
 
 ## Verify
 
-After starting an opencode session, query the Conspectus hook store:
+After starting an opencode session and sending a prompt, list the live
+state Conspectus has for it:
+
+```sh
+conspectus table sessions --columns +live
+```
+
+and check the attribution records:
 
 ```sh
 conspectus graph --format json \
   | jq '[.candidate_links[] | select(.source_metadata.adapter == "hook_sidecar" and .source.harness_key == "opencode")] | length'
 ```
 
-If the count is `0` after a few seconds of activity, check stderr for
-the plugin's one-shot spawn warning and confirm that `conspectus` is on
+If either is empty after a few seconds of activity, check stderr for the
+plugin's one-shot spawn warning and confirm that `conspectus` is on
 `PATH` from inside the opencode process environment. On opencode 2.x,
-also confirm that `opencode plugin list` shows the `dist/v2` entry.
+also confirm that `opencode plugin list` shows the `dist/v2` entry, and
+that it is in `opencode.jsonc`: an entry in `cli.json` reports no live
+state.
+
+## Development
+
+```sh
+npm run typecheck   # needs npm install
+npm test            # Node 22.6 or later; no install needed
+```
+
+`npm test` (or `just opencode-plugin-test` from the repository root)
+replays the event scripts in
+[`tests/fixtures/hooks/opencode-live/`](../../tests/fixtures/hooks/opencode-live/)
+through `src/live.ts` and compares every payload it emits. The Rust tests
+feed the same payloads through `conspectus hook write opencode`'s parser
+and the live-state store. CI runs neither the build nor these tests, so
+run both after a change here.
 
 ## Implementation notes
 
-- Payload shape: flat `{session_id, cwd?, hook_event_name?}` JSON over
-  stdin. Same contract as the existing `conspectus hook write
-  claude-code` and `conspectus hook write codex` writers. Both entrypoints
-  share `src/write.ts`.
-- The Rust writer (`HarnessAdapter::hook_record_from_payload`) is the
-  stable interface boundary; if opencode renames event variants this
-  plugin updates, but the Rust side does not.
-- The 2.x entrypoint has no runtime dependencies. It is typed against
-  `@opencode/plugin`'s TUI API but does not import it at runtime.
-- The plugin does *not* forward message, text, or tool events to keep
-  sidecar churn low. The Conspectus discovery pass uses the freshest
-  record per pane and does not enforce a TTL, so lifecycle and route
-  events are sufficient.
-- If a Conspectus record is ever written from opencode 2.x's shared
-  service (for example by a server plugin of your own), the writer marks
-  it as coming from a background harness and discovery never uses it for
-  pane attribution (ADR 0126).
+- `src/live.ts` is the reducer. It imports nothing, does nothing when
+  loaded, and uses only TypeScript that Node can strip, so its tests run
+  without a build. The entrypoints (`src/index.ts`, `src/v2/server.ts`)
+  hand it events; `src/write.ts` sends what it returns, keeps the
+  heartbeat timer, and spawns the writer detached and unawaited, so a
+  write never holds opencode up or keeps it running.
+- Payload: flat JSON over stdin, `{session_id, cwd?, hook_event_name?,
+  attribution?, live?}`, where `live` is `{instance, seq, observed_ms,
+  heartbeat_s, pid, pid_start, state, detail, subagents, via_subagent,
+  since_ms}`. `instance` is fresh each time the plugin loads and `seq`
+  counts up within it, which orders snapshots that land within the same
+  second. A payload without `live` is recorded for attribution only, as
+  0.2.0 sent it; one with `live` is recorded for attribution as well only
+  when `attribution` is true.
+- The Rust writer (`HarnessAdapter::live_snapshot_from_payload` and
+  `is_attribution_event`, in `src/discovery/harness/opencode_live.rs`) is
+  the stable interface boundary; if opencode renames events, this plugin
+  updates, but the Rust side does not.
+- The 2.x entrypoints have no runtime dependencies. They are typed
+  against `@opencode/plugin` but import nothing from it at run time.
+- The plugin does *not* read message, text, or tool events, which carry
+  payload and would cost a write per token.

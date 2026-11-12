@@ -269,6 +269,50 @@ gaps come with the hooks:
   state, which is not the same as idle; `hook status codex` calls an
   installed hook `silent` while Codex runs and nothing arrives.
 
+#### OpenCode live state
+
+The opencode plugin (`plugins/opencode-hook`, 0.3.0 or later) reports
+what each session is doing: working (generating, retrying, rate
+limited), waiting for a permission, a question, or other input, ready,
+compacting, failed, and how many subagents it runs. It works on opencode
+1.x and 2.x. There is no `hook init opencode`: rebuild the plugin from
+the same checkout as your `conspectus` (`npm install && npm run build` in
+`plugins/opencode-hook`), since an older binary treats every report as an
+attribution record, then restart opencode.
+
+- **1.x**: the existing install (`opencode plugin <path>`) is enough;
+  the plugin runs in each TUI.
+- **2.x**: list `dist/v2` in `opencode.jsonc` as `{"package":
+  "<checkout>/plugins/opencode-hook/dist/v2"}` instead of in `cli.json`,
+  and restart the `opencode serve --service` process too. That loads the
+  plugin's server entrypoint in the shared service, which sees every
+  session, as well as its TUI entrypoint in each client. Listed only in
+  `cli.json`, the plugin still says which session each pane shows but
+  reports no live state.
+
+See [`plugins/opencode-hook/README.md`](../plugins/opencode-hook/README.md)
+for the details. The plugin sends a session's whole state whenever it
+changes and every minute while the session is not ready; each report
+replaces the session's entry in `live-state.json`. A subagent's
+permission or question also shows on its root session, and only a root
+session's lifecycle events still go to attribution, so a pane no longer
+names a running subagent. Only states, counts, ids, paths, and times are
+kept: never a title, a message, a permission's patterns or resources, a
+question, or an error text. Some gaps come with opencode's events:
+
+- opencode 1.x publishes nothing for an Esc interrupt, so the turn reads
+  `ready` (finished), not interrupted; 2.x says which. Not every 1.x
+  failure publishes an error either, so a failed 1.x turn may read
+  `ready`.
+- A killed opencode says nothing; Conspectus finds its pid gone and shows
+  it `exited`. On 2.x that pid is the shared service's, so closing a
+  client leaves its sessions as the service runs them.
+- When opencode reloads the plugin without restarting (1.x instance
+  disposal, a 2.x plugin unload), sessions still working or waiting read
+  `exited` until their next event.
+- `hook status` does not cover opencode yet; check with `conspectus table
+  sessions --columns +live`.
+
 #### Live-state health
 
 The last line of `conspectus hook status <harness>` says whether the

@@ -355,7 +355,9 @@ noted.
 - Socket clients have no timeouts. `hook write`'s ingest call is now bounded
   at 2 s (CSP-810); the others are CSP-836.
 - The OpenCode 1.x plugin forwards child-session events (a pane briefly names
-  the child); the 2.x plugin listens for an event that no longer exists.
+  the child); the 2.x plugin listens for an event that no longer exists. Both
+  fixed (CSP-816): only root sessions' events are attributed, and the dead
+  entry is gone.
 - Pi's idle cache warming moves the session file's mtime, so
   `last_active_epoch` can look recent on an idle session.
 - Doc drift: ADR 0028 and `docs/operations.md` still describe a TTL and

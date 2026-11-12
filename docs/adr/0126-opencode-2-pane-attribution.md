@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Amends ADR 0049 for opencode 2.x.
+Accepted. Amends ADR 0049 for opencode 2.x. Decision 3 is amended by
+ADR 0206 for live state; see the amendment below.
 
 ## Context
 
@@ -71,7 +72,8 @@ to be reopened if that stopped holding.
    entrypoint could only produce background-harness records. Querying the
    V2 server API would mean reading the service password from
    `service.json` to reach endpoints that cannot answer the question.
-   CSP-221 stays closed.
+   CSP-221 stays closed. (Amended: a server entrypoint now reports live
+   state, never attribution; the server API client stays rejected.)
 
 The TUI entrypoint only reads client state. It never calls the server
 API, never writes opencode state, and never sends input. Its only effect
@@ -115,3 +117,23 @@ and ADR 0028 is untouched.
 - **Drop background records in the writer.** Rejected. Keeping them
   costs nothing, and a future pane-less consumer (for example session
   recency) could use them.
+
+## Amendment: live state (ADR 0206)
+
+Decision 3 rejected a server entrypoint because its records could say
+nothing about panes, which was all attribution needed. Live state needs
+what only the service has: every session, including the ones no client
+shows, such as a background subagent or a turn that goes on after its
+client closed. The plugin therefore ships a server entrypoint,
+`dist/v2/server.js`, which sends live-state snapshots for every session
+of its location and nothing else (ADR 0206 decisions 3 and 23). Its
+writes come from the service, so the writer still marks them
+background-harness records with no pane context, and none takes the
+attribution path. Decisions 1 and 2 stand: which session a pane shows
+comes from the TUI entrypoint alone, and the server API client stays
+rejected.
+
+Operators list `dist/v2` once in `opencode.jsonc`, which loads both
+entrypoints, instead of in `cli.json`, which loads the TUI entrypoint
+alone and so gives attribution without live state. The TUI entrypoint
+no longer lists `session.compacted`, which 2.x does not publish.

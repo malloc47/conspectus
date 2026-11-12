@@ -108,6 +108,16 @@ forms, lists, readers, and keys look and behave alike.
   may be untrusted or disabled, or the agent started before the install),
   `no-events`, `off` (with the command that installs the hooks), or
   `unsupported` (Pi's hook reports no live state yet).
+- **opencode reports what each session is doing.** The opencode plugin
+  (0.3.0) now sends each session's state (working, waiting for a
+  permission, a question, or input, ready, compacting, failed, and its
+  subagents) to `live-state.json`, on opencode 1.x from each TUI and on
+  2.x from a new server entrypoint in the shared service, which sees
+  every session. A subagent's wait also shows on its root session. To
+  turn it on, rebuild the plugin and `conspectus` from the same checkout
+  and restart opencode; on 2.x, list `dist/v2` in `opencode.jsonc`
+  instead of `cli.json` and restart the opencode service too. Nothing
+  shows it in the TUI yet.
 
 ### Changed
 
@@ -705,6 +715,11 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **An opencode pane no longer names a running subagent.** The opencode
+  1.x plugin recorded every session's events for attribution, children
+  included, so while a subagent ran its pane briefly showed the child
+  session. Only root sessions are recorded now. The 2.x plugin no longer
+  listens for `session.compacted`, which 2.x does not send.
 - **`conspectus hook init codex` no longer replaces your Codex hooks.**
   It replaced `[[hooks.SessionStart]]` tables (the form the Codex docs
   show) and an inline `hooks = { ... }` table with its own entry,
