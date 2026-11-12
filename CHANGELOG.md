@@ -144,6 +144,13 @@ forms, lists, readers, and keys look and behave alike.
   `?` help lists the marks under "Agent state". Every session and mux row
   is three cells wider before its label, so narrow panes drop labels and
   previews sooner.
+- **Group headers count the agents waiting on you.** In the Sessions,
+  Mux, PRs, and Search views a group header shows `! N` after its `(N)`
+  session count when N agents beneath it wait on you, each counted once;
+  in the Mux view it counts every agent of the muxes beneath it, so a
+  header can wait without a session count. The counts line up in one
+  column and never give way, so once one header shows a count, the paths
+  of the others narrow a few cells sooner on a narrow pane.
 
 ### Changed
 

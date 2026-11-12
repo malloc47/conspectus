@@ -185,7 +185,8 @@ Conspectus only watches. It never answers a prompt or types into an
 agent's pane; to act on a waiting agent, attach to its mux as usual.
 
 Live state shows in the TUI (a mark after the age on session and mux
-rows, and a word on pinned sessions; see
+rows, a count of waiting agents on group headers, and a word on pinned
+sessions; see
 [Live state in the TUI](#live-state-in-the-tui)), in `conspectus table`,
 `conspectus node show`, and the graph JSON.
 
@@ -285,6 +286,11 @@ state has its own shape, so it reads without color:
 - **A mux** shows the state of its agents that needs you first: waiting,
   then error, then ready, then working, then the rest. Under a mux with
   several agents, each agent's row shows its own mark.
+- **Group headers** count the agents beneath them that wait on you, as
+  `! 2` after the `(N)` session count, each agent once however many rows
+  list it. In the Mux view a header counts every agent of its muxes,
+  listed as a row or not, so it can show `! 1` with no `(N)`. Pinned and
+  History buckets show no counts.
 - **Pinned** spells it as a word: a pinned session (or one listed under a
   pinned mux) whose agent is waiting, working, ready, or failed reads
   `waiting`, `working`, `ready`, or `error` instead of `in mux` or

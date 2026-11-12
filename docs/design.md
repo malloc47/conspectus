@@ -704,9 +704,12 @@ no evidence or exited, a quiet state dimmed, in the theme's status colors,
 never animated. A mux shows the state of its agents that ranks first
 (waiting, error, ready, working, then the rest). Pinned spells a running
 session's live state as `waiting`, `working`, `ready`, or `error` in place
-of its link word. The cell never gives way on a narrow row. Ordering,
-grouping, filtering, the header count, the jump key, seen and unseen, and
-the detail pane's fields are later stories (the plan's section 7.1).
+of its link word. The cell never gives way on a narrow row. A group
+header counts the agents beneath it that wait, each once, as `! N` after
+its `(N)` (ADR 0210): its session rows, or in the Mux view every agent of
+its muxes. Ordering, grouping, filtering, the header count, the jump key,
+seen and unseen, and the detail pane's fields are later stories (the
+plan's section 7.1).
 
 ## Pin Slots
 
