@@ -44,7 +44,12 @@ Pi run a plugin inside the harness, which can hold it itself.
    for plugin sources, and a private `reducer` block (pending waits by
    agent id, active subagent ids, the state to resume after compaction).
    The `reducer` block is internal, may change between versions, and is
-   not exposed through any output.
+   not exposed through any output; a block a version cannot read counts
+   as empty. The observation's `since_ms` is when the shown state began.
+   A wait shows its own start, and when it ends the agent's own state
+   shows again with the start it had, as does the state compaction
+   interrupted, so a finished turn does not look new because the session
+   compacted while idle.
 
 3. **Two ways in, one entry shape.**
    - *Event sources* (Claude Code, Codex): `hook write` maps the payload
@@ -55,6 +60,24 @@ Pi run a plugin inside the harness, which can hold it itself.
      entry when `instance` matches and `seq` is higher, or when `instance`
      is new and `observed_ms` is not older.
 
+   The neutral events are a closed set that names no harness: session
+   started (flagged when it follows compaction, which keeps waits, child
+   agents, and an open turn), turn started, retrying (optionally rate
+   limited), wait started and wait ended per agent (permission,
+   question, plan, input), tool finished per agent (which ends that
+   agent's wait, since approval itself fires nothing), child agent
+   started and stopped by id, the background list of child agents
+   (which replaces the set), compaction started and ended, turn ended
+   (finished or interrupted), turn failed (rate limited, auth,
+   overloaded, failed), idle confirmed, and session ended. One shared
+   reducer folds them for every event source; a harness's reducer
+   handles only the cases it must and hands the rest to the shared one.
+   A payload that says several things is several events applied in one
+   write. An input whose ids do not look like ids (empty, over 256
+   bytes, or with whitespace or control characters) is refused, and a
+   path or tmux name that does not look like one is dropped, so a
+   mapping bug cannot route text into the file.
+
 4. **Ordering is by store revision.** Every successful write takes the
    next `rev` under the lock, and entries record the `rev` and the
    millisecond time of their last change. Order is the order in which
@@ -64,7 +87,15 @@ Pi run a plugin inside the harness, which can hold it itself.
 5. **One live entry per `(harness, pid)`.** An event with a new session
    id from a pid that already has an entry marks the old entry
    `exited/ended`. This covers `/clear`, `/new`, and resume, which swap
-   the session in a running process.
+   the session in a running process. When both entries record the pid's
+   start time and the times differ, the pid was reused and the old entry
+   is `exited/killed`. The rule applies to event sources only: a
+   snapshot source can host several sessions in one process (a shared
+   service), and it ends its own sessions with a final snapshot. An
+   `exited` entry takes no further events from its process, so a writer
+   that lost the race to the end neither revives it nor supersedes its
+   successor; a session start, or an event from another process, opens
+   it afresh.
 
 6. **The writer is best-effort, bounded, and silent.**
    - The live-state write never waits on a daemon. For every event except
@@ -81,11 +112,17 @@ Pi run a plugin inside the harness, which can hold it itself.
 
 7. **Garbage collection on write.** Entries in `exited` for more than an
    hour are dropped. Entries whose pid is dead and untouched for a day
-   are dropped. The file keeps at most 512 entries (oldest first).
+   are dropped. The file keeps at most 512 entries (oldest first). Ages
+   are measured by the store's clock from the entry's last change; an
+   exited entry takes no more events, so that is when it exited. Entries
+   without a pid are dropped only by the cap.
 
 8. **Readers tolerate anything.** A missing, unreadable, or newer-schema
    file means no live state, never an error. Unknown fields in entries
-   are ignored. A reader never writes the store.
+   are ignored, and an entry a version cannot read is skipped. A reader
+   never writes the store. A writer leaves a newer-schema file alone and
+   replaces a corrupt one (the store is rebuildable), and a busy lock, a
+   refused input, or a newer file is an outcome, not an error.
 
 9. **No payload.** Entries contain enums, counts, ids, paths, and times.
    The writer reads payloads in memory against a typed whitelist (ADR

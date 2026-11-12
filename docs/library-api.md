@@ -79,7 +79,9 @@ These modules are not part of the library contract (ADR 0015, amended
   readers for the earlier pin model, kept until `pin migrate` is retired).
 - `pub` but `#[doc(hidden)]`, reachable only because the binary,
   integration tests, or the widget preview example use them: `cli`,
-  `tui`, `snapshot`, `hook`, `filter`, `dev_scenarios`.
+  `tui`, `snapshot`, `hook`, `live_store` (the live-state store that
+  hook writers fold events into; library consumers read live state
+  through `model::live` on a snapshot), `filter`, `dev_scenarios`.
 
 ## Stable Entry Points
 
