@@ -331,10 +331,28 @@ impl<'de> Deserialize<'de> for LiveSource {
     }
 }
 
-/// Whether the process behind an observation still runs, as the reader
+/// Whether the process behind an observation still runs, as a reader
 /// found it when it checked. It is an input to
-/// [`LiveObservation::effective`], never stored.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+/// [`LiveObservation::effective`]. The live-state store never records
+/// it; a graph's table keeps the answer its binder found beside each
+/// observation ([`LiveBinding`]).
+///
+/// Serialized by [`Self::name`]. A reader that meets a name it does not
+/// know, or none, reads [`Self::Unknown`].
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum Liveness {
     /// The recorded process is running.
     Alive,
@@ -343,10 +361,40 @@ pub enum Liveness {
     Dead,
     /// The reader could not check: no pid was recorded, or the platform
     /// offers no cheap way to look.
+    #[default]
     Unknown,
 }
 
+impl<'de> Deserialize<'de> for Liveness {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let name = String::deserialize(deserializer)?;
+        Ok(Self::from_name(&name).unwrap_or(Liveness::Unknown))
+    }
+}
+
 impl Liveness {
+    /// Every liveness answer.
+    pub const ALL: [Liveness; 3] = [Liveness::Alive, Liveness::Dead, Liveness::Unknown];
+
+    /// The stable name the answer serializes as.
+    pub fn name(self) -> &'static str {
+        match self {
+            Liveness::Alive => "alive",
+            Liveness::Dead => "dead",
+            Liveness::Unknown => "unknown",
+        }
+    }
+
+    /// The answer named `name`, or `None` for a name outside the set.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|liveness| liveness.name() == name)
+    }
+
     /// The liveness of a recorded process whose pid is running now.
     /// `recorded_start` is the start time stored with the observation
     /// ([`LiveObservation::pid_start`]) and `current_start` the start
@@ -581,6 +629,51 @@ impl LiveObservation {
             detail,
             confidence,
         }
+    }
+}
+
+/// An observation bound to a graph node, with whether its process ran
+/// when it was bound: the value of a snapshot's `node_live` table (ADR
+/// 0205). The binder checks the recorded pid and start time against the
+/// process table once, so a reader of the table needs no process check
+/// of its own; the time rules still apply at read time, through
+/// [`Self::effective`].
+///
+/// Serializes as the observation's fields beside `liveness`; a binding
+/// without `liveness` reads it as [`Liveness::Unknown`].
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct LiveBinding {
+    #[serde(flatten)]
+    pub observation: LiveObservation,
+    /// What the binder found about the observation's process.
+    #[serde(default)]
+    pub liveness: Liveness,
+}
+
+impl LiveBinding {
+    pub fn new(observation: LiveObservation, liveness: Liveness) -> Self {
+        Self {
+            observation,
+            liveness,
+        }
+    }
+
+    /// The state a reader shows at `now_ms`: the observation read
+    /// through [`LiveObservation::effective`] with the bound liveness.
+    pub fn effective(&self, now_ms: i64) -> EffectiveLive {
+        self.observation.effective(now_ms, self.liveness)
     }
 }
 

@@ -129,6 +129,61 @@ fn sources_and_confidences_serialize_by_stable_lowercase_names() {
 }
 
 #[test]
+fn liveness_serializes_by_stable_lowercase_names_and_defaults_to_unknown() {
+    let names: Vec<&str> = Liveness::ALL.iter().map(|l| l.name()).collect();
+    assert_eq!(names, ["alive", "dead", "unknown"]);
+    for liveness in Liveness::ALL {
+        assert_eq!(
+            serde_json::to_value(liveness).expect("serialize liveness"),
+            serde_json::Value::String(liveness.name().to_string())
+        );
+        assert_eq!(Liveness::from_name(liveness.name()), Some(liveness));
+    }
+    let undead: Liveness = serde_json::from_str(r#""undead""#).expect("lenient liveness");
+    assert_eq!(undead, Liveness::Unknown);
+    assert_eq!(Liveness::default(), Liveness::Unknown);
+}
+
+#[test]
+fn a_binding_reads_its_observation_with_the_bound_liveness() {
+    let waiting = observed(Waiting).with_detail(Permission);
+    let hour_later = waiting.observed_ms + 60 * MINUTE;
+    for liveness in Liveness::ALL {
+        assert_eq!(
+            LiveBinding::new(waiting, liveness).effective(hour_later),
+            waiting.effective(hour_later, liveness),
+            "{liveness:?}"
+        );
+    }
+}
+
+#[test]
+fn a_binding_serializes_as_its_observation_beside_the_liveness() {
+    let binding = LiveBinding::new(full_observation(), Liveness::Dead);
+    let mut expected = serde_json::to_value(full_observation()).expect("serialize observation");
+    expected["liveness"] = serde_json::json!("dead");
+    assert_eq!(
+        serde_json::to_value(binding).expect("serialize binding"),
+        expected
+    );
+    let read: LiveBinding = serde_json::from_value(expected).expect("deserialize binding");
+    assert_eq!(read, binding);
+
+    let unchecked: LiveBinding =
+        serde_json::from_value(serde_json::to_value(full_observation()).expect("observation"))
+            .expect("a binding without liveness loads");
+    assert_eq!(
+        unchecked,
+        LiveBinding::new(full_observation(), Liveness::Unknown)
+    );
+
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&binding).expect("archive binding");
+    let decoded =
+        rkyv::from_bytes::<LiveBinding, rkyv::rancor::Error>(&bytes).expect("deserialize binding");
+    assert_eq!(decoded, binding);
+}
+
+#[test]
 fn each_state_carries_exactly_the_details_of_the_vocabulary() {
     let table: Vec<(&str, Vec<&str>)> = LiveState::ALL
         .into_iter()

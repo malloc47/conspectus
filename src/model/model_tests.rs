@@ -570,16 +570,22 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
 
     snap.node_live.insert(
         NodeId::AgentSession(agent_id),
-        live::LiveObservation::new(live::LiveState::Waiting, live::LiveSource::Hook, 9)
-            .with_detail(live::LiveDetail::Plan)
-            .with_since_ms(5)
-            .with_subagents(1)
-            .with_pid(42, Some(10))
-            .with_heartbeat_s(30),
+        live::LiveBinding::new(
+            live::LiveObservation::new(live::LiveState::Waiting, live::LiveSource::Hook, 9)
+                .with_detail(live::LiveDetail::Plan)
+                .with_since_ms(5)
+                .with_subagents(1)
+                .with_pid(42, Some(10))
+                .with_heartbeat_s(30),
+            live::Liveness::Alive,
+        ),
     );
     snap.node_live.insert(
         NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
-        live::LiveObservation::new(live::LiveState::Starting, live::LiveSource::Hook, 11),
+        live::LiveBinding::new(
+            live::LiveObservation::new(live::LiveState::Starting, live::LiveSource::Hook, 11),
+            live::Liveness::Unknown,
+        ),
     );
 
     snap.canonicalize();

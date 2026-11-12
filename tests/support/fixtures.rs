@@ -1,4 +1,6 @@
-use conspectus::model::live::{LiveDetail, LiveObservation, LiveSource, LiveState};
+use conspectus::model::live::{
+    LiveBinding, LiveDetail, LiveObservation, LiveSource, LiveState, Liveness,
+};
 use conspectus::model::{
     AgentSessionId, AgentSessionNode, BranchId, BranchNode, Confidence, ForgePrId, ForgePrNode,
     ForkId, ForkNode, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
@@ -225,17 +227,23 @@ pub fn live_state_graph() -> GraphSnapshot {
     };
     snapshot.node_live.insert(
         NodeId::AgentSession(agent_id("session-a")),
-        LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 1_790_769_000_000)
-            .with_detail(LiveDetail::Permission)
-            .with_since_ms(1_790_768_940_000)
-            .with_subagents(1)
-            .with_pid(4242, Some(123_456)),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 1_790_769_000_000)
+                .with_detail(LiveDetail::Permission)
+                .with_since_ms(1_790_768_940_000)
+                .with_subagents(1)
+                .with_pid(4242, Some(123_456)),
+            Liveness::Alive,
+        ),
     );
     snapshot.node_live.insert(
         main.id(),
-        LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_790_769_500_000)
-            .with_detail(LiveDetail::Generating)
-            .with_heartbeat_s(30),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_790_769_500_000)
+                .with_detail(LiveDetail::Generating)
+                .with_heartbeat_s(30),
+            Liveness::Unknown,
+        ),
     );
     resolved(snapshot)
 }

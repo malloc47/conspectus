@@ -269,7 +269,7 @@ fn merge_with_prior_keeps_the_fresh_live_table_and_drops_the_prior_one() {
     // pass rebinds the table after the merge (ADR 0205), so none of
     // them leaks into the merged snapshot, not even for a node that
     // only the prior has; the fresh table passes through whole.
-    use crate::model::live::{LiveObservation, LiveSource, LiveState};
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
 
     let kept = AgentSessionId::new("codex", "/state", "kept");
     let ended = AgentSessionId::new("codex", "/state", "ended");
@@ -277,7 +277,12 @@ fn merge_with_prior_keeps_the_fresh_live_table_and_drops_the_prior_one() {
     let session_node = |id: &AgentSessionId| {
         GraphNode::AgentSession(AgentSessionNode::new(id.clone(), "codex".to_string()))
     };
-    let observed = |state| LiveObservation::new(state, LiveSource::Hook, 1_000);
+    let observed = |state| {
+        LiveBinding::new(
+            LiveObservation::new(state, LiveSource::Hook, 1_000),
+            Liveness::Alive,
+        )
+    };
 
     let mut fresh = GraphSnapshot::empty();
     fresh.nodes.push(session_node(&kept));
@@ -332,7 +337,7 @@ fn merge_with_prior_keeps_the_fresh_live_table_and_drops_the_prior_one() {
 fn a_fragment_made_from_a_snapshot_keeps_only_provider_output() {
     // Providers emit fragments; the live table is bound after the merge,
     // so the conversion leaves it behind with the other derived fields.
-    use crate::model::live::{LiveObservation, LiveSource, LiveState};
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
 
     let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "s1"));
     let mut snapshot = GraphSnapshot::empty();
@@ -344,7 +349,10 @@ fn a_fragment_made_from_a_snapshot_keeps_only_provider_output() {
         )));
     snapshot.node_live.insert(
         session,
-        LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_000),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_000),
+            Liveness::Alive,
+        ),
     );
 
     let fragment = GraphFragment::from(snapshot.clone());
@@ -1000,7 +1008,9 @@ fn slice_fingerprint_ignores_live_state() {
     // Live state changes every few seconds and says nothing about
     // which processes a pane runs, so a change in `node_live` alone
     // must never reopen the /proc walk (ADR 0205).
-    use crate::model::live::{LiveDetail, LiveObservation, LiveSource, LiveState};
+    use crate::model::live::{
+        LiveBinding, LiveDetail, LiveObservation, LiveSource, LiveState, Liveness,
+    };
 
     let quiet = snapshot_with_mux_session("s1", "s1", 1_000);
     let agent_node = NodeId::AgentSession(AgentSessionId::new("codex", "global", "s1"));
@@ -1009,20 +1019,29 @@ fn slice_fingerprint_ignores_live_state() {
     let mut working = quiet.clone();
     working.node_live.insert(
         agent_node.clone(),
-        LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_000_000)
-            .with_detail(LiveDetail::Tool)
-            .with_pid(4242, Some(7)),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_000_000)
+                .with_detail(LiveDetail::Tool)
+                .with_pid(4242, Some(7)),
+            Liveness::Alive,
+        ),
     );
     let mut waiting = working.clone();
     waiting.node_live.insert(
         agent_node,
-        LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 2_000_000)
-            .with_detail(LiveDetail::Permission)
-            .with_pid(4242, Some(7)),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 2_000_000)
+                .with_detail(LiveDetail::Permission)
+                .with_pid(4242, Some(7)),
+            Liveness::Dead,
+        ),
     );
     waiting.node_live.insert(
         mux_node,
-        LiveObservation::new(LiveState::Starting, LiveSource::Hook, 2_000_000),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Starting, LiveSource::Hook, 2_000_000),
+            Liveness::Unknown,
+        ),
     );
 
     let expected = mux_or_harness_slice_fingerprint(&quiet);

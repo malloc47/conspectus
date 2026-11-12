@@ -1,5 +1,7 @@
 use super::*;
-use crate::model::live::{LiveConfidence, LiveDetail, LiveSource, LiveState};
+use crate::model::live::{
+    LiveBinding, LiveConfidence, LiveDetail, LiveObservation, LiveSource, LiveState, Liveness,
+};
 
 const NOW_MS: i64 = 1_790_769_600_000;
 const MINUTE_MS: i64 = 60 * 1000;
@@ -16,8 +18,9 @@ fn observed(state: LiveState, minutes_ago: i64) -> LiveObservation {
     LiveObservation::new(state, LiveSource::Hook, NOW_MS - minutes_ago * MINUTE_MS)
 }
 
-fn alive(_: &LiveObservation) -> Liveness {
-    Liveness::Alive
+/// `observation` bound with a process found running.
+fn alive(observation: LiveObservation) -> LiveBinding {
+    LiveBinding::new(observation, Liveness::Alive)
 }
 
 /// A snapshot with a node for every session and mux named, and a
@@ -84,13 +87,15 @@ fn a_live_table_serializes_as_a_list_beside_each_node_id() {
     let mut snapshot = GraphSnapshot::empty();
     snapshot.node_live.insert(
         session("a"),
-        observed(LiveState::Waiting, 1)
-            .with_detail(LiveDetail::Permission)
-            .with_pid(4242, Some(99)),
+        alive(
+            observed(LiveState::Waiting, 1)
+                .with_detail(LiveDetail::Permission)
+                .with_pid(4242, Some(99)),
+        ),
     );
     snapshot.node_live.insert(
         NodeId::MuxSession(mux("main")),
-        observed(LiveState::Working, 0),
+        LiveBinding::new(observed(LiveState::Working, 0), Liveness::Unknown),
     );
 
     let value = serde_json::to_value(&snapshot).expect("serialize snapshot");
@@ -112,6 +117,7 @@ fn a_live_table_serializes_as_a_list_beside_each_node_id() {
             "source": "hook",
             "pid": 4242,
             "pid_start": 99,
+            "liveness": "alive",
         })
     );
     assert_eq!(
@@ -122,6 +128,7 @@ fn a_live_table_serializes_as_a_list_beside_each_node_id() {
             "since_ms": NOW_MS,
             "observed_ms": NOW_MS,
             "source": "hook",
+            "liveness": "unknown",
         })
     );
 }
@@ -131,16 +138,21 @@ fn a_live_table_round_trips_through_json() {
     let mut snapshot = hosted(&[("a", "main", Provenance::StrongDiscovered)]);
     snapshot.node_live.insert(
         session("a"),
-        observed(LiveState::Working, 3)
-            .with_detail(LiveDetail::Tool)
-            .with_since_ms(NOW_MS - 20 * MINUTE_MS)
-            .with_subagents(2)
-            .with_pid(4242, Some(99))
-            .with_heartbeat_s(30),
+        alive(
+            observed(LiveState::Working, 3)
+                .with_detail(LiveDetail::Tool)
+                .with_since_ms(NOW_MS - 20 * MINUTE_MS)
+                .with_subagents(2)
+                .with_pid(4242, Some(99))
+                .with_heartbeat_s(30),
+        ),
     );
     snapshot.node_live.insert(
         NodeId::MuxSession(mux("main")),
-        observed(LiveState::Ready, 0).with_detail(LiveDetail::Finished),
+        LiveBinding::new(
+            observed(LiveState::Ready, 0).with_detail(LiveDetail::Finished),
+            Liveness::Dead,
+        ),
     );
 
     let json = serde_json::to_string(&snapshot).expect("serialize snapshot");
@@ -153,13 +165,16 @@ fn a_live_table_round_trips_through_rkyv() {
     let mut snapshot = hosted(&[("a", "main", Provenance::StrongDiscovered)]);
     snapshot.node_live.insert(
         session("a"),
-        observed(LiveState::Error, 2)
-            .with_detail(LiveDetail::RateLimited)
-            .with_pid(4242, None),
+        LiveBinding::new(
+            observed(LiveState::Error, 2)
+                .with_detail(LiveDetail::RateLimited)
+                .with_pid(4242, None),
+            Liveness::Dead,
+        ),
     );
     snapshot.node_live.insert(
         NodeId::MuxSession(mux("main")),
-        observed(LiveState::Starting, 1),
+        alive(observed(LiveState::Starting, 1)),
     );
 
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&snapshot).expect("archive snapshot");
@@ -182,14 +197,28 @@ fn an_entry_with_names_this_version_does_not_know_still_loads() {
             "since_ms": 1,
             "observed_ms": 2,
             "source": "telepathy",
+            "liveness": "undead",
+        }, {
+            "node_id": { "type": "mux_session", "native_id": "tmux:other" },
+            "state": "ready",
+            "since_ms": 1,
+            "observed_ms": 2,
+            "source": "hook",
         }],
     });
     let read: GraphSnapshot = serde_json::from_value(json).expect("deserialize snapshot");
-    let observation = read.node_live[&NodeId::MuxSession(mux("main"))];
+    let binding = read.node_live[&NodeId::MuxSession(mux("main"))];
+    assert_eq!(binding.liveness, Liveness::Unknown);
+    let observation = binding.observation;
     assert_eq!(observation.state, LiveState::Unknown);
     assert_eq!(observation.detail, None);
     assert_eq!(observation.source, LiveSource::Unknown);
     assert_eq!((observation.since_ms, observation.observed_ms), (1, 2));
+    assert_eq!(
+        read.node_live[&NodeId::MuxSession(mux("other"))].liveness,
+        Liveness::Unknown,
+        "a binding without a liveness reads as unchecked"
+    );
 }
 
 // ---- canonicalize and eviction ----
@@ -202,10 +231,10 @@ fn canonicalize_keeps_the_live_table() {
     ]);
     snapshot
         .node_live
-        .insert(session("b"), observed(LiveState::Working, 0));
+        .insert(session("b"), alive(observed(LiveState::Working, 0)));
     snapshot
         .node_live
-        .insert(session("a"), observed(LiveState::Waiting, 0));
+        .insert(session("a"), alive(observed(LiveState::Waiting, 0)));
     let table = snapshot.node_live.clone();
 
     snapshot.canonicalize();
@@ -230,7 +259,7 @@ fn evicting_a_provider_drops_the_live_state_of_its_nodes_only() {
     for id in [&session("a"), &mux_id, &unowned] {
         snapshot
             .node_live
-            .insert(id.clone(), observed(LiveState::Working, 0));
+            .insert(id.clone(), alive(observed(LiveState::Working, 0)));
     }
 
     snapshot.evict_provider("tmux");
@@ -251,36 +280,32 @@ fn evicting_a_provider_drops_the_live_state_of_its_nodes_only() {
 // ---- live_state_of ----
 
 #[test]
-fn live_state_of_is_none_without_an_entry_and_never_asks_about_liveness() {
+fn live_state_of_is_none_without_an_entry() {
     let snapshot = hosted(&[("a", "main", Provenance::StrongDiscovered)]);
-    let state = snapshot.live_state_of(&session("a"), NOW_MS, |_| {
-        panic!("no observation, so nothing to check")
-    });
-    assert_eq!(state, None);
+    assert_eq!(snapshot.live_state_of(&session("a"), NOW_MS), None);
 }
 
 #[test]
-fn live_state_of_reads_the_effective_state_with_the_callers_liveness() {
+fn live_state_of_reads_the_effective_state_with_the_bound_liveness() {
+    let waiting = observed(LiveState::Waiting, 120)
+        .with_detail(LiveDetail::Question)
+        .with_pid(4242, Some(7));
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.node_live.insert(
-        session("waiting"),
-        observed(LiveState::Waiting, 120)
-            .with_detail(LiveDetail::Question)
-            .with_pid(4242, Some(7)),
-    );
+    for (key, liveness) in [
+        ("alive", Liveness::Alive),
+        ("dead", Liveness::Dead),
+        ("unchecked", Liveness::Unknown),
+    ] {
+        snapshot
+            .node_live
+            .insert(session(key), LiveBinding::new(waiting, liveness));
+    }
     snapshot
         .node_live
-        .insert(session("working"), observed(LiveState::Working, 11));
-    let waiting = session("waiting");
+        .insert(session("working"), alive(observed(LiveState::Working, 11)));
 
-    let mut asked = None;
-    let state = snapshot.live_state_of(&waiting, NOW_MS, |observation| {
-        asked = Some((observation.pid, observation.pid_start));
-        Liveness::Alive
-    });
-    assert_eq!(asked, Some((Some(4242), Some(7))));
     assert_eq!(
-        state,
+        snapshot.live_state_of(&session("alive"), NOW_MS),
         Some(EffectiveLive {
             state: LiveState::Waiting,
             detail: Some(LiveDetail::Question),
@@ -288,21 +313,20 @@ fn live_state_of_reads_the_effective_state_with_the_callers_liveness() {
         }),
         "a waiting agent whose process lives does not age"
     );
-
     assert_eq!(
         snapshot
-            .live_state_of(&waiting, NOW_MS, |_| Liveness::Dead)
+            .live_state_of(&session("dead"), NOW_MS)
             .map(|live| (live.state, live.detail)),
         Some((LiveState::Exited, Some(LiveDetail::Killed)))
     );
     assert_eq!(
-        snapshot.live_state_of(&waiting, NOW_MS, |_| Liveness::Unknown),
+        snapshot.live_state_of(&session("unchecked"), NOW_MS),
         Some(EffectiveLive::STALE),
         "with no liveness evidence a two-hour-old state is stale"
     );
     assert_eq!(
         snapshot
-            .live_state_of(&session("working"), NOW_MS, alive)
+            .live_state_of(&session("working"), NOW_MS)
             .map(|live| (live.state, live.confidence)),
         Some((LiveState::Working, LiveConfidence::Quiet))
     );
@@ -314,15 +338,15 @@ fn live_state_of_reads_a_pane_only_entry_on_its_mux() {
     let mux_id = NodeId::MuxSession(mux("main"));
     snapshot
         .node_live
-        .insert(mux_id.clone(), observed(LiveState::Starting, 0));
+        .insert(mux_id.clone(), alive(observed(LiveState::Starting, 0)));
 
     assert_eq!(
         snapshot
-            .live_state_of(&mux_id, NOW_MS, alive)
+            .live_state_of(&mux_id, NOW_MS)
             .map(|live| live.state),
         Some(LiveState::Starting)
     );
-    assert_eq!(snapshot.live_state_of(&session("a"), NOW_MS, alive), None);
+    assert_eq!(snapshot.live_state_of(&session("a"), NOW_MS), None);
 }
 
 // ---- live_counts_of_mux ----
@@ -339,9 +363,9 @@ fn a_mux_with_no_sessions_counts_nothing() {
         )));
     snapshot
         .node_live
-        .insert(session("a"), observed(LiveState::Waiting, 0));
+        .insert(session("a"), alive(observed(LiveState::Waiting, 0)));
 
-    let counts = snapshot.live_counts_of_mux(&mux("empty"), NOW_MS, alive);
+    let counts = snapshot.live_counts_of_mux(&mux("empty"), NOW_MS);
     assert!(counts.is_empty(), "{counts:?}");
     assert_eq!(counts.dominant(), None);
 }
@@ -351,9 +375,9 @@ fn a_mux_counts_the_session_it_hosts() {
     let mut snapshot = hosted(&[("a", "main", Provenance::StrongDiscovered)]);
     snapshot
         .node_live
-        .insert(session("a"), observed(LiveState::Ready, 0));
+        .insert(session("a"), alive(observed(LiveState::Ready, 0)));
 
-    let counts = snapshot.live_counts_of_mux(&mux("main"), NOW_MS, alive);
+    let counts = snapshot.live_counts_of_mux(&mux("main"), NOW_MS);
     assert_eq!(
         counts,
         LiveCounts {
@@ -381,10 +405,12 @@ fn a_mux_counts_every_session_it_prefers_and_no_other() {
         ("elsewhere", LiveState::Error),
         ("drifted", LiveState::Compacting),
     ] {
-        snapshot.node_live.insert(session(key), observed(state, 0));
+        snapshot
+            .node_live
+            .insert(session(key), alive(observed(state, 0)));
     }
 
-    let counts = snapshot.live_counts_of_mux(&mux("main"), NOW_MS, alive);
+    let counts = snapshot.live_counts_of_mux(&mux("main"), NOW_MS);
     assert_eq!(
         counts,
         LiveCounts {
@@ -395,7 +421,7 @@ fn a_mux_counts_every_session_it_prefers_and_no_other() {
     );
     assert_eq!(counts.dominant(), Some(LiveState::Waiting));
 
-    let other = snapshot.live_counts_of_mux(&mux("other"), NOW_MS, alive);
+    let other = snapshot.live_counts_of_mux(&mux("other"), NOW_MS);
     assert_eq!(
         other,
         LiveCounts {
@@ -414,17 +440,17 @@ fn a_pane_only_entry_counts_on_its_mux_beside_its_sessions() {
     ]);
     snapshot
         .node_live
-        .insert(session("a"), observed(LiveState::Working, 0));
+        .insert(session("a"), alive(observed(LiveState::Working, 0)));
     snapshot.node_live.insert(
         NodeId::MuxSession(mux("main")),
-        observed(LiveState::Waiting, 0).with_detail(LiveDetail::Input),
+        alive(observed(LiveState::Waiting, 0).with_detail(LiveDetail::Input)),
     );
     snapshot.node_live.insert(
         NodeId::MuxSession(mux("other")),
-        observed(LiveState::Ready, 0),
+        alive(observed(LiveState::Ready, 0)),
     );
 
-    let counts = snapshot.live_counts_of_mux(&mux("main"), NOW_MS, alive);
+    let counts = snapshot.live_counts_of_mux(&mux("main"), NOW_MS);
     assert_eq!(
         counts,
         LiveCounts {
@@ -444,9 +470,9 @@ fn a_hosted_session_without_an_entry_is_not_counted() {
     ]);
     snapshot
         .node_live
-        .insert(session("a"), observed(LiveState::Working, 0));
+        .insert(session("a"), alive(observed(LiveState::Working, 0)));
 
-    let counts = snapshot.live_counts_of_mux(&mux("main"), NOW_MS, alive);
+    let counts = snapshot.live_counts_of_mux(&mux("main"), NOW_MS);
     assert_eq!(
         counts,
         LiveCounts {
@@ -466,23 +492,22 @@ fn mux_counts_read_each_observation_with_its_own_liveness() {
     ]);
     snapshot.node_live.insert(
         session("a"),
-        observed(LiveState::Working, 0).with_pid(1, None),
+        LiveBinding::new(
+            observed(LiveState::Working, 0).with_pid(1, None),
+            Liveness::Dead,
+        ),
     );
     snapshot.node_live.insert(
         session("b"),
-        observed(LiveState::Waiting, 0).with_pid(2, None),
+        alive(observed(LiveState::Waiting, 0).with_pid(2, None)),
     );
     // Silent for twenty minutes with no pid to check.
-    snapshot
-        .node_live
-        .insert(session("c"), observed(LiveState::Ready, 20));
+    snapshot.node_live.insert(
+        session("c"),
+        LiveBinding::new(observed(LiveState::Ready, 20), Liveness::Unknown),
+    );
 
-    let counts =
-        snapshot.live_counts_of_mux(&mux("main"), NOW_MS, |observation| match observation.pid {
-            Some(1) => Liveness::Dead,
-            Some(_) => Liveness::Alive,
-            None => Liveness::Unknown,
-        });
+    let counts = snapshot.live_counts_of_mux(&mux("main"), NOW_MS);
     assert_eq!(
         counts,
         LiveCounts {

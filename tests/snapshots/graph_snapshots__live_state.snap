@@ -134,7 +134,8 @@ expression: rendered
       "observed_ms": 1790769000000,
       "source": "hook",
       "pid": 4242,
-      "pid_start": 123456
+      "pid_start": 123456,
+      "liveness": "alive"
     },
     {
       "node_id": {
@@ -146,7 +147,8 @@ expression: rendered
       "since_ms": 1790769500000,
       "observed_ms": 1790769500000,
       "source": "hook",
-      "heartbeat_s": 30
+      "heartbeat_s": 30,
+      "liveness": "unknown"
     }
   ]
 }

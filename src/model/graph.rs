@@ -1,6 +1,6 @@
 //! The `GraphSnapshot` container and the `SnapshotIndex` lookups built over it.
 
-use super::live::{EffectiveLive, LiveCounts, LiveObservation, Liveness};
+use super::live::{EffectiveLive, LiveBinding, LiveCounts};
 use super::*;
 
 #[derive(
@@ -58,19 +58,21 @@ pub struct GraphSnapshot {
     )]
     pub node_presence: BTreeMap<NodeId, NodePresence>,
     /// Live agent state (ADR 0205): the latest observation of what an
-    /// agent is doing, keyed by its agent session, or by a mux for an
-    /// agent seen in one of the mux's panes that no session matched.
-    /// Sparse: no entry means no evidence, never idle. Read it through
-    /// [`Self::live_state_of`] and [`Self::live_counts_of_mux`], which
-    /// apply the read-time rules; a stored state is not shown as it is.
-    /// Serializes as a list, like `node_presence`, and is left out when
-    /// empty.
+    /// agent is doing, with whether its process ran when the table was
+    /// bound, keyed by its agent session, or by a mux for an agent seen
+    /// in one of the mux's panes that no session matched. Discovery's
+    /// `live_state` pass rebuilds it from the live-state store on every
+    /// cycle. Sparse: no entry means no evidence, never idle. Read it
+    /// through [`Self::live_state_of`] and [`Self::live_counts_of_mux`],
+    /// which apply the read-time rules; a stored state is not shown as
+    /// it is. Serializes as a list, like `node_presence`, and is left
+    /// out when empty.
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
         with = "node_live_serde"
     )]
-    pub node_live: BTreeMap<NodeId, LiveObservation>,
+    pub node_live: BTreeMap<NodeId, LiveBinding>,
     /// The latest probe of each mux backend and socket, keyed by
     /// [`probe_key`]. Kept across cycles that reuse a mux slice (it
     /// rides in `graph.bin`), so gone and unknown stay decidable
@@ -129,23 +131,24 @@ mod node_presence_serde {
 }
 
 /// Round-trip helper for `GraphSnapshot::node_live`: a list of entries,
-/// each the node id beside the observation's own fields.
+/// each the node id beside the observation's own fields and the bound
+/// liveness.
 mod node_live_serde {
     use std::collections::BTreeMap;
 
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    use super::{LiveObservation, NodeId};
+    use super::{LiveBinding, NodeId};
 
     #[derive(Serialize, Deserialize)]
     struct Entry {
         node_id: NodeId,
         #[serde(flatten)]
-        observation: LiveObservation,
+        binding: LiveBinding,
     }
 
     pub fn serialize<S>(
-        map: &BTreeMap<NodeId, LiveObservation>,
+        map: &BTreeMap<NodeId, LiveBinding>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
@@ -153,24 +156,22 @@ mod node_live_serde {
     {
         let entries: Vec<Entry> = map
             .iter()
-            .map(|(node_id, observation)| Entry {
+            .map(|(node_id, binding)| Entry {
                 node_id: node_id.clone(),
-                observation: *observation,
+                binding: *binding,
             })
             .collect();
         entries.serialize(serializer)
     }
 
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<BTreeMap<NodeId, LiveObservation>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<NodeId, LiveBinding>, D::Error>
     where
         D: Deserializer<'de>,
     {
         let entries: Vec<Entry> = Vec::deserialize(deserializer)?;
         Ok(entries
             .into_iter()
-            .map(|entry| (entry.node_id, entry.observation))
+            .map(|entry| (entry.node_id, entry.binding))
             .collect())
     }
 }
@@ -414,30 +415,21 @@ impl GraphSnapshot {
     }
 
     /// The live state of `id` at `now_ms` (ADR 0205): its `node_live`
-    /// observation read through [`LiveObservation::effective`], or
-    /// `None` when the table has no entry for it, which means no
-    /// evidence, not idle. `id` is an agent session, or a mux for an
-    /// agent seen in one of its panes that no session matched.
-    ///
-    /// `liveness` tells whether the observation's process still runs.
-    /// It is called with the stored observation, and only when there is
-    /// one, so a caller can check the recorded `pid` and `pid_start`
-    /// against the process table. A caller that cannot check answers
-    /// [`Liveness::Unknown`] and the time rules decide alone.
-    pub fn live_state_of(
-        &self,
-        id: &NodeId,
-        now_ms: i64,
-        liveness: impl FnOnce(&LiveObservation) -> Liveness,
-    ) -> Option<EffectiveLive> {
-        let observation = self.node_live.get(id)?;
-        Some(observation.effective(now_ms, liveness(observation)))
+    /// binding read through [`LiveBinding::effective`], with the
+    /// liveness found when the table was bound, or `None` when the table
+    /// has no entry for it, which means no evidence, not idle. `id` is an
+    /// agent session, or a mux for an agent seen in one of its panes that
+    /// no session matched.
+    pub fn live_state_of(&self, id: &NodeId, now_ms: i64) -> Option<EffectiveLive> {
+        self.node_live
+            .get(id)
+            .map(|binding| binding.effective(now_ms))
     }
 
     /// How many of the agents in `mux` are in each live state at
     /// `now_ms` (ADR 0205). A mux has no state of its own; these counts
     /// stand for it. Each of these counts once, by its effective state
-    /// as [`Self::live_state_of`] reads it with the same `liveness`:
+    /// as [`Self::live_state_of`] reads it:
     ///
     /// - every agent session with a `node_live` entry whose preferred
     ///   mux ([`Self::preferred_mux_for`]) is `mux`;
@@ -446,12 +438,7 @@ impl GraphSnapshot {
     ///
     /// A session with no entry is not counted (no evidence is not idle),
     /// and neither is one whose strongest mux candidate is another mux.
-    pub fn live_counts_of_mux(
-        &self,
-        mux: &MuxSessionId,
-        now_ms: i64,
-        mut liveness: impl FnMut(&LiveObservation) -> Liveness,
-    ) -> LiveCounts {
+    pub fn live_counts_of_mux(&self, mux: &MuxSessionId, now_ms: i64) -> LiveCounts {
         self.node_live
             .iter()
             .filter(|(id, _)| match id {
@@ -459,7 +446,7 @@ impl GraphSnapshot {
                 NodeId::MuxSession(pane_mux) => pane_mux == mux,
                 _ => false,
             })
-            .map(|(_, observation)| observation.effective(now_ms, liveness(observation)).state)
+            .map(|(_, binding)| binding.effective(now_ms).state)
             .collect()
     }
 
