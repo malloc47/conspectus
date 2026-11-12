@@ -4,6 +4,7 @@ title: 'TUI: notify when an agent needs you'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
+updated_date: '2026-11-12 20:06'
 labels:
   - live-state
   - ls-tui
@@ -42,3 +43,9 @@ Blockers: Operator decision 9 and the cell story.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 item 9: no notifications in v1, because the harnesses already notify. Deferred, not decided against; revisit if the operator asks (a terminal bell while the TUI is open and unfocused, per-state toggles). Do not start this story.
+<!-- SECTION:NOTES:END -->

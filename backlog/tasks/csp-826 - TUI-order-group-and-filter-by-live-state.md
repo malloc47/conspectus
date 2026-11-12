@@ -4,10 +4,10 @@ title: 'TUI: order, group, and filter by live state'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
+updated_date: '2026-11-12 20:05'
 labels:
   - live-state
   - ls-tui
-  - needs-decision
 milestone: m-26
 dependencies:
   - CSP-823
@@ -42,3 +42,9 @@ Blockers: Operator decision 4 and the cell story.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 item 4: a float-waiting-first control (off by default, the same mechanism as float-sessions-with-a-mux), a State filter row in Controls, and --state on conspectus table. Rows never re-sort under the cursor between operator actions. No state grouping and no Attention view in this story. Note from CSP-814: sorting or filtering by live state means the tree must be rebuilt when the overlay changes, instead of refilling cells in place.
+<!-- SECTION:NOTES:END -->

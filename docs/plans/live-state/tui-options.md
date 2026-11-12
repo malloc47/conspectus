@@ -1,8 +1,10 @@
 # Live State In The TUI: Options And Recommended Defaults
 
-Status: waiting for the operator. Phase 1 puts live state on the row models
-(CSP-814) and renders nothing. Every item below changes what the operator
-sees or widens what Conspectus may read, so each has options and a
+Status: answered on 2026-11-12; the decisions are recorded in section 7.1 of
+`README.md`, which is the contract for the TUI stories. This document keeps
+the options and reasoning behind them. Phase 1 put live state on the row
+models (CSP-814) and rendered nothing. Every item below changes what the
+operator sees or widens what Conspectus may read, so each has options and a
 recommendation. The mockups are generated from the documented frames in
 `docs/tui-columns.md` (same column grid and spacing); the glyphs are
 candidates and must pass the vetting in ADR 0154 before use.

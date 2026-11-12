@@ -4,11 +4,10 @@ title: 'TUI: show live state on session and mux rows'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
-updated_date: '2026-11-12 15:36'
+updated_date: '2026-11-12 20:04'
 labels:
   - live-state
   - ls-tui
-  - needs-decision
 milestone: m-26
 dependencies:
   - CSP-814
@@ -43,3 +42,9 @@ Blockers: Operator decisions 1, 7, and 10 and the plumbing story.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 items 1, 7, 10: Option A. A new always-filled one-cell column right after the age on session rows, mux rows (rolled up), nested agent rows, and the agent rows of the PRs view. Glyphs: '!' waiting, '»' working (also compacting and starting), '›' ready, '×' error (the shared failure mark), '?' unknown or stale (the existing can't-tell mark), '·' no evidence or exited. A quiet state dims the same glyph; shape never depends on color; colors are theme roles (ADR 0153); every glyph is vetted (ADR 0154). No animation. Pinned and History use words (waiting, working, ready, error), replacing 'in mux' when live state exists (CSP-829 owns the detail pane). Narrow widths and the density modes: decide the give-way order with the existing narrow-row rules and say so in docs/tui-columns.md. Unseen/seen styling and the header chip are separate stories.
+<!-- SECTION:NOTES:END -->

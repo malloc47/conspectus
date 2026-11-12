@@ -4,11 +4,10 @@ title: 'TUI: jump to the next session that needs attention'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
-updated_date: '2026-11-12 15:36'
+updated_date: '2026-11-12 20:05'
 labels:
   - live-state
   - ls-tui
-  - needs-decision
 milestone: m-26
 dependencies:
   - CSP-823
@@ -43,3 +42,9 @@ Blockers: Operator decisions 5 and 6, and the cell story.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 item 5: jump to the next waiting session from any view, longest-waiting first, waiting only, wrapping; the key comes from the free keys of the scoped keymap and its hint is generated.
+<!-- SECTION:NOTES:END -->

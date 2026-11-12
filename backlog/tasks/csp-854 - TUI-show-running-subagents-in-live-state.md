@@ -4,10 +4,10 @@ title: 'TUI: show running subagents in live state'
 status: To Do
 assignee: []
 created_date: '2026-11-12 15:25'
+updated_date: '2026-11-12 20:06'
 labels:
   - live-state
   - ls-tui
-  - needs-decision
 milestone: m-26
 dependencies:
   - CSP-823
@@ -42,3 +42,9 @@ Blockers: Operator decision 8 and the cell story (CSP-823).
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 item 8: a dim '+N' chip after the row label while any subagent is active, and the detail pane lists them; no nested rows. A subagent that is waiting raises '!' on the root session (already in the model).
+<!-- SECTION:NOTES:END -->

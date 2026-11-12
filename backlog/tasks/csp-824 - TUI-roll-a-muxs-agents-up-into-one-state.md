@@ -4,10 +4,10 @@ title: 'TUI: roll a mux''s agents up into one state'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
+updated_date: '2026-11-12 20:05'
 labels:
   - live-state
   - ls-tui
-  - needs-decision
 milestone: m-26
 dependencies:
   - CSP-823
@@ -42,3 +42,9 @@ Blockers: Operator decision 2 and the cell story.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 item 2: mux rollup precedence waiting, then error, then ready, then working (compacting, starting, unknown, exited after). The mux row shows the rolled-up mark in the cell from CSP-823; nested agent rows keep their own. Group headers show the waiting count next to (N) when above zero.
+<!-- SECTION:NOTES:END -->

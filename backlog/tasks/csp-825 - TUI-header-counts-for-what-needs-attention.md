@@ -4,10 +4,10 @@ title: 'TUI: header counts for what needs attention'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
+updated_date: '2026-11-12 20:05'
 labels:
   - live-state
   - ls-tui
-  - needs-decision
 milestone: m-26
 dependencies:
   - CSP-823
@@ -42,3 +42,9 @@ Blockers: Operator decision 3 and the cell story.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 item 3: header chip '! N' with the waiting count over the whole graph, hidden at zero, ranked after freshness and counts and before the warning mark.
+<!-- SECTION:NOTES:END -->

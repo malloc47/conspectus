@@ -336,10 +336,40 @@ Follow-ups the stories filed (labels `live-state`, milestone m-26):
 | D8 | Phase 1 reads no screen, no transcript, and runs no new subprocess | ADR 0028 and 0086; capability manifest | ADR 0207 lists the options |
 | D9 | `hook init claude-code` edits `settings.json` in place with a scanner of the crate's own, and `serde_json`'s `preserve_order` stays off | the feature reorders every JSON map in the crate (10 goldens changed when measured) and still re-indents the file; the splice keeps every untouched byte | ADR 0208 alternative A: enable the feature and update the goldens |
 
-## 7. Parked for the operator
+## 7. Decided by the operator, and still parked
 
-These change what the operator sees or widen what Conspectus is allowed to
-read, so they wait for an answer. Recommendations are marked.
+### 7.1 Decisions (2026-11-12)
+
+The operator answered the options in [`tui-options.md`](tui-options.md). The
+TUI stories (CSP-823 to CSP-830, CSP-854) and the two approved sources carry
+these as their contract.
+
+| # | Decision | Story |
+|---|---|---|
+| 1 | **Option A**: a new always-filled one-cell column right after the age on session rows, mux rows (rolled up), nested agent rows, and the agent rows of the PRs view. Glyphs: `!` waiting, `»` working (also compacting and starting), `›` ready, `×` error (the shared failure mark), `?` unknown or stale (the existing "can't tell" mark), `·` no evidence or exited. A quiet state dims the same glyph; shape never depends on color. Colors are theme roles. No animation. | CSP-823 |
+| 2 | Mux rollup precedence **waiting, then error, then ready, then working** (compacting, starting, unknown, exited after). Nested agent rows keep their own mark. Group headers show the waiting count next to `(N)` when it is above zero. | CSP-824 |
+| 3 | **Header chip**: `! N` waiting count, whole graph, hidden at zero, ranked after freshness and counts and before `▲`. | CSP-825 |
+| 4 | **A float-waiting-first control** (off by default, same mechanism as "float sessions with a mux"), a **State filter** row in Controls and `--state` on `conspectus table`. Rows never re-sort under the cursor between operator actions. No state grouping and no Attention view yet. | CSP-826 |
+| 5 | **Jump to the next waiting session** from any view: longest-waiting first, waiting only, wraps; the key comes from the free keys of the scoped keymap. | CSP-827 |
+| 6 | **Seen/unseen for ready**, derived read-only: a ready turn is unseen until a tmux client has been attached to its mux after the turn ended, or, for a session with no mux, until the operator selects it in this TUI instance (memory only). Unseen ready is bold, seen is plain; the shape is the same. Nothing is persisted. | CSP-828 |
+| 7 | Pinned and History **words** `waiting`, `working`, `ready`, `error`, replacing `in mux` when live state exists (the link fact stays in the detail pane). | CSP-829 |
+| 8 | Subagents: a dim `+N` chip after the row label while any subagent is active, and the detail pane lists them; no nested rows. | CSP-854 |
+| 9 | **No notifications** in v1 (the harnesses already notify). | CSP-830 (deferred) |
+| 10 | **No animation.** | CSP-823 |
+| 11 | Hook-free sources approved: the **Codex pane title**, and **`claude agents --json`** after a check that it does not start Claude's background supervisor. Not approved for now: transcript and rollout tails, ingesting agent-deck's `state.db`. | CSP-831, CSP-832 (CSP-833, CSP-834 declined) |
+| 12 | Quiet states show dimmed; stale or unknown shows `?`. | CSP-829 |
+
+Items 9, 10, and 12 are the defaults the options document recommended; the
+operator did not change them.
+
+### 7.2 Still parked
+
+Notifications (item 9) are deferred, not decided against; the options
+document lists the later choices (a terminal bell while the TUI is open and
+unfocused, per-state toggles). Transcript tails and agent-deck ingestion
+stay declined until the operator asks. CSP-822 (recording real payloads) needs
+real harness sessions and the operator's accounts. The remaining follow-ups
+(CSP-836 to CSP-853) are low priority and independent.
 
 The data every TUI option reads is already on the row models (CSP-814):
 `AgentSessionRow.live` (effective state, detail, confidence, since,

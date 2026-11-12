@@ -4,10 +4,10 @@ title: 'TUI: live state in the detail pane and in pinned and history rows'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
+updated_date: '2026-11-12 20:05'
 labels:
   - live-state
   - ls-tui
-  - needs-decision
 milestone: m-26
 dependencies:
   - CSP-823
@@ -42,3 +42,9 @@ Blockers: Operator decisions 7 and 12, and the cell story.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 items 7 and 12: Node fields State, Since, Source, and Evidence (fresh, quiet, stale) in the explorer, the glossary entry, and the Pinned and History words from CSP-823. Quiet states show dimmed; stale or unknown shows '?'.
+<!-- SECTION:NOTES:END -->

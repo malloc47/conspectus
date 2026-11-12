@@ -4,7 +4,7 @@ title: Ingest another orchestrator's state
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
-updated_date: '2026-11-12 02:25'
+updated_date: '2026-11-12 20:06'
 labels:
   - live-state
   - ls-policy
@@ -44,3 +44,9 @@ Blockers: Operator decision 11.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 item 11: not approved for now. Leave this story alone unless the operator asks.
+<!-- SECTION:NOTES:END -->
