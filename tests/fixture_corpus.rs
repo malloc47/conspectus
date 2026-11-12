@@ -712,3 +712,25 @@ fn pi_branched_session_with_every_entry_type_discovers_session() {
         Some("Approach B is done.")
     );
 }
+
+#[test]
+fn pi_cache_warming_after_a_finished_turn_keeps_the_turn_as_last_activity() {
+    let (_temp, fragment) = pi_fixture_scenario(&[(
+        "pi/session-cache-warm.jsonl",
+        "--home-user-projects-my-project--",
+        "2026-10-16T12-00-00-000Z_0199f0c3-0000-7000-8000-00000000c0a1.jsonl",
+    )]);
+
+    let session = fragment
+        .nodes
+        .iter()
+        .find_map(|n| match n {
+            GraphNode::AgentSession(s) => Some(s),
+            _ => None,
+        })
+        .expect("cache-warm session");
+    // The assistant's stop at 12:01:00, not the last `usage` entry at
+    // 12:14:00 that idle cache warming appended.
+    assert_eq!(session.last_active_epoch, Some(1_792_152_060));
+    assert_eq!(session.last_message_preview.as_deref(), Some("Renamed."));
+}

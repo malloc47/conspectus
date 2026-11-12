@@ -14,6 +14,11 @@
 //! last-message preview is the Tier 2 read, capped and normalized by
 //! [`normalize_last_message_preview`] (ADR 0023).
 //!
+//! A session's last activity is the timestamp of its newest entry that
+//! is not a `usage` entry, which Pi's idle cache warming appends while
+//! nothing happens. A file whose tail has no such entry falls back to
+//! the header's timestamp, then to the file's mtime.
+//!
 //! `/fork`, `/clone`, and `pi --fork` record the parent's file path as the
 //! header's `parentSession`. Each one becomes an ADR 0018
 //! `parent_session` candidate from the child, with `lineage_kind = fork`
@@ -515,9 +520,16 @@ struct Block {
     text: Option<String>,
 }
 
-/// The newest entry timestamp and the last-message preview, read from
-/// the tail of the file. Entries are appended in time order, so the
-/// last timestamped line is the newest.
+/// Entry type Pi writes on its own while the session sits idle: with
+/// cache warming on (the default), it appends `usage` entries to keep
+/// the prompt cache warm for up to half an hour after a run.
+const IDLE_ENTRY_TYPE: &str = "usage";
+
+/// The newest activity timestamp and the last-message preview, read
+/// from the tail of the file. Entries are appended in time order, so the
+/// last timestamped line is the newest. `usage` entries are not
+/// activity and are passed over, so an idle session keeps the time of
+/// its last real entry.
 fn read_tail(path: &Path) -> (Option<i64>, Option<String>) {
     let Some(buf) = read_tail_bytes(path) else {
         return (None, None);
@@ -531,7 +543,7 @@ fn read_tail(path: &Path) -> (Option<i64>, Option<String>) {
         let Ok(entry) = serde_json::from_slice::<TailEntry>(line) else {
             continue;
         };
-        if newest.is_none() {
+        if newest.is_none() && entry.entry_type.as_deref() != Some(IDLE_ENTRY_TYPE) {
             newest = entry.timestamp.as_deref().and_then(parse_epoch);
         }
         if preview.is_none() {

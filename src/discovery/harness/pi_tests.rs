@@ -223,6 +223,75 @@ fn last_active_is_the_newest_entry_timestamp() {
 }
 
 #[test]
+fn last_active_passes_over_cache_warm_usage_entries() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    let path = fixture
+        .write_pi_session(
+            &PiSessionRecord::new("s", "/work")
+                .with_timestamp("2026-01-02T03:04:05.000Z")
+                .with_exchange("q", "a"),
+        )
+        .expect("write");
+    append_session_lines(
+        &path,
+        &[
+            r#"{"type":"usage","id":"u1","parentId":"s-2","timestamp":"2026-01-02T03:09:00.000Z","kind":"cache_warm","usage":{"input":4,"cacheRead":5120}}"#,
+            r#"{"type":"usage","id":"u2","parentId":"u1","timestamp":"2026-01-02T03:30:00.000Z","kind":"cache_warm","usage":{"input":4,"cacheRead":5120}}"#,
+        ],
+    );
+    assert_eq!(
+        discover_session(&context, "s").last_active_epoch,
+        Some(1_767_323_045),
+        "idle cache warming is not activity",
+    );
+
+    append_session_lines(
+        &path,
+        &[
+            r#"{"type":"message","id":"m9","parentId":"u2","timestamp":"2026-01-02T04:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"next"}]}}"#,
+        ],
+    );
+    assert_eq!(
+        discover_session(&context, "s").last_active_epoch,
+        Some(1_767_326_400),
+        "the next real entry moves it again",
+    );
+}
+
+#[test]
+fn last_active_falls_back_to_the_mtime_when_no_entry_has_a_usable_time() {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    let dir = fixture.pi_state_root().join("--work--");
+    fs::create_dir_all(&dir).expect("dir");
+    let path = dir.join("2026-01-02T03-04-05-000Z_s.jsonl");
+    fs::write(
+        &path,
+        concat!(
+            r#"{"type":"session","version":3,"id":"s","cwd":"/work"}"#,
+            "\n",
+            r#"{"type":"usage","id":"u1","parentId":null,"timestamp":"2026-01-02T03:30:00.000Z","kind":"cache_warm"}"#,
+            "\n",
+        ),
+    )
+    .expect("write");
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .expect("open")
+        .set_modified(UNIX_EPOCH + Duration::from_secs(1_767_300_000))
+        .expect("set mtime");
+
+    assert_eq!(
+        discover_session(&context, "s").last_active_epoch,
+        Some(1_767_300_000)
+    );
+}
+
+#[test]
 fn header_without_an_id_falls_back_to_the_file_name() {
     let temp = TempDir::new().expect("temp");
     let (context, fixture) = context_with_state(&temp);
