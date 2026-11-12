@@ -156,3 +156,23 @@ opencode-plugin-test:
     fi
     cd plugins/opencode-hook
     node --experimental-strip-types --test test/*.test.ts
+
+# The Pi extension's live-state tests (ADR 0206): its state machine
+# replays the event scripts in tests/fixtures/hooks/pi-live/, and its
+# handlers run against a stand-in Pi and a stand-in writer. Like the
+# opencode tests they need Node 22.6 or later, which the dev shell does not
+# provide; without it the recipe says so and fails, and `check` does not
+# run it.
+pi-plugin-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v node >/dev/null 2>&1; then
+        echo "pi-plugin-test: node not found on PATH; the extension tests need Node 22.6 or later" >&2
+        exit 1
+    fi
+    if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 6) ? 0 : 1)'; then
+        echo "pi-plugin-test: node $(node --version) is too old; the extension tests need Node 22.6 or later" >&2
+        exit 1
+    fi
+    cd plugins/pi-hook
+    node --experimental-strip-types --test test/*.test.ts
