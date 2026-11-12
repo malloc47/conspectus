@@ -76,11 +76,13 @@ pub(crate) fn session_cell(snapshot: &GraphSnapshot, id: &NodeId, now_ms: i64) -
 }
 
 /// The running subagents worth showing beside the state: none once the
-/// session reads `exited` or `unknown`, whatever was last recorded.
+/// session reads `exited` or `unknown`, whatever was last recorded
+/// ([`LiveState::shows_subagents`]).
 fn shown_subagents(binding: &LiveBinding, effective: &EffectiveLive) -> u16 {
-    match effective.state {
-        LiveState::Exited | LiveState::Unknown => 0,
-        _ => binding.observation.subagents,
+    if effective.state.shows_subagents() {
+        binding.observation.subagents
+    } else {
+        0
     }
 }
 

@@ -598,6 +598,17 @@ fn counts_tally_each_state() {
 }
 
 #[test]
+fn subagents_show_beside_every_state_but_exited_and_unknown() {
+    for state in LiveState::ALL {
+        assert_eq!(
+            state.shows_subagents(),
+            !matches!(state, Exited | Unknown),
+            "{state:?}"
+        );
+    }
+}
+
+#[test]
 fn the_default_precedence_puts_what_needs_the_operator_first() {
     let mut ranked = LiveState::ALL;
     ranked.sort_by_key(|state| state.default_precedence());

@@ -145,6 +145,13 @@ impl LiveState {
         self.details().contains(&detail)
     }
 
+    /// Whether a session in this state has running child agents worth
+    /// showing beside it: not once it has exited or its state can't be
+    /// told, whatever count was last recorded.
+    pub fn shows_subagents(self) -> bool {
+        !matches!(self, LiveState::Exited | LiveState::Unknown)
+    }
+
     /// The default rank of this state when one state has to stand for
     /// several, as on a mux row; lower ranks first. What needs the
     /// operator comes first: `waiting`, `error`, `ready`, then `working`,
