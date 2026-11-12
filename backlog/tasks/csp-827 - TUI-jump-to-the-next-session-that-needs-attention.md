@@ -4,6 +4,7 @@ title: 'TUI: jump to the next session that needs attention'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
+updated_date: '2026-11-12 15:36'
 labels:
   - live-state
   - ls-tui
@@ -29,7 +30,7 @@ TUI changes: A new key and status hint.
 
 Tests and checks: Keymap tests, generated help, cursor movement across views.
 
-Blockers: Operator decisions 5 and 10, and the cell story.
+Blockers: Operator decisions 5 and 6, and the cell story.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

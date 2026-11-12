@@ -4,6 +4,7 @@ title: 'TUI: show live state on session and mux rows'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
+updated_date: '2026-11-12 15:36'
 labels:
   - live-state
   - ls-tui
@@ -29,7 +30,7 @@ TUI changes: Adds the cell to Sessions, Mux, PRs, Pinned, and History as decided
 
 Tests and checks: `conspectus tui --snapshot` at normal and narrow widths in each view, `tests/tui_columns_doc.rs`, the consistency suites for glyphs, state, text, and freshness.
 
-Blockers: Operator decisions 1, 6, 10 and the plumbing story.
+Blockers: Operator decisions 1, 7, and 10 and the plumbing story.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
