@@ -1,9 +1,10 @@
 //! Claude Code hook payloads as live-state events (ADR 0204, ADR 0206).
 //!
-//! Claude Code runs `conspectus hook write claude-code` once per hook
-//! event with the payload on stdin and waits for it, and [`live_events`]
-//! says what the payload means in the neutral vocabulary of
-//! [`LiveEventKind`]:
+//! `conspectus hook init claude-code` installs a command hook for each of
+//! [`HOOK_SUBSCRIPTIONS`]. Claude Code runs `conspectus hook write
+//! claude-code` once per event with the payload on stdin and waits for
+//! it, and [`live_events`] says what the payload means in the neutral
+//! vocabulary of [`LiveEventKind`]:
 //!
 //! | Event | Fields it reads | Live events |
 //! | :- | :- | :- |
@@ -76,6 +77,14 @@ use crate::live_store::{
 
 use super::HARNESS_KEY;
 
+/// One hook event `hook init claude-code` installs, with the matcher its
+/// entry needs; `None` matches every occurrence of the event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct HookSubscription {
+    pub(crate) event: &'static str,
+    pub(crate) matcher: Option<&'static str>,
+}
+
 const SESSION_START: &str = "SessionStart";
 const USER_PROMPT_SUBMIT: &str = "UserPromptSubmit";
 const PERMISSION_REQUEST: &str = "PermissionRequest";
@@ -97,6 +106,74 @@ const PLAN_TOOL: &str = "ExitPlanMode";
 
 /// The subagent tool, under its current name and the one it had before.
 const SUBAGENT_TOOLS: [&str; 2] = ["Agent", "Task"];
+
+/// The events Conspectus subscribes to (ADR 0206 decision 1), in the
+/// order `hook init` installs them. The session start matcher lists every
+/// documented source; `PreToolUse` fires only for the two tools that
+/// open a dialog, and `Notification` only for the types
+/// [`live_events`] maps.
+pub(crate) const HOOK_SUBSCRIPTIONS: [HookSubscription; 14] = [
+    HookSubscription {
+        event: SESSION_START,
+        matcher: Some("startup|resume|clear|compact|fork"),
+    },
+    HookSubscription {
+        event: USER_PROMPT_SUBMIT,
+        matcher: None,
+    },
+    HookSubscription {
+        event: PERMISSION_REQUEST,
+        matcher: None,
+    },
+    HookSubscription {
+        event: PRE_TOOL_USE,
+        matcher: Some("AskUserQuestion|ExitPlanMode"),
+    },
+    HookSubscription {
+        event: POST_TOOL_USE,
+        matcher: None,
+    },
+    HookSubscription {
+        event: POST_TOOL_USE_FAILURE,
+        matcher: None,
+    },
+    HookSubscription {
+        event: NOTIFICATION,
+        matcher: Some(
+            "permission_prompt|idle_prompt|elicitation_dialog|elicitation_url_dialog|\
+             agent_needs_input|quota_auto_resume_fired|quota_auto_resume_stale|\
+             quota_auto_resume_disabled",
+        ),
+    },
+    HookSubscription {
+        event: SUBAGENT_START,
+        matcher: None,
+    },
+    HookSubscription {
+        event: SUBAGENT_STOP,
+        matcher: None,
+    },
+    HookSubscription {
+        event: STOP,
+        matcher: None,
+    },
+    HookSubscription {
+        event: STOP_FAILURE,
+        matcher: None,
+    },
+    HookSubscription {
+        event: PRE_COMPACT,
+        matcher: None,
+    },
+    HookSubscription {
+        event: POST_COMPACT,
+        matcher: None,
+    },
+    HookSubscription {
+        event: SESSION_END,
+        matcher: None,
+    },
+];
 
 /// Whether `payload` names the session a process runs, which only a
 /// session start does. A payload without an event name comes from a

@@ -615,62 +615,202 @@ fn hook_init_status_remove_claude_code_preserves_existing_settings() {
     let home = tempfile::TempDir::new().expect("home temp");
     let settings = home.path().join(".claude/settings.json");
     fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
-    fs::write(
-        &settings,
-        r#"{
-          "theme": "dark",
-          "hooks": {
+    let original = serde_json::json!({
+        "theme": "dark",
+        "permissions": { "allow": ["Bash(git status)"] },
+        "hooks": {
             "SessionStart": [
-              {
-                "matcher": "startup",
-                "hooks": [
-                  { "type": "command", "command": "echo existing" }
-                ]
-              }
+                { "matcher": "startup", "hooks": [{ "type": "command", "command": "echo existing" }] }
+            ],
+            "Stop": [
+                { "hooks": [{ "type": "command", "command": "/home/me/bin/notify-done", "timeout": 30 }] }
             ]
-          }
-        }"#,
-    )
-    .expect("write settings");
+        }
+    });
+    fs::write(&settings, original.to_string()).expect("write settings");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
 
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("init")
-        .arg("claude-code")
-        .arg("--command")
-        .arg("conspectus hook write claude-code")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("installed Claude Code hook"));
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("not-installed\tclaude-code\t"))
+        .stdout(predicate::str::contains("missing\tclaude-code\t").count(14));
 
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("status")
-        .arg("claude-code")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("installed\tclaude-code"));
-
-    let installed: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&settings).expect("read")).expect("json");
-    assert_eq!(installed["theme"], "dark");
-    assert!(
-        fs::read_to_string(&settings)
-            .expect("read")
-            .contains("echo existing")
+    hook(&["init", "claude-code", "--dry-run"])
+        .stdout(predicate::str::contains("would install Claude Code hooks"));
+    assert_eq!(
+        read_settings(&settings),
+        original,
+        "a dry run writes nothing"
     );
 
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("remove")
-        .arg("claude-code")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("removed Claude Code hook"));
+    hook(&[
+        "init",
+        "claude-code",
+        "--command",
+        "conspectus hook write claude-code",
+    ])
+    .stdout(predicate::str::contains("installed Claude Code hooks"))
+    .stdout(predicate::str::contains("(14 added, 0 updated)"));
 
-    let removed = fs::read_to_string(&settings).expect("read");
-    assert!(removed.contains("echo existing"));
-    assert!(!removed.contains("hook write claude-code"));
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("installed\tclaude-code\t"))
+        .stdout(predicate::str::contains("installed\tclaude-code\t").count(15))
+        .stdout(predicate::str::contains("\tSessionStart\n"))
+        .stdout(predicate::str::contains("\tSessionEnd\n"))
+        .stderr(predicate::str::is_empty());
+
+    let installed = read_settings(&settings);
+    assert_eq!(installed["theme"], "dark");
+    assert_eq!(installed["permissions"], original["permissions"]);
+    assert_eq!(
+        installed["hooks"]["SessionStart"][0],
+        original["hooks"]["SessionStart"][0]
+    );
+    assert_eq!(installed["hooks"]["Stop"][0], original["hooks"]["Stop"][0]);
+    let events = installed["hooks"].as_object().expect("hooks");
+    assert_eq!(events.len(), 14, "{installed}");
+    for (event, groups) in events {
+        let own = groups
+            .as_array()
+            .expect("groups")
+            .last()
+            .expect("Conspectus's group");
+        assert_eq!(
+            own["hooks"][0]["command"],
+            "conspectus hook write claude-code"
+        );
+        assert_eq!(own["hooks"][0]["timeout"], 5, "{event}");
+    }
+
+    hook(&["init", "claude-code"]).stdout(predicate::str::contains(
+        "Claude Code hooks already installed",
+    ));
+    assert_eq!(read_settings(&settings), installed);
+
+    hook(&["remove", "claude-code"]).stdout(predicate::str::contains("removed Claude Code hooks"));
+    assert_eq!(read_settings(&settings), original);
+    hook(&["remove", "claude-code"])
+        .stdout(predicate::str::contains("Claude Code hooks not installed"));
+}
+
+#[test]
+fn hook_init_claude_code_upgrades_a_session_start_only_install() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    // What `hook init claude-code` wrote when it installed one entry.
+    let old = serde_json::json!({
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "resume|startup|clear|compact",
+                    "hooks": [{ "type": "command", "command": "/old/bin/conspectus hook write claude-code" }]
+                }
+            ]
+        }
+    });
+    fs::write(&settings, old.to_string()).expect("write settings");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
+
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("partial\tclaude-code\t"))
+        .stdout(predicate::str::contains("outdated\tclaude-code\t").count(1))
+        .stdout(predicate::str::contains("\tSessionStart\n"))
+        .stdout(predicate::str::contains("missing\tclaude-code\t").count(13))
+        .stderr(predicate::str::contains("conspectus hook init claude-code"));
+
+    hook(&["init", "claude-code"]).stdout(predicate::str::contains("(13 added, 1 updated)"));
+    let upgraded = read_settings(&settings);
+    let session_start = upgraded["hooks"]["SessionStart"]
+        .as_array()
+        .expect("groups");
+    assert_eq!(session_start.len(), 1, "never duplicated: {upgraded}");
+    assert_eq!(
+        session_start[0],
+        serde_json::json!({
+            "matcher": "startup|resume|clear|compact|fork",
+            "hooks": [{
+                "type": "command",
+                "command": "/old/bin/conspectus hook write claude-code",
+                "timeout": 5
+            }]
+        })
+    );
+    // New events run the command the old install ran.
+    assert_eq!(
+        upgraded["hooks"]["Notification"][0]["hooks"][0]["command"],
+        "/old/bin/conspectus hook write claude-code"
+    );
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("installed\tclaude-code\t"))
+        .stdout(predicate::str::contains("installed\tclaude-code\t").count(15));
+
+    hook(&["remove", "claude-code"]);
+    assert_eq!(read_settings(&settings), serde_json::json!({}));
+}
+
+#[test]
+fn hook_init_claude_code_project_scope_leaves_the_user_settings_alone() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = tempfile::TempDir::new().expect("project temp");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .current_dir(project.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
+
+    hook(&["init", "claude-code", "--scope", "project"])
+        .stdout(predicate::str::contains("(14 added, 0 updated)"));
+    let settings = project.path().join(".claude/settings.json");
+    assert_eq!(
+        read_settings(&settings)["hooks"]
+            .as_object()
+            .expect("hooks")
+            .len(),
+        14
+    );
+    assert!(!home.path().join(".claude").exists());
+
+    hook(&["status", "claude-code", "--scope", "project"])
+        .stdout(predicate::str::starts_with("installed\tclaude-code\t"));
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("not-installed\tclaude-code\t"));
+    hook(&["remove", "claude-code", "--scope", "project"]);
+    assert_eq!(read_settings(&settings), serde_json::json!({}));
+}
+
+#[test]
+fn hook_init_claude_code_refuses_a_hooks_table_it_would_replace() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    let text = r#"{"hooks": {"Stop": {"not": "a list"}}}"#;
+    fs::write(&settings, text).expect("write settings");
+
+    isolated_cmd(home.path())
+        .args(["hook", "init", "claude-code"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("hooks.Stop"));
+    assert_eq!(fs::read_to_string(&settings).expect("read"), text);
+}
+
+fn read_settings(path: &std::path::Path) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(path).expect("read settings")).expect("settings json")
 }
 
 #[test]

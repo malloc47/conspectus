@@ -193,6 +193,8 @@ impl HarnessAdapter for ClaudeCodeAdapter {
 #[path = "claude_code_live.rs"]
 mod live;
 
+pub(crate) use live::{HOOK_SUBSCRIPTIONS, HookSubscription};
+
 fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFragment> {
     let projects = state_root.join("projects");
 

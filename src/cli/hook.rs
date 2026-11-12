@@ -2,7 +2,8 @@
 //!
 //! Four subcommands: `write` (records one hook payload; it lives in
 //! [`super::hook_write`]), `init` / `remove` (install or remove each
-//! harness's hook: a settings entry for Claude Code and Codex, an
+//! harness's hook: settings entries for Claude Code, one per event it
+//! reports, in [`super::hook_claude`]; a settings entry for Codex; an
 //! owned extension file for Pi), and `status` (reports whether the
 //! hook is installed).
 //!
@@ -18,6 +19,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
+use super::hook_claude::{
+    claude_hook_coverage, coverage_label, ensure_claude_hook, remove_claude_hook,
+};
 use super::hook_write::HookWriteArgs;
 
 #[derive(Debug, Args)]
@@ -46,7 +50,8 @@ enum HookCommand {
     Write(HookWriteArgs),
     /// Install a Conspectus hook into harness configuration.
     Init(HookInitArgs),
-    /// Report whether a Conspectus hook is installed.
+    /// Report whether a Conspectus hook is installed (for Claude Code,
+    /// event by event).
     Status(HookStatusArgs),
     /// Remove a Conspectus hook from harness configuration.
     Remove(HookRemoveArgs),
@@ -69,7 +74,8 @@ struct HookInitArgs {
     /// Print the action without writing files.
     #[arg(long)]
     dry_run: bool,
-    /// Command installed into the harness config.
+    /// Command installed into the harness config. For Claude Code it
+    /// also replaces the command of entries Conspectus installed before.
     #[arg(long = "command", value_name = "COMMAND")]
     command: Option<String>,
 }
@@ -115,26 +121,34 @@ impl HookInitArgs {
 
     fn run_claude_install(self) -> Result<()> {
         let path = claude_settings_path(self.scope)?;
-        let command = self
-            .command
-            .unwrap_or_else(|| default_hook_command("claude-code"));
         let mut document = read_json_document(&path)?;
-        let changed = ensure_claude_hook(&mut document, &command);
+        let install = ensure_claude_hook(
+            &mut document,
+            self.command.as_deref(),
+            &default_hook_command("claude-code"),
+        )
+        .with_context(|| format!("can't install the Claude Code hooks in {}", path.display()))?;
+        let counts = format!("{} added, {} updated", install.added, install.updated);
 
         if self.dry_run {
-            let verb = if changed {
-                "would install"
+            if install.changed() {
+                println!(
+                    "would install Claude Code hooks in {} ({counts})",
+                    path.display()
+                );
             } else {
-                "already installed"
-            };
-            println!("{verb} Claude Code hook in {}", path.display());
+                println!("already installed Claude Code hooks in {}", path.display());
+            }
             return Ok(());
         }
-        if changed {
+        if install.changed() {
             write_json_document(&path, &document)?;
-            println!("installed Claude Code hook in {}", path.display());
+            println!(
+                "installed Claude Code hooks in {} ({counts})",
+                path.display()
+            );
         } else {
-            println!("Claude Code hook already installed in {}", path.display());
+            println!("Claude Code hooks already installed in {}", path.display());
         }
         Ok(())
     }
@@ -207,13 +221,30 @@ impl HookStatusArgs {
         }
     }
 
+    /// One line for the install as a whole, then one per subscribed
+    /// event, each `<label>\tclaude-code\t<path>\t<event>`.
     fn run_claude_status(self) -> Result<()> {
         let path = claude_settings_path(self.scope)?;
         let document = read_json_document(&path)?;
-        if has_claude_hook(&document) {
-            println!("installed\tclaude-code\t{}", path.display());
-        } else {
-            println!("not-installed\tclaude-code\t{}", path.display());
+        let coverage = claude_hook_coverage(&document);
+        let overall = coverage_label(&document, &coverage);
+        println!("{overall}\tclaude-code\t{}", path.display());
+        for (event, state) in &coverage {
+            println!(
+                "{}\tclaude-code\t{}\t{event}",
+                state.label(),
+                path.display()
+            );
+        }
+        if overall == "partial" {
+            let scope = match self.scope {
+                HookScopeFlag::User => "",
+                HookScopeFlag::Project => " --scope project",
+            };
+            eprintln!(
+                "some events are missing or outdated; `{} hook init claude-code{scope}` completes the install",
+                crate::invocation::invoked_name()
+            );
         }
         Ok(())
     }
@@ -262,14 +293,14 @@ impl HookRemoveArgs {
             } else {
                 "not installed"
             };
-            println!("{verb} Claude Code hook in {}", path.display());
+            println!("{verb} Claude Code hooks in {}", path.display());
             return Ok(());
         }
         if changed {
             write_json_document(&path, &document)?;
-            println!("removed Claude Code hook from {}", path.display());
+            println!("removed Claude Code hooks from {}", path.display());
         } else {
-            println!("Claude Code hook not installed in {}", path.display());
+            println!("Claude Code hooks not installed in {}", path.display());
         }
         Ok(())
     }
@@ -504,99 +535,6 @@ fn write_toml_document(path: &Path, value: &DocumentMut) -> Result<()> {
     fs::write(&tmp, text).with_context(|| format!("failed to write {}", tmp.display()))?;
     fs::rename(&tmp, path).with_context(|| format!("failed to replace {}", path.display()))?;
     Ok(())
-}
-
-pub(super) fn ensure_claude_hook(document: &mut serde_json::Value, command: &str) -> bool {
-    if has_claude_hook(document) {
-        return false;
-    }
-
-    let object = document
-        .as_object_mut()
-        .expect("settings document is object");
-    let hooks = object
-        .entry("hooks")
-        .or_insert_with(|| serde_json::json!({}));
-    if !hooks.is_object() {
-        *hooks = serde_json::json!({});
-    }
-    let hooks_object = hooks.as_object_mut().expect("hooks is object");
-    let session_start = hooks_object
-        .entry("SessionStart")
-        .or_insert_with(|| serde_json::json!([]));
-    if !session_start.is_array() {
-        *session_start = serde_json::json!([]);
-    }
-    session_start
-        .as_array_mut()
-        .expect("SessionStart is array")
-        .push(serde_json::json!({
-            "matcher": "resume|startup|clear|compact",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": command
-                }
-            ]
-        }));
-    true
-}
-
-pub(super) fn has_claude_hook(document: &serde_json::Value) -> bool {
-    document
-        .get("hooks")
-        .and_then(|hooks| hooks.get("SessionStart"))
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|entries| entries.iter().any(entry_contains_conspectus_hook))
-}
-
-pub(super) fn remove_claude_hook(document: &mut serde_json::Value) -> bool {
-    let Some(entries) = document
-        .get_mut("hooks")
-        .and_then(|hooks| hooks.get_mut("SessionStart"))
-        .and_then(serde_json::Value::as_array_mut)
-    else {
-        return false;
-    };
-
-    let mut changed = false;
-    for entry in entries.iter_mut() {
-        let Some(hooks) = entry
-            .get_mut("hooks")
-            .and_then(serde_json::Value::as_array_mut)
-        else {
-            continue;
-        };
-        let original_len = hooks.len();
-        hooks.retain(|hook| !hook_is_conspectus_command(hook));
-        changed |= hooks.len() != original_len;
-    }
-    entries.retain(|entry| {
-        entry
-            .get("hooks")
-            .and_then(serde_json::Value::as_array)
-            .is_none_or(|hooks| !hooks.is_empty())
-    });
-    changed
-}
-
-fn entry_contains_conspectus_hook(entry: &serde_json::Value) -> bool {
-    entry
-        .get("hooks")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|hooks| hooks.iter().any(hook_is_conspectus_command))
-}
-
-fn hook_is_conspectus_command(hook: &serde_json::Value) -> bool {
-    hook.get("type").and_then(serde_json::Value::as_str) == Some("command")
-        && hook
-            .get("command")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(is_conspectus_hook_command)
-}
-
-fn is_conspectus_hook_command(command: &str) -> bool {
-    command.contains("hook write claude-code")
 }
 
 fn ensure_codex_hook(document: &mut DocumentMut, command: &str) -> bool {

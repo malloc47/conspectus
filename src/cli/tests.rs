@@ -1,4 +1,3 @@
-use super::hook::{ensure_claude_hook, has_claude_hook, remove_claude_hook};
 use super::hook_write::{harness_binaries, resolve_harness_pid_with};
 use super::tui::parse_tui_duration;
 use super::*;
@@ -286,76 +285,6 @@ fn pager_candidates_empty_pager_env_falls_back_to_internal_defaults() {
     // with default flags.
     assert_eq!(program(&candidates[0]), "less");
     assert_eq!(args(&candidates[0]), vec!["-F", "-R", "-X"]);
-}
-
-#[test]
-fn ensure_claude_hook_preserves_existing_hooks() {
-    let mut document = serde_json::json!({
-        "theme": "dark",
-        "hooks": {
-            "SessionStart": [
-                {
-                    "matcher": "startup",
-                    "hooks": [
-                        { "type": "command", "command": "echo existing" }
-                    ]
-                }
-            ]
-        }
-    });
-
-    assert!(ensure_claude_hook(
-        &mut document,
-        "conspectus hook write claude-code"
-    ));
-    assert!(has_claude_hook(&document));
-
-    let entries = document["hooks"]["SessionStart"].as_array().expect("array");
-    assert_eq!(entries.len(), 2);
-    assert_eq!(document["theme"], "dark");
-}
-
-#[test]
-fn ensure_claude_hook_is_idempotent() {
-    let mut document = serde_json::json!({});
-
-    assert!(ensure_claude_hook(
-        &mut document,
-        "conspectus hook write claude-code"
-    ));
-    assert!(!ensure_claude_hook(
-        &mut document,
-        "conspectus hook write claude-code"
-    ));
-
-    let entries = document["hooks"]["SessionStart"].as_array().expect("array");
-    assert_eq!(entries.len(), 1);
-}
-
-#[test]
-fn remove_claude_hook_preserves_unrelated_hooks_in_same_entry() {
-    let mut document = serde_json::json!({
-        "hooks": {
-            "SessionStart": [
-                {
-                    "matcher": "startup",
-                    "hooks": [
-                        { "type": "command", "command": "conspectus hook write claude-code" },
-                        { "type": "command", "command": "echo existing" }
-                    ]
-                }
-            ]
-        }
-    });
-
-    assert!(remove_claude_hook(&mut document));
-    assert!(!has_claude_hook(&document));
-
-    let hooks = document["hooks"]["SessionStart"][0]["hooks"]
-        .as_array()
-        .expect("hooks");
-    assert_eq!(hooks.len(), 1);
-    assert_eq!(hooks[0]["command"], "echo existing");
 }
 
 // ---- ADR 0031: FilterArgs ----

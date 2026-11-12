@@ -142,6 +142,7 @@ use lifecycle::{RefreshArgs, ServeArgs, StatusArgs};
 mod hook;
 use hook::HookArgs;
 
+mod hook_claude;
 mod hook_write;
 
 mod node;

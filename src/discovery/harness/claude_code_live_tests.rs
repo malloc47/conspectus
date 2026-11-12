@@ -335,6 +335,26 @@ fn each_subscribed_notification_type_has_its_meaning() {
 }
 
 #[test]
+fn the_notification_matcher_lists_exactly_the_types_the_mapping_reads() {
+    let matcher = HOOK_SUBSCRIPTIONS
+        .iter()
+        .find(|subscription| subscription.event == "Notification")
+        .and_then(|subscription| subscription.matcher)
+        .expect("a notification matcher");
+    for notification in matcher.split('|') {
+        assert!(
+            !kinds(&payload(
+                "Notification",
+                json!({"notification_type": notification})
+            ))
+            .is_empty(),
+            "{notification}"
+        );
+    }
+    assert_eq!(matcher.split('|').count(), 8);
+}
+
+#[test]
 fn child_agents_start_and_stop_by_id() {
     assert_eq!(
         kinds(&payload(
@@ -568,26 +588,44 @@ fn events_the_mapping_does_not_cover_and_unreadable_payloads_say_nothing() {
 }
 
 #[test]
+fn every_subscribed_event_maps_to_something() {
+    let representative = |event: &str| match event {
+        "PreToolUse" => json!({"tool_name": "AskUserQuestion"}),
+        "Notification" => json!({"notification_type": "idle_prompt"}),
+        "SubagentStart" | "SubagentStop" => json!({"agent_id": CHILD}),
+        _ => json!({}),
+    };
+    for subscription in HOOK_SUBSCRIPTIONS {
+        let event = subscription.event;
+        assert!(
+            !kinds(&payload(event, representative(event))).is_empty(),
+            "{event}"
+        );
+    }
+}
+
+#[test]
+fn the_session_start_matcher_lists_every_documented_source() {
+    let matcher = HOOK_SUBSCRIPTIONS[0]
+        .matcher
+        .expect("a session start matcher");
+    assert_eq!(HOOK_SUBSCRIPTIONS[0].event, "SessionStart");
+    let mut sources: Vec<&str> = matcher.split('|').collect();
+    sources.sort_unstable();
+    assert_eq!(sources, ["clear", "compact", "fork", "resume", "startup"]);
+}
+
+#[test]
 fn only_a_session_start_is_recorded_for_attribution() {
     let adapter = super::super::ClaudeCodeAdapter::new();
     let event = |name: &str| json!({"hook_event_name": name, "session_id": "s"});
     assert!(adapter.is_attribution_event(&event("SessionStart")));
-    for name in [
-        "UserPromptSubmit",
-        "PermissionRequest",
-        "PreToolUse",
-        "PostToolUse",
-        "PostToolUseFailure",
-        "Notification",
-        "SubagentStart",
-        "SubagentStop",
-        "Stop",
-        "StopFailure",
-        "PreCompact",
-        "PostCompact",
-        "SessionEnd",
-    ] {
-        assert!(!adapter.is_attribution_event(&event(name)), "{name}");
+    for subscription in HOOK_SUBSCRIPTIONS.iter().skip(1) {
+        assert!(
+            !adapter.is_attribution_event(&event(subscription.event)),
+            "{}",
+            subscription.event
+        );
     }
     assert!(!adapter.is_attribution_event(&json!({"hook_event_name": 3})));
     // A caller older than per-event hooks sends no event name.
