@@ -376,7 +376,7 @@ fn shown(app: &mut App, snapshot: &GraphSnapshot) -> Vec<(NodeId, Shown, String)
 /// What `snapshot`'s live tables say a row standing for `node` shows, read
 /// through the model alone: a session's mark from its effective state, a
 /// mux's from its counts by the default precedence, and on a Pinned row
-/// its own `status`.
+/// a running session's live word in place of `status`.
 fn expected(snapshot: &GraphSnapshot, node: &NodeId, mixed: Option<&str>) -> Shown {
     let now_ms = crate::tui::rows::tree_current_unix_ms();
     let state = |node: &NodeId| snapshot.live_state_of(node, now_ms);
@@ -402,6 +402,16 @@ fn expected(snapshot: &GraphSnapshot, node: &NodeId, mixed: Option<&str>) -> Sho
             Shown::Mark(mark.to_string())
         }
         (_, None) => Shown::Mark(session_mark(node).to_string()),
+        (NodeId::AgentSession(_), Some(status)) if ["in mux", "resumable"].contains(&status) => {
+            let word = match state(node).map(|live| live.state) {
+                Some(LiveState::Waiting) => "waiting",
+                Some(LiveState::Working | LiveState::Compacting | LiveState::Starting) => "working",
+                Some(LiveState::Ready) => "ready",
+                Some(LiveState::Error) => "error",
+                _ => status,
+            };
+            Shown::Word(word.to_string())
+        }
         (_, Some(status)) => Shown::Word(status.to_string()),
     }
 }
@@ -461,8 +471,13 @@ fn one_entity_shows_one_mark_in_every_view() {
     };
     let hosted = marks(&session(HOSTED));
     assert!(hosted.contains(&Shown::Mark("!".into())), "{hosted:?}");
+    assert!(
+        hosted.contains(&Shown::Word("waiting".into())),
+        "{hosted:?}"
+    );
     let solo = marks(&session(SOLO));
     assert!(solo.contains(&Shown::Mark("›".into())), "{solo:?}");
+    assert!(solo.contains(&Shown::Word("ready".into())), "{solo:?}");
     let beside = marks(&session(BESIDE));
     assert!(beside.contains(&Shown::Mark("×".into())), "{beside:?}");
     // The mux hosts a waiting agent and a failed one: waiting first.
@@ -523,7 +538,7 @@ fn with_quiet_and_stale() -> GraphSnapshot {
 }
 
 #[test]
-fn quiet_stale_and_exited_agents_show_their_marks() {
+fn quiet_stale_and_exited_agents_show_their_marks_and_keep_their_words() {
     let snapshot = with_quiet_and_stale();
     let seen = assert_one_mark_per_entity(&snapshot, LiveOverlay::off);
     let shown = |key: &str| -> Vec<Shown> {
@@ -533,25 +548,40 @@ fn quiet_stale_and_exited_agents_show_their_marks() {
             .collect()
     };
     assert!(shown(HOSTED).contains(&Shown::Mark("»".into())));
+    assert!(shown(HOSTED).contains(&Shown::Word("working".into())));
     assert!(shown(BESIDE).contains(&Shown::Mark("?".into())));
+    // Stale and exited say nothing live, so Pinned keeps the link word.
     assert!(shown(SOLO).contains(&Shown::Mark("·".into())));
+    assert!(
+        shown(SOLO)
+            .iter()
+            .all(|shown| !matches!(shown, Shown::Word(word) if word == "ready")),
+        "{:?}",
+        shown(SOLO)
+    );
 
-    // Quiet dims the same shape; fresh does not.
-    let mut app = listing_with(View::Sessions, &snapshot, LiveOverlay::off());
-    let buffer = buffer_of(&mut app, 220, 40);
-    let lines = tuikit::testkit::buffer::rows(&buffer);
-    let y = lines
-        .iter()
-        .position(|line| line.contains("e44d01cb"))
-        .expect("the hosted session's row");
-    let x = lines[y]
-        .chars()
-        .position(|c| c == '»')
-        .expect("the working mark");
-    let cell = &buffer[(u16::try_from(x).unwrap(), u16::try_from(y).unwrap())];
+    // Quiet dims the same shape, and the same word in Pinned.
     let theme = crate::tui::Theme::default();
-    assert_eq!(cell.fg, theme.info);
-    assert!(cell.modifier.contains(theme.muted), "quiet is dimmed");
+    for (view, needle) in [(View::Sessions, "»"), (View::Pinned, "working")] {
+        let mut app = listing_with(view, &snapshot, LiveOverlay::off());
+        let buffer = buffer_of(&mut app, 220, 40);
+        let lines = tuikit::testkit::buffer::rows(&buffer);
+        let y = lines
+            .iter()
+            .position(|line| line.contains("e44d01cb") && line.contains(needle))
+            .unwrap_or_else(|| panic!("{view:?}: the hosted session's row"));
+        let x = lines[y]
+            .split(needle)
+            .next()
+            .map(|before| before.chars().count())
+            .expect("the mark or word");
+        let cell = &buffer[(u16::try_from(x).unwrap(), u16::try_from(y).unwrap())];
+        assert_eq!(cell.fg, theme.info, "{view:?}");
+        assert!(
+            cell.modifier.contains(theme.muted),
+            "{view:?}: quiet is dimmed"
+        );
+    }
 }
 
 #[test]

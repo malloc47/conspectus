@@ -17,7 +17,8 @@ use tuikit::tree::{self, RowColumns, RowCtx, RowMark};
 
 use super::*;
 use crate::tui::rows::{
-    EntityState, HitRow, LiveSign, MixedRow, MixedTone, PaneHitRow, PaneRow, PinMarker, Row,
+    EntityState, HitRow, LiveSign, MixedLive, MixedRow, MixedTone, PaneHitRow, PaneRow, PinMarker,
+    Row,
 };
 use crate::tui::widgets::badge::{
     command_badge, harness_badge, hits_chip, no_agent_chip, was_in_chip,
@@ -701,21 +702,25 @@ impl LeftColumns<'_> {
     }
 
     /// A Pinned or History row's cells after its prefix: the bold label,
-    /// the state word (a spinner while the row awaits the hand-off, as wide
-    /// as the word, so its column holds still), the age, the chip, and the
+    /// the state word (a session's live word in place of its link word,
+    /// and a spinner while the row awaits the hand-off, as wide as the
+    /// word, so its column holds still), the age, the chip, and the
     /// content. A row for something stopped, removed, missing, planned, or
     /// unknown is dimmed from its label on when it is drawn.
     fn mixed_cells(&self, mixed: &MixedRow, pending: bool) -> Cells<Col> {
         let theme = self.theme;
-        // A pull request's word takes the style of its state glyph, so the
-        // two read as one signal; other live words share the attached
-        // color.
-        let status_style = match (mixed.tone, mixed.pr_status) {
-            (MixedTone::Dim, _) => Style::default(),
-            (MixedTone::Normal, Some(status)) => status.mark(theme).1,
-            (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached()),
+        let live = live_word_sign(mixed);
+        // A live session's word and a pull request's word take the style
+        // of their glyphs, so the word reads as the glyph does in the
+        // views of one kind; other live words share the attached color.
+        let status_style = match (mixed.tone, live, mixed.pr_status) {
+            (MixedTone::Dim, _, _) => Style::default(),
+            (MixedTone::Normal, Some(sign), _) => sign.style(theme),
+            (MixedTone::Normal, None, Some(status)) => status.mark(theme).1,
+            (MixedTone::Normal, None, None) => Style::default().fg(theme.mux_attached()),
         };
-        let word = text::truncate_end(&mixed.status, MIXED_STATUS_CELLS);
+        let status = live.and_then(LiveSign::word).unwrap_or(&mixed.status);
+        let word = text::truncate_end(status, MIXED_STATUS_CELLS);
         let status = match self.spinner.filter(|_| pending) {
             Some(glyph) => text::pad(glyph, text::width(&word)),
             None => word,
@@ -786,6 +791,20 @@ impl LeftColumns<'_> {
             ),
         ]
     }
+}
+
+/// The live sign whose word a Pinned or History row prints in place of
+/// its status: the row stands for a running session (its word says
+/// whether it runs in a mux) whose agent is waiting, working, ready, or in
+/// error. A session with no evidence, or whose evidence can't be trusted,
+/// keeps its word, and the detail pane still says whether it is in a mux.
+fn live_word_sign(mixed: &MixedRow) -> Option<LiveSign> {
+    let MixedLive::Session(cell) = mixed.live else {
+        return None;
+    };
+    let running_session =
+        mixed.node_kind == NodeKind::AgentSession && mixed.tone == MixedTone::Normal;
+    Some(LiveSign::of_session(Some(cell))).filter(|sign| running_session && sign.word().is_some())
 }
 
 /// Whether a mixed-kind row is a stopped mux in the Mux view: a row that

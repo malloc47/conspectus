@@ -92,7 +92,8 @@ record a pin points at, shown only when History lists pinned records.
   mark: the mark keeps its value, dimmed with the row. It comes from the
   agents' own reports, which the TUI reads on its own about once a
   second, not from the refresh the action waits for, and a row shows one
-  spinner. In Pinned and History the spinner takes the word.
+  spinner. In Pinned and History the spinner takes the word, a live word
+  included.
 - A live-state mark whose evidence is quiet (work with no news for longer
   than its source's quiet window) is dimmed and keeps its shape.
   On the cursor row the mark takes the highlight like the other cells, so
@@ -205,11 +206,19 @@ instead: in the state cell, or for live state in the live cell.
 | `draft` | an open pull request marked draft | `◐` | Pinned, History |
 | `merged` | a merged pull request | `⊕` | Pinned, History |
 | `closed` | a closed, unmerged pull request | `⊗` | Pinned, History |
+| `waiting` | a running session whose agent is waiting on you; in place of `in mux` or `resumable` | `!` | Pinned, and sessions nested under a pin |
+| `working` | a running session whose agent is working, compacting, or starting; in place of `in mux` or `resumable` | `»` | Pinned, and sessions nested under a pin |
+| `ready` | a running session whose agent is ready for a prompt; in place of `in mux` or `resumable` | `›` | Pinned, and sessions nested under a pin |
+| `error` | a running session whose agent's turn ended on an error; in place of `in mux` or `resumable` | `×` | Pinned, and sessions nested under a pin |
 
 In Pinned, the word of a live pull request takes the style of its state
-glyph (green, yellow, magenta, red, or dim for `unknown`); other live
-words are green. Words of rows that are stopped, removed, missing,
-planned, or unknown are ghost style. A pull request's word follows the
+glyph (green, yellow, magenta, red, or dim for `unknown`), and a live
+session's `waiting`, `working`, `ready`, or `error` the style of its live
+mark (dimmed when quiet); other live words are green. A session whose
+live state can't be told, has exited, or is unknown keeps `in mux` or
+`resumable`; whether it runs in a mux stays in the detail pane either way.
+History lists no sessions, so it shows no live word. Words of rows that
+are stopped, removed, missing, planned, or unknown are ghost style. A pull request's word follows the
 same rule as its glyph (see [PR row](#pr-row)): a closed or merged draft
 reads `closed` or `merged`.
 
@@ -344,12 +353,12 @@ A Pinned row in a narrow pane keeps its name and its state word:
 ┌ ► sessions · mux · prs · pinned … ───┐
 │  ▼ project  ~/repos/project          │
 │►   ▼ ▣ ◉ project-main   live       5m│
-│        ●   ambiguous …  in mux     1m│
-│        ●   ambiguous …  in mux     1m│
-│        ●   hook-super…  in mux     1m│
-│        ●   claude-cod…  in mux     1h│
+│        ●   ambiguous …  waiting    1m│
+│        ●   ambiguous …  working    1m│
+│        ●   hook-super…  working    1m│
+│        ●   claude-cod…  ready      1h│
 │      ▣ ◎ nightly        stopped    2d│
-│      ● ◉ parser-sessi…  in mux     1h│
+│      ● ◉ parser-sessi…  ready      1h│
 │      ◇ ◎ ledger-workt…  removed    3d│
 │      ▣ ◎ weekly-review  planned     —│
 │  ▼ Other                             │
@@ -623,7 +632,7 @@ in bold and its path dim; for kind grouping, `Muxes`, `Sessions`,
 |---|---|---|---|---|
 | 1 | Prefix | cursor gutter, indent, disclosure (only with rows beneath), the pin's kind glyph, pin marker | always | the glyph keeps its color even on a ghost row |
 | 2 | Label | the pin's name | always | bold, cut at 28, padded so it ends in one column at every depth |
-| 3 | Status | a word from [State words](#state-words) | always | cut at 9, padded; a spinner while a refresh is pending |
+| 3 | Status | a word from [State words](#state-words); a running session's live word in place of `in mux` or `resumable` | always | cut at 9, padded; a spinner while a refresh is pending |
 | 4 | Age | see [Age](#age) | always | 4 cells |
 | 5 | Chip | the harness or program | mux and session pins | one width across the tree, so content lines up; the first cell to leave a narrow row |
 | 6 | Content | by kind (below) | when it gets at least 7 cells, or its whole text | gray |
@@ -638,7 +647,8 @@ Rows beneath a pin use the same columns, with no pin marker, and their
 state word starts in the pin row's column. A nested
 mux reads `live`. A nested session's label is its alias, title, mux name,
 or the first 8 characters of its key, its status is `in mux` or
-`resumable`, and its content is the directory it ran in.
+`resumable` (or, when its agent has live state, `waiting`, `working`,
+`ready`, or `error`), and its content is the directory it ran in.
 
 <!-- frame: keys="4" width=170 height=30 -->
 ```text
@@ -646,7 +656,7 @@ or the first 8 characters of its key, its status is `in mux` or
 │► ▼ project  ~/repos/project                                                       │
 │    ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/proje…│
 │      ▣ ◎ nightly                         stopped    2d   claude     ~/repos/proje…│
-│      ● ◉ parser-session                  in mux     1h   claude     claude-code i…│
+│      ● ◉ parser-session                  ready      1h   claude     claude-code i…│
 │      ◇ ◎ ledger-worktree                 removed    3d              project · fea…│
 │      ▣ ◎ weekly-review                   planned     —   codex      ~/repos/proje…│
 │  ▼ Other                                                                          │
@@ -661,7 +671,7 @@ or the first 8 characters of its key, its status is `in mux` or
 │      ▣ ◎ nightly                         stopped    2d   claude     ~/repos/proje…│
 │      ▣ ◎ weekly-review                   planned     —   codex      ~/repos/proje…│
 │  ▼ Sessions                                                                       │
-│      ● ◉ parser-session                  in mux     1h   claude     claude-code i…│
+│      ● ◉ parser-session                  ready      1h   claude     claude-code i…│
 │  ▼ Worktrees                                                                      │
 │      ◇ ◎ ledger-worktree                 removed    3d              project · fea…│
 │  ▼ PRs                                                                            │
@@ -673,7 +683,7 @@ or the first 8 characters of its key, its status is `in mux` or
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
 │    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
-│    ● ◉ parser-session                  in mux     1h   claude     claude-code in …│
+│    ● ◉ parser-session                  ready      1h   claude     claude-code in …│
 │    ◇ ◎ ledger-worktree                 removed    3d              project · featu…│
 │    ⇄ ◉ ledger-pr                       merged     5d              conspectus/proj…│
 │    ▣ ◎ weekly-review                   planned     —   codex      ~/repos/project │

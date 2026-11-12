@@ -291,9 +291,9 @@ pub mod words {
     pub const ERROR: &str = "error";
 
     /// Every word, in the order the reference lists them.
-    pub const ALL: [&str; 12] = [
+    pub const ALL: [&str; 16] = [
         LIVE, IN_MUX, RESUMABLE, STOPPED, REMOVED, MISSING, PLANNED, UNKNOWN, PR_OPEN, PR_DRAFT,
-        PR_MERGED, PR_CLOSED,
+        PR_MERGED, PR_CLOSED, WAITING, WORKING, READY, ERROR,
     ];
 }
 
@@ -338,8 +338,8 @@ pub struct MixedRow {
     /// The pin marker cell after the kind glyph.
     pub marker: PinMarker,
     /// The live state of the session or mux the row stands for (a pin's
-    /// row: the entity it points at). A stopped mux draws its agents' mark
-    /// in the live cell.
+    /// row: the entity it points at). A session's live word replaces its
+    /// link word; a stopped mux draws its agents' mark in the live cell.
     pub live: MixedLive,
 }
 

@@ -90,6 +90,10 @@ fn mixed_views_use_only_the_shared_status_vocabulary() {
         "draft",
         "merged",
         "closed",
+        "waiting",
+        "working",
+        "ready",
+        "error",
     ];
     for view in [View::Pinned, View::History] {
         let lines = lines_of(view);
