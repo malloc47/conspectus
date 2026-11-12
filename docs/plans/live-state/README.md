@@ -1,7 +1,11 @@
 # Live Agent State: Plan
 
-Status: drafted 2026-11-12 on branch `feat/live-state` (milestone m-26).
-Evidence: the six research notes in [`research/`](research/). Decisions: ADRs 0203 to 0207.
+Status: drafted 2026-11-12 on branch `feat/live-state` (milestone m-26);
+phase 1 built on the same branch (CSP-806 to CSP-821). Section 9 records
+where the build differs from this draft. Evidence: the six research notes
+in [`research/`](research/). Decisions: ADRs 0203 to 0207, and 0208 for the
+Claude Code settings edit. Operator guide: "Live agent state" in
+[`docs/operations.md`](../../operations.md#live-agent-state).
 
 ## 1. Goal
 
@@ -112,7 +116,8 @@ The store is the integration point, not the daemon.
   agents' processes once a second, so an agent killed without a goodbye
   reads `exited/killed` within a second rather than at the next snapshot.
 - Reducers for stateless hooks (Claude Code, Codex) run in Rust inside
-  `hook write`, folding each event into the stored per-session entry. Plugins
+  `hook write`, folding each event into the stored per-session entry (as
+  built, one shared reducer over neutral events; section 9). Plugins
   with in-process state (OpenCode, Pi) send a complete snapshot of their own
   state with an instance id and a sequence number, and the store replaces the
   entry when it is newer. Both end in the same entry shape.
@@ -177,7 +182,7 @@ path), plus a lock file.
 - **Supersede:** one live entry per (harness, pid). A new session id from the
   same process (`/clear`, `/new`, resume) ends the old entry.
 - **GC:** exited entries past an hour and dead-pid entries past a day are
-  dropped on write; the file is capped at a few hundred entries.
+  dropped on write; the file is capped at 512 entries.
 - **Privacy:** entries hold enums, counts, ids, paths, and times. The writer
   parses payloads in memory against a typed whitelist and drops the rest
   ([01](research/01-claude-code.md) §6.2 has the Claude Code list). Tests plant
@@ -188,7 +193,9 @@ path), plus a lock file.
 ### 3.4 Graph representation (ADR 0205)
 
 A snapshot side table, `node_live: BTreeMap<NodeId, LiveObservation>`, next to
-`node_presence` and `node_provenance`:
+`node_presence` and `node_provenance` (as built, its values are
+`LiveBinding`s, the observation with the liveness the binder found;
+section 9):
 
 - Keyed by `AgentSession` id (exact match on harness and native session id).
   Entries that have a pane but no known session ("pane-only") go to a second
@@ -201,7 +208,8 @@ A snapshot side table, `node_live: BTreeMap<NodeId, LiveObservation>`, next to
   fingerprint (ADR 0091), and 31 struct literals in the library API.
 - Not graph links: a state is not a relationship between two nodes, and
   `ResolvedRelationship.target` is a `NodeId`.
-- Bumps the rkyv `FORMAT_VERSION`, skipped from JSON only if empty.
+- Bumps the rkyv `FORMAT_VERSION` (to 12, with both tables), skipped from
+  JSON only if empty.
 
 ### 3.5 Install and emission (ADR 0206)
 
@@ -264,20 +272,43 @@ synthetic, built from the documented payload shapes.
 | Order | Story | Task |
 |---|---|---|
 | 1 | Record the decisions and plan | CSP-806 (done) |
-| 2 | Vocabulary and rules in the model | CSP-807 |
-| 3 | `node_live` snapshot side table | CSP-808 |
-| 3 | The live-state store | CSP-809 |
-| 4 | `hook write` as a fast, silent writer | CSP-810 |
-| 5 | Claude Code: reducer, fixtures, install | CSP-811 |
-| 6 | Bind live state at discovery | CSP-812 |
-| 7 | CLI output | CSP-813 |
-| 7 | TUI plumbing (data on row models, nothing rendered) | CSP-814 |
-| 8 | Codex, OpenCode, Pi | CSP-815, CSP-816, CSP-817 |
-| any | Spool defects, key order, Pi mtime | CSP-818, CSP-819, CSP-820 |
-| 9 | Operator guide | CSP-821 |
+| 2 | Vocabulary and rules in the model | CSP-807 (done) |
+| 3 | `node_live` snapshot side table | CSP-808 (done) |
+| 3 | The live-state store | CSP-809 (done) |
+| 4 | `hook write` as a fast, silent writer | CSP-810 (done) |
+| 5 | Claude Code: reducer, fixtures, install | CSP-811 (done) |
+| 6 | Bind live state at discovery | CSP-812 (done) |
+| 7 | CLI output | CSP-813 (done) |
+| 7 | TUI plumbing (data on row models, nothing rendered) | CSP-814 (done) |
+| 8 | Codex, OpenCode, Pi | CSP-815, CSP-816, CSP-817 (done) |
+| any | Spool defects, key order, Pi mtime | CSP-818, CSP-819, CSP-820 (done) |
+| 9 | Operator guide | CSP-821 (done) |
 | 10 | Real-payload verification (needs the operator) | CSP-822 |
-| parked | TUI rendering (cell, rollup, header, order, jump, seen, detail, notify) | CSP-823 to CSP-830 |
+| parked | TUI rendering (cell, rollup, header, order, jump, seen, detail, notify, subagents) | CSP-823 to CSP-830, CSP-854 |
 | parked | Hook-free sources (pane title, `claude agents --json`, tails, other orchestrators) | CSP-831 to CSP-834 |
+
+Follow-ups the stories filed (labels `live-state`, milestone m-26):
+
+| Task | Follow-up | Status |
+|---|---|---|
+| CSP-836 | Bound the daemon socket calls the TUI and CLI make | To Do |
+| CSP-837 | Stop reading the undocumented `CLAUDE_CODE_VERSION` in the hook writer | To Do |
+| CSP-838 | Honor `CLAUDE_CONFIG_DIR` for Claude Code discovery and hook install | To Do |
+| CSP-839 | Keep a stable `conspectus` path in installed hook commands | To Do |
+| CSP-840 | Parse only the whitelisted fields of a hook payload in `hook write` | To Do |
+| CSP-841 | Count every pane-only agent on its mux (`pane_live`) | Done |
+| CSP-842 | Name running agents without live state in `hook status` | To Do |
+| CSP-843 | Re-check bound agents' processes between snapshots in the TUI | Done |
+| CSP-844 | Honor `CODEX_HOME` for Codex discovery | To Do |
+| CSP-845 | Ask tmux about the hook's own pane in `hook write` | Done |
+| CSP-846 | OpenCode 2.x: live state from a TUI-only plugin install | To Do |
+| CSP-847 | OpenCode 2.x: re-read pending permission asks when the server plugin starts | To Do |
+| CSP-848 | Report opencode's live-state health in `hook status` | To Do |
+| CSP-849 | Decide whether CI builds and tests the harness plugins | To Do |
+| CSP-850 | Pi: let the operator name the tools that count as subagents | To Do |
+| CSP-851 | Pi: send the running Pi version with live state | To Do |
+| CSP-852 | Gate a split pane's hook record against its own pane's harness | To Do |
+| CSP-853 | Match a pane-only live entry to its tmux server by full socket path | To Do |
 
 ### 5.2 Effect on existing backlog
 
@@ -303,6 +334,7 @@ synthetic, built from the documented payload shapes.
 | D6 | Quiet instead of silently stale: long WORKING stays WORKING, flagged | a 40-minute test run is real work | change the window or add a hard cutoff |
 | D7 | OpenCode 1.x and 2.x plugins both get a reducer; Pi needs >= 0.84.4 for WAITING and degrades below | the operator runs 1.18.32; 2.x is current | drop one |
 | D8 | Phase 1 reads no screen, no transcript, and runs no new subprocess | ADR 0028 and 0086; capability manifest | ADR 0207 lists the options |
+| D9 | `hook init claude-code` edits `settings.json` in place with a scanner of the crate's own, and `serde_json`'s `preserve_order` stays off | the feature reorders every JSON map in the crate (10 goldens changed when measured) and still re-indents the file; the splice keeps every untouched byte | ADR 0208 alternative A: enable the feature and update the goldens |
 
 ## 7. Parked for the operator
 
@@ -322,22 +354,27 @@ state must rebuild the tree on such a change instead.
 **TUI**
 
 1. State names and the glyph/column (the `●◐○` set collides with session
-   kind, PR, and refresh marks).
+   kind, PR, and refresh marks). CSP-823.
 2. Mux rollup: which state dominates, and does the mux row show it.
-3. Header chip: what it counts.
+   CSP-824.
+3. Header chip: what it counts. CSP-825.
 4. Ordering: attention-first sort, state grouping, a dedicated view.
-5. A jump-to-next-attention key.
-6. Seen/unseen for `ready`.
-7. Pinned and History words for a live session.
-8. Subagent display (count chip, nesting, detail only).
-9. Notifications.
-10. Animation for `working`.
+   CSP-826.
+5. A jump-to-next-attention key. CSP-827.
+6. Seen/unseen for `ready`. CSP-828 (and CSP-823's mark).
+7. Pinned and History words for a live session. CSP-829.
+8. Subagent display (count chip, nesting, detail only). CSP-854.
+9. Notifications. CSP-830.
+10. Animation for `working`. CSP-823.
 
 **Detection policy**
 
 11. Hook-free fallbacks (pane title, `claude agents --json`, transcript tails,
-    ingesting another orchestrator's state).
-12. Staleness display (quiet vs dim vs unknown).
+    ingesting another orchestrator's state). CSP-831 to CSP-834.
+12. Staleness display (quiet vs dim vs unknown). CSP-829.
+
+Until those land, the operator reads live state through the CLI and the
+graph JSON ([`docs/operations.md`](../../operations.md#live-agent-state)).
 
 The mockups and a recommended default for each are in
 [`tui-options.md`](tui-options.md).
@@ -371,3 +408,51 @@ noted.
   (CSP-820): the adapter takes the newest entry that is not `usage`.
 - Doc drift: ADR 0028 and `docs/operations.md` still describe a TTL and
   `hooks.sqlite3`; `docs/design.md` omits `hook_ingest`. Fixed (CSP-818).
+
+## 9. As built (phase 1)
+
+Where the build differs from, or settles, the draft above:
+
+- **One shared reducer.** `hook write` maps each event source's payload
+  (Claude Code, Codex) to a closed set of neutral events (ADR 0204
+  decision 3) and folds them with one reducer shared by every event
+  source; a harness's reducer handles only the cases it must. Codex
+  needed none of its own. Plugin sources (opencode, Pi) send whole
+  snapshots with an instance and sequence number, and the store replaces
+  the entry, so both kinds end in the same entry shape.
+- **Bindings, not bare observations.** `node_live` holds `LiveBinding`s:
+  the stored observation and the `Liveness` (alive, dead, unknown) the
+  binder found for its process, so `graph --format json` tells a dead
+  agent's last state from a live one without a process table. Agents no
+  session matches yet go to a second table, `pane_live`, keyed by the
+  tmux mux and pane (`LivePane`), so two such agents in one mux each
+  count (CSP-841). Readers use `GraphSnapshot::live_state_of`,
+  `live_counts_of_mux`, `live_panes_of`, and `live_tables`. `graph.bin`
+  is at format version 12.
+- **The TUI keeps the data current but draws nothing.** It binds the store
+  again within about a second of a change and re-checks bound agents'
+  processes once a second (CSP-843); the row models carry `live` fields
+  (CSP-814) for the parked rendering stories.
+- **CLI surfaces.** An opt-in `live` column on `table sessions` and
+  `table mux`, a `live state` section in `node show`, the two lists in
+  the graph JSON, and a health line at the end of `hook status`
+  (`receiving`, `silent`, `no-events`, `off`, `unsupported`). No separate
+  `--fresh` read was built: `--refresh` binds the store as it is.
+- **Installers.** Claude Code gets 14 entries, written into `settings.json`
+  in place so the operator's bytes survive (ADR 0208); Codex gets 11,
+  edited into `config.toml` through `toml_edit`, with the `/hooks` trust
+  step printed and never written; Pi gets extension version 2, and
+  `hook status pi` states the Pi versions waiting needs; opencode gets
+  plugin 0.3.0 with a 2.x server entrypoint. There is no `hook init
+  opencode` and no opencode health line yet (CSP-848).
+- **Plugin reducers are verified with `node --test`.** The opencode reducer
+  and the Pi state machine are TypeScript modules with no harness imports,
+  tested by `just opencode-plugin-test` and `just pi-plugin-test` (Node
+  22.6 or later, run by hand). The scripted event fixtures are shared: the
+  TypeScript tests replay them through the reducer, and the Rust tests
+  feed the expected snapshots through the payload parser and the store.
+  Neither CI nor the dev shell runs the plugin tests yet (CSP-849).
+- **Attribution fixes.** The hook spool keeps one record per pane
+  (CSP-818), `hook write` asks tmux about its own pane (CSP-845), and Pi's
+  idle cache warming no longer dates a session (CSP-820).
+- **Every fixture is synthetic** until CSP-822 records real payloads.
