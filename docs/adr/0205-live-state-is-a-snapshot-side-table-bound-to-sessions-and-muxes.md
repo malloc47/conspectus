@@ -70,7 +70,13 @@ five representations:
    table: `snapshot.live_state_of(id, now)` returns the ADR 0203
    effective state. `snapshot.live_counts_of_mux(id, now)` returns
    `LiveCounts` over the mux's hosted sessions (found with the existing
-   preferred-mux helpers) and its pane-only entries.
+   preferred-mux helpers) and its pane-only entries. Both also take the
+   caller's liveness check, a closure from the stored observation to
+   `Liveness`, called only for an entry that exists, so the reader that
+   holds the process table checks the recorded pid and start time and a
+   reader that cannot answers `Unknown`. A hosted session counts when
+   the mux is its preferred mux and it has an entry; one without an
+   entry is not counted at all.
 
 6. **Not in the fingerprint.** `node_live` is not part of the process-tree
    fingerprint and the fields of identity nodes are unchanged, so a state
@@ -78,7 +84,10 @@ five representations:
 
 7. **Eviction and merge** treat the table like presence: the mutator owns
    it, so it is rebuilt on every cycle, and a provider eviction drops
-   entries for the nodes it owned.
+   entries for the nodes it owned. A `GraphFragment` (provider output)
+   has no live table; the conversion from a snapshot names it among the
+   fields it leaves behind, and the warm-start merge keeps the fresh
+   snapshot's table and drops the prior's.
 
 ## Consequences
 
