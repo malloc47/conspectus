@@ -4,6 +4,7 @@ title: 'TUI plumbing: refresh live state from the store onto the row models'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
+updated_date: '2026-11-12 02:27'
 labels:
   - live-state
   - ls-tui
@@ -12,7 +13,7 @@ dependencies:
   - CSP-812
 documentation:
   - >-
-    docs/adr/0204-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md
+    docs/adr/0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md
   - docs/plans/live-state/research/06-internal-audit.md
 priority: medium
 type: enhancement

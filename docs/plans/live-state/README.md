@@ -1,7 +1,7 @@
 # Live Agent State: Plan
 
 Status: drafted 2026-11-12 on branch `feat/live-state` (milestone m-26).
-Evidence: the six research notes in [`research/`](research/). Decisions: ADRs 0202 to 0206.
+Evidence: the six research notes in [`research/`](research/). Decisions: ADRs 0203 to 0207.
 
 ## 1. Goal
 
@@ -84,11 +84,11 @@ Cross-cutting findings that shape the design
 
 | Layer | What | Decision |
 |---|---|---|
-| L0 | Neutral vocabulary and rules in `src/model` | ADR 0202 |
-| L1 | Emitters: hook entries and plugins, one reducer per harness | ADR 0205 |
-| L2 | The live-state store: a per-session folded state file, outside the attribution spool | ADR 0203 |
-| L3 | Binding the store to nodes at discovery, and again in the TUI | ADR 0204 |
-| L4 | The `node_live` snapshot side table | ADR 0204 |
+| L0 | Neutral vocabulary and rules in `src/model` | ADR 0203 |
+| L1 | Emitters: hook entries and plugins, one reducer per harness | ADR 0206 |
+| L2 | The live-state store: a per-session folded state file, outside the attribution spool | ADR 0204 |
+| L3 | Binding the store to nodes at discovery, and again in the TUI | ADR 0205 |
+| L4 | The `node_live` snapshot side table | ADR 0205 |
 | L5 | CLI and JSON surfaces | stories |
 | L6 | TUI rendering | parked, section 7 |
 
@@ -115,7 +115,7 @@ The store is the integration point, not the daemon.
   state with an instance id and a sequence number, and the store replaces the
   entry when it is newer. Both end in the same entry shape.
 
-### 3.2 State model (ADR 0202)
+### 3.2 State model (ADR 0203)
 
 Closed set, harness-neutral:
 
@@ -161,7 +161,7 @@ A mux has no state of its own. It has **counts** over the sessions it hosts
 Which state dominates is a display decision (section 7); the data layer
 provides the counts and a default precedence function.
 
-### 3.3 The store (ADR 0203)
+### 3.3 The store (ADR 0204)
 
 `$XDG_STATE_HOME/conspectus/live-state.json`, category 2 (rebuildable
 observation, already inside the manifest's `$STATE/conspectus/**` write
@@ -183,7 +183,7 @@ path), plus a lock file.
   store. Even `tool_name` is not stored: it is used to classify
   (`AskUserQuestion` becomes `question`) and dropped.
 
-### 3.4 Graph representation (ADR 0204)
+### 3.4 Graph representation (ADR 0205)
 
 A snapshot side table, `node_live: BTreeMap<NodeId, LiveObservation>`, next to
 `node_presence` and `node_provenance`:
@@ -200,7 +200,7 @@ A snapshot side table, `node_live: BTreeMap<NodeId, LiveObservation>`, next to
   `ResolvedRelationship.target` is a `NodeId`.
 - Bumps the rkyv `FORMAT_VERSION`, skipped from JSON only if empty.
 
-### 3.5 Install and emission (ADR 0205)
+### 3.5 Install and emission (ADR 0206)
 
 - `hook init <harness>` is idempotent and installs the full set for that
   harness; re-running upgrades an older install. Nothing changes without the
@@ -223,7 +223,7 @@ A snapshot side table, `node_live: BTreeMap<NodeId, LiveObservation>`, next to
   snapshot only on change, plus a 60 s heartbeat while not idle. The
   writer is a spawned `conspectus hook write` (detached, not awaited), never
   one per streaming event.
-- Hook-free sources are out of phase 1 (ADR 0206).
+- Hook-free sources are out of phase 1 (ADR 0207).
 
 ## 4. Cost and latency budget
 
@@ -291,14 +291,14 @@ synthetic, built from the documented payload shapes.
 
 | # | Decision | Why | To reverse |
 |---|---|---|---|
-| D1 | Live state is a side table, not a node field or link | precedent (0140), keeps identity and fingerprint stable, small socket payload, library API intact | ADR 0204 names the alternative; the table is read through one accessor |
+| D1 | Live state is a side table, not a node field or link | precedent (0140), keeps identity and fingerprint stable, small socket payload, library API intact | ADR 0205 names the alternative; the table is read through one accessor |
 | D2 | The store, not the daemon, is the integration point | daemon optional, no resolve per event, fast TUI | add a daemon `live_state` command later; the store stays the source |
-| D3 | `tool_name`, `agent_type`, and error text are not persisted | MCP names leak server names; error text is payload | extend the whitelist in the ADR 0205 table |
+| D3 | `tool_name`, `agent_type`, and error text are not persisted | MCP names leak server names; error text is payload | extend the whitelist in the ADR 0206 table |
 | D4 | `hook init` installs the full event set and upgrades on re-run | operator-initiated; nothing silent | add a `--minimal` flag |
 | D5 | Two writer spawns per tool call are acceptable (`PostToolUse` for all tools) | needed to leave WAITING; about 10 ms against tool latency | drop the two events; WAITING lingers until the next turn event |
 | D6 | Quiet instead of silently stale: long WORKING stays WORKING, flagged | a 40-minute test run is real work | change the window or add a hard cutoff |
 | D7 | OpenCode 1.x and 2.x plugins both get a reducer; Pi needs >= 0.84.4 for WAITING and degrades below | the operator runs 1.18.32; 2.x is current | drop one |
-| D8 | Phase 1 reads no screen, no transcript, and runs no new subprocess | ADR 0028 and 0086; capability manifest | ADR 0206 lists the options |
+| D8 | Phase 1 reads no screen, no transcript, and runs no new subprocess | ADR 0028 and 0086; capability manifest | ADR 0207 lists the options |
 
 ## 7. Parked for the operator
 

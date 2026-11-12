@@ -1,14 +1,14 @@
-# ADR 0204: Live State Is A Snapshot Side Table Bound To Sessions And Muxes
+# ADR 0205: Live State Is A Snapshot Side Table Bound To Sessions And Muxes
 
 ## Status
 
-Accepted. Part of the live agent state plan with ADRs 0202, 0203, 0205,
-and 0206. Extends the graph snapshot (ADR 0083) with one sparse table,
+Accepted. Part of the live agent state plan with ADRs 0203, 0204, 0206,
+and 0207. Extends the graph snapshot (ADR 0083) with one sparse table,
 following the presence table of ADR 0140. Bumps the rkyv format version.
 
 ## Context
 
-ADR 0202 defines the observation and ADR 0203 stores it. The graph
+ADR 0203 defines the observation and ADR 0204 stores it. The graph
 needs to carry it to every consumer: the TUI row builders, `conspectus
 table`, `graph --format json`, `node show`, and the library API (ADR
 0015).
@@ -64,10 +64,10 @@ five representations:
 4. **Liveness comes from the process evidence discovery already has.**
    An entry's pid is checked against the process table and the recorded
    start time. Where the platform offers no cheap check, liveness is
-   `Unknown` and the 15-minute rule applies (ADR 0202).
+   `Unknown` and the 15-minute rule applies (ADR 0203).
 
 5. **Effective state is read through an accessor**, never from the raw
-   table: `snapshot.live_state_of(id, now)` returns the ADR 0202
+   table: `snapshot.live_state_of(id, now)` returns the ADR 0203
    effective state. `snapshot.live_counts_of_mux(id, now)` returns
    `LiveCounts` over the mux's hosted sessions (found with the existing
    preferred-mux helpers) and its pane-only entries.
@@ -92,7 +92,7 @@ five representations:
 - A pane-only entry shows on the mux row, not on any session. If the
   session appears later, the next bind moves the state to it.
 - Mux aggregation is computed, so the model does not need to decide which
-  state a mux row shows (ADR 0202).
+  state a mux row shows (ADR 0203).
 
 ## Alternatives Considered
 

@@ -1,9 +1,9 @@
-# ADR 0202: Live State Is A Neutral Observation With A Closed State Set
+# ADR 0203: Live State Is A Neutral Observation With A Closed State Set
 
 ## Status
 
 Accepted. Part of the live agent state plan (`docs/plans/live-state/`)
-with ADRs 0203, 0204, 0205, and 0206. Extends the data model; adds no
+with ADRs 0204, 0205, 0206, and 0207. Extends the data model; adds no
 write path (ADR 0143) and relies on ADR 0086 (payload privacy) and ADR
 0140 (absence is not evidence of absence).
 

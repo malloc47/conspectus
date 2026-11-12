@@ -4,6 +4,7 @@ title: 'Claude Code live state: reducer, fixtures, and hook install'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
+updated_date: '2026-11-12 02:27'
 labels:
   - live-state
   - ls-emit
@@ -13,7 +14,7 @@ dependencies:
 documentation:
   - docs/plans/live-state/research/01-claude-code.md
   - >-
-    docs/adr/0205-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md
+    docs/adr/0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md
 priority: high
 type: enhancement
 ordinal: 897000
@@ -24,7 +25,7 @@ ordinal: 897000
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Claude Code is the harness the operator uses most and has the richest hook set, so it is the vertical slice that proves the design end to end. Its installed hook covers session start only, with a matcher that misses the newer `fork` source, so nothing reports permission waits, stops, or subagents.
 
-Scope: Implement the Claude Code adapter's `LiveEvent` mapping and reducer from the research (`01-claude-code.md` section 6): the 14 events of ADR 0205, per-agent waits, the subagent set, compaction, `StopFailure` types, `SessionEnd`, and the Stop-time reconcile of background subagents. Extend `hook init claude-code` to install the full set idempotently (upgrading an older install), with a 5 s timeout on every entry, the typed `Notification` matcher, the complete `SessionStart` matcher, and exec-form detection; extend `hook status claude-code` to show per-event coverage; make `hook remove` remove every entry it added and nothing else. Build the fixtures from documented payload shapes: single payloads and ordered sequences for the reducer (simple turn, permission approve, deny, Esc interrupt, AskUserQuestion, plan approve, parallel and background subagents, auto-compact, `/clear`, rate limit, kill -9). Replace the existing fixtures that use the invalid `source: "user"`. Record the known gaps in the reducer's documentation.
+Scope: Implement the Claude Code adapter's `LiveEvent` mapping and reducer from the research (`01-claude-code.md` section 6): the 14 events of ADR 0206, per-agent waits, the subagent set, compaction, `StopFailure` types, `SessionEnd`, and the Stop-time reconcile of background subagents. Extend `hook init claude-code` to install the full set idempotently (upgrading an older install), with a 5 s timeout on every entry, the typed `Notification` matcher, the complete `SessionStart` matcher, and exec-form detection; extend `hook status claude-code` to show per-event coverage; make `hook remove` remove every entry it added and nothing else. Build the fixtures from documented payload shapes: single payloads and ordered sequences for the reducer (simple turn, permission approve, deny, Esc interrupt, AskUserQuestion, plan approve, parallel and background subagents, auto-compact, `/clear`, rate limit, kill -9). Replace the existing fixtures that use the invalid `source: "user"`. Record the known gaps in the reducer's documentation.
 
 TUI changes: none visible. The TUI renders the same frames before and after (check a few views with `conspectus tui --snapshot`).
 

@@ -1,9 +1,9 @@
-# ADR 0203: The Live-State Store Folds Agent Events Per Session
+# ADR 0204: The Live-State Store Folds Agent Events Per Session
 
 ## Status
 
-Accepted. Part of the live agent state plan with ADRs 0202, 0204, 0205,
-and 0206. Refines ADR 0028 and ADR 0146: attribution stays in the hook
+Accepted. Part of the live agent state plan with ADRs 0203, 0205, 0206,
+and 0207. Refines ADR 0028 and ADR 0146: attribution stays in the hook
 spool; state gets its own store beside it. A category 2 observation
 under ADR 0143, inside the manifest's `$STATE/conspectus/**` path.
 
@@ -39,7 +39,7 @@ Pi run a plugin inside the harness, which can hold it itself.
    this ADR.
 
 2. **The unit is the entry**, one per `(harness, session_id)`. It holds
-   a `LiveObservation` (ADR 0202), the cwd and transcript path, the tmux
+   a `LiveObservation` (ADR 0203), the cwd and transcript path, the tmux
    socket, session name, and pane id when known, an `instance` and `seq`
    for plugin sources, and a private `reducer` block (pending waits by
    agent id, active subagent ids, the state to resume after compaction).
@@ -89,7 +89,7 @@ Pi run a plugin inside the harness, which can hold it itself.
 
 9. **No payload.** Entries contain enums, counts, ids, paths, and times.
    The writer reads payloads in memory against a typed whitelist (ADR
-   0205), and tests plant sentinel strings in every payload-bearing field
+   0206), and tests plant sentinel strings in every payload-bearing field
    and assert none reaches the file (ADR 0086 Tier 3).
 
 ## Consequences
@@ -136,7 +136,7 @@ Pi run a plugin inside the harness, which can hold it itself.
   one (every reducer is idempotent) or, for a working state, by the quiet
   window.
 - *What if the pid cannot be found?* The entry has no pid; its liveness is
-  `Unknown`, and the 15-minute rule applies (ADR 0202).
+  `Unknown`, and the 15-minute rule applies (ADR 0203).
 - *What about two machines sharing a home directory?* Out of scope; the
   pid and tmux socket make entries machine-local, and the store lives
   under `$XDG_STATE_HOME`, which is per machine by convention.

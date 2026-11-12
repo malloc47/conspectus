@@ -641,7 +641,7 @@ presence first, so nothing attaches to, counts, or renames a ghost.
 
 ## Live Agent State
 
-Per ADRs 0202 to 0206 (plan: `docs/plans/live-state/`), Conspectus shows what
+Per ADRs 0203 to 0207 (plan: `docs/plans/live-state/`), Conspectus shows what
 a running agent is doing, in the operator's three buckets: **waiting** on them
 (permission, question, plan, input), **ready** for a new prompt, and
 **working** (generating, running a tool, retrying, compacting, with
@@ -652,13 +652,13 @@ State is an observation, not a relationship. Emitters (the hook entries of
 Claude Code and Codex, the OpenCode plugin, the Pi extension) report events.
 `conspectus hook write` folds each event into a per-session entry in
 `$XDG_STATE_HOME/conspectus/live-state.json` (a category 2 observation, ADR
-0203). It never waits on a daemon, prints nothing, and keeps only enums,
+0204). It never waits on a daemon, prints nothing, and keeps only enums,
 counts, ids, paths, and times. Entries are keyed by harness and session id
 and carry the tmux pane, so split panes do not collide.
 
 A discovery mutator binds entries to `AgentSession` nodes (by harness and
 native session id), or to the `MuxSession` for pane-only entries, into a
-sparse `node_live` snapshot table beside `node_presence` (ADR 0204). The TUI
+sparse `node_live` snapshot table beside `node_presence` (ADR 0205). The TUI
 re-binds from the store about once a second between snapshots, with or without
 a daemon. A mux has no state of its own: it has counts over what it hosts.
 
@@ -668,7 +668,7 @@ stay as they are and are flagged quiet; `waiting`, `ready`, and `error` do not
 age while the process lives; with no liveness evidence everything but
 `exited` becomes `unknown` after fifteen minutes. A session with no events has
 no live state. Hook-free sources (pane title, `claude agents --json`,
-transcript tails) need their own decisions (ADR 0206). Which glyphs, columns,
+transcript tails) need their own decisions (ADR 0207). Which glyphs, columns,
 rollups, and orderings show it in the TUI is open (the plan's parked list).
 
 ## Pin Slots

@@ -797,7 +797,7 @@ rank. ADR 0078, as amended by ADR 0190, governs the order.
     not "slot".
 14. **Docs in the same change.** `docs/tui-columns.md` and its frames,
     `docs/design.md` (and its stale socket list), `docs/operations.md`,
-    a new ADR (next number 0202) refining 0028 and 0146, plus a
+    a new ADR (next number 0203) refining 0028 and 0146, plus a
     framework record if `tuikit` gains a control or mark.
 
 ## 9. Drift and latent bugs found along the way

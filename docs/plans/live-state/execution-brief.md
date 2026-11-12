@@ -23,7 +23,7 @@ this file says how.
 ## Read First
 
 1. `CLAUDE.md` (project rules; they override anything here that conflicts).
-2. `docs/plans/live-state/README.md` (the plan) and ADRs 0202 to 0206.
+2. `docs/plans/live-state/README.md` (the plan) and ADRs 0203 to 0207.
    Then ADR 0028 (hook sidecars), 0146 (the hook spool), 0143 (the mutation
    envelope), 0086 (payload privacy), 0140 (presence, the precedent for a
    sparse table), 0083 (snapshot persistence), and 0117 (capabilities).

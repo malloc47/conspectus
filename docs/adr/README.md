@@ -41,8 +41,8 @@ The provider-neutral node model, evidence-preserving `GraphLink` candidates, and
 | [0059](0059-resolver-rules-engine-evaluation.md) | Resolver Rules-Engine Evaluation | Accepted |
 | [0077](0077-resolver-ambiguous-slot-preservation.md) | Resolver-Side Preservation Of Ambiguous Resolution Slots | Accepted (narrowed by 0107) |
 | [0084](0084-first-class-pin-nodes.md) | First-Class Pin Nodes | Accepted (amended by 0141) |
-| [0202](0202-live-state-is-a-neutral-observation-with-a-closed-state-set.md) | Live State Is A Neutral Observation With A Closed State Set | Accepted |
-| [0204](0204-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md) | Live State Is A Snapshot Side Table Bound To Sessions And Muxes | Accepted |
+| [0203](0203-live-state-is-a-neutral-observation-with-a-closed-state-set.md) | Live State Is A Neutral Observation With A Closed State Set | Accepted |
+| [0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md) | Live State Is A Snapshot Side Table Bound To Sessions And Muxes | Accepted |
 
 ## Discovery and attribution
 
@@ -53,7 +53,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0011](0011-forge-discovery-via-gh.md) | Forge Discovery Via The `gh` CLI | Accepted |
 | [0013](0013-opencode-sqlite-session-store.md) | Read opencode Sessions From SQLite | Accepted |
 | [0027](0027-workspace-detection-precedence.md) | Workspace Detection And Provider Precedence | Accepted |
-| [0028](0028-hook-sidecar-mux-attribution.md) | Hook Sidecar Mux Attribution | Accepted (refined by 0146; live state added by 0203, 0205) |
+| [0028](0028-hook-sidecar-mux-attribution.md) | Hook Sidecar Mux Attribution | Accepted (refined by 0146; live state added by 0204, 0206) |
 | [0046](0046-process-tree-pane-linker.md) | Process-Tree Pane Linker | Accepted |
 | [0048](0048-codex-state-and-log-readers.md) | Codex State and Log Readers for Mux Attribution | Accepted (amended) |
 | [0049](0049-opencode-hook-plugin-distribution.md) | OpenCode Hook Plugin Distribution | Accepted |
@@ -64,9 +64,9 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0089](0089-mux-backend-trait.md) | Mux Backend Trait | Accepted |
 | [0111](0111-launch-directory-is-optional.md) | The Launch Directory Is An Optional Input | Accepted |
 | [0138](0138-provider-workspaces-from-observed-cwds.md) | Provider Workspaces From Observed Cwds | Accepted |
-| [0203](0203-the-live-state-store-folds-agent-events-per-session.md) | The Live-State Store Folds Agent Events Per Session | Accepted |
-| [0205](0205-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted |
-| [0206](0206-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted |
+| [0204](0204-the-live-state-store-folds-agent-events-per-session.md) | The Live-State Store Folds Agent Events Per Session | Accepted |
+| [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted |
+| [0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted |
 
 ## User intent and the write envelope
 

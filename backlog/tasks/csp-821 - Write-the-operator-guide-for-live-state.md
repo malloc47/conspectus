@@ -4,6 +4,7 @@ title: Write the operator guide for live state
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
+updated_date: '2026-11-12 02:27'
 labels:
   - live-state
   - ls-docs
@@ -34,7 +35,7 @@ Tests and checks: `git diff --check`; the doc-sync tests that scan the docs stil
 <!-- AC:BEGIN -->
 - [ ] #1 `docs/operations.md` explains enabling, states, gaps, privacy, and troubleshooting
 - [ ] #2 `docs/library-api.md` lists the live-state types
-- [ ] #3 The known gaps match ADR 0205
+- [ ] #3 The known gaps match ADR 0206
 <!-- AC:END -->
 
 ## Definition of Done

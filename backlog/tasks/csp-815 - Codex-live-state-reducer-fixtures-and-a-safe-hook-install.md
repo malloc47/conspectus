@@ -4,6 +4,7 @@ title: 'Codex live state: reducer, fixtures, and a safe hook install'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
+updated_date: '2026-11-12 02:27'
 labels:
   - live-state
   - ls-emit
@@ -14,7 +15,7 @@ dependencies:
 documentation:
   - docs/plans/live-state/research/02-codex.md
   - >-
-    docs/adr/0205-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md
+    docs/adr/0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md
 priority: medium
 type: enhancement
 ordinal: 901000
@@ -25,7 +26,7 @@ ordinal: 901000
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Codex now has a full hook system whose entries sit beside the operator's own, but the installed Conspectus entry likely does nothing on current Codex until the operator trusts it in `/hooks`, and the installer replaces an operator's `[[hooks.SessionStart]]` tables and sets no timeout. State needs the installer fixed and the reducer written.
 
-Scope: Fix `hook init codex`: preserve the operator's array-of-tables and inline forms, set a timeout on every entry, install the Tier A set of ADR 0205 as separate matcher groups, make status and remove idempotent and exact, and print the `/hooks` review instruction. Never write a trust value. Implement the Codex `LiveEvent` mapping and reducer (`02-codex.md` section 6) including the subagent child set and `permission_mode` plan handling, fixtures from the documented shapes with sentinel text, and the `unknown event is ignored` behavior.
+Scope: Fix `hook init codex`: preserve the operator's array-of-tables and inline forms, set a timeout on every entry, install the Tier A set of ADR 0206 as separate matcher groups, make status and remove idempotent and exact, and print the `/hooks` review instruction. Never write a trust value. Implement the Codex `LiveEvent` mapping and reducer (`02-codex.md` section 6) including the subagent child set and `permission_mode` plan handling, fixtures from the documented shapes with sentinel text, and the `unknown event is ignored` behavior.
 
 TUI changes: none visible. The TUI renders the same frames before and after (check a few views with `conspectus tui --snapshot`).
 

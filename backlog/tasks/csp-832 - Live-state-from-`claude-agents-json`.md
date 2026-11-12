@@ -4,6 +4,7 @@ title: Live state from `claude agents --json`
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
+updated_date: '2026-11-12 02:25'
 labels:
   - live-state
   - ls-policy
@@ -12,7 +13,7 @@ milestone: m-26
 dependencies:
   - CSP-812
 documentation:
-  - docs/adr/0206-live-state-sources-beyond-hooks-need-their-own-decision.md
+  - docs/adr/0207-live-state-sources-beyond-hooks-need-their-own-decision.md
   - docs/plans/live-state/research/01-claude-code.md
 priority: low
 type: enhancement

@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-25 02:00'
-updated_date: '2026-11-12 01:48'
+updated_date: '2026-11-12 02:24'
 labels:
   - t8
 milestone: m-13
@@ -49,5 +49,5 @@ Legacy ID: `T8-022`
 <!-- SECTION:NOTES:BEGIN -->
 TUI framework update (2026-10-31, CSP-766): no `status_running`, `status_waiting`, `status_idle`, or `status_error` colors exist or are reserved. New colors are host roles registered with the framework theme (`ROLES` in `src/tui/theme.rs`, ADR 0153), set under `[tui.theme]`; a header chip is a `tuikit::chip::StatusChip` (ADR 0157); a row glyph is a cell of the view's column schema built in `src/tui/rows/` (ADR 0183), and a new glyph needs a vetted entry in the glyph table (`tuikit::glyphs` or the host's `src/tui/icons.rs`, ADR 0154).
 
-Superseded by milestone m-26 (Live Agent State, ADRs 0202 to 0206). The plan replaces this story's pane-delta detection with hook and plugin events (pane scraping conflicts with ADR 0028 and ADR 0086), keeps state in a `node_live` snapshot side table rather than a node property, and moves the glyph, header chip, and column decisions to the TUI stories CSP-823 to CSP-830. Close this task when CSP-823 lands.
+Superseded by milestone m-26 (Live Agent State, ADRs 0203 to 0207). The plan replaces this story's pane-delta detection with hook and plugin events (pane scraping conflicts with ADR 0028 and ADR 0086), keeps state in a `node_live` snapshot side table rather than a node property, and moves the glyph, header chip, and column decisions to the TUI stories CSP-823 to CSP-830. Close this task when CSP-823 lands.
 <!-- SECTION:NOTES:END -->

@@ -1,14 +1,14 @@
-# ADR 0206: Live-State Sources Beyond Hooks Need Their Own Decision
+# ADR 0207: Live-State Sources Beyond Hooks Need Their Own Decision
 
 ## Status
 
-Accepted. Part of the live agent state plan with ADRs 0202 to 0205.
+Accepted. Part of the live agent state plan with ADRs 0203 to 0206.
 Applies the carve-out in ADR 0028 (no generic terminal scraping without a
 separate decision) and the tiers of ADR 0086.
 
 ## Context
 
-Hooks and plugins (ADR 0205) cover most states but have gaps: an
+Hooks and plugins (ADR 0206) cover most states but have gaps: an
 interrupted Claude turn fires no `Stop`, an approval granted fires no
 event, a killed process fires no exit, and a session with no hook
 installed has no evidence at all. Other orchestrators close those gaps
@@ -32,10 +32,10 @@ Each candidate widens what Conspectus reads or runs:
 ## Decision
 
 1. **Phase 1 reads no screen, no transcript, and runs no new program for
-   live state.** The only inputs are hook and plugin events (ADR 0205) and
+   live state.** The only inputs are hook and plugin events (ADR 0206) and
    process liveness the discovery code already has.
 2. **A session with no events has no live state.** It is not shown as idle
-   (ADR 0202).
+   (ADR 0203).
 3. **A missing signal is made visible, not guessed.** `hook status`
    reports a harness that is active without events, so a missing install
    or an untrusted Codex hook is found by the operator rather than hidden
@@ -57,7 +57,7 @@ Each candidate widens what Conspectus reads or runs:
 - The first release answers the operator's three questions from events
   alone and is honest where it cannot: `unknown` and `quiet` exist so a
   gap shows as a gap.
-- The known inaccuracies are listed in ADR 0205 and in the operator guide,
+- The known inaccuracies are listed in ADR 0206 and in the operator guide,
   so they are not rediscovered as bugs.
 - Closing a gap is a small, separately reviewable change, and a source can
   be turned down without touching the model or the store.

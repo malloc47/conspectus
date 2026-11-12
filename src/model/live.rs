@@ -1,4 +1,4 @@
-//! Live agent state (ADR 0202): what a running agent is doing now, in a
+//! Live agent state (ADR 0203): what a running agent is doing now, in a
 //! closed vocabulary that no harness owns, and the rules that turn a
 //! stored observation into the state a reader shows.
 //!

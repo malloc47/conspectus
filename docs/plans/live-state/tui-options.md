@@ -204,7 +204,7 @@ beside the existing filters; `conspectus table --state waiting` follows.
 
 ## 9. Sources beyond hooks (detection policy)
 
-Phase 1 reads no screen and no transcript (ADR 0206). Each source below needs
+Phase 1 reads no screen and no transcript (ADR 0207). Each source below needs
 your go-ahead, then its own ADR.
 
 | Source | Recommend | Why |

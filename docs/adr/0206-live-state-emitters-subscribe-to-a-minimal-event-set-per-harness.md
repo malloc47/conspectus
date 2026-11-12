@@ -1,9 +1,9 @@
-# ADR 0205: Live-State Emitters Subscribe To A Minimal Event Set Per Harness
+# ADR 0206: Live-State Emitters Subscribe To A Minimal Event Set Per Harness
 
 ## Status
 
-Accepted. Part of the live agent state plan with ADRs 0202, 0203, 0204,
-and 0206. Extends ADR 0028 (hook sidecars) with state events. Hook
+Accepted. Part of the live agent state plan with ADRs 0203, 0204, 0205,
+and 0207. Extends ADR 0028 (hook sidecars) with state events. Hook
 installation remains operator-initiated, ADR 0143 category 5. Refines
 ADR 0086 for hook payloads.
 
@@ -59,7 +59,7 @@ are in the research notes and become tests.
    are debounced.
 5. **Heartbeat.** Plugin sources resend an unchanged snapshot every 60 s
    while the state is not `ready`, so a hung plugin shows as quiet (ADR
-   0202). Event sources send none.
+   0203). Event sources send none.
 
 ### Installation
 
@@ -103,7 +103,7 @@ are in the research notes and become tests.
     subagent tool a subagent) and discards it. MCP tool names reveal
     server names, and no state needs them.
 13. **A writer never disturbs the harness**: nothing on stdout or stderr,
-    exit 0, bounded time (ADR 0203). Plugin handlers catch and swallow
+    exit 0, bounded time (ADR 0204). Plugin handlers catch and swallow
     their own errors.
 
 ## Consequences
@@ -122,7 +122,7 @@ are in the research notes and become tests.
   approval granted fires no event until the tool ends (so `waiting` can
   linger through a long approved tool); a killed process says nothing.
   The first is repaired by the next turn event or the quiet window, the
-  second by the next tool event, the third by pid liveness. ADR 0206
+  second by the next tool event, the third by pid liveness. ADR 0207
   lists the sources that could close them.
 
 ## Alternatives Considered

@@ -4,6 +4,7 @@ title: Expose live state in CLI output
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
+updated_date: '2026-11-12 02:27'
 labels:
   - live-state
   - ls-cli
@@ -13,7 +14,7 @@ dependencies:
   - CSP-811
 documentation:
   - >-
-    docs/adr/0204-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md
+    docs/adr/0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md
 priority: medium
 type: enhancement
 ordinal: 899000

@@ -4,6 +4,7 @@ title: Bind live state to the graph at discovery
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
+updated_date: '2026-11-12 02:27'
 labels:
   - live-state
   - ls-bind
@@ -13,7 +14,7 @@ dependencies:
   - CSP-809
 documentation:
   - >-
-    docs/adr/0204-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md
+    docs/adr/0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md
 priority: high
 type: enhancement
 ordinal: 898000
@@ -22,7 +23,7 @@ ordinal: 898000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-The store is only useful once its entries reach the nodes consumers read. ADR 0204 defines the binding (session by harness and native id, otherwise the mux by tmux socket and session name) and runs it both at discovery and again in the TUI, so a pure function must own it.
+The store is only useful once its entries reach the nodes consumers read. ADR 0205 defines the binding (session by harness and native id, otherwise the mux by tmux socket and session name) and runs it both at discovery and again in the TUI, so a pure function must own it.
 
 Scope: Add the pure `bind_live(snapshot, entries, liveness, now)` and the `live_state` discovery mutator, registered beside the hook sidecar (provider descriptor, eviction, always re-run) so daemon cycles, one-shot cold rebuilds, and the daemonless TUI's background discovery all produce the table. Add a liveness probe that checks an entry's pid and start time against the process table the discovery code already has (Linux `/proc`; other platforms report `Unknown`). Pane-only entries bind to the mux; a later-appearing session takes the state from the mux on the next bind. Unbound entries stay in the store. Live state never creates a node.
 
