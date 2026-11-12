@@ -73,15 +73,29 @@ impl ProcProbe {
 }
 
 impl PidProbe for ProcProbe {
+    /// A running process, the common case, costs one read of its `stat`;
+    /// only a pid with no readable `stat` costs a stat of its directory
+    /// and of the table's root, to tell a gone process from a table that
+    /// is not there.
     fn status(&self, pid: i64) -> PidStatus {
-        let Some(root) = self.root.as_deref().filter(|root| root.is_dir()) else {
+        let Some(root) = self.root.as_deref() else {
             return PidStatus::Unknown;
         };
-        if pid <= 0 || !root.join(pid.to_string()).is_dir() {
-            return PidStatus::Gone;
+        if pid > 0 {
+            let dir = root.join(pid.to_string());
+            if let Ok(stat) = fs::read_to_string(dir.join("stat")) {
+                return PidStatus::Running {
+                    start: parse_start_time(&stat),
+                };
+            }
+            if dir.is_dir() {
+                return PidStatus::Running { start: None };
+            }
         }
-        PidStatus::Running {
-            start: start_time_in(root, pid),
+        if root.is_dir() {
+            PidStatus::Gone
+        } else {
+            PidStatus::Unknown
         }
     }
 }
@@ -173,6 +187,13 @@ mod tests {
             ProcProbe::at(root.join("absent")).liveness(&observation(Some(4242), Some(500))),
             Liveness::Unknown
         );
+        fs::create_dir(root.join("5151")).unwrap();
+        assert_eq!(
+            ProcProbe::at(root).status(5151),
+            PidStatus::Running { start: None },
+            "a process whose stat cannot be read runs, start unknown"
+        );
+        assert_eq!(ProcProbe::at(root).status(0), PidStatus::Gone);
     }
 
     #[test]
