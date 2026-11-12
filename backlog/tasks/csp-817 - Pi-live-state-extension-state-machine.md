@@ -4,7 +4,7 @@ title: 'Pi live state: extension state machine'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 11:19'
+updated_date: '2026-11-12 11:22'
 labels:
   - live-state
   - ls-emit
@@ -39,7 +39,7 @@ Blockers: The fast writer.
 - [ ] #1 The extension reports state on change and a heartbeat, never spawning a process on a streaming event
 - [ ] #2 Error text never leaves the extension; only the class does
 - [ ] #3 `hook status pi` reports an outdated extension and the version floor for WAITING
-- [ ] #4 Fixtures and a Rust mirror verify the state machine without Node
+- [ ] #4 The state machine is a pure exported function tested with `node --test` against shared event-script fixtures that the Rust tests also consume
 <!-- AC:END -->
 
 ## Definition of Done

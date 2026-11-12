@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 11:20'
+updated_date: '2026-11-12 11:22'
 labels:
   - live-state
   - ls-emit
@@ -40,7 +40,7 @@ Blockers: The fast writer.
 - [x] #1 The plugin sends a state snapshot on change and a heartbeat while not idle, with `instance` and `seq`
 - [x] #2 A child session's wait raises `waiting` with `via_subagent` on its root session
 - [x] #3 The two plugin defects from the research are fixed
-- [x] #4 Fixtures and a Rust mirror verify the reducer without Node, and the manual checks are recorded
+- [x] #4 The reducer is a pure module tested with `node --test` against shared event-script fixtures that the Rust tests also consume, and the manual checks are recorded
 <!-- AC:END -->
 
 ## Definition of Done
