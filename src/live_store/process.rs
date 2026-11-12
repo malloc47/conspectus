@@ -4,11 +4,87 @@
 //! handed to a new process does not pass for the recorded one. Where
 //! `/proc` is absent the answer is [`Liveness::Unknown`], and the time
 //! rules of [`LiveObservation::effective`] decide alone.
+//!
+//! The check goes through [`PidProbe`], so the store's garbage
+//! collection, the graph binding, and tests that stand in a process
+//! table of their own share one rule ([`PidProbe::liveness`]).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::model::live::{LiveObservation, Liveness};
+
+/// What a probe found about one pid.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PidStatus {
+    /// A process has the pid. `start` is its start time when the probe
+    /// could read it.
+    Running { start: Option<u64> },
+    /// No process has the pid.
+    Gone,
+    /// The probe cannot tell, as on a platform without `/proc`.
+    Unknown,
+}
+
+/// A process table to check recorded pids against.
+pub trait PidProbe {
+    /// What the table says about `pid` now.
+    fn status(&self, pid: i64) -> PidStatus;
+
+    /// Whether the process `observation` records still runs: `Unknown`
+    /// without a pid or when the probe cannot tell, `Dead` when the pid
+    /// is gone or now belongs to a process that started at another time
+    /// ([`Liveness::of_running_pid`]), else `Alive`.
+    fn liveness(&self, observation: &LiveObservation) -> Liveness {
+        let Some(pid) = observation.pid.filter(|pid| *pid > 0) else {
+            return Liveness::Unknown;
+        };
+        match self.status(pid) {
+            PidStatus::Running { start } => Liveness::of_running_pid(observation.pid_start, start),
+            PidStatus::Gone => Liveness::Dead,
+            PidStatus::Unknown => Liveness::Unknown,
+        }
+    }
+}
+
+/// The process table under a `/proc` directory: one directory per pid,
+/// with the start time in field 22 of its `stat`. It reads files only
+/// and starts no process.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProcProbe {
+    root: Option<PathBuf>,
+}
+
+impl ProcProbe {
+    /// This machine's process table: `/proc` on Linux. Elsewhere the
+    /// probe answers [`PidStatus::Unknown`] for every pid.
+    pub fn system() -> Self {
+        Self {
+            root: cfg!(target_os = "linux").then(|| PathBuf::from("/proc")),
+        }
+    }
+
+    /// The table under `root`, laid out as `/proc` is.
+    pub fn at(root: impl Into<PathBuf>) -> Self {
+        Self {
+            root: Some(root.into()),
+        }
+    }
+}
+
+impl PidProbe for ProcProbe {
+    fn status(&self, pid: i64) -> PidStatus {
+        let Some(root) = self.root.as_deref().filter(|root| root.is_dir()) else {
+            return PidStatus::Unknown;
+        };
+        if pid <= 0 || !root.join(pid.to_string()).is_dir() {
+            return PidStatus::Gone;
+        }
+        PidStatus::Running {
+            start: start_time_in(root, pid),
+        }
+    }
+}
 
 /// The start time of `pid` in clock ticks since boot (field 22 of
 /// `/proc/<pid>/stat`), or `None` when there is no such process or no
@@ -17,24 +93,10 @@ pub fn process_start_time(pid: i64) -> Option<u64> {
     start_time_in(Path::new("/proc"), pid)
 }
 
-/// Whether the process `observation` records still runs: `Unknown`
-/// without a pid or without `/proc`, `Dead` when the pid is gone or now
-/// belongs to a process that started at another time, else `Alive`.
+/// Whether the process `observation` records still runs, by this
+/// machine's process table ([`ProcProbe::system`]).
 pub fn process_liveness(observation: &LiveObservation) -> Liveness {
-    liveness_in(Path::new("/proc"), observation)
-}
-
-pub(crate) fn liveness_in(proc_root: &Path, observation: &LiveObservation) -> Liveness {
-    let Some(pid) = observation.pid.filter(|pid| *pid > 0) else {
-        return Liveness::Unknown;
-    };
-    if !proc_root.is_dir() {
-        return Liveness::Unknown;
-    }
-    if !proc_root.join(pid.to_string()).is_dir() {
-        return Liveness::Dead;
-    }
-    Liveness::of_running_pid(observation.pid_start, start_time_in(proc_root, pid))
+    ProcProbe::system().liveness(observation)
 }
 
 fn start_time_in(proc_root: &Path, pid: i64) -> Option<u64> {
@@ -88,29 +150,44 @@ mod tests {
         fs::write(proc_root.path().join("4242/stat"), stat_line("claude", 500)).unwrap();
         let root = proc_root.path();
         assert_eq!(
-            liveness_in(root, &observation(Some(4242), Some(500))),
+            ProcProbe::at(root).liveness(&observation(Some(4242), Some(500))),
             Liveness::Alive
         );
         assert_eq!(
-            liveness_in(root, &observation(Some(4242), None)),
+            ProcProbe::at(root).liveness(&observation(Some(4242), None)),
             Liveness::Alive
         );
         assert_eq!(
-            liveness_in(root, &observation(Some(4242), Some(499))),
+            ProcProbe::at(root).liveness(&observation(Some(4242), Some(499))),
             Liveness::Dead
         );
         assert_eq!(
-            liveness_in(root, &observation(Some(77), Some(500))),
+            ProcProbe::at(root).liveness(&observation(Some(77), Some(500))),
             Liveness::Dead
         );
         assert_eq!(
-            liveness_in(root, &observation(None, None)),
+            ProcProbe::at(root).liveness(&observation(None, None)),
             Liveness::Unknown
         );
         assert_eq!(
-            liveness_in(&root.join("absent"), &observation(Some(4242), Some(500))),
+            ProcProbe::at(root.join("absent")).liveness(&observation(Some(4242), Some(500))),
             Liveness::Unknown
         );
+    }
+
+    #[test]
+    fn a_probe_that_cannot_tell_leaves_liveness_unknown() {
+        struct Blind;
+        impl PidProbe for Blind {
+            fn status(&self, _: i64) -> PidStatus {
+                PidStatus::Unknown
+            }
+        }
+        assert_eq!(
+            Blind.liveness(&observation(Some(4242), Some(500))),
+            Liveness::Unknown
+        );
+        assert_eq!(ProcProbe::at("/no/such/proc").status(1), PidStatus::Unknown);
     }
 
     #[test]

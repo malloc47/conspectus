@@ -47,7 +47,7 @@ pub use file::{
     DEAD_RETENTION_MS, EXITED_RETENTION_MS, LIVE_STATE_SCHEMA_VERSION, LiveEntry, LiveFile,
     LiveTmux, MAX_ENTRIES, entry_key,
 };
-pub use process::{process_liveness, process_start_time};
+pub use process::{PidProbe, PidStatus, ProcProbe, process_liveness, process_start_time};
 pub use reducer::{Reducer, SharedReducer, fold};
 pub use store::{Applied, LIVE_STATE_FILE, LIVE_STATE_LOCK, LOCK_WAIT, LiveStore, now_ms};
 

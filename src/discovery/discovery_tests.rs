@@ -1263,3 +1263,253 @@ fn cwd_git_probes_skip_the_cwd_of_a_gone_mux() {
     let gone = observed_cwd_git_fragment(&snapshot, &DiscoveryCaches::default());
     assert!(gone.nodes.is_empty(), "a ghost's cwd is not");
 }
+
+/// A codex session in a scratch harness root, a tmux mux `alpha` on the
+/// default server, and a scratch live-state store, for the tests of the
+/// `live_state` pass.
+struct LiveWorld {
+    temp: tempfile::TempDir,
+    caches: Arc<DiscoveryCaches>,
+}
+
+impl LiveWorld {
+    const SESSION: &str = "session-x";
+
+    fn new() -> Self {
+        use crate::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        std::fs::create_dir(temp.path().join("scan")).expect("scan dir");
+        HarnessFixture::at(temp.path().join("state"))
+            .write_codex_session(&CodexSessionRecord::new(Self::SESSION).with_cwd("/work/x"))
+            .expect("write codex session");
+        Self {
+            temp,
+            caches: Arc::default(),
+        }
+    }
+
+    fn live_root(&self) -> PathBuf {
+        self.temp.path().join("live")
+    }
+
+    /// Fold `kind` for `harness:session` into the store, as `hook write`
+    /// does, with `context`.
+    fn event(
+        &self,
+        harness: &str,
+        session: &str,
+        kind: crate::live_store::LiveEventKind,
+        context: crate::live_store::LiveContext,
+    ) {
+        let event =
+            crate::live_store::LiveEvent::new(harness, session, crate::live_store::now_ms(), kind)
+                .with_context(context);
+        crate::live_store::LiveStore::at(self.live_root())
+            .apply_event(&event)
+            .expect("write the store");
+    }
+
+    fn config(&self) -> LocalDiscoveryConfig {
+        use crate::discovery::harness::codex::HARNESS_KEY as CODEX_KEY;
+        use crate::discovery::harness::fixtures::HarnessFixture;
+        use crate::discovery::tmux::FakeTmux;
+
+        LocalDiscoveryConfig::empty()
+            .with_harness_state_root(
+                CODEX_KEY,
+                HarnessFixture::at(self.temp.path().join("state")).codex_state_root(),
+            )
+            .with_tmux_runner(FakeTmux::with_sessions(
+                "alpha\t/work/x\t1700000500\t1700000000\n",
+            ))
+            .with_live_state_root(self.live_root())
+            .with_caches(Arc::clone(&self.caches))
+    }
+
+    /// One discovery cycle on top of `prior`, as the daemon runs them.
+    fn discover(&self, prior: GraphSnapshot) -> GraphSnapshot {
+        discover_local_warm_with(
+            [self.temp.path().join("scan")],
+            self.config(),
+            prior,
+            &crate::config::ServerIntervals::default(),
+        )
+        .expect("discover")
+    }
+
+    fn fingerprint(&self) -> Option<u64> {
+        *self
+            .caches
+            .process_tree_fingerprint
+            .lock()
+            .expect("fingerprint lock")
+    }
+}
+
+/// The codex session's node id in `snapshot`.
+fn codex_session(snapshot: &GraphSnapshot) -> NodeId {
+    snapshot
+        .nodes
+        .iter()
+        .find_map(|node| match node {
+            GraphNode::AgentSession(session) if session.id.session_key == LiveWorld::SESSION => {
+                Some(node.id())
+            }
+            _ => None,
+        })
+        .expect("the codex session is discovered")
+}
+
+fn this_process() -> crate::live_store::LiveContext {
+    let pid = i64::from(std::process::id());
+    crate::live_store::LiveContext {
+        pid: Some(pid),
+        pid_start: crate::live_store::process_start_time(pid),
+        ..Default::default()
+    }
+}
+
+fn in_alpha(pane: &str) -> crate::live_store::LiveContext {
+    crate::live_store::LiveContext {
+        tmux: Some(crate::live_store::LiveTmux {
+            socket: Some("/tmp/tmux-1000/default".to_string()),
+            session: Some("alpha".to_string()),
+            pane: Some(pane.to_string()),
+        }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn discovery_binds_the_live_state_store_to_sessions_and_muxes() {
+    use crate::live_store::LiveEventKind;
+    use crate::model::live::{LiveState, Liveness};
+
+    let world = LiveWorld::new();
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnStarted,
+        this_process(),
+    );
+    world.event(
+        "pi",
+        "no-transcript-yet",
+        LiveEventKind::TurnStarted,
+        in_alpha("%2"),
+    );
+    world.event(
+        "codex",
+        "nowhere",
+        LiveEventKind::TurnStarted,
+        Default::default(),
+    );
+
+    let snapshot = world.discover(GraphSnapshot::empty());
+
+    let session = codex_session(&snapshot);
+    let alpha = NodeId::MuxSession(MuxSessionId::new("tmux:alpha"));
+    let table: Vec<(NodeId, LiveState, Liveness)> = snapshot
+        .node_live
+        .iter()
+        .map(|(id, binding)| (id.clone(), binding.observation.state, binding.liveness))
+        .collect();
+    let mut expected = vec![
+        (session, LiveState::Working, Liveness::Alive),
+        (alpha, LiveState::Working, Liveness::Unknown),
+    ];
+    expected.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(table, expected, "one binding per bound entry");
+    assert_eq!(
+        snapshot
+            .nodes
+            .iter()
+            .filter(|node| matches!(node, GraphNode::AgentSession(_)))
+            .count(),
+        1,
+        "an unbound entry creates no session"
+    );
+}
+
+#[test]
+fn every_cycle_rebinds_the_store_without_reopening_the_process_tree_walk() {
+    use crate::live_store::LiveEventKind;
+    use crate::model::live::LiveState;
+
+    let world = LiveWorld::new();
+    let state_of = |snapshot: &GraphSnapshot| {
+        snapshot
+            .node_live
+            .get(&codex_session(snapshot))
+            .map(|binding| binding.observation.state)
+    };
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnStarted,
+        Default::default(),
+    );
+    let first = world.discover(GraphSnapshot::empty());
+    assert_eq!(state_of(&first), Some(LiveState::Working));
+    let fingerprint = world.fingerprint();
+    assert!(fingerprint.is_some());
+
+    // The turn ends. A cold rebuild (a one-shot command, the daemonless
+    // TUI) binds the new state, and the mux and harness slice, which is
+    // all the process-tree gate looks at, is as it was.
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnEnded { interrupted: false },
+        Default::default(),
+    );
+    let second = world.discover(GraphSnapshot::empty());
+    assert_eq!(state_of(&second), Some(LiveState::Ready));
+    assert_eq!(
+        world.fingerprint(),
+        fingerprint,
+        "a state change alone must not reopen the process-tree walk"
+    );
+
+    // A cycle on top of the last snapshot, as the daemon runs them,
+    // takes the table from the store, not from the prior.
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnStarted,
+        Default::default(),
+    );
+    let third = world.discover(second);
+    assert_eq!(state_of(&third), Some(LiveState::Working));
+
+    // An emptied store empties the table on the next cycle, and the
+    // session stays.
+    std::fs::write(
+        world.live_root().join(crate::live_store::LIVE_STATE_FILE),
+        r#"{ "schema_version": 1, "rev": 9, "entries": {} }"#,
+    )
+    .expect("empty the store");
+    let fourth = world.discover(third);
+    assert!(fourth.node_live.is_empty(), "{:?}", fourth.node_live);
+    assert_eq!(state_of(&fourth), None);
+}
+
+#[test]
+fn discovery_without_a_live_state_root_binds_nothing() {
+    use crate::live_store::LiveEventKind;
+
+    let world = LiveWorld::new();
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnStarted,
+        Default::default(),
+    );
+    let snapshot = discover_local_with(
+        [world.temp.path().join("scan")],
+        world.config().without_live_state(),
+    )
+    .expect("discover");
+    assert!(snapshot.node_live.is_empty());
+}

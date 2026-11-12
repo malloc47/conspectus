@@ -26,6 +26,7 @@ pub mod forge;
 pub mod git;
 pub mod harness;
 pub mod hook_sidecar;
+pub mod live_state;
 pub(crate) mod memo;
 pub mod orchestrator;
 pub mod pins;
@@ -901,9 +902,10 @@ fn fingerprint_normalized_node(node: &GraphNode) -> GraphNode {
 /// Always-rerun mutator block extracted from
 /// [`discover_local_warm_with`]. Runs against the merged
 /// (fresh + prior backstop) snapshot so cross-references,
-/// codex-log attribution, hook sidecar replay, and the declared
-/// link/alias/pin overlays land against the canonical merged
-/// state regardless of which heavy providers were skipped.
+/// codex-log attribution, hook sidecar replay, the live-state
+/// binding, and the declared link/alias/pin overlays land against
+/// the canonical merged state regardless of which heavy providers
+/// were skipped.
 ///
 /// The corresponding slices in `prior` are pre-evicted by
 /// [`discover_local_warm_with`]'s gate, so each mutator stamps
@@ -956,6 +958,12 @@ fn apply_mutators(
     if let Some(root) = &config.hook_sidecar_root {
         hook_sidecar::apply_hook_sidecars(snapshot, root, current_epoch());
     }
+    // After the hook sidecar, whose sessions an entry may name (ADR
+    // 0205). The table is replaced, never merged, so it is rebuilt on
+    // every cycle.
+    if let Some(root) = &config.live_state_root {
+        live_state::apply_live_state(snapshot, root, &crate::live_store::ProcProbe::system());
+    }
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(snapshot, context, loader);
         aliases::apply_aliases(snapshot, context, loader);
@@ -1003,6 +1011,13 @@ pub struct LocalDiscoveryConfig {
     pub forge_adapters: Vec<Box<dyn forge::ForgeAdapter>>,
     pub process_tree_enabled: bool,
     pub hook_sidecar_root: Option<PathBuf>,
+    /// The directory of the live-state store (ADR 0204), whose entries
+    /// the `live_state` pass binds to sessions and muxes (ADR 0205).
+    /// `None` binds no live state (tests, headless fixtures);
+    /// [`Self::from_env`] uses `$XDG_STATE_HOME/conspectus`, else
+    /// `$HOME/.local/state/conspectus`, and the dev scenario builder its
+    /// world's own state directory.
+    pub live_state_root: Option<PathBuf>,
     /// Registered orchestrator adapter roots.
     /// Keyed by orchestrator descriptor key
     /// (`agent_deck` today; dmux / herdr / pertmux / workmux
@@ -1132,6 +1147,8 @@ impl LocalDiscoveryConfig {
             forge_adapters,
             process_tree_enabled: env::var_os("CONSPECTUS_DISABLE_PROCTREE").is_none(),
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
+            live_state_root: crate::live_store::LiveStore::from_env()
+                .map(|store| store.dir().to_path_buf()),
             orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
             pin_slots: crate::pin_slots::SlotStore::from_env(),
@@ -1157,6 +1174,7 @@ impl LocalDiscoveryConfig {
             forge_adapters: Vec::new(),
             process_tree_enabled: false,
             hook_sidecar_root: None,
+            live_state_root: None,
             orchestrator_roots: BTreeMap::new(),
             worktree_backend: None,
             declared_config_loader: None,
@@ -1318,6 +1336,19 @@ impl LocalDiscoveryConfig {
 
     pub fn without_hook_sidecar(mut self) -> Self {
         self.hook_sidecar_root = None;
+        self
+    }
+
+    /// Bind the live-state store in `root` (the directory that holds
+    /// `live-state.json`) on every discovery.
+    pub fn with_live_state_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.live_state_root = Some(root.into());
+        self
+    }
+
+    /// Bind no live state: `node_live` stays empty.
+    pub fn without_live_state(mut self) -> Self {
+        self.live_state_root = None;
         self
     }
 

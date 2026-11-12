@@ -299,6 +299,9 @@ impl ScenarioWorld {
             .with_harness_state_root(AIDER_HARNESS_KEY, self.root.clone())
             .with_harness_state_root(PI_HARNESS_KEY, self.harness.pi_state_root())
             .with_hook_sidecar_root(&self.hook_root)
+            // The world's own live-state store; an absent one binds
+            // nothing.
+            .with_live_state_root(self.root.join("state/conspectus"))
             // Codex's aux-attribution mutator pass
             // pulls from live `~/.codex/logs_*.sqlite`; skip it
             // in the scenario TUI so dev_scenarios stays
