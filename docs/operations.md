@@ -71,6 +71,8 @@ minimal latest-only spool at `hooks-latest.json`, which every refresh
 replays. With `conspectus serve` running, the hook writer sends the
 observation to the daemon, which writes it to the spool and updates the
 graph at once; with no daemon, the hook writer writes the spool itself.
+It waits at most 2 seconds for the daemon to answer, so a stuck daemon
+delays a session start by that much, and then writes the spool itself.
 The spool lives under:
 
 1. `$CONSPECTUS_HOOK_SIDECAR_STATE`, when set.
@@ -119,7 +121,28 @@ Manual Claude Code hook setup:
 Place that in `~/.claude/settings.json` or a local Claude Code
 settings file. The subcommand reads Claude's hook JSON from stdin,
 records `session_id`, `transcript_path`, `cwd`, and tmux context when
-available, then exits without writing to the transcript.
+available, then exits without writing to the transcript. A session
+start also writes the session's live-state entry to
+`$XDG_STATE_HOME/conspectus/live-state.json` (or
+`$HOME/.local/state/conspectus/live-state.json`); nothing shows it yet.
+
+`hook write` never disturbs the harness that runs it. It prints nothing
+on stdout or stderr and exits 0 even when the payload is empty or
+unreadable, the harness name is unknown, tmux is missing, or a store
+can't be written, so a broken hook shows up as missing attribution, not
+as an error in the harness. Only a malformed command line (no harness
+name, an unknown flag) prints a usage message and exits 2, which Claude
+Code treats as a block; `hook init` always installs a well-formed one.
+To check a hook by hand, pipe a payload in and look for the records:
+
+```sh
+echo '{"session_id":"test","cwd":"/tmp","hook_event_name":"SessionStart"}' |
+  conspectus hook write claude-code --state-root /tmp/hook-check
+ls /tmp/hook-check   # hooks-latest.json, live-state.json, and its lock
+```
+
+`--state-root PATH` writes both files under `PATH` and never asks the
+daemon.
 
 Pi has no hook settings, so its hook is a TypeScript extension that
 `hook init pi` writes as one file (ADR 0121). Restart Pi or run

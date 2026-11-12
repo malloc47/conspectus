@@ -1868,7 +1868,8 @@ migration helper and harmless if it fails.
   mux in `hooks-latest.json`, is the durable hook record and every refresh
   replays it (ADR 0146). When the daemon is available, it writes the spool
   root its discovery reads and ingests the record into `SnapshotState`; when
-  no daemon snapshot is available, the hook writer writes the spool under
+  no daemon snapshot is available, or the daemon does not answer within
+  2 s, the hook writer writes the spool under
   `$XDG_STATE_HOME/conspectus/hooks` or
   `$HOME/.local/state/conspectus/hooks`, with
   `$CONSPECTUS_HOOK_SIDECAR_STATE` as an override.

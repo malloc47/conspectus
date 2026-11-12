@@ -340,7 +340,8 @@ noted.
   sets no timeout; hooks may be inert until trusted.
 - The attribution spool key ignores the pane; `ACTIVE_TTL_SECONDS` is dead;
   an ingest leaves two active links for one pane until the next cycle.
-- Socket clients have no timeouts.
+- Socket clients have no timeouts. `hook write`'s ingest call is now bounded
+  at 2 s (CSP-810); the others are CSP-836.
 - The OpenCode 1.x plugin forwards child-session events (a pane briefly names
   the child); the 2.x plugin listens for an event that no longer exists.
 - Pi's idle cache warming moves the session file's mtime, so

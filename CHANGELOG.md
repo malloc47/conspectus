@@ -61,6 +61,11 @@ forms, lists, readers, and keys look and behave alike.
   moves to format version 10: the first run after upgrading ignores the
   old file, with one warning where a refresh or the daemon reads it, and
   rebuilds it. Nothing fills the table yet.
+- **`conspectus hook write` records live state.** A Claude Code
+  `SessionStart` now also writes the session's entry (ready, with its
+  pane, process, cwd, and transcript path) to
+  `$XDG_STATE_HOME/conspectus/live-state.json`, before the attribution
+  record. Nothing reads or shows it yet.
 
 ### Changed
 
@@ -640,6 +645,14 @@ forms, lists, readers, and keys look and behave alike.
   before. The changes above are what moving each control onto it
   changed; `docs/operations.md` lists them by area under "What changed in
   the TUI".
+- **`conspectus hook write` never disturbs the harness that runs it.** It
+  prints nothing and exits 0 whatever goes wrong once it runs (an empty
+  or unreadable payload, an unknown harness, a store or spool it cannot
+  write, a daemon that does not answer), where it printed an error or a
+  warning and could exit 1. It waits at most 2 s for the daemon to take
+  a session start, then writes the hook spool itself. Only a malformed
+  command line still prints a usage message. Claude Code events other
+  than `SessionStart` never reach the spool or the daemon.
 
 ### Fixed
 

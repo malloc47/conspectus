@@ -101,14 +101,31 @@ Pi run a plugin inside the harness, which can hold it itself.
    - The live-state write never waits on a daemon. For every event except
      a session start, `hook write` opens no socket. A session start
      still takes the existing attribution path (ADR 0146), after the
-     live-state write, and that path gains a socket timeout.
+     live-state write, and that path gains a socket timeout: 2 s on
+     each read and write of the `hook_ingest` call, after which the
+     writer writes the spool itself, as for any daemon error. Other
+     socket commands keep no bound, since a refresh can rebuild the
+     whole graph.
+   - Each harness's adapter says which of its events take the
+     attribution path; for Claude Code that is `SessionStart` alone, so
+     no per-tool-call event pays for a resolve and a `graph.bin`
+     rewrite.
    - It spawns tmux only to learn a session's socket and name the first
      time it sees the entry; later events reuse the stored pane
-     information (`TMUX_PANE` is read directly).
+     information (`TMUX_PANE` is read directly, and the socket comes
+     from `$TMUX`). A session start asks tmux anyway for its
+     attribution record, and that answer serves the entry too.
+   - The agent's pid is the one the harness exports for its hooks
+     (Claude Code's `CLAUDE_PID`) when that names a running process,
+     else the nearest ancestor running the harness, with its start time
+     from `/proc`. Both records use it.
    - The lock wait is 200 ms. On timeout the event is dropped.
-   - It prints nothing to stdout or stderr and exits 0 whatever happens.
-     Claude Code feeds some hook stdout to the model and treats exit 2
-     as a block, so a bug here must not reach the agent.
+   - It prints nothing to stdout or stderr and exits 0 whatever happens
+     once it runs, a panic included. Claude Code feeds some hook stdout
+     to the model and treats exit 2 as a block, so a bug here must not
+     reach the agent. A malformed command line is rejected by the
+     argument parser before the command runs, with a usage message and
+     exit 2; `hook init` writes only well-formed ones.
 
 7. **Garbage collection on write.** Entries in `exited` for more than an
    hour are dropped. Entries whose pid is dead and untouched for a day
