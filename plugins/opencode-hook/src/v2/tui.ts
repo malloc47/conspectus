@@ -12,19 +12,23 @@
 // the client's route moves to a session, including in-app switches, and
 // on that session's lifecycle events. Events for other sessions reach
 // every client, so they are ignored here; forwarding them would stamp
-// this pane onto sessions it isn't showing.
+// this pane onto sessions it isn't showing. These records carry no live
+// state, so Conspectus records them for attribution only; each session's
+// state comes from the server entrypoint (`server.ts`), which sees every
+// session.
 
 import type { Plugin } from "@opencode/plugin/tui";
 import { writeHook } from "../write.js";
 
 // 2.x equivalents of the 1.x lifecycle events the 1.x plugin forwards
-// (`session.renamed` stands in for 1.x `session.updated`).
+// (`session.renamed` stands in for 1.x `session.updated`). 2.x has no
+// `session.compacted`; its `session.compaction.*` events say nothing
+// about which session a pane shows.
 const LIFECYCLE_EVENTS = new Set([
   "session.created",
   "session.renamed",
   "session.status",
   "session.idle",
-  "session.compacted",
 ]);
 
 // The router has no change event, so route changes are noticed on any
