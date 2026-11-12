@@ -305,6 +305,16 @@ synthetic, built from the documented payload shapes.
 These change what the operator sees or widen what Conspectus is allowed to
 read, so they wait for an answer. Recommendations are marked.
 
+The data every TUI option reads is already on the row models (CSP-814):
+`AgentSessionRow.live` (effective state, detail, confidence, since,
+subagents), `MuxSessionRow.live` (the counts), and `MixedRow.live` for
+Pinned, History, and stopped-mux rows, filled by `tui::rows::live::annotate`
+for every view and kept current between snapshots by the TUI's live
+overlay. A rendering story reads those fields; no builder computes live
+state. Because nothing sorts or filters by it yet, an overlay change
+refills the cells in place; a story that sorts, filters, or groups by live
+state must rebuild the tree on such a change instead.
+
 **TUI**
 
 1. State names and the glyph/column (the `●◐○` set collides with session

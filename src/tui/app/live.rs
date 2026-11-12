@@ -6,7 +6,8 @@
 //! table changes, or time alone moves a state, the rows already built
 //! take their new live values in place. Nothing else about a row depends
 //! on its live state, so the tree is not rebuilt, and the selection and
-//! folds stay as they are.
+//! folds stay as they are; once rows are sorted, filtered, or grouped by
+//! live state, a change has to rebuild the tree instead.
 
 use super::*;
 use crate::tui::live_overlay::LiveOverlay;

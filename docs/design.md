@@ -665,8 +665,10 @@ native session id), or to the `MuxSession` for pane-only entries, into a
 sparse `node_live` snapshot table beside `node_presence` (ADR 0205). Each
 binding keeps whether the entry's process ran when it was bound. Unbound
 entries show nowhere, and binding never creates a node. The TUI re-binds from
-the store about once a second between snapshots, with or without a daemon. A
-mux has no state of its own: it has counts over what it hosts.
+the store about once a second between snapshots, with or without a daemon: it
+stats the file each tick, reads and binds it only after a rewrite, and binds
+every new snapshot before its rows are built. A mux has no state of its own:
+it has counts over what it hosts.
 
 The effective state is computed at read time from `now` and process liveness:
 a dead pid is `exited`; `working`, `compacting`, and `starting` that go quiet
@@ -678,8 +680,12 @@ transcript tails) need their own decisions (ADR 0207). The CLI shows it as
 `node_live` in `graph --format json`, in opt-in `live` columns of
 `conspectus table` (a session's effective state, a mux's counts), in `node
 show`, and as a per-harness health line in `hook status` (events arriving, or
-an agent running with none). Which glyphs, columns, rollups, and orderings
-show it in the TUI is open (the plan's parked list).
+an agent running with none). In the TUI the row models carry it: session rows
+the effective state with its detail, confidence, start, and subagents, mux
+rows the counts, and Pinned and History rows the value of the entity they
+stand for, filled for every view by one pass, so an entity carries the same
+value wherever it is listed. Nothing draws it yet; which glyphs, columns,
+rollups, and orderings show it is open (the plan's parked list).
 
 ## Pin Slots
 
