@@ -38,6 +38,7 @@ use serde_json::json;
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{FileStamp, StampedMap};
 use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
+use crate::live_store::{LiveContext, LiveEvent};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
@@ -50,9 +51,6 @@ use crate::model::{
 const TAIL_SCAN_BYTES: u64 = 32 * 1024;
 
 pub const HARNESS_KEY: &str = crate::discovery::providers::CODEX;
-
-/// The hook events `conspectus hook init codex` installs, in order.
-pub(crate) const HOOK_EVENTS: [&str; 1] = ["SessionStart"];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CodexAdapter;
@@ -152,6 +150,28 @@ impl HarnessAdapter for CodexAdapter {
         })
     }
 
+    /// Only `SessionStart` names the session a process runs, so only it
+    /// is recorded for attribution; every other event reaches only the
+    /// live-state store.
+    fn is_attribution_event(&self, payload: &serde_json::Value) -> bool {
+        live::is_attribution_event(payload)
+    }
+
+    /// Every event `hook init codex` installs; see `codex_live.rs` for
+    /// the mapping and its known gaps.
+    fn live_events_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        context: &LiveContext,
+        observed_ms: i64,
+    ) -> Vec<LiveEvent> {
+        live::live_events(payload, context, observed_ms)
+    }
+
+    fn reports_live_state(&self) -> bool {
+        true
+    }
+
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         vec![std::ffi::OsString::from("codex")]
     }
@@ -171,6 +191,11 @@ impl HarnessAdapter for CodexAdapter {
         ])
     }
 }
+
+#[path = "codex_live.rs"]
+mod live;
+
+pub(crate) use live::HOOK_EVENTS;
 
 fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFragment> {
     let sessions_dir = state_root.join("sessions");

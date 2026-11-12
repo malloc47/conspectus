@@ -937,19 +937,57 @@ fn hook_status_calls_an_installed_hook_silent_when_its_agent_runs_without_events
 }
 
 #[test]
+fn hook_status_reports_codex_live_state_health() {
+    use conspectus::live_store::{LiveEvent, LiveEventKind, LiveStore, now_ms};
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    assert!(
+        health_line(home.path(), "codex").starts_with("off\tcodex\t"),
+        "not installed"
+    );
+    isolated_cmd(home.path())
+        .args([
+            "hook",
+            "init",
+            "codex",
+            "--command",
+            "conspectus hook write codex",
+        ])
+        .assert()
+        .success();
+    assert!(
+        health_line(home.path(), "codex").starts_with("no-events\tcodex\t"),
+        "installed, with nothing heard and no agent running"
+    );
+
+    let store = LiveStore::at(home.path().join(".local/state/conspectus"));
+    store
+        .apply_event(&LiveEvent::new(
+            "codex",
+            "019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37",
+            now_ms(),
+            LiveEventKind::TurnStarted,
+        ))
+        .expect("write live state");
+    let line = health_line(home.path(), "codex");
+    assert!(
+        line.starts_with(&format!(
+            "receiving\tcodex\t{}\tlive state: 1 session, newest event ",
+            store.path().display()
+        )),
+        "{line}"
+    );
+}
+
+#[test]
 fn hook_status_says_when_a_harness_s_hook_reports_no_live_state() {
     let home = tempfile::TempDir::new().expect("home temp");
-    for harness in ["codex", "pi"] {
-        let line = health_line(home.path(), harness);
-        assert!(
-            line.starts_with(&format!("unsupported\t{harness}\t")),
-            "{line}"
-        );
-        assert!(
-            line.ends_with("\tlive state: not reported by this harness's hook"),
-            "{line}"
-        );
-    }
+    let line = health_line(home.path(), "pi");
+    assert!(line.starts_with("unsupported\tpi\t"), "{line}");
+    assert!(
+        line.ends_with("\tlive state: not reported by this harness's hook"),
+        "{line}"
+    );
 }
 
 fn read_settings(path: &std::path::Path) -> serde_json::Value {
@@ -965,7 +1003,7 @@ fn codex_case(name: &str) -> String {
 }
 
 /// The events `hook init codex` installs.
-const CODEX_EVENTS: usize = 1;
+const CODEX_EVENTS: usize = 11;
 
 /// A scratch home whose `~/.codex/config.toml` holds `text`.
 fn codex_home(text: &str) -> (tempfile::TempDir, PathBuf) {

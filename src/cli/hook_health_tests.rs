@@ -87,21 +87,21 @@ fn a_hook_not_installed_says_how_to_install_it() {
 #[test]
 fn a_hook_that_reports_no_live_state_is_never_called_silent() {
     for installed in [true, false] {
-        let health = Health::assess("codex", false, installed, &LiveFile::default(), never_asked);
+        let health = Health::assess("pi", false, installed, &LiveFile::default(), never_asked);
         assert_eq!(health, Health::Unsupported);
         assert_eq!(health.label(), "unsupported");
     }
 }
 
 #[test]
-fn only_claude_code_hooks_report_live_state_so_far() {
+fn only_the_claude_code_and_codex_hooks_report_live_state_so_far() {
     let reports = |harness: &str| {
         crate::discovery::harness::registered_adapters()
             .find(|adapter| adapter.harness_key() == harness)
             .is_some_and(crate::discovery::harness::HarnessAdapter::reports_live_state)
     };
     assert!(reports("claude-code"));
-    assert!(!reports("codex"));
+    assert!(reports("codex"));
     assert!(!reports("pi"));
 }
 

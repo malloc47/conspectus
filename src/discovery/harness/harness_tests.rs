@@ -378,7 +378,7 @@ fn adapters_without_a_live_mapping_attribute_every_payload_and_say_no_live_state
         "cwd": "/work",
     });
     let context = crate::live_store::LiveContext::default();
-    for key in ["codex", "opencode", "pi", "aider"] {
+    for key in ["opencode", "pi", "aider"] {
         let adapter = registered_adapters()
             .find(|adapter| adapter.harness_key() == key)
             .expect("registered");
