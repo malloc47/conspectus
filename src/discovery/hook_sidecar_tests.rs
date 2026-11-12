@@ -735,31 +735,75 @@ fn hook_record_links_normally_when_pane_command_is_unknown() {
     );
 }
 
+/// A live Claude Code record from pane `pane` of tmux session `editor`:
+/// its pid is this test process, so the liveness gate passes.
+fn pane_record(session_key: &str, pane: &str, observed_epoch: i64) -> hook::HookRecord {
+    hook::HookRecord {
+        schema_version: hook::SCHEMA_VERSION,
+        harness_key: "claude-code".to_string(),
+        session_key: session_key.to_string(),
+        cwd: Some("/work".to_string()),
+        pid: Some(i64::from(std::process::id())),
+        ppid: None,
+        tmux: Some(hook::HookTmuxRecord {
+            session_name: Some("editor".to_string()),
+            native_id: None,
+            pane_id: Some(pane.to_string()),
+            socket_path: None,
+        }),
+        transcript_path: None,
+        hook_event_name: Some("SessionStart".to_string()),
+        observed_epoch,
+        harness_version: None,
+        background_harness: false,
+    }
+}
+
+fn session_node(key: &str) -> NodeId {
+    NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", key))
+}
+
+/// The sessions with an Active hook link to a mux.
+fn active_hook_sources(snapshot: &GraphSnapshot) -> Vec<NodeId> {
+    let mut sources: Vec<NodeId> = hook_mux_links(snapshot)
+        .into_iter()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .map(|link| link.source.clone())
+        .collect();
+    sources.sort();
+    sources
+}
+
+/// The sessions the graph's hook process observations identify.
+fn observed_process_sessions(snapshot: &GraphSnapshot) -> Vec<NodeId> {
+    let mut sessions: Vec<NodeId> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| link.relation == RelationKind::ProcessIdentifiesSession)
+        .filter_map(|link| link.target_node_id().cloned())
+        .collect();
+    sessions.sort();
+    sessions
+}
+
+fn runtime_process_count(snapshot: &GraphSnapshot) -> usize {
+    snapshot
+        .nodes
+        .iter()
+        .filter(|node| matches!(node, GraphNode::RuntimeProcess(_)))
+        .count()
+}
+
 #[test]
 fn hook_records_for_different_panes_in_same_mux_both_remain_active() {
     let temp = tempdir().expect("tempdir");
-    fs::write(
-        temp.path().join("pane1.json"),
-        r#"{
-              "schema_version": 1,
-              "harness_key": "claude-code",
-              "session_key": "alpha",
-              "tmux": { "session_name": "editor", "pane_id": "%1" },
-              "observed_epoch": 1700000000
-            }"#,
-    )
-    .expect("write pane 1 record");
-    fs::write(
-        temp.path().join("pane2.json"),
-        r#"{
-              "schema_version": 1,
-              "harness_key": "claude-code",
-              "session_key": "beta",
-              "tmux": { "session_name": "editor", "pane_id": "%2" },
-              "observed_epoch": 1700000500
-            }"#,
-    )
-    .expect("write pane 2 record");
+    let store = hook::HookStore::new(temp.path());
+    store
+        .write_record(&pane_record("alpha", "%1", 1_700_000_000))
+        .expect("write pane 1 record");
+    store
+        .write_record(&pane_record("beta", "%2", 1_700_000_500))
+        .expect("write pane 2 record");
     let mut snapshot = GraphSnapshot {
         nodes: vec![session("alpha"), session("beta"), mux("editor")],
         ..GraphSnapshot::empty()
@@ -767,28 +811,141 @@ fn hook_records_for_different_panes_in_same_mux_both_remain_active() {
 
     apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_600);
 
-    let active_sources: Vec<_> = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| {
-            link.relation == RelationKind::LinkedToMux && matches!(link.state, LinkState::Active)
-        })
-        .map(|link| link.source.clone())
-        .collect();
-    assert_eq!(active_sources.len(), 2);
-    assert!(
-        active_sources.contains(&NodeId::AgentSession(AgentSessionId::new(
-            "claude-code",
-            "/state",
-            "alpha"
-        )))
+    assert_eq!(
+        active_hook_sources(&snapshot),
+        [session_node("alpha"), session_node("beta")]
     );
-    assert!(
-        active_sources.contains(&NodeId::AgentSession(AgentSessionId::new(
-            "claude-code",
-            "/state",
-            "beta"
-        )))
+}
+
+/// The daemon's ingest applies one record to a graph that already holds
+/// the previous cycle's hook links.
+fn ingest(snapshot: &mut GraphSnapshot, record: hook::HookRecord) {
+    apply_hook_records(snapshot, vec![record], 1_700_001_000);
+}
+
+fn editor_graph(sessions: &[&str]) -> GraphSnapshot {
+    let mut nodes: Vec<GraphNode> = sessions.iter().map(|key| session(key)).collect();
+    nodes.push(mux("editor"));
+    GraphSnapshot {
+        nodes,
+        ..GraphSnapshot::empty()
+    }
+}
+
+#[test]
+fn an_ingest_overrides_the_graphs_older_hook_link_for_the_same_pane() {
+    let mut snapshot = editor_graph(&["alpha", "beta"]);
+    ingest(&mut snapshot, pane_record("alpha", "%1", 1_700_000_000));
+    ingest(&mut snapshot, pane_record("beta", "%1", 1_700_000_500));
+
+    assert_eq!(active_hook_sources(&snapshot), [session_node("beta")]);
+    let winner = hook_mux_links(&snapshot)
+        .into_iter()
+        .find(|link| link.source == session_node("beta"))
+        .expect("winner")
+        .id
+        .clone();
+    let loser = hook_mux_links(&snapshot)
+        .into_iter()
+        .find(|link| link.source == session_node("alpha"))
+        .expect("the older link stays for diagnostics");
+    assert_eq!(
+        loser.state,
+        LinkState::Overridden {
+            by: winner,
+            reason: Some("superseded by fresher hook sidecar record for same pane".to_string()),
+        }
+    );
+    assert_eq!(runtime_process_count(&snapshot), 1);
+    assert_eq!(
+        observed_process_sessions(&snapshot),
+        [session_node("beta")],
+        "only the pane's winner keeps a process observation"
+    );
+}
+
+#[test]
+fn an_ingest_matches_what_the_next_cycle_replays() {
+    let temp = tempdir().expect("tempdir");
+    let store = hook::HookStore::new(temp.path());
+    let mut live = editor_graph(&["alpha", "beta", "gamma"]);
+    for record in [
+        pane_record("alpha", "%1", 1_700_000_000),
+        pane_record("beta", "%2", 1_700_000_100),
+        pane_record("gamma", "%1", 1_700_000_200),
+    ] {
+        store.write_record(&record).expect("spool");
+        ingest(&mut live, record);
+    }
+    let mut cycled = editor_graph(&["alpha", "beta", "gamma"]);
+    apply_hook_sidecars(&mut cycled, temp.path(), 1_700_001_000);
+
+    let expected = [session_node("beta"), session_node("gamma")];
+    assert_eq!(active_hook_sources(&live), expected);
+    assert_eq!(active_hook_sources(&cycled), expected);
+    assert_eq!(observed_process_sessions(&live), expected);
+    assert_eq!(observed_process_sessions(&cycled), expected);
+}
+
+#[test]
+fn an_ingest_older_than_the_graphs_link_for_its_pane_is_overridden() {
+    let mut snapshot = editor_graph(&["alpha", "beta"]);
+    ingest(&mut snapshot, pane_record("beta", "%1", 1_700_000_500));
+    ingest(&mut snapshot, pane_record("alpha", "%1", 1_700_000_000));
+
+    assert_eq!(active_hook_sources(&snapshot), [session_node("beta")]);
+    let late = hook_mux_links(&snapshot)
+        .into_iter()
+        .find(|link| link.source == session_node("alpha"))
+        .expect("late arrival");
+    assert!(matches!(late.state, LinkState::Overridden { .. }));
+    assert_eq!(observed_process_sessions(&snapshot), [session_node("beta")]);
+}
+
+#[test]
+fn an_ingest_of_the_panes_session_again_keeps_one_link_and_one_process() {
+    let mut snapshot = editor_graph(&["alpha"]);
+    ingest(&mut snapshot, pane_record("alpha", "%1", 1_700_000_000));
+    ingest(&mut snapshot, pane_record("alpha", "%1", 1_700_000_000));
+    ingest(&mut snapshot, pane_record("alpha", "%1", 1_700_000_300));
+
+    assert_eq!(active_hook_sources(&snapshot), [session_node("alpha")]);
+    assert_eq!(
+        hook_mux_links(&snapshot).len(),
+        2,
+        "the first stays Overridden"
+    );
+    assert_eq!(runtime_process_count(&snapshot), 1);
+}
+
+#[test]
+fn a_graph_holding_two_active_hook_links_for_one_pane_keeps_the_fresher() {
+    let mut snapshot = editor_graph(&["alpha", "beta", "gamma"]);
+    // What an ingest could leave behind before it superseded links:
+    // both pane-1 links Active, each with its process observation.
+    let mut first = snapshot.clone();
+    ingest(&mut first, pane_record("alpha", "%1", 1_700_000_000));
+    let mut second = snapshot.clone();
+    ingest(&mut second, pane_record("beta", "%1", 1_700_000_500));
+    snapshot.nodes = first.nodes;
+    for node in second.nodes {
+        if snapshot.find_node(&node.id()).is_none() {
+            snapshot.nodes.push(node);
+        }
+    }
+    snapshot.candidate_links = first.candidate_links;
+    snapshot.candidate_links.extend(second.candidate_links);
+    assert_eq!(active_hook_sources(&snapshot).len(), 2);
+
+    ingest(&mut snapshot, pane_record("gamma", "%2", 1_700_000_600));
+
+    assert_eq!(
+        active_hook_sources(&snapshot),
+        [session_node("beta"), session_node("gamma")]
+    );
+    assert_eq!(
+        observed_process_sessions(&snapshot),
+        [session_node("beta"), session_node("gamma")]
     );
 }
 

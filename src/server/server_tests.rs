@@ -206,6 +206,92 @@ fn an_ingested_hook_record_survives_a_daemon_restart() {
     assert!(hook_attributes(&restarted, "current"));
 }
 
+/// The sessions the daemon's live graph ties to a mux through an Active
+/// hook link.
+fn active_hook_sessions(ctx: &DispatchCtx) -> Vec<String> {
+    let snapshot = load_snapshot_state(&ctx.snapshot_state).expect("snapshot");
+    let mut sessions: Vec<String> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.relation == RelationKind::LinkedToMux
+                && link.source_metadata.adapter == crate::discovery::providers::HOOK_SIDECAR
+                && matches!(link.state, crate::model::LinkState::Active)
+        })
+        .filter_map(|link| match &link.source {
+            NodeId::AgentSession(id) => Some(id.session_key.clone()),
+            _ => None,
+        })
+        .collect();
+    sessions.sort();
+    sessions
+}
+
+fn pane_hook_record(session_key: &str, pane: &str, observed_epoch: i64) -> HookRecord {
+    let mut record = hook_record(session_key, "alpha");
+    if let Some(tmux) = record.tmux.as_mut() {
+        tmux.pane_id = Some(pane.to_string());
+    }
+    record.observed_epoch = observed_epoch;
+    record
+}
+
+#[test]
+fn an_ingest_never_leaves_two_active_hook_links_for_one_pane() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = crate::discovery::tmux::ScriptedTmux::default();
+    server.lists(ALPHA_ROW);
+    let ctx = mux_ctx_with_hooks(temp.path(), server, Some(temp.path().join("hooks")));
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+    let now = crate::discovery::current_epoch();
+
+    for (session, epoch) in [("first", now - 10), ("second", now)] {
+        let record = pane_hook_record(session, "%1", epoch);
+        let response = handle_hook_ingest(&hook_ingest_request(&record), &ctx);
+        assert!(response_is_ok(&response), "{:?}", response.error);
+    }
+    assert_eq!(active_hook_sessions(&ctx), ["second"]);
+
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+    assert_eq!(active_hook_sessions(&ctx), ["second"]);
+}
+
+#[test]
+fn ingests_for_two_panes_of_one_mux_both_outlive_a_refresh() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = crate::discovery::tmux::ScriptedTmux::default();
+    server.lists(ALPHA_ROW);
+    let ctx = mux_ctx_with_hooks(temp.path(), server, Some(temp.path().join("hooks")));
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+    let now = crate::discovery::current_epoch();
+
+    for (session, pane, epoch) in [("left", "%1", now - 10), ("right", "%2", now)] {
+        let record = pane_hook_record(session, pane, epoch);
+        let response = handle_hook_ingest(&hook_ingest_request(&record), &ctx);
+        assert!(response_is_ok(&response), "{:?}", response.error);
+    }
+    assert_eq!(active_hook_sessions(&ctx), ["left", "right"]);
+
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+    assert_eq!(
+        active_hook_sessions(&ctx),
+        ["left", "right"],
+        "the spool keeps one record per pane, so the refresh replays both"
+    );
+}
+
 #[test]
 fn a_failed_spool_write_refuses_the_ingest_and_leaves_the_graph_alone() {
     let temp = tempfile::tempdir().unwrap();
