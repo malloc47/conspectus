@@ -3,7 +3,8 @@
 //! Cells from ADR 0006:
 //! `id` `agent` `cwd` `mux` `mux-conf` `pr` `pr-conf` `lineage`
 //! `workspace` `checkout` `branch` `repo` `fork` `declared`
-//! `preview` `title` `activity`.
+//! `preview` `title` `activity`, and `live` (the session's live state,
+//! read at `RenderOptions::now_epoch`).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -102,6 +103,7 @@ pub fn build_agent_rows_from_snapshot(
     let fork_lookup = collect_fork_lookup(snapshot);
     let declared_lookup = collect_declared_lookup(snapshot);
     let pr_global = collect_global_pr(snapshot);
+    let live_now_ms = super::live::read_time_ms(options.now_epoch);
 
     let filtered: Vec<&SessionRow<'_>> = sessions
         .iter()
@@ -122,6 +124,8 @@ pub fn build_agent_rows_from_snapshot(
             .as_ref()
             .and_then(|id| branch_lookup.get(id));
         let ctx = CellCtx {
+            snapshot,
+            live_now_ms,
             row,
             mux: mux_lookup.get(&row.key()),
             branch_refname,
@@ -138,6 +142,9 @@ pub fn build_agent_rows_from_snapshot(
 }
 
 struct CellCtx<'a> {
+    snapshot: &'a GraphSnapshot,
+    /// When the `live` cell reads live state, Unix epoch milliseconds.
+    live_now_ms: i64,
     row: &'a SessionRow<'a>,
     mux: Option<&'a MuxInfo>,
     branch_refname: Option<&'a String>,
@@ -197,6 +204,12 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
         "activity" => agent
             .last_active_epoch
             .map_or_else(dash, |epoch| format_relative_age(epoch, current_epoch())),
+        "live" => super::live::session_cell(
+            ctx.snapshot,
+            &NodeId::AgentSession(agent.id.clone()),
+            ctx.live_now_ms,
+        )
+        .unwrap_or_else(dash),
         _ => dash(),
     }
 }

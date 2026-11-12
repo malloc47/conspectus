@@ -8,6 +8,7 @@ pub mod agent;
 pub mod dot;
 pub mod forks;
 pub mod html;
+mod live;
 pub mod mux;
 pub mod node_show;
 pub mod prs;

@@ -1959,6 +1959,61 @@ fn columns_lists_every_row_type_with_default_marker() {
 }
 
 #[test]
+fn the_live_columns_are_listed_opt_in_and_chosen_by_flag_or_config() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    for row_type in ["sessions", "mux"] {
+        let assert = isolated_cmd(home.path())
+            .current_dir(temp.path())
+            .args(["columns", row_type])
+            .assert()
+            .success();
+        let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+        let line = output
+            .lines()
+            .find(|line| line.starts_with("live "))
+            .unwrap_or_else(|| panic!("no live column for {row_type}:\n{output}"));
+        assert!(!line.contains("(default)"), "{line}");
+
+        let assert = isolated_cmd(home.path())
+            .current_dir(temp.path())
+            .args(["table", row_type, "--no-cache", "--columns", "id,live"])
+            .assert()
+            .success();
+        let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+        assert_eq!(
+            output
+                .lines()
+                .next()
+                .map(str::split_whitespace)
+                .map(Iterator::collect::<Vec<_>>),
+            Some(vec!["ID", "LIVE"]),
+            "{output}"
+        );
+    }
+
+    let config = home.path().join(".config/conspectus/config.toml");
+    fs::create_dir_all(config.parent().expect("parent")).expect("config dir");
+    fs::write(&config, "[table.mux]\ncolumns = [\"mux\", \"live\"]\n").expect("config");
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .args(["table", "mux", "--no-cache"])
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert_eq!(
+        output
+            .lines()
+            .next()
+            .map(str::split_whitespace)
+            .map(Iterator::collect::<Vec<_>>),
+        Some(vec!["MUX", "LIVE"]),
+        "{output}"
+    );
+}
+
+#[test]
 fn columns_rejects_unknown_row_type() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");

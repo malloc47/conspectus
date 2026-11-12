@@ -54,6 +54,7 @@ pub fn build_mux_rows_from_snapshot(
     let muxes = collect_mux_rows(snapshot);
     let attachments = collect_attachment_lookup(snapshot);
     let ambiguity = collect_per_agent_ambiguity(snapshot);
+    let live_now_ms = super::live::read_time_ms(options.now_epoch);
 
     let body_full_ids: Vec<String> = muxes
         .iter()
@@ -84,6 +85,8 @@ pub fn build_mux_rows_from_snapshot(
             continue;
         }
         let ctx = CellCtx {
+            snapshot,
+            live_now_ms,
             row,
             short_id,
             attached: if visible_attached.is_empty() {
@@ -153,6 +156,9 @@ fn mux_matches_filter(
 }
 
 struct CellCtx<'a> {
+    snapshot: &'a GraphSnapshot,
+    /// When the `live` cell reads live state, Unix epoch milliseconds.
+    live_now_ms: i64,
     row: &'a MuxRow<'a>,
     short_id: &'a str,
     attached: Option<&'a [AttachedAgent]>,
@@ -195,6 +201,9 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
             .attached
             .and_then(|entries| entries.iter().find_map(|a| a.preview.clone()))
             .unwrap_or_else(dash),
+        "live" => {
+            super::live::mux_cell(ctx.snapshot, &mux.id, ctx.live_now_ms).unwrap_or_else(dash)
+        }
         _ => dash(),
     }
 }

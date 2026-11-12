@@ -1,0 +1,11 @@
+---
+source: tests/live_state_output.rs
+expression: "table(&snapshot, Projection::Agent, &[\"agent\", \"live\"], now_ms)"
+---
+AGENT                LIVE
+-------------------  ----------------------------
+claude-code:builder  working:generating quiet 12m
+claude-code:gone     exited:killed 4m
+claude-code:lost     unknown:stale 20m
+claude-code:unheard  —
+claude-code:waiter   waiting:permission +1 3m
