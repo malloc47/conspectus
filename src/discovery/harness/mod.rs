@@ -35,6 +35,7 @@ pub mod codex;
 pub mod fixtures;
 pub mod opencode;
 pub mod pi;
+mod plugin_live;
 
 pub use aider::AiderAdapter;
 pub use claude_code::ClaudeCodeAdapter;
@@ -342,36 +343,15 @@ pub trait HarnessAdapter: Send + Sync {
         harness_version: Option<String>,
         observed_epoch: i64,
     ) -> anyhow::Result<crate::hook::HookRecord> {
-        use anyhow::bail;
-        let Some(session_id) = payload
-            .get("session_id")
-            .and_then(serde_json::Value::as_str)
-        else {
-            bail!(
-                "{} hook payload missing string `session_id`",
-                self.display_label()
-            );
-        };
-        if session_id.is_empty() {
-            bail!(
-                "{} hook payload has empty `session_id`",
-                self.display_label()
-            );
-        }
-        Ok(crate::hook::HookRecord {
-            schema_version: crate::hook::SCHEMA_VERSION,
-            harness_key: self.harness_key().to_string(),
-            session_key: session_id.to_string(),
-            cwd: crate::hook::optional_payload_string(payload, "cwd"),
+        session_hook_record(
+            self,
+            payload,
             pid,
             ppid,
-            tmux: tmux.filter(|tmux| !tmux.is_empty()),
-            transcript_path: crate::hook::optional_payload_string(payload, "transcript_path"),
-            hook_event_name: crate::hook::optional_payload_string(payload, "hook_event_name"),
-            observed_epoch,
+            tmux,
             harness_version,
-            background_harness: false,
-        })
+            observed_epoch,
+        )
     }
 
     /// Whether `conspectus hook write` records `payload` for attribution
@@ -439,6 +419,52 @@ pub trait HarnessAdapter: Send + Sync {
     fn live_reducer(&self) -> &dyn crate::live_store::Reducer {
         &crate::live_store::SharedReducer
     }
+}
+
+/// The hook sidecar record [`HarnessAdapter::hook_record_from_payload`]
+/// builds by default: the ADR 0028 canonical `session_id` string, the
+/// payload's `cwd`, `transcript_path`, and `hook_event_name`, stamped with
+/// `adapter`'s harness key. An adapter that overrides the method to adjust
+/// its inputs builds the record with this.
+pub(crate) fn session_hook_record<A: HarnessAdapter + ?Sized>(
+    adapter: &A,
+    payload: &serde_json::Value,
+    pid: Option<i64>,
+    ppid: Option<i64>,
+    tmux: Option<crate::hook::HookTmuxRecord>,
+    harness_version: Option<String>,
+    observed_epoch: i64,
+) -> anyhow::Result<crate::hook::HookRecord> {
+    use anyhow::bail;
+    let Some(session_id) = payload
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+    else {
+        bail!(
+            "{} hook payload missing string `session_id`",
+            adapter.display_label()
+        );
+    };
+    if session_id.is_empty() {
+        bail!(
+            "{} hook payload has empty `session_id`",
+            adapter.display_label()
+        );
+    }
+    Ok(crate::hook::HookRecord {
+        schema_version: crate::hook::SCHEMA_VERSION,
+        harness_key: adapter.harness_key().to_string(),
+        session_key: session_id.to_string(),
+        cwd: crate::hook::optional_payload_string(payload, "cwd"),
+        pid,
+        ppid,
+        tmux: tmux.filter(|tmux| !tmux.is_empty()),
+        transcript_path: crate::hook::optional_payload_string(payload, "transcript_path"),
+        hook_event_name: crate::hook::optional_payload_string(payload, "hook_event_name"),
+        observed_epoch,
+        harness_version,
+        background_harness: false,
+    })
 }
 
 /// Stub signature used as the [`HarnessAdapter::runtime_signature`]

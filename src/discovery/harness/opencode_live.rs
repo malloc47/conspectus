@@ -16,24 +16,11 @@
 //! ```
 //!
 //! [`live_snapshot`] reads the `live` object as a [`LiveSnapshot`] for the
-//! store, field by field against a whitelist:
-//!
-//! | Field | Read as |
-//! | :- | :- |
-//! | `session_id`, `cwd` (top level) | the session and its directory; the store refuses an id that is not one and drops a path that is not absolute |
-//! | `instance`, `seq` | the plugin instance and its sequence number; without both there is no snapshot |
-//! | `state` | a name of the closed set; any other value reads `unknown` |
-//! | `detail` | a name of the closed set that `state` carries; any other is dropped |
-//! | `subagents` | a count, clamped to `u16` |
-//! | `via_subagent` | a flag, false unless `true` |
-//! | `observed_ms`, `since_ms` | times, never later than the writer's clock or, for `since_ms`, than `observed_ms`; a missing or non-positive one is the writer's time |
-//! | `heartbeat_s` | seconds, at most [`MAX_HEARTBEAT_S`] |
-//! | `pid`, `pid_start` | the opencode process the plugin runs in, which replaces the one the writer found by walking its parents; the start time the writer read wins when both name the same pid |
-//!
-//! Nothing else is read, and no field can carry text into the store: a
-//! state or detail outside the closed set is not copied, and every id and
-//! path is checked by the store (ADR 0086 Tier 3, ADR 0206 decisions 10
-//! to 12).
+//! store through the parser the Pi extension's snapshots share
+//! (`plugin_live.rs`), field by field against a whitelist: a state or
+//! detail outside the closed sets is not copied, counts and the heartbeat
+//! are clamped, no time runs ahead of the writer's clock, and the plugin's
+//! own pid replaces the one the writer found by walking its parents.
 //!
 //! [`is_attribution_event`] decides which payloads also take the
 //! attribution path (the hook spool and the daemon's `hook_ingest`, ADR
@@ -58,16 +45,12 @@
 //! - Without the plugin, or with only the 2.x TUI entrypoint installed, a
 //!   session has no entry, which is no evidence, not idle.
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 
+use crate::discovery::harness::plugin_live;
 use crate::live_store::{LiveContext, LiveSnapshot};
-use crate::model::live::{LiveDetail, LiveState};
 
 use super::HARNESS_KEY;
-
-/// The longest heartbeat interval a snapshot may claim, so a reader's
-/// quiet window (three heartbeats) stays under half an hour.
-pub(crate) const MAX_HEARTBEAT_S: u32 = 600;
 
 /// Whether `payload` takes the attribution path: when the plugin marks it
 /// with `attribution`, as it says; else when it carries no live state.
@@ -87,84 +70,7 @@ pub(super) fn live_snapshot(
     context: &LiveContext,
     observed_ms: i64,
 ) -> Option<LiveSnapshot> {
-    let fields = payload.as_object()?;
-    let live = fields.get("live")?.as_object()?;
-    let session_id = text(fields, "session_id")?;
-    let instance = text(live, "instance")?;
-    let seq = live.get("seq")?.as_u64()?;
-    let observed = time(live, "observed_ms", observed_ms);
-    let state = live
-        .get("state")
-        .and_then(Value::as_str)
-        .and_then(LiveState::from_name)
-        .unwrap_or(LiveState::Unknown);
-    let detail = live
-        .get("detail")
-        .and_then(Value::as_str)
-        .and_then(LiveDetail::from_name)
-        .filter(|detail| state.accepts(*detail));
-    let subagents = live
-        .get("subagents")
-        .and_then(Value::as_u64)
-        .map_or(0, |count| u16::try_from(count).unwrap_or(u16::MAX));
-    let heartbeat_s = live
-        .get("heartbeat_s")
-        .and_then(Value::as_u64)
-        .map_or(0, |seconds| {
-            u32::try_from(seconds.min(u64::from(MAX_HEARTBEAT_S))).unwrap_or(MAX_HEARTBEAT_S)
-        });
-    let (pid, pid_start) = match live
-        .get("pid")
-        .and_then(Value::as_i64)
-        .filter(|pid| *pid > 1)
-    {
-        Some(pid) => {
-            let reported = live.get("pid_start").and_then(Value::as_u64);
-            let found = context.pid_start.filter(|_| context.pid == Some(pid));
-            (Some(pid), found.or(reported))
-        }
-        None => (context.pid, context.pid_start),
-    };
-    Some(LiveSnapshot {
-        harness: HARNESS_KEY.to_string(),
-        session_id: session_id.to_string(),
-        instance: instance.to_string(),
-        seq,
-        observed_ms: observed,
-        context: LiveContext {
-            cwd: text(fields, "cwd")
-                .map(str::to_string)
-                .or_else(|| context.cwd.clone()),
-            pid,
-            pid_start,
-            ..context.clone()
-        },
-        state,
-        detail,
-        since_ms: time(live, "since_ms", observed),
-        subagents,
-        via_subagent: live.get("via_subagent").and_then(Value::as_bool) == Some(true),
-        heartbeat_s,
-    })
-}
-
-/// The string at `key`, or `None` when it is missing, empty, or not a
-/// string.
-fn text<'a>(fields: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
-    fields
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|text| !text.is_empty())
-}
-
-/// The time at `key`, no later than `latest`; `latest` when it is
-/// missing or not positive.
-fn time(fields: &Map<String, Value>, key: &str, latest: i64) -> i64 {
-    fields
-        .get(key)
-        .and_then(Value::as_i64)
-        .filter(|ms| *ms > 0)
-        .map_or(latest, |ms| ms.min(latest))
+    plugin_live::live_snapshot(HARNESS_KEY, payload, context, observed_ms)
 }
 
 #[cfg(test)]

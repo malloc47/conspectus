@@ -16,6 +16,7 @@ use super::*;
 use crate::discovery::harness::live_sequences::{self, assert_shown, corpus_dir};
 use crate::discovery::harness::{HarnessAdapter, OpenCodeAdapter};
 use crate::live_store::{Applied, LiveStore};
+use crate::model::live::{LiveDetail, LiveState};
 
 /// The scenarios the research's fixture plan and the story list.
 const SCRIPTS: [&str; 19] = [

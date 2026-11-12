@@ -4,8 +4,10 @@
 use serde_json::{Value, json};
 
 use super::*;
+use crate::discovery::harness::plugin_live::MAX_HEARTBEAT_S;
 use crate::discovery::harness::{HarnessAdapter, OpenCodeAdapter};
 use crate::live_store::{Applied, LiveStore, LiveTmux};
+use crate::model::live::{LiveDetail, LiveState};
 
 const SESSION: &str = "ses_7Kq2mX9vB4nL1pZ8";
 const CWD: &str = "/home/user/projects/my-project";
