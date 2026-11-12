@@ -812,6 +812,263 @@ fn hook_init_claude_code_refuses_a_hooks_table_it_would_replace() {
     assert_eq!(fs::read_to_string(&settings).expect("read"), text);
 }
 
+/// A settings file kept by hand: keys in no order, four-space
+/// indentation, an escape and a literal non-ASCII character, a number in
+/// exponent form, objects kept on one line, and no trailing newline.
+const HAND_KEPT_SETTINGS: &str = r#"{
+    "statusLine": {"type": "command", "command": "~/.claude/statusline.sh"},
+    "model": "opus",
+    "env": {
+        "GREETING": "caf\u00e9 ☕ naïve",
+        "RETRIES": 1e1
+    },
+    "permissions": {
+        "deny": [],
+        "allow": ["Bash(git status)", "Read(~/notes/**)"]
+    },
+    "theme": "dark"
+}"#;
+
+/// Runs `conspectus hook <args>` in a scratch home, from `cwd`.
+fn hook_in(home: &Path, cwd: &Path, args: &[&str]) -> assert_cmd::assert::Assert {
+    isolated_cmd(home)
+        .current_dir(cwd)
+        .arg("hook")
+        .args(args)
+        .assert()
+}
+
+#[test]
+fn hook_init_claude_code_adds_only_its_entries_and_remove_gives_the_file_back() {
+    let variants = [
+        ("    ", "\n", HAND_KEPT_SETTINGS.to_string()),
+        ("\t", "\n", HAND_KEPT_SETTINGS.replace("    ", "\t") + "\n"),
+        (
+            "  ",
+            "\r\n",
+            HAND_KEPT_SETTINGS
+                .replace("    ", "  ")
+                .replace('\n', "\r\n")
+                + "\r\n",
+        ),
+    ];
+    for project_scope in [false, true] {
+        for (unit, newline, original) in &variants {
+            let home = tempfile::TempDir::new().expect("home temp");
+            let project = tempfile::TempDir::new().expect("project temp");
+            let (root, scope) = if project_scope {
+                (project.path(), &["--scope", "project"][..])
+            } else {
+                (home.path(), &[][..])
+            };
+            let settings = root.join(".claude/settings.json");
+            fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+            fs::write(&settings, original).expect("write settings");
+            let hook = |args: &[&str]| {
+                hook_in(home.path(), project.path(), &[args, scope].concat()).success()
+            };
+
+            hook(&[
+                "init",
+                "claude-code",
+                "--command",
+                "conspectus hook write claude-code",
+            ])
+            .stdout(predicate::str::contains("(14 added, 0 updated)"));
+            let installed = fs::read_to_string(&settings).expect("read settings");
+            // The original's bytes run up to the end of its last value and
+            // resume at the line ending before its closing brace; the hooks
+            // go between, in the file's own indentation and line ending.
+            let end = original.rfind("\"dark\"").expect("last value") + "\"dark\"".len();
+            assert!(installed.starts_with(&original[..end]), "{installed:?}");
+            assert!(installed.ends_with(&original[end..]), "{installed:?}");
+            let inserted = &installed[end..installed.len() - (original.len() - end)];
+            assert!(
+                inserted.starts_with(&format!(
+                    ",{newline}{unit}\"hooks\": {{{newline}{unit}{unit}\""
+                )),
+                "{inserted:?}"
+            );
+            assert!(
+                inserted.contains(&format!("{newline}{unit}{unit}\"PostCompact\": [{newline}")),
+                "{inserted:?}"
+            );
+            assert_eq!(
+                inserted.matches('\n').count(),
+                inserted.matches(newline).count(),
+                "one line ending throughout: {inserted:?}"
+            );
+            assert!(!home.path().join(".claude").exists() || !project_scope);
+
+            hook(&["status", "claude-code"])
+                .stdout(predicate::str::starts_with("installed\tclaude-code\t"));
+            hook(&["init", "claude-code"]).stdout(predicate::str::contains(
+                "Claude Code hooks already installed",
+            ));
+            assert_eq!(fs::read_to_string(&settings).expect("read"), installed);
+
+            hook(&["remove", "claude-code", "--dry-run"])
+                .stdout(predicate::str::contains("would remove Claude Code hooks"));
+            assert_eq!(fs::read_to_string(&settings).expect("read"), installed);
+            hook(&["remove", "claude-code"])
+                .stdout(predicate::str::contains("removed Claude Code hooks"));
+            assert_eq!(
+                &fs::read_to_string(&settings).expect("read"),
+                original,
+                "remove gives back the file byte for byte"
+            );
+        }
+    }
+}
+
+#[test]
+fn hook_init_claude_code_leaves_the_operators_hooks_byte_for_byte() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    let stop = r#"
+      {
+        "hooks": [
+          { "type": "command", "command": "/home/me/bin/notify-done", "timeout": 30 }
+        ]
+      }"#;
+    let guard = r#"
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "/home/me/bin/guard"}]
+      }"#;
+    let original = format!(
+        "{{\n  \"hooks\": {{\n    \"Stop\": [{stop}\n    ],\n    \"PreToolUse\": [{guard}\n    ]\n  }},\n  \"theme\": \"dark\"\n}}\n"
+    );
+    fs::write(&settings, &original).expect("write settings");
+    let hook = |args: &[&str]| hook_in(home.path(), home.path(), args).success();
+
+    hook(&[
+        "init",
+        "claude-code",
+        "--command",
+        "conspectus hook write claude-code",
+    ])
+    .stdout(predicate::str::contains("(14 added, 0 updated)"));
+    let installed = fs::read_to_string(&settings).expect("read settings");
+    // Each of the operator's groups is still there, as written, with
+    // Conspectus's after it; the events Conspectus adds follow theirs.
+    for operator in [stop, guard] {
+        assert!(
+            installed.contains(&format!("{operator},\n      {{\n        \"hooks\": [\n")),
+            "{installed}"
+        );
+    }
+    assert!(installed.starts_with(&format!("{{\n  \"hooks\": {{\n    \"Stop\": [{stop},")));
+    assert!(
+        installed.contains("\n    ],\n    \"Notification\": ["),
+        "{installed}"
+    );
+    assert!(
+        installed.ends_with("\n  },\n  \"theme\": \"dark\"\n}\n"),
+        "{installed}"
+    );
+    let value = read_settings(&settings);
+    assert_eq!(value["hooks"]["Stop"].as_array().expect("groups").len(), 2);
+    assert_eq!(
+        value["hooks"]["Stop"][1]["hooks"][0]["command"],
+        "conspectus hook write claude-code"
+    );
+
+    hook(&["remove", "claude-code"]);
+    assert_eq!(fs::read_to_string(&settings).expect("read"), original);
+}
+
+#[test]
+fn hook_init_claude_code_upgrades_an_old_entry_where_it_stands() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    // What an older `hook init claude-code` wrote, as a formatter later
+    // left it: four spaces, `hooks` before `matcher`, `command` first.
+    let original = r#"{
+    "model": "opus",
+    "hooks": {
+        "SessionStart": [
+            {
+                "hooks": [
+                    {
+                        "command": "/old/bin/conspectus hook write claude-code",
+                        "type": "command"
+                    }
+                ],
+                "matcher": "resume|startup|clear|compact"
+            }
+        ]
+    },
+    "theme": "dark"
+}"#;
+    fs::write(&settings, original).expect("write settings");
+    let hook = |args: &[&str]| hook_in(home.path(), home.path(), args).success();
+
+    hook(&["init", "claude-code"]).stdout(predicate::str::contains("(13 added, 1 updated)"));
+    let installed = fs::read_to_string(&settings).expect("read settings");
+    // The old entry gains a timeout and the full matcher where they
+    // belong, and nothing else in it moves.
+    let upgraded = original
+        .replace(
+            "\"type\": \"command\"\n",
+            "\"type\": \"command\",\n                        \"timeout\": 5\n",
+        )
+        .replace(
+            "\"resume|startup|clear|compact\"",
+            "\"startup|resume|clear|compact|fork\"",
+        );
+    let split = upgraded.find("\n    },\n").expect("the end of the hooks");
+    assert!(
+        installed.starts_with(&format!(
+            "{},\n        \"Notification\": [\n",
+            &upgraded[..split]
+        )),
+        "{installed}"
+    );
+    assert!(installed.ends_with(&upgraded[split..]), "{installed}");
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("installed\tclaude-code\t"));
+
+    // Remove takes the whole entry out, and the hooks with it.
+    hook(&["remove", "claude-code"]);
+    assert_eq!(
+        fs::read_to_string(&settings).expect("read"),
+        "{\n    \"model\": \"opus\",\n    \"theme\": \"dark\"\n}"
+    );
+}
+
+#[test]
+fn hook_init_claude_code_refuses_a_file_it_cannot_edit_exactly() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    for (text, error) in [
+        (
+            "{\n  // my theme\n  \"theme\": \"dark\"\n}\n",
+            "failed to parse JSON",
+        ),
+        ("{\"theme\": \"dark\",}\n", "failed to parse JSON"),
+        (
+            "{\"hooks\": {}, \"theme\": \"dark\", \"hooks\": {}}\n",
+            "appears twice",
+        ),
+    ] {
+        fs::write(&settings, text).expect("write settings");
+        for dry_run in [true, false] {
+            let mut args = vec!["init", "claude-code"];
+            if dry_run {
+                args.push("--dry-run");
+            }
+            hook_in(home.path(), home.path(), &args)
+                .failure()
+                .stderr(predicate::str::contains(error));
+            assert_eq!(fs::read_to_string(&settings).expect("read"), text);
+        }
+    }
+}
+
 /// The last line `hook status <harness>` prints: the live-state health.
 fn health_line(home: &Path, harness: &str) -> String {
     let assert = isolated_cmd(home)

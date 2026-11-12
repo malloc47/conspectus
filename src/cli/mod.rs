@@ -146,6 +146,7 @@ mod hook_claude;
 mod hook_codex;
 mod hook_health;
 mod hook_write;
+mod json_splice;
 
 mod node;
 use node::NodeArgs;

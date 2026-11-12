@@ -8,6 +8,11 @@
 //! `status` (reports whether the hook is installed, then whether it
 //! feeds live state; that line comes from [`super::hook_health`]).
 //!
+//! Both settings files are edited in place: `config.toml` through
+//! `toml_edit`, and `settings.json` by [`super::json_splice`], which
+//! changes only the entries that differ, so the operator's key order,
+//! layout, and every other byte stay as they were.
+//!
 //! Every helper this module needs is either hook-specific
 //! (moved here alongside the args) or comes from external
 //! crates. Nothing shared back through `super`.
@@ -29,6 +34,7 @@ use super::hook_codex::{
 };
 use super::hook_health::print_health;
 use super::hook_write::HookWriteArgs;
+use super::json_splice::splice;
 
 #[derive(Debug, Args)]
 pub(super) struct HookArgs {
@@ -128,7 +134,8 @@ impl HookInitArgs {
 
     fn run_claude_install(self) -> Result<()> {
         let path = claude_settings_path(self.scope)?;
-        let mut document = read_json_document(&path)?;
+        let settings = read_json_settings(&path)?;
+        let mut document = settings.document.clone();
         let install = ensure_claude_hook(
             &mut document,
             self.command.as_deref(),
@@ -136,26 +143,28 @@ impl HookInitArgs {
         )
         .with_context(|| format!("can't install the Claude Code hooks in {}", path.display()))?;
         let counts = format!("{} added, {} updated", install.added, install.updated);
+        let text = if install.changed() {
+            Some(settings.text_holding(&document).with_context(|| {
+                format!("can't install the Claude Code hooks in {}", path.display())
+            })?)
+        } else {
+            None
+        };
 
-        if self.dry_run {
-            if install.changed() {
+        match (self.dry_run, text) {
+            (true, Some(_)) => println!(
+                "would install Claude Code hooks in {} ({counts})",
+                path.display()
+            ),
+            (true, None) => println!("already installed Claude Code hooks in {}", path.display()),
+            (false, Some(text)) => {
+                replace_settings_file(&path, &text)?;
                 println!(
-                    "would install Claude Code hooks in {} ({counts})",
+                    "installed Claude Code hooks in {} ({counts})",
                     path.display()
                 );
-            } else {
-                println!("already installed Claude Code hooks in {}", path.display());
             }
-            return Ok(());
-        }
-        if install.changed() {
-            write_json_document(&path, &document)?;
-            println!(
-                "installed Claude Code hooks in {} ({counts})",
-                path.display()
-            );
-        } else {
-            println!("Claude Code hooks already installed in {}", path.display());
+            (false, None) => println!("Claude Code hooks already installed in {}", path.display()),
         }
         Ok(())
     }
@@ -256,7 +265,7 @@ impl HookStatusArgs {
     /// whether any event is installed.
     fn run_claude_status(&self) -> Result<bool> {
         let path = claude_settings_path(self.scope)?;
-        let document = read_json_document(&path)?;
+        let document = read_json_settings(&path)?.document;
         let coverage = claude_hook_coverage(&document);
         let overall = coverage_label(&document, &coverage);
         println!("{overall}\tclaude-code\t{}", path.display());
@@ -359,23 +368,24 @@ impl HookRemoveArgs {
 
     fn run_claude_remove(self) -> Result<()> {
         let path = claude_settings_path(self.scope)?;
-        let mut document = read_json_document(&path)?;
-        let changed = remove_claude_hook(&mut document);
-
-        if self.dry_run {
-            let verb = if changed {
-                "would remove"
-            } else {
-                "not installed"
-            };
-            println!("{verb} Claude Code hooks in {}", path.display());
-            return Ok(());
-        }
-        if changed {
-            write_json_document(&path, &document)?;
-            println!("removed Claude Code hooks from {}", path.display());
+        let settings = read_json_settings(&path)?;
+        let mut document = settings.document.clone();
+        let text = if remove_claude_hook(&mut document) {
+            Some(settings.text_holding(&document).with_context(|| {
+                format!("can't remove the Claude Code hooks from {}", path.display())
+            })?)
         } else {
-            println!("Claude Code hooks not installed in {}", path.display());
+            None
+        };
+
+        match (self.dry_run, text) {
+            (true, Some(_)) => println!("would remove Claude Code hooks in {}", path.display()),
+            (true, None) => println!("not installed Claude Code hooks in {}", path.display()),
+            (false, Some(text)) => {
+                replace_settings_file(&path, &text)?;
+                println!("removed Claude Code hooks from {}", path.display());
+            }
+            (false, None) => println!("Claude Code hooks not installed in {}", path.display()),
         }
         Ok(())
     }
@@ -611,25 +621,44 @@ fn shell_quote(value: &str) -> String {
     }
 }
 
-fn read_json_document(path: &Path) -> Result<serde_json::Value> {
-    match fs::read_to_string(path) {
-        Ok(text) => {
-            let value: serde_json::Value = serde_json::from_str(&text)
-                .with_context(|| format!("failed to parse JSON {}", path.display()))?;
-            if value.is_object() {
-                Ok(value)
-            } else {
-                bail!("{} must contain a JSON object", path.display());
-            }
+/// A JSON settings file as read: its text, when the file exists, and the
+/// object it holds, empty for a file that does not exist yet.
+struct JsonSettings {
+    text: Option<String>,
+    document: serde_json::Value,
+}
+
+impl JsonSettings {
+    /// The text that makes the file hold `document`: the file's own text
+    /// with only the values that changed edited, or, for a new file, the
+    /// document pretty-printed.
+    fn text_holding(&self, document: &serde_json::Value) -> Result<String> {
+        match &self.text {
+            Some(text) => splice(text, document),
+            None => Ok(serde_json::to_string_pretty(document)? + "\n"),
         }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(serde_json::json!({})),
-        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
     }
 }
 
-fn write_json_document(path: &Path, value: &serde_json::Value) -> Result<()> {
-    let text = serde_json::to_string_pretty(value)? + "\n";
-    replace_settings_file(path, &text)
+fn read_json_settings(path: &Path) -> Result<JsonSettings> {
+    match fs::read_to_string(path) {
+        Ok(text) => {
+            let document: serde_json::Value = serde_json::from_str(&text)
+                .with_context(|| format!("failed to parse JSON {}", path.display()))?;
+            if !document.is_object() {
+                bail!("{} must contain a JSON object", path.display());
+            }
+            Ok(JsonSettings {
+                text: Some(text),
+                document,
+            })
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(JsonSettings {
+            text: None,
+            document: serde_json::json!({}),
+        }),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
 }
 
 fn read_toml_document(path: &Path) -> Result<DocumentMut> {
