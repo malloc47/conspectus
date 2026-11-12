@@ -103,6 +103,7 @@ mod help;
 mod keys;
 mod layout;
 mod lifecycle;
+mod live;
 mod marks;
 mod menus;
 mod parity;

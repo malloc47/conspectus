@@ -186,7 +186,12 @@ pub(super) fn app_over_filtered(view: View, snapshot: &GraphSnapshot, filter: Ro
 /// matches the loose pinned session, the way the Search view and the
 /// lists need one to have anything to show.
 pub(super) fn searched(view: View, filter: RowFilter) -> App {
-    let mut app = app_over_filtered(view, &world(), filter);
+    with_search(app_over_filtered(view, &world(), filter))
+}
+
+/// `app` with the search [`searched`] applies, which matches the loose
+/// pinned session.
+pub(super) fn with_search(mut app: App) -> App {
     app.update(Msg::StartContentSearch {
         text: "needle".into(),
         kinds: crate::viewer::search::ContentKinds::default(),
