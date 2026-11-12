@@ -168,7 +168,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0064](0064-hybrid-sessions-graph-grouping.md) | Hybrid Workspace+Repo Grouping In Sessions/Graph | Accepted (amended by 0184) |
 | [0065](0065-sessions-workspace-grouping-replaces-workspaces-view.md) | Workspace Grouping In Sessions Replaces The Workspaces View | Accepted |
 | [0071](0071-ambiguous-mux-scope-and-detail.md) | Ambiguous Mux Surface Moves From Session Row To Group Detail | Accepted (detail-pane section superseded by 0074; the several-mux hint revised) |
-| [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted (extended by 0120, amended by 0145) |
+| [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted (extended by 0120, amended by 0145, 0210) |
 | [0120](0120-mux-rows-drop-the-ambiguity-glyph.md) | Mux Rows Drop The Ambiguity Glyph | Accepted |
 | [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted (amended by 0144, 0145, 0154); framework-owned in part |
 | [0074](0074-detail-pane-related-entities-flatten.md) | Detail-Pane Related-Entities Flatten | Accepted (narrowed by 0107, amended by 0187, narrowed by 0188) |
@@ -244,6 +244,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0200](0200-tui-the-application-runtime-stays-in-conspectus-until-a-second-program-needs-it.md) | The Application Runtime Stays In Conspectus Until A Second Program Needs It | Accepted; framework-owned in part |
 | [0202](0202-tui-each-view-reopens-with-the-rows-it-had-expanded-and-selected.md) | Each View Reopens With The Rows It Had Expanded And Selected | Accepted |
 | [0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md) | Session And Mux Rows Show Live State In A One-Cell Column After The Age | Accepted |
+| [0210](0210-tui-group-headers-count-the-agents-waiting-beneath-them.md) | Group Headers Count The Agents Waiting Beneath Them | Accepted |
 
 ## Transcript viewer
 
