@@ -520,9 +520,9 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 │  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
 │  ▼ ◆   project        ~/repos/project                       (4)  ! 2  ▲           │
 │►     ●   showcase   claude       1m  !  ∘  ambiguous mux candidate A  Showcase: a…│
-│      ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  Showcase: a…│
+│      ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  +3  Showcas…│
 │      ●   showcase   claude       1m  »  ∘  hook-supersession current sessi…       │
-│      ● ◉ showcase   claude       1h  !  ∘  claude-code in project repo  I expande…│
+│      ● ◉ showcase   claude       1h  !  ∘  claude-code in project repo  +1        │
 │  ▶     Ungrouped                                            (1)                   │
 ```
 
@@ -530,10 +530,10 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │►   ●   showcase   claude       1m  !  ∘  ambiguous mux candidate A  project       │
-│    ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  project       │
+│    ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  +3  project   │
 │    ●   showcase   claude       1m  ›  ⊸  agent-deck composite launcher  showcase-…│
 │    ●   showcase   claude       1m  »  ∘  hook-supersession current sessi…  project│
-│    ● ◉ showcase   claude       1h  !  ∘  claude-code in project repo  project     │
+│    ● ◉ showcase   claude       1h  !  ∘  claude-code in project repo  +1  project │
 │    ●   showcase   pi           2h  ×  ∘  repo-a            Showcase: pi in atelie…│
 │    ●   showcase   opencode     3h  ?  ∘  repo-b            Showcase: opencode in …│
 │    ●   showcase   codex       12h  ·  ⊸  bare-work  bare-project      Showcase: c…│
@@ -684,9 +684,9 @@ The sessions under a PR are session rows, each with its live mark:
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │  ▼ ◇   conspectus/project  ~/repos/project  (4)  ! 2  ▲                           │
 │►   ▼ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                      │
-│        ● ◉ showcase   claude       1h  !  ∘  I expanded `notes.md` into a release…│
+│        ● ◉ showcase   claude       1h  !  ∘  +1  I expanded `notes.md` into a rel…│
 │        ●   showcase   claude       1m  !  ∘  Showcase: ambiguous mux candidate A  │
-│        ●   showcase   claude       1m  »  ∘  Showcase: ambiguous mux candidate B  │
+│        ●   showcase   claude       1m  »  ∘  +3  Showcase: ambiguous mux candidat…│
 │        ●   showcase   claude       1m  »  ∘  Showcase: hook-supersession current …│
 │  ▶ ◆   conspectus/project  ~/repos/project  no checkout                           │
 │  ▶     project             conspectus/project                                     │
@@ -892,7 +892,7 @@ session's last activity, as everywhere else, not the time of the match.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
 │►   ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
-│    ● ◉ showcase   claude       1h  !  ∘  project        2 hits│
+│    ● ◉ showcase   claude       1h  !  ∘  +1  project    2 hits│
 │    ●   showcase   pi           2h  ×  ∘  repo-a         2 hits│
 ```
 
@@ -903,7 +903,7 @@ session's last activity, as everywhere else, not the time of the match.
 │► ▼   Mux panes                                                │
 │      ▣ ◉ project 0.0   2 hits          ready once they pass.  │
 │  ▼   project    (1)  ! 1  ▲                                   │
-│      ● ◉ showcase   claude       1h  !  ∘  project      2 hits│
+│      ● ◉ showcase   claude       1h  !  ∘  +1  project  2 hits│
 │  ▼   repo-a     (1)                                           │
 │      ●   showcase   pi           2h  ×  ∘  repo-a       2 hits│
 ```
@@ -971,7 +971,7 @@ It takes the [hit row](#hit-row)'s columns after the mux glyph.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
 │►   ▣ ◉ project 0.0   4 hits            0s from feature/extra… │
-│    ● ◉ showcase   claude       1h  !  ∘  project        4 hits│
+│    ● ◉ showcase   claude       1h  !  ∘  +1  project    4 hits│
 ```
 
 ### Pane hit row
@@ -1007,6 +1007,6 @@ column, then the mux's name and the pane's place, then:
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/2 "the" · All · 2 sessions · 1 pane · 4 skipped · sca…│
 │►   ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
-│    ● ◉ showcase   claude       1h  !  ∘  project        2 hits│
+│    ● ◉ showcase   claude       1h  !  ∘  +1  project    2 hits│
 │    ●   showcase   pi           2h  ×  ∘  repo-a         2 hits│
 ```

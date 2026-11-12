@@ -973,11 +973,12 @@ fn build_showcase(world: &mut ScenarioWorld) -> Result<()> {
 /// What the showcase's agents are doing, in the world's own live-state
 /// store, so every live-state mark shows somewhere: sessions waiting on
 /// the operator (two of them in `project`, the pinned session among
-/// them, so its header counts two), one working and one gone quiet at
-/// it, a ready one, an error, evidence too old to trust, an exited
-/// session, and sessions with none. The `ambiguous` mux's two candidates
-/// are waiting and working, so its row rolls the two up, and two agents
-/// in panes of `project` that no session matches yet count there.
+/// them, whose wait is its subagent's, so its header counts two), one
+/// working with three subagents and one gone quiet at it, a ready one, an
+/// error, evidence too old to trust, an exited session, and sessions with
+/// none. The `ambiguous` mux's two candidates are waiting and working, so
+/// its row rolls the two up, and two agents in panes of `project` that no
+/// session matches yet count there.
 ///
 /// No entry records a process, so each holds for fifteen minutes from its
 /// latest evidence, measured from the showcase's anchor time; the
@@ -989,8 +990,9 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
 
     /// One agent's report: its harness and session, its state, when the
     /// state began and when the agent was last heard from (milliseconds
-    /// before the anchor), the seconds between its heartbeats, and the
-    /// pane of `project` it runs in when no session matches it.
+    /// before the anchor), the seconds between its heartbeats, the pane of
+    /// `project` it runs in when no session matches it, the subagents it
+    /// runs, and whether its state is one of theirs.
     struct Report {
         harness: &'static str,
         session: &'static str,
@@ -1000,6 +1002,8 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
         heard: i64,
         heartbeat_s: u32,
         pane: Option<&'static str>,
+        subagents: u16,
+        via_subagent: bool,
     }
     let report = |session, state, detail, began, heard| Report {
         harness: "claude-code",
@@ -1010,6 +1014,8 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
         heard,
         heartbeat_s: 0,
         pane: None,
+        subagents: 0,
+        via_subagent: false,
     };
 
     let now_ms = SHOWCASE_NOW_EPOCH * 1_000;
@@ -1023,13 +1029,17 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
             minute,
             minute,
         ),
-        report(
-            "showcase-claude-ambig-b",
-            LiveState::Working,
-            Some(LiveDetail::Tool),
-            2 * minute,
-            minute / 2,
-        ),
+        // Three subagents at work for it.
+        Report {
+            subagents: 3,
+            ..report(
+                "showcase-claude-ambig-b",
+                LiveState::Working,
+                Some(LiveDetail::Tool),
+                2 * minute,
+                minute / 2,
+            )
+        },
         report(
             "showcase-deck-launcher",
             LiveState::Ready,
@@ -1047,15 +1057,20 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
             14 * minute,
             12 * minute,
         ),
-        // The pinned session asked a question at its last activity, so
-        // `project` has two sessions waiting.
-        report(
-            "showcase-claude",
-            LiveState::Waiting,
-            Some(LiveDetail::Question),
-            60 * minute,
-            5 * minute,
-        ),
+        // The pinned session's subagent asked a question at its last
+        // activity, which waits on the root session, so `project` has two
+        // sessions waiting.
+        Report {
+            subagents: 1,
+            via_subagent: true,
+            ..report(
+                "showcase-claude",
+                LiveState::Waiting,
+                Some(LiveDetail::Question),
+                60 * minute,
+                5 * minute,
+            )
+        },
         Report {
             harness: "pi",
             heartbeat_s: 60,
@@ -1121,6 +1136,8 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
             heard,
             heartbeat_s,
             pane,
+            subagents,
+            via_subagent,
         } = report;
         let context = LiveContext {
             tmux: pane.map(|pane| LiveTmux {
@@ -1140,8 +1157,8 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
             state,
             detail,
             since_ms: now_ms - began,
-            subagents: 0,
-            via_subagent: false,
+            subagents,
+            via_subagent,
             heartbeat_s,
         };
         let applied = store

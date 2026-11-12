@@ -155,6 +155,21 @@ fn assert_layer_coverage(snapshot: &GraphSnapshot) {
         waiting >= 2,
         "showcase needs two waiting sessions; has {waiting}"
     );
+    // A session running subagents, and one whose wait is a subagent's.
+    assert!(
+        snapshot
+            .node_live
+            .values()
+            .any(|binding| binding.observation.subagents > 1),
+        "showcase missing a session running subagents"
+    );
+    assert!(
+        snapshot
+            .node_live
+            .values()
+            .any(|binding| binding.observation.via_subagent),
+        "showcase missing a session waiting through a subagent"
+    );
 
     // Lineage relation: codex parent → child fork chain.
     let has_lineage = snapshot
