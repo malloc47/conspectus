@@ -31,50 +31,76 @@ five representations:
 ## Decision
 
 1. **`GraphSnapshot` gains `node_live: BTreeMap<NodeId,
-   LiveObservation>`**, sparse like `node_presence`: an absent key means
-   no evidence. It rides in `graph.bin` and serializes to JSON as a list
-   (as `node_presence` does), omitted when empty so state-less goldens
-   do not change.
+   LiveBinding>`**, sparse like `node_presence`: an absent key means
+   no evidence. A `LiveBinding` is the stored `LiveObservation` and the
+   `Liveness` its binder found for the observation's process (decision
+   4). It rides in `graph.bin` and serializes to JSON as a list (as
+   `node_presence` does), each entry the node id beside the
+   observation's fields and `liveness`, omitted when empty so
+   state-less goldens do not change.
 
 2. **Keys are `AgentSession` ids, or `MuxSession` ids for pane-only
    entries.** Binding (the store's entries to nodes) follows three
    rules, in order:
    1. An entry binds to the `AgentSession` whose harness and native
-      session id match. The match is exact.
+      session id match. The match is exact. Two session nodes for one
+      native session (the same id under two state scopes) bind the
+      lower node id.
    2. Otherwise, an entry with a tmux socket and session name binds to
-      the `MuxSession` it names. This covers a new session that has no
+      the tmux `MuxSession` it names. This covers a new session that has no
       transcript yet (Pi after `/new`, Codex before the first rollout).
-      A mux holds counts over these and over its hosted sessions.
+      A mux holds counts over these and over its hosted sessions. The
+      server is the socket path's last component, the name `tmux -L`
+      gives it, with `default` for the default server, matched against
+      the mux node's socket.
    3. Otherwise it stays in the store, unbound, and appears nowhere.
       Live state alone never creates an agent session node (the graph
       is sparse; the hook sidecar already synthesizes sessions where
       attribution needs one).
 
-3. **A pure function does the binding**: `bind_live(snapshot, entries,
-   liveness, now) -> BTreeMap<NodeId, LiveObservation>`. Two callers use
-   it:
-   - the discovery mutator `live_state`, which runs with the other
+   Only nodes that exist now take live state: a gone or unknown node
+   from history (ADR 0140) binds nothing. The graph has no pane node,
+   so a node holds one entry. When several bind to one node, it keeps
+   the one the store wrote last: the highest entry `rev`, then the
+   newest `observed_ms`, then one that has not exited (a process that
+   moves to a new session ends its old entry in the same write), then
+   the lowest entry key. Two agents in panes of one mux that no session
+   matches yet therefore show as one on the mux until their sessions
+   appear; each session then has its own.
+
+3. **A pure function does the binding**: `bind_live(snapshot, file,
+   probe) -> BTreeMap<NodeId, LiveBinding>` in `discovery::live_state`,
+   over the store's file and a `PidProbe` (decision 4). It takes no
+   clock: time enters only when a reader computes the effective state.
+   Two callers use it:
+   - the discovery mutator `live_state` (a `Mutator` provider beside
+     `hook_sidecar`, reading the store directory in
+     `LocalDiscoveryConfig::live_state_root`), which runs with the other
      mutators after the harness providers and the hook sidecar (daemon
      class cycles, one-shot cold rebuilds, and the daemonless TUI's
-     background discovery), so a snapshot always carries the table;
+     background discovery) and replaces the table, so a snapshot always
+     carries a table rebuilt from the store. It reads one file and
+     checks one pid per bound entry, and it starts no process;
    - the TUI's overlay, which re-runs it
      against the snapshot it holds whenever the store changes, so state
      is visible within about a second without a rediscovery.
 
 4. **Liveness comes from the process evidence discovery already has.**
    An entry's pid is checked against the process table and the recorded
-   start time. Where the platform offers no cheap check, liveness is
-   `Unknown` and the 15-minute rule applies (ADR 0203).
+   start time through a `PidProbe` (`/proc/<pid>` and field 22 of its
+   `stat` on Linux), at bind time, and the answer is stored in the
+   binding. Where the platform offers no cheap check, liveness is
+   `Unknown` and the 15-minute rule applies (ADR 0203). A daemon
+   snapshot's answer is at most one class cycle old; the TUI re-binds,
+   so its answers are as fresh as its binds.
 
 5. **Effective state is read through an accessor**, never from the raw
    table: `snapshot.live_state_of(id, now)` returns the ADR 0203
-   effective state. `snapshot.live_counts_of_mux(id, now)` returns
-   `LiveCounts` over the mux's hosted sessions (found with the existing
-   preferred-mux helpers) and its pane-only entries. Both also take the
-   caller's liveness check, a closure from the stored observation to
-   `Liveness`, called only for an entry that exists, so the reader that
-   holds the process table checks the recorded pid and start time and a
-   reader that cannot answers `Unknown`. A hosted session counts when
+   effective state, read with the stored liveness.
+   `snapshot.live_counts_of_mux(id, now)` returns `LiveCounts` over the
+   mux's hosted sessions (found with the existing preferred-mux
+   helpers) and its pane-only entry, each read the same way. A reader
+   needs no process check of its own. A hosted session counts when
    the mux is its preferred mux and it has an entry; one without an
    entry is not counted at all.
 
@@ -113,6 +139,14 @@ five representations:
 - **C (links).** Would require a relation whose target is not an entity.
 - **E (outside the graph).** Rejected for the machine-readable requirement;
   an in-memory overlay remains as the TUI's fast path in front of D.
+- **Liveness supplied by each reader** (the accessors taking a closure
+  from the observation to `Liveness`). Every reader would need a process
+  table, a script reading `graph --format json` could not tell a dead
+  agent's last state from a live one, and the binder checks the pid
+  anyway. Storing the answer costs one field per entry.
+- **Folding a dead process into the stored state** (rewriting the entry
+  as `exited/killed` at bind time). It would lose the state the agent was
+  in, and readers could not tell an unchecked process from a live one.
 
 ## Open Questions Answered
 
@@ -122,4 +156,5 @@ five representations:
   `--fresh` read that skips the snapshot).
 - *Where is a split pane's state?* Each pane's agent has its own entry. The
   mux shows counts over all of them. A session's own row shows its own
-  state.
+  state. Until a pane's agent has a session node, its entry binds to the
+  mux, which holds one such entry (decision 2).

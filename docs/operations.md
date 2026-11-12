@@ -179,7 +179,12 @@ takes out every Conspectus entry and nothing else.
 
 Each event updates the session's entry in
 `$XDG_STATE_HOME/conspectus/live-state.json` (or
-`$HOME/.local/state/conspectus/live-state.json`); nothing shows it yet.
+`$HOME/.local/state/conspectus/live-state.json`). Every discovery binds the
+entries to the sessions they describe, or to the tmux session an agent runs
+in when Conspectus has no session for it yet, so `conspectus graph --format
+json` lists them under `node_live`, each with whether its process was
+running (`liveness`). An entry that matches neither shows nowhere. Nothing
+else shows live state yet.
 Only states, counts, ids, paths, and times are kept: never a prompt, a
 tool's input or output, a message, or an error text, and never a tool
 name. Some gaps come with the hooks:

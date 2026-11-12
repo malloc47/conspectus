@@ -400,6 +400,10 @@ The sane default is:
   durable user intent; when the daemon is available, it writes each hook
   observation to the spool and ingests it into the in-memory graph at once
   (ADR 0146)
+- read the live-state store and bind each entry to its agent session, or to
+  its tmux mux when no session matches yet, checking the recorded pid and
+  start time against the process table; binding never creates a node, and
+  the table is rebuilt on every discovery (ADR 0205)
 - read read-only harness state and log databases when the harness maintains
   them, using stable indexed fields to discover sessions and to derive live
   mux attribution; for Codex this is the `state_*.sqlite` threads/lineage
@@ -658,9 +662,11 @@ and carry the tmux pane, so split panes do not collide.
 
 A discovery mutator binds entries to `AgentSession` nodes (by harness and
 native session id), or to the `MuxSession` for pane-only entries, into a
-sparse `node_live` snapshot table beside `node_presence` (ADR 0205). The TUI
-re-binds from the store about once a second between snapshots, with or without
-a daemon. A mux has no state of its own: it has counts over what it hosts.
+sparse `node_live` snapshot table beside `node_presence` (ADR 0205). Each
+binding keeps whether the entry's process ran when it was bound. Unbound
+entries show nowhere, and binding never creates a node. The TUI re-binds from
+the store about once a second between snapshots, with or without a daemon. A
+mux has no state of its own: it has counts over what it hosts.
 
 The effective state is computed at read time from `now` and process liveness:
 a dead pid is `exited`; `working`, `compacting`, and `starting` that go quiet

@@ -37,7 +37,7 @@ inputs.
 | Module | Classification | Stable entry points |
 | --- | --- | --- |
 | `model` | pure data model | `GraphSnapshot`, `GraphNode`, `GraphLink`, typed IDs, relation/provenance/confidence enums |
-| `model::live` | pure data model | `LiveState`, `LiveDetail`, `LiveSource`, `LiveObservation` (its `effective` read rule), `Liveness`, `LiveConfidence`, `EffectiveLive`, `LiveCounts`; a snapshot's `node_live` table is read through `GraphSnapshot::live_state_of` and `GraphSnapshot::live_counts_of_mux`, which take the caller's liveness check |
+| `model::live` | pure data model | `LiveState`, `LiveDetail`, `LiveSource`, `LiveObservation` (its `effective` read rule), `Liveness`, `LiveBinding` (an observation with the liveness found when it was bound), `LiveConfidence`, `EffectiveLive`, `LiveCounts`; a snapshot's `node_live` table of `LiveBinding`s is read through `GraphSnapshot::live_state_of` and `GraphSnapshot::live_counts_of_mux`, which apply the bound liveness |
 | `resolve` | pure resolver | `resolve_snapshot`, `resolve_links`, `explain_resolved_relationships` |
 | `output` | pure renderer | `render_graph_json` |
 | `output::table` | pure renderer | `render`, `render_with`, `Projection` re-export |
@@ -64,6 +64,7 @@ where possible.
 | `discovery::git` | `GitProbe` shells out to `git`; `GitDiscovery` uses probes over explicit roots | call `fragment_from_probe` for pure tests, or run `GitDiscovery` only where `git` is allowed |
 | `discovery::tmux` | `SystemTmux` shells out to `tmux` | inject a `TmuxRunner`; parse rows with `parse_list_sessions` for pure tests |
 | `history` | `HistoryStore::at(dir)` reads and writes the history files under an advisory lock; `HistoryStore::from_env` reads `$XDG_STATE_HOME` | construct a store over a temp directory in tests; `merge::merge` and `project::project_into` are pure |
+| `discovery::live_state` | `apply_live_state` reads the live-state store in a directory and checks recorded pids through a `PidProbe` (`/proc` on Linux); `LocalDiscoveryConfig::from_env` binds `$XDG_STATE_HOME/conspectus` | `bind_live` is pure over a snapshot, the store's file, and a probe; `LocalDiscoveryConfig::empty` binds nothing, `with_live_state_root` points at a temp directory |
 | `pin_slots` | `SlotStore::at(path)` reads and writes `pins.toml` atomically; `SlotStore::from_env` reads `$XDG_DATA_HOME` | construct a store over a temp path in tests; `parse_slots` is pure |
 | `pin_ops`, `pin_migrate` | slot gestures and legacy conversion over a `SlotStore` and a `HistoryWriter` | inject temp stores; `pin_migrate::plan` is pure |
 | `rebuild` | `plan` is pure over a snapshot and an `Env` of injected backends; `execute` runs the plan through those backends | inject a mux backend, worktree backend, and `Cloner`; print `Plan::render` for dry runs |
@@ -126,6 +127,7 @@ failing provider (`DiscoveryError::Provider` names the provider's keys).
   (see `docs/operations.md`)
 - `CONSPECTUS_DISABLE_TMUX`
 - `CONSPECTUS_DISABLE_FORGE`
+- `XDG_STATE_HOME` (the history and live-state stores)
 - `HOME`
 - `XDG_CONFIG_HOME` through `ConfigLoader::from_env`
 

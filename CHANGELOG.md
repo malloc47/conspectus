@@ -58,14 +58,14 @@ forms, lists, readers, and keys look and behave alike.
   `live_counts_of_mux` (counts over the sessions a mux hosts and its own
   entry). `graph --format json` lists it as `node_live` only when it
   has entries, so output without live state is unchanged. `graph.bin`
-  moves to format version 10: the first run after upgrading ignores the
+  moves to format version 11: the first run after upgrading ignores the
   old file, with one warning where a refresh or the daemon reads it, and
-  rebuilds it. Nothing fills the table yet.
+  rebuilds it.
 - **`conspectus hook write` records live state.** A Claude Code
   `SessionStart` now also writes the session's entry (ready, with its
   pane, process, cwd, and transcript path) to
   `$XDG_STATE_HOME/conspectus/live-state.json`, before the attribution
-  record. Nothing reads or shows it yet.
+  record.
 - **Claude Code reports what each session is doing.** `conspectus hook
   init claude-code` now installs an entry for each of the 14 hook events
   that say whether a session is working, waiting for you (a permission
@@ -76,6 +76,14 @@ forms, lists, readers, and keys look and behave alike.
   start is upgraded in place, and nothing changes until you run it. Each
   event updates the session's entry in `live-state.json`; nothing shows
   it in the TUI yet.
+- **Discovery binds live state to the graph.** Every discovery (daemon
+  cycles, one-shot commands, the daemonless TUI) reads
+  `live-state.json` and puts each entry on the agent session it
+  describes, or on the tmux session the agent runs in when there is no
+  session for it yet, with whether its process still runs. `conspectus
+  graph --format json` lists them under `node_live`; an entry that
+  matches nothing shows nowhere, and live state never adds a session.
+  The TUI shows none of it yet.
 
 ### Changed
 
