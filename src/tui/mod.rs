@@ -21,6 +21,7 @@ pub mod explorer;
 pub mod icons;
 pub mod keybindings;
 pub mod keymap;
+mod live_overlay;
 pub mod messages;
 pub mod modal;
 pub mod paths;

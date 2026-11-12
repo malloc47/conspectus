@@ -46,6 +46,8 @@ mod content;
 mod executor;
 mod handoff;
 mod launch;
+#[cfg(test)]
+mod live_tests;
 mod mux_name;
 mod overlay_keys;
 mod term;
@@ -496,25 +498,12 @@ impl LoopMode for LiveMode {
             }
             match snapshot {
                 Ok(snapshot) => {
-                    // Build the tree against `App`'s current
-                    // projection state (ADR 0085 contract 4). If
-                    // the operator changed view / grouping /
-                    // filter after the worker was spawned, the
-                    // fresh snapshot lands in the projection the
-                    // operator is actually looking at instead of
-                    // the stale config snapshot the worker
-                    // captured.
-                    let tree = crate::tui::rows::build_tree_for_view(
-                        crate::tui::rows::TreeInputs::from_app(&snapshot, app),
-                    );
-                    let handle = SnapshotHandle::new(snapshot);
-                    let initial_selection_hint = launch_context_row_id(&tree);
-                    app.update(Msg::SetData {
-                        snapshot: handle,
-                        tree,
-                        loaded_at_epoch: crate::discovery::current_epoch(),
-                        initial_selection_hint,
-                    });
+                    // If the operator changed view / grouping / filter
+                    // after the worker was spawned, the fresh snapshot
+                    // lands in the projection the operator is actually
+                    // looking at instead of the stale config snapshot
+                    // the worker captured.
+                    install_snapshot(app, snapshot);
                     let cfg_clone = app.config().clone();
                     populate_provider_status(app, &cfg_clone);
                 }
@@ -530,6 +519,9 @@ impl LoopMode for LiveMode {
             }
         }
         let _ = config;
+        // Between snapshots, live state comes from its store: one stat a
+        // tick, and a re-read and re-bind when the store was rewritten.
+        app.poll_live(Instant::now(), crate::tui::rows::tree_current_unix_ms());
         // Timer-driven auto-refresh. Only fires when no request
         // is in-flight and at least `refresh_interval` has
         // elapsed.
@@ -1008,7 +1000,8 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
     config.forge_fetch = crate::discovery::forge::ForgeFetch::CachedOnly;
     // Snapshot mode goes through a different entry point, so the
     // file only ever moves under interactive runs.
-    let app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
+    let mut app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
+    app.set_live_overlay(crate::tui::live_overlay::LiveOverlay::from_env());
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
     let (preview_tx, preview_rx) = mpsc::channel();
     let (confirmed_tx, confirmed_rx) = mpsc::channel();
@@ -1062,17 +1055,7 @@ pub(in crate::tui) fn set_static_data(
     config: &RunConfig,
     snapshot: &crate::model::GraphSnapshot,
 ) {
-    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
-        snapshot, app,
-    ));
-    let handle = SnapshotHandle::new(snapshot.clone());
-    let initial_selection_hint = launch_context_row_id(&tree);
-    app.update(Msg::SetData {
-        snapshot: handle,
-        tree,
-        loaded_at_epoch: crate::discovery::current_epoch(),
-        initial_selection_hint,
-    });
+    install_snapshot(app, snapshot.clone());
     populate_provider_status(app, config);
 }
 
@@ -2142,27 +2125,31 @@ fn apply_discovery(
     discovered: Result<crate::model::GraphSnapshot>,
 ) {
     match discovered {
-        Ok(snapshot) => {
-            // Build against `App`'s projection state (ADR 0085
-            // contract 4). This is a synchronous refresh so no App
-            // mutations landed between resolve and build, but
-            // reading from App keeps the shape symmetric with the
-            // async worker path above.
-            let tree = crate::tui::rows::build_tree_for_view(
-                crate::tui::rows::TreeInputs::from_app(&snapshot, app),
-            );
-            let handle = SnapshotHandle::new(snapshot);
-            let initial_selection_hint = launch_context_row_id(&tree);
-            app.update(Msg::SetData {
-                snapshot: handle,
-                tree,
-                loaded_at_epoch: crate::discovery::current_epoch(),
-                initial_selection_hint,
-            });
-        }
+        Ok(snapshot) => install_snapshot(app, snapshot),
         Err(err) => report_refresh_failure(app, &err),
     }
     populate_provider_status(app, config);
+}
+
+/// Put `snapshot` on screen in place of the one the app holds: bind the
+/// live overlay to it, build the active view's tree against the app's
+/// projection state (ADR 0085 contract 4), and send [`Msg::SetData`].
+/// Every new snapshot (a discovery worker's or a daemon's, `r`, a
+/// fixture, snapshot mode) arrives this way, so the overlay is never
+/// keyed to the nodes of the snapshot it replaced.
+fn install_snapshot(app: &mut App, snapshot: crate::model::GraphSnapshot) {
+    app.rebind_live(&snapshot, Instant::now());
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+        &snapshot, app,
+    ));
+    let handle = SnapshotHandle::new(snapshot);
+    let initial_selection_hint = launch_context_row_id(&tree);
+    app.update(Msg::SetData {
+        snapshot: handle,
+        tree,
+        loaded_at_epoch: crate::discovery::current_epoch(),
+        initial_selection_hint,
+    });
 }
 
 /// Mark the snapshot stale and log why (ADR 0105). The previous good
@@ -2237,18 +2224,7 @@ pub(super) fn refresh_from_snapshot(
     config: &RunConfig,
     snapshot: crate::model::GraphSnapshot,
 ) {
-    let resolved = resolve_snapshot(snapshot);
-    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
-        &resolved, app,
-    ));
-    let handle = SnapshotHandle::new(resolved);
-    let initial_selection_hint = launch_context_row_id(&tree);
-    app.update(Msg::SetData {
-        snapshot: handle,
-        tree,
-        loaded_at_epoch: crate::discovery::current_epoch(),
-        initial_selection_hint,
-    });
+    install_snapshot(app, resolve_snapshot(snapshot));
     populate_provider_status(app, config);
 }
 

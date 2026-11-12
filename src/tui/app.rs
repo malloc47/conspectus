@@ -28,6 +28,7 @@ mod controls;
 mod explorer_nav;
 mod handoff;
 mod listing;
+mod live;
 mod msg;
 mod overlays;
 mod restore;
@@ -309,6 +310,9 @@ pub struct App {
     /// The trees the state file saved, by view, each waiting for its
     /// view to list rows (see [`restore`]).
     saved_trees: BTreeMap<View, crate::tui_state::PersistedTree>,
+    /// The live table the rows read, bound from the store between
+    /// snapshots once the live runtime turns it on (see [`live`]).
+    live: crate::tui::live_overlay::LiveOverlay,
 }
 
 /// Saved-per-view UI state. Each entry holds everything that needs
@@ -482,6 +486,7 @@ impl App {
             view_states: BTreeMap::new(),
             tui_state_cache: None,
             saved_trees: BTreeMap::new(),
+            live: crate::tui::live_overlay::LiveOverlay::off(),
         }
     }
 

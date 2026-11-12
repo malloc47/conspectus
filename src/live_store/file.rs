@@ -228,6 +228,15 @@ impl LiveFile {
         })
     }
 
+    /// What a reader takes `text` for: the file it holds, or no live
+    /// state when it is corrupt or a newer version wrote it.
+    pub(crate) fn read_text(text: &str) -> Self {
+        match Self::parse(text) {
+            Parsed::File(file) => file,
+            Parsed::Corrupt | Parsed::Newer => Self::default(),
+        }
+    }
+
     /// The file as it is written: pretty JSON with a trailing newline.
     pub(crate) fn render(&self) -> serde_json::Result<String> {
         let mut text = serde_json::to_string_pretty(self)?;

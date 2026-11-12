@@ -124,7 +124,7 @@ impl App {
         Some(crate::tui::rows::build_tree_for_view(
             crate::tui::rows::TreeInputs {
                 snapshot,
-                live: &snapshot.node_live,
+                live: self.live_table(snapshot),
                 view,
                 grouping,
                 filter,

@@ -1332,7 +1332,7 @@ impl<'a> TreeInputs<'a> {
     pub fn from_app(snapshot: &'a crate::model::GraphSnapshot, app: &'a crate::tui::App) -> Self {
         Self {
             snapshot,
-            live: &snapshot.node_live,
+            live: app.live_table(snapshot),
             view: app.active_view(),
             grouping: app.grouping(),
             filter: {

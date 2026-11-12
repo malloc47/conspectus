@@ -100,13 +100,8 @@ impl LiveStore {
     /// that is missing, unreadable, corrupt, or from a newer version
     /// reads as no live state. Never writes.
     pub fn read(&self) -> LiveFile {
-        let Ok(text) = fs::read_to_string(self.path()) else {
-            return LiveFile::default();
-        };
-        match LiveFile::parse(&text) {
-            Parsed::File(file) => file,
-            Parsed::Corrupt | Parsed::Newer => LiveFile::default(),
-        }
+        fs::read_to_string(self.path())
+            .map_or_else(|_| LiveFile::default(), |text| LiveFile::read_text(&text))
     }
 
     /// Fold `event` into its session's entry with the shared reducer.
