@@ -520,7 +520,8 @@ impl LoopMode for LiveMode {
         }
         let _ = config;
         // Between snapshots, live state comes from its store: one stat a
-        // tick, and a re-read and re-bind when the store was rewritten.
+        // tick, a re-read and re-bind when the store was rewritten, and
+        // once a second a check of the bound agents' processes.
         app.poll_live(Instant::now(), crate::tui::rows::tree_current_unix_ms());
         // Timer-driven auto-refresh. Only fires when no request
         // is in-flight and at least `refresh_interval` has

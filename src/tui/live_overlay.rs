@@ -15,6 +15,16 @@
 //! replaced. A missing, unreadable, or corrupt store is an empty table,
 //! reported nowhere.
 //!
+//! An agent killed without a goodbye writes nothing to the store, so
+//! between binds the overlay checks the processes of its bound entries
+//! again, at most once per [`PROCESS_CHECK_INTERVAL`]
+//! ([`LiveOverlay::recheck`]): one read of `/proc/<pid>/stat` per bound
+//! entry whose process may still run, and nothing at all when no entry
+//! is bound. A killed agent's rows read `exited/killed` within that
+//! period instead of at the next snapshot. An entry that recorded its
+//! own exit, or whose process was already found gone, is not checked
+//! again: neither answer can change what its rows show.
+//!
 //! An overlay that is off ([`LiveOverlay::off`], the default) leaves the
 //! rows reading the snapshot's own table, as `--snapshot` and the fixture
 //! and scenario TUIs do: what they draw comes from the snapshot alone.
@@ -29,7 +39,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use crate::discovery::live_state::bind_live;
 use crate::live_store::{LiveFile, LiveStore, PidProbe, ProcProbe};
-use crate::model::live::LiveBinding;
+use crate::model::live::{LiveBinding, LiveState, Liveness};
 use crate::model::{GraphSnapshot, NodeId};
 use crate::tui::rows::LiveCell;
 use crate::tui::rows::live::cells_at;
@@ -41,6 +51,10 @@ pub(crate) const REREAD_INTERVAL: Duration = Duration::from_secs(1);
 /// How often the overlay checks whether time alone moved a state the
 /// rows show (a working agent going quiet, an unchecked one going stale).
 pub(crate) const AGE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+
+/// The least time between two checks of the bound entries' processes,
+/// counting the check every bind makes.
+pub(crate) const PROCESS_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 /// What a stat of the store file found: enough to tell that it was
 /// rewritten. Writers rename a new file into place, so a rewrite changes
@@ -100,6 +114,9 @@ pub(crate) struct LiveOverlay {
     /// The cells of the active table at the last age check.
     checked: BTreeMap<NodeId, LiveCell>,
     checked_at: Option<Instant>,
+    /// When the bound entries' processes were last checked, by a bind or
+    /// a [`LiveOverlay::recheck`].
+    probed_at: Option<Instant>,
 }
 
 /// The store file and what was last read from it.
@@ -137,6 +154,7 @@ impl LiveOverlay {
             table: BTreeMap::new(),
             checked: BTreeMap::new(),
             checked_at: None,
+            probed_at: None,
         }
     }
 
@@ -203,7 +221,7 @@ impl LiveOverlay {
             let stamp = source.files.stamp(&source.path);
             source.read(stamp, now);
         }
-        self.bind(snapshot);
+        self.bind(snapshot, now);
     }
 
     /// One tick: stat the store, and when it was rewritten since it was
@@ -225,7 +243,39 @@ impl LiveOverlay {
             return false;
         }
         source.read(stamp, now);
-        snapshot.is_some_and(|snapshot| self.bind(snapshot))
+        snapshot.is_some_and(|snapshot| self.bind(snapshot, now))
+    }
+
+    /// Check the processes of the bound entries again, at most once per
+    /// [`PROCESS_CHECK_INTERVAL`] since the last check or bind, and record
+    /// any that died or whose pid now belongs to another process. Reads
+    /// neither the store nor the process of an entry that recorded its
+    /// exit or was already found gone; with no entry bound it reads
+    /// nothing. Returns whether the table changed.
+    pub(crate) fn recheck(&mut self, now: Instant) -> bool {
+        let Some(source) = &self.source else {
+            return false;
+        };
+        if self
+            .probed_at
+            .is_some_and(|at| now.saturating_duration_since(at) < PROCESS_CHECK_INTERVAL)
+        {
+            return false;
+        }
+        self.probed_at = Some(now);
+        let mut changed = false;
+        for binding in self.table.values_mut() {
+            if binding.observation.state == LiveState::Exited || binding.liveness == Liveness::Dead
+            {
+                continue;
+            }
+            let liveness = source.probe.liveness(&binding.observation);
+            if liveness != binding.liveness {
+                binding.liveness = liveness;
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// Whether time alone changed what a row of `snapshot` would show
@@ -246,13 +296,14 @@ impl LiveOverlay {
         moved
     }
 
-    /// Bind what was last read to `snapshot`. Returns whether the table
-    /// changed.
-    fn bind(&mut self, snapshot: &GraphSnapshot) -> bool {
+    /// Bind what was last read to `snapshot` at `now`, which checks every
+    /// bound entry's process. Returns whether the table changed.
+    fn bind(&mut self, snapshot: &GraphSnapshot, now: Instant) -> bool {
         let Some(source) = &self.source else {
             return false;
         };
         let table = bind_live(snapshot, &source.file, source.probe.as_ref());
+        self.probed_at = Some(now);
         let changed = table != self.table;
         self.table = table;
         changed

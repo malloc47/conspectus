@@ -3,8 +3,9 @@
 //! The App holds the live overlay; the runtime drives it, since it reads
 //! the store and `/proc`: [`App::rebind_live`] before each new snapshot's
 //! rows are built, [`App::poll_live`] once a tick. When the overlay's
-//! table changes, or time alone moves a state, the rows already built
-//! take their new live values in place. Nothing else about a row depends
+//! table changes (a store rewrite, or an agent's process found gone), or
+//! time alone moves a state, the rows already built take their new live
+//! values in place. Nothing else about a row depends
 //! on its live state, so the tree is not rebuilt, and the selection and
 //! folds stay as they are; once rows are sorted, filtered, or grouped by
 //! live state, a change has to rebuild the tree instead.
@@ -35,13 +36,14 @@ impl App {
     }
 
     /// One tick of the overlay at `now` (`now_ms` by the wall clock):
-    /// pick up a rewritten store, or a state time alone moved, and fill
-    /// the rows on screen with it.
+    /// pick up a rewritten store, an agent whose process ended, or a
+    /// state time alone moved, and fill the rows on screen with it.
     pub(crate) fn poll_live(&mut self, now: Instant, now_ms: i64) {
         let snapshot = self.handle.as_ref().map(SnapshotHandle::snapshot);
         let rebound = self.live.poll(now, snapshot);
+        let rechecked = self.live.recheck(now);
         let aged = snapshot.is_some_and(|snapshot| self.live.aged(snapshot, now, now_ms));
-        if rebound || aged {
+        if rebound || rechecked || aged {
             self.refill_live(now_ms);
         }
     }
