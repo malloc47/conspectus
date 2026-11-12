@@ -404,6 +404,77 @@ fn no_payload_text_reaches_a_file_or_an_output() {
     }
 }
 
+#[test]
+fn the_graph_carries_the_live_state_hook_write_recorded() {
+    use conspectus::discovery::harness::fixtures::{ClaudeCodeSessionRecord, HarnessFixture};
+
+    let world = World::new();
+    // A transcript, so discovery has the session the hooks report on.
+    let harness = HarnessFixture::at(world.root.join("harness"));
+    harness
+        .write_claude_code_session(
+            &ClaudeCodeSessionRecord::new(SESSION, "/work/project")
+                .with_timestamp("2026-01-02T03:04:05Z"),
+        )
+        .expect("claude code transcript");
+    // The test process stands in for Claude Code, so the recorded pid
+    // runs while discovery checks it.
+    let harness_pid = std::process::id().to_string();
+    let prompt = serde_json::json!({
+        "session_id": SESSION,
+        "transcript_path": "/home/user/.claude/projects/-work-project/8f3c2a10.jsonl",
+        "cwd": "/work/project",
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "synthetic prompt",
+    })
+    .to_string();
+    for payload in [session_start(), prompt] {
+        let mut cmd = world.hook("claude-code");
+        cmd.env("CLAUDE_PID", &harness_pid);
+        run_silently(cmd, payload);
+    }
+
+    let cwd = world.root.join("cwd");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let output = Command::cargo_bin("conspectus")
+        .expect("conspectus binary")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", &world.home)
+        .env("XDG_CONFIG_HOME", world.root.join("xdg/config"))
+        .env("XDG_STATE_HOME", &world.state)
+        .env("XDG_DATA_HOME", world.root.join("xdg/data"))
+        .env("XDG_CACHE_HOME", world.root.join("xdg/cache"))
+        .env("XDG_RUNTIME_DIR", &world.runtime)
+        .env(
+            "CONSPECTUS_CLAUDE_CODE_STATE",
+            harness.claude_code_state_root(),
+        )
+        .env("CONSPECTUS_DISABLE_TMUX", "1")
+        .env("CONSPECTUS_DISABLE_ZELLIJ", "1")
+        .env("CONSPECTUS_DISABLE_FORGE", "1")
+        .current_dir(&cwd)
+        .args(["graph", "--format", "json", "--no-cache"])
+        .output()
+        .expect("run graph");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph: serde_json::Value = serde_json::from_slice(&output.stdout).expect("graph JSON");
+
+    let table = graph["node_live"].as_array().expect("a live table");
+    assert_eq!(table.len(), 1, "{table:#?}");
+    let binding = &table[0];
+    assert_eq!(binding["node_id"]["type"], "agent_session");
+    assert_eq!(binding["node_id"]["harness_key"], "claude-code");
+    assert_eq!(binding["node_id"]["session_key"], SESSION);
+    assert_eq!(binding["state"], "working", "{binding}");
+    assert_eq!(binding["pid"].to_string(), harness_pid);
+    assert_eq!(binding["liveness"], "alive", "{binding}");
+}
+
 fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
