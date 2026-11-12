@@ -4,7 +4,7 @@ title: 'TUI: live state in the detail pane and in pinned and history rows'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
-updated_date: '2026-11-12 20:05'
+updated_date: '2026-11-12 21:30'
 labels:
   - live-state
   - ls-tui
@@ -47,4 +47,6 @@ Blockers: Operator decisions 7 and 12, and the cell story.
 
 <!-- SECTION:NOTES:BEGIN -->
 Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 items 7 and 12: Node fields State, Since, Source, and Evidence (fresh, quiet, stale) in the explorer, the glossary entry, and the Pinned and History words from CSP-823. Quiet states show dimmed; stale or unknown shows '?'.
+
+From CSP-823 (ADR 0209): the Pinned words landed there. A running session's Pinned row (a session pin or a session nested under a pin) whose agent is waiting, working (compacting, starting), ready, or failed reads `waiting`, `working`, `ready`, or `error` in place of `in mux` or `resumable` (both link words, since an agent that reports a state is running), in its mark's style, dimmed when quiet; unknown, stale, exited, and no evidence keep the link word. Quiet states already draw dimmed and stale ones `?` in the live cell. Left for this story: the explorer's State, Since, Source, and Evidence fields and the glossary entry.
 <!-- SECTION:NOTES:END -->
