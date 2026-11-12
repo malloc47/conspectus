@@ -37,6 +37,7 @@ inputs.
 | Module | Classification | Stable entry points |
 | --- | --- | --- |
 | `model` | pure data model | `GraphSnapshot`, `GraphNode`, `GraphLink`, typed IDs, relation/provenance/confidence enums |
+| `model::live` | pure data model | `LiveState`, `LiveDetail`, `LiveSource`, `LiveObservation` (its `effective` read rule), `Liveness`, `LiveConfidence`, `EffectiveLive`, `LiveCounts` |
 | `resolve` | pure resolver | `resolve_snapshot`, `resolve_links`, `explain_resolved_relationships` |
 | `output` | pure renderer | `render_graph_json` |
 | `output::table` | pure renderer | `render`, `render_with`, `Projection` re-export |

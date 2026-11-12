@@ -76,6 +76,11 @@ being idle.
       `exited` becomes `unknown/stale`.
    5. `starting` older than two minutes becomes `unknown/stale`.
 
+   "Older" is the age of the latest evidence (`observed_ms`), not of the
+   state (`since_ms`), so a heartbeat or a repeated event keeps a state
+   fresh; a state passes a window only when strictly older than it. A
+   recorded `exited` is never changed by time or liveness.
+
    The result is `(state, detail, confidence)`, with confidence `fresh`,
    `quiet`, or `stale`.
 

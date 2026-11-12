@@ -46,6 +46,12 @@ forms, lists, readers, and keys look and behave alike.
   file on the next write. `--no-resume-view` opens every view on its
   default folds instead. The file is also written before the TUI hands
   the terminal to tmux or a viewer, and when the TUI stops on an error.
+- **Live agent state vocabulary** in the library model (`model::live`):
+  eight states (`working`, `waiting`, `ready`, `compacting`, `error`,
+  `starting`, `exited`, `unknown`) with their details, the observation a
+  session's live state is recorded as, the read-time rule that marks a
+  long-silent state quiet or stale and a dead process exited, and
+  per-state counts for a mux. Nothing produces or shows live state yet.
 
 ### Changed
 
