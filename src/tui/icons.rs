@@ -159,7 +159,8 @@ pub mod live {
 }
 
 /// Every glyph the left panel can draw, once each: the kind glyphs, the
-/// state glyphs, and the framework marks it uses. The reference document
+/// state glyphs, the live-state marks, and the framework marks it uses.
+/// The reference document
 /// lists exactly these, and a test keeps the two in step. (The ellipsis
 /// and the rule cell are marks too, but the reference describes them in
 /// prose; they are not part of a row's vocabulary.)
@@ -174,6 +175,9 @@ pub fn all_glyphs() -> Vec<&'static str> {
         push(kind.default_glyph());
     }
     for glyph in state::ALL {
+        push(glyph);
+    }
+    for glyph in live::ALL {
         push(glyph);
     }
     for glyph in [

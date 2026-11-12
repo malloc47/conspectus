@@ -6,7 +6,7 @@
 use super::*;
 
 /// The words the mixed views (Pinned, History) use for status.
-const STATUS_WORDS: [&str; 10] = [
+const STATUS_WORDS: [&str; 14] = [
     "live",
     "stopped",
     "removed",
@@ -17,6 +17,10 @@ const STATUS_WORDS: [&str; 10] = [
     "merged",
     "closed",
     "draft",
+    "waiting",
+    "working",
+    "ready",
+    "error",
 ];
 
 /// Whitespace-separated words of a line.

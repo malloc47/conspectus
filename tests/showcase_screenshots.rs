@@ -189,7 +189,8 @@ fn a_content_query_narrows_the_showcase_sessions_and_marks_their_hits() {
     );
     assert!(filtered.contains("2 hits"), "{filtered}");
     assert!(filtered.contains("1/11 sessions"), "{filtered}");
-    assert!(filtered.contains("a release summary and"), "{filtered}");
+    // The row's snippet shows the match, after its hit count.
+    assert!(filtered.contains("2 hits  …release summary"), "{filtered}");
     assert!(plain.contains("11 sessions"), "{plain}");
 
     // A query nothing matches says so.

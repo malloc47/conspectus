@@ -337,7 +337,7 @@ fn render_at_default_size_shows_header_tree_and_detail() {
         "session harness label missing: {text}"
     );
     assert!(
-        text.contains("could you give me"),
+        text.contains("could you give"),
         "same-line preview missing: {text}"
     );
     assert!(
@@ -4161,27 +4161,32 @@ fn row_text_at(row: &crate::tui::rows::Row, width: usize) -> String {
 
 #[test]
 fn a_narrow_session_row_gives_way_key_first_and_keeps_its_state() {
-    // A session's lined-up cells (key, chip, age, state) give way key
-    // first, then the chip, then the age; the state glyph stays. The
-    // label after them narrows with `…`, and leaves once it cannot keep
-    // eight cells.
+    // A session's lined-up cells (key, chip, age, live mark, state) give
+    // way key first, then the chip, then the age; the live mark and the
+    // state glyph stay. The label after them narrows with `…`, and leaves
+    // once it cannot keep eight cells.
     let mut session = session_under_group("0199a3f2-ab");
     session.depth = 0;
     if let RowKind::AgentSession(row) = &mut session.kind {
         row.alias = Some("a label of some length".into());
     }
-    // The prefix is 4 cells; the lined-up cells take 29 more.
+    let marks = format!(
+        "{}  {}",
+        crate::tui::icons::live::NONE,
+        crate::tui::icons::state::UNLINKED
+    );
+    // The prefix is 4 cells; the lined-up cells take 32 more.
     let wide = row_text_at(&session, 60);
     assert!(
         wide.contains("0199a3f2  ") && wide.contains("a label of some length"),
         "{wide}"
     );
-    let cut = row_text_at(&session, 4 + 29 + 2 + 10);
+    let cut = row_text_at(&session, 4 + 32 + 2 + 10);
     assert!(
         cut.ends_with("a label o…"),
         "the label narrows with the mark: {cut:?}"
     );
-    let gone = row_text_at(&session, 4 + 29 + 2 + 7);
+    let gone = row_text_at(&session, 4 + 32 + 2 + 7);
     assert!(
         !gone.contains("label"),
         "a label under eight cells leaves: {gone:?}"
@@ -4190,27 +4195,23 @@ fn a_narrow_session_row_gives_way_key_first_and_keeps_its_state() {
         gone.contains("0199a3f2"),
         "the key stays while the rest fits: {gone:?}"
     );
-    let keyless = row_text_at(&session, 30);
+    let keyless = row_text_at(&session, 33);
     assert!(
         !keyless.contains("0199a3f2") && keyless.contains("claude"),
         "{keyless:?}"
     );
+    assert!(keyless.trim_end().ends_with(&marks), "{keyless:?}");
+    let chipless = row_text_at(&session, 15);
     assert!(
-        keyless
-            .trim_end()
-            .ends_with(crate::tui::icons::state::UNLINKED),
-        "{keyless:?}"
+        !chipless.contains("claude") && chipless.contains('—'),
+        "the chip leaves before the age: {chipless:?}"
     );
-    let ageless = row_text_at(&session, 12);
+    assert!(chipless.trim_end().ends_with(&marks), "{chipless:?}");
+    let ageless = row_text_at(&session, 9);
+    assert!(!ageless.contains('—'), "then the age: {ageless:?}");
     assert!(
-        !ageless.contains("claude"),
-        "the chip leaves before the age: {ageless:?}"
-    );
-    assert!(
-        ageless
-            .trim_end()
-            .ends_with(crate::tui::icons::state::UNLINKED),
-        "{ageless:?}"
+        ageless.trim_end().ends_with(&marks),
+        "the live mark and the state stay: {ageless:?}"
     );
 }
 
@@ -4229,40 +4230,43 @@ fn a_narrow_mux_row_narrows_its_chips_and_name_before_its_age_leaves() {
             .collect()
     };
     // Room for the name's step (20 from 39 cells), two chips and a count
-    // (24), the age, and the state.
-    let wide = text(80);
+    // (24), the age, the live mark, and the state.
+    let wide = text(83);
     assert!(
         wide.contains("claude") && wide.contains("codex") && wide.contains("+1"),
         "{wide}"
     );
     // Then one chip and a count of the rest.
-    let one = text(50);
+    let one = text(53);
     assert!(
         one.contains("claude") && one.contains("+2") && !one.contains("codex"),
         "{one}"
     );
     assert!(one.contains("2m"), "{one}");
     // Then the name narrows, cut with the mark, and the age stays.
-    let narrow = text(36);
+    let narrow = text(39);
     assert!(
         narrow.contains('…') && narrow.contains("2m") && narrow.contains("claude"),
         "{narrow}"
     );
     // Then the age leaves, then the chips; the name and the state stay.
-    let ageless = text(29);
+    let ageless = text(32);
     assert!(
         !ageless.contains("2m") && ageless.contains("claude"),
         "{ageless}"
     );
-    let bare = text(16);
+    let bare = text(19);
     assert!(
         !bare.contains("claude") && bare.starts_with("a-rather"),
         "{bare}"
     );
     assert!(
-        bare.trim_end()
-            .ends_with(crate::tui::icons::state::UNLINKED),
-        "{bare}"
+        bare.trim_end().ends_with(&format!(
+            "{}  {}",
+            crate::tui::icons::live::NONE,
+            crate::tui::icons::state::UNLINKED
+        )),
+        "the live mark and the state stay: {bare}"
     );
 }
 
@@ -4437,6 +4441,49 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         .map(|s| s.content.to_string())
         .collect();
     assert_eq!(settled.replace('⊸', "⠋"), pending);
+}
+
+#[test]
+fn a_pending_row_keeps_its_live_mark_and_spins_the_link_cell() {
+    use crate::model::live::{LiveConfidence, LiveState};
+    let theme = Theme::default();
+    let mut session = session_under_group_with("0199a3f2", MuxIndicator::Attached);
+    if let RowKind::AgentSession(row) = &mut session.kind {
+        row.live = Some(crate::tui::rows::LiveCell {
+            state: LiveState::Waiting,
+            detail: None,
+            confidence: LiveConfidence::Fresh,
+            since_ms: 0,
+            subagents: 0,
+        });
+    }
+    let draw =
+        |spinner| line_text(&lay_out(std::slice::from_ref(&session), &theme, 0, 80, spinner)[0]);
+    let settled = draw(None);
+    assert!(settled.contains("!  ⊸"), "{settled}");
+    let pending = draw(Some("⠋"));
+    assert_eq!(
+        settled.replace('⊸', "⠋"),
+        pending,
+        "only the link cell spins; the live mark stays"
+    );
+
+    let mux = MuxSessionRow {
+        live: [LiveState::Ready, LiveState::Working].into_iter().collect(),
+        ..agentless_mux_row(None)
+    };
+    let text = |spinner| -> String {
+        mux_spans_in(&mux, &theme, 0, 100, spinner)
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect()
+    };
+    let settled = text(None);
+    assert!(
+        settled.contains("›  ∘"),
+        "ready ranks before working: {settled}"
+    );
+    assert_eq!(settled.replace('∘', "⠋"), text(Some("⠋")));
 }
 
 /// A transcript of `turns` alternating user and assistant messages,

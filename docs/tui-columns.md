@@ -88,6 +88,15 @@ record a pin points at, shown only when History lists pinned records.
   of a mux that tmux says is still the same session, and of its
   sessions, clear at once and take new values when the refresh lands;
   each mux clears on its own.
+- The spinner takes the link or mux state cell, never the live-state
+  mark: the mark keeps its value, dimmed with the row. It comes from the
+  agents' own reports, which the TUI reads on its own about once a
+  second, not from the refresh the action waits for, and a row shows one
+  spinner. In Pinned and History the spinner takes the word.
+- A live-state mark whose evidence is quiet (work with no news for longer
+  than its source's quiet window) is dimmed and keeps its shape.
+  On the cursor row the mark takes the highlight like the other cells, so
+  its shape still reads where reverse video draws no color.
 - A row for something stopped, removed, missing, planned, or unknown is
   drawn as a ghost. A group header for such an entity is too.
 
@@ -116,7 +125,11 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `⊸` | linked: a session with a definitive mux, or a mux with a client attached | green | Session rows, Mux rows, nested sessions |
 | `∘` | not linked: a session with no definitive mux (none or ambiguous), or a mux with no client | dim | Session rows, Mux rows, nested sessions |
 | `⊘` | a mux that has stopped | ghost | Stopped mux rows in the Mux view |
-| `?` | can't be checked: a mux whose server didn't answer, or a PR with no state yet | dim | Mux rows, stopped mux rows, PR rows |
+| `?` | can't be checked: a mux whose server didn't answer, or a PR with no state yet; in the live cell, an agent whose evidence is too old to trust | dim | Mux rows, stopped mux rows, PR rows; the live cell |
+| `!` | live state: the agent is waiting on you (a permission prompt, a question, a plan, other input) | yellow (the theme's warning color) | The live cell of session and mux rows, nested ones included, in every view |
+| `»` | live state: working (a turn, a compaction, or a start under way) | green (the theme's info color); dimmed when quiet | The live cell |
+| `›` | live state: ready, the turn is over and the agent takes a prompt | green (the theme's success color) | The live cell |
+| `·` | live state: no evidence, or the session exited; on a mux, no agent with live state but exited ones | dim | The live cell |
 | `○` | an open pull request | green | PR rows |
 | `◐` | a draft pull request (open and marked draft) | yellow | PR rows |
 | `⊕` | a merged pull request | magenta | PR rows |
@@ -128,25 +141,55 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `◌` | a pull request with no local branch | dim | PR rows, in the tracking cell |
 | `—` | an age or value that isn't known | dim | Age cells |
 | `√` | a path or value that checked out | green | Forms |
-| `×` | a failed check or value | red | Forms and check lists |
+| `×` | a failed check or value; in the live cell, a turn that ended on an error | red | Forms and check lists; the live cell |
 | `•` | an unchecked item | default | Multi-select lists, such as Clean up |
 | `◄` | back | gray | The right pane's breadcrumb |
 | `⠋` `⠙` `⠹` `⠸` `⠼` `⠴` `⠦` `⠧` | a refresh is pending for this row | gray | Where the state glyph or word goes |
 
-The `…` character marks text cut to fit, and `·` separates parts of a
-content string (`repo · branch`). Neither is a state. Every width on this
-page counts terminal cells, not characters: a CJK character or an emoji
-takes two, a combining accent none, so wide text is cut and padded at the
-same columns as ASCII.
+The `…` character marks text cut to fit and is no state. `·` separates
+parts of a content string (`repo · branch`); alone in the live cell it is
+the no-state mark. Every width on this page counts terminal cells, not
+characters: a CJK character or an emoji takes two, a combining accent
+none, so wide text is cut and padded at the same columns as ASCII.
 
-Two glyphs have a second life by design. `⌥` is both the branch kind
+Some glyphs have a second life by design. `⌥` is both the branch kind
 and the "tracked locally" mark on a PR row, because both say "this is a
-local branch". `?` means "couldn't be checked" for muxes and PRs alike.
+local branch". `?` means "couldn't be checked" for muxes and PRs alike,
+and for an agent whose live state is too old to trust. `×` is the shared
+failure mark: a failed check in a form, a failed turn in the live cell.
+`›` joins the hops of a breadcrumb in the right pane and, in the left
+pane's live cell, says the agent is ready; its shape pairs with working's
+`»`.
+
+### The live cell
+
+Session rows and mux rows carry one cell right after the age that says
+what the agent is doing now, from the reports its harness's hooks or
+plugin make (see [operations.md](operations.md#live-agent-state)). It is
+always filled, so no state hides behind an empty cell, and each value has
+its own shape:
+
+| Mark | Session | Mux |
+|---|---|---|
+| `!` | waiting on you | some agent of it waits on you |
+| `»` | working, compacting, or starting | its most urgent agent is working |
+| `›` | ready for a prompt | its most urgent agent is ready |
+| `×` | its turn ended on an error | its most urgent agent failed |
+| `?` | its evidence is too old to trust | its most urgent agent can't be told |
+| `·` | no evidence, or it exited | no agent of it has live state, or every one exited |
+
+A mux has no state of its own: its mark is the state of its agents that
+needs the operator first, waiting, then error, then ready, then working,
+then the rest. The agents nested under a mux keep their own marks. A
+quiet state (work with no news past its source's quiet window) draws the
+same mark dimmed; a mux's mark is never dimmed, since its counts do not
+say how fresh each agent's evidence is. Nothing animates: the Braille
+spinner keeps meaning a pending refresh.
 
 ## State words
 
-Only Pinned and History use words. Views of one kind show the glyph in
-the last column instead.
+Only Pinned and History use words. Views of one kind show the glyph
+instead: in the state cell, or for live state in the live cell.
 
 | Word | Meaning | Glyph in a single-kind view | Where it appears |
 |---|---|---|---|
@@ -199,6 +242,10 @@ every view that shows that entity:
 
 Sorting by recency uses these same times.
 
+On session and mux rows the live mark follows the age, so `1m  !` reads
+"waiting, last active a minute ago". The age keeps its meaning beside it:
+the entity's last activity, not when its live state began.
+
 ## Labels, chips, counts, and warnings
 
 - **Harness chip.** A filled pill, 10 cells wide (the theme's
@@ -242,7 +289,8 @@ gives the bar its column; where that cell is already at its least, the
 row gives the column up by the steps below.
 
 1. The cells that line up down the tree (the prefix; a session's key,
-   chip, age, and state; a mux's name, chips, age, and state; a PR's
+   chip, age, live mark, and state; a mux's name, chips, age, live mark,
+   and state; a PR's
    label, tracking mark, age, and state; every cell of a Pinned or
    History row; a header's label, path, count, and warning; every cell
    of a hit, pane, or pane hit row) keep the widths they have on every
@@ -274,14 +322,20 @@ row gives the column up by the steps below.
 | Row | Gives way first to last | Never gives way |
 |---|---|---|
 | Group header | the path or members (narrowing first) | the label, the count, the warning |
-| Session row, cells that line up | the key, the chip, the age | the state glyph |
+| Session row, cells that line up | the key, the chip, the age | the live mark, the state glyph |
 | Session row, the rest | the preview or snippet, the `was in` note, the project (narrowing first), the hit count, the label (narrowing first) | |
-| Mux row, cells that line up | the chips narrow to one chip and `+N`, the name narrows, the age, the chips | the name, the state glyph |
+| Mux row, cells that line up | the chips narrow to one chip and `+N`, the name narrows, the age, the chips | the name, the live mark, the state glyph |
 | Mux row, the rest | the preview, snippet, or directory, the hit count | |
 | PR row, cells that line up | the label narrows (its number stays whole), the age, the tracking mark | the label, the state glyph |
 | PR row, the rest | the title, the branch (narrowing first) | |
 | Pinned or History row | the chip, the content, the label narrows, the age | the label, the state word |
 | Hit, pane, or pane hit row | the chip or command, the age, the name narrows, the snippet narrows | the name, the turn, line, or hit count |
+
+The live mark never gives way: with the link glyph beside it, it is what
+the row is doing, which a narrow pane is no reason to hide. It takes three
+cells with its gap, so a narrow row loses its label, project, and preview
+three cells sooner than it would without it, and a mux name narrows three
+cells sooner.
 
 A Pinned row in a narrow pane keeps its name and its state word:
 
@@ -332,8 +386,8 @@ the repo header's columns:
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │  ▼ ◆   repo-a                   ~/atelier-demo/repo-a     (2)                     │
 │    ▼ ◇   repo-a                 ~/atelier-demo/repo-a     (2)                     │
-│        ●   showcase   pi           2h  ∘  Showcase: pi in atelier member repo     │
-│        ●   showcase   codex        3d  ∘  Showcase: codex parent in atelier fork …│
+│        ●   showcase   pi           2h  ×  ∘  Showcase: pi in atelier member repo  │
+│        ●   showcase   codex        3d  ·  ∘  Showcase: codex parent in atelier fo…│
 │  ▶ ◆   repo-b                   ~/atelier-demo/repo-b     (1)                     │
 │► ▼ ◆   bare-project             ~/checkouts/bare-project  (1)                     │
 │    ▶ ◇   bare-project (linked)  ~/checkouts/bare-project  (1)                     │
@@ -349,11 +403,12 @@ the repo header's columns:
 | 2 | Session key | the harness's own id | always | first 8 cells, dim, padded to 8 |
 | 3 | Harness chip | the session's harness | always | 10 cells |
 | 4 | Age | last activity | always | 4 cells |
-| 5 | State | `⊸` linked to a definitive mux, `∘` not | always | 1 cell; a spinner while a refresh is pending |
-| 6 | Label | alias, title, or mux name (see above) | when one applies | cut at 32 cells |
-| 7 | `was in` chip | the session's last mux | only if that mux is stopped | dim |
-| 8 | Project | repo or directory name | only in flat grouping | 16 cells, cut with `…` |
-| 9 | Preview | last message | only if it gets at least 7 cells | dim italic |
+| 5 | Live | what the agent is doing now (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when quiet; keeps its mark while a refresh is pending |
+| 6 | State | `⊸` linked to a definitive mux, `∘` not | always | 1 cell; a spinner while a refresh is pending |
+| 7 | Label | alias, title, or mux name (see above) | when one applies | cut at 32 cells |
+| 8 | `was in` chip | the session's last mux | only if that mux is stopped | dim |
+| 9 | Project | repo or directory name | only in flat grouping | 16 cells, cut with `…` |
+| 10 | Preview | last message | only if it gets at least 7 cells | dim italic |
 
 While a content filter is active (`--contains TEXT`, or the Content row in
 Controls), the rows are the sessions whose transcripts mention the text, and
@@ -367,7 +422,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                   │
-│      ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher   │
+│      ●   showcase   claude       1m  ›  ⊸  Showcase: agent-deck composite launcher│
 │  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
 │  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
 │  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
@@ -379,32 +434,32 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │  ▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                   │
-│      ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher   │
+│      ●   showcase   claude       1m  ›  ⊸  Showcase: agent-deck composite launcher│
 │  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
 │  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
 │  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
 │  ▼ ◆   project        ~/repos/project                       (4)  ▲                │
-│►     ●   showcase   claude       1m  ∘  ambiguous mux candidate A  Showcase: ambi…│
-│      ●   showcase   claude       1m  ∘  ambiguous mux candidate B  Showcase: ambi…│
-│      ●   showcase   claude       1m  ∘  hook-supersession current sessi…  Showcas…│
-│      ● ◉ showcase   claude       1h  ∘  claude-code in project repo  I expanded `…│
+│►     ●   showcase   claude       1m  !  ∘  ambiguous mux candidate A  Showcase: a…│
+│      ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  Showcase: a…│
+│      ●   showcase   claude       1m  »  ∘  hook-supersession current sessi…       │
+│      ● ◉ showcase   claude       1h  ›  ∘  claude-code in project repo  I expande…│
 │  ▶     Ungrouped                                            (1)                   │
 ```
 
 <!-- frame: keys="<C-g><C-g><C-g><C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│►   ●   showcase   claude       1m  ∘  ambiguous mux candidate A  project          │
-│    ●   showcase   claude       1m  ∘  ambiguous mux candidate B  project          │
-│    ●   showcase   claude       1m  ⊸  agent-deck composite launcher  showcase-dec…│
-│    ●   showcase   claude       1m  ∘  hook-supersession current sessi…  project   │
-│    ● ◉ showcase   claude       1h  ∘  claude-code in project repo  project        │
-│    ●   showcase   pi           2h  ∘  repo-a            Showcase: pi in atelier m…│
-│    ●   showcase   opencode     3h  ∘  repo-b            Showcase: opencode in ate…│
-│    ●   showcase   codex       12h  ⊸  bare-work  bare-project      Showcase: code…│
-│    ●   showcase   codex        2d  ∘  repo-a            Showcase: codex child for…│
-│    ●   showcase   codex        3d  ∘  repo-a            Showcase: codex parent in…│
-│    ●   showcase   codex        7d  ∘  orphan            Showcase: orphan session …│
+│►   ●   showcase   claude       1m  !  ∘  ambiguous mux candidate A  project       │
+│    ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  project       │
+│    ●   showcase   claude       1m  ›  ⊸  agent-deck composite launcher  showcase-…│
+│    ●   showcase   claude       1m  »  ∘  hook-supersession current sessi…  project│
+│    ● ◉ showcase   claude       1h  ›  ∘  claude-code in project repo  project     │
+│    ●   showcase   pi           2h  ×  ∘  repo-a            Showcase: pi in atelie…│
+│    ●   showcase   opencode     3h  ?  ∘  repo-b            Showcase: opencode in …│
+│    ●   showcase   codex       12h  ·  ⊸  bare-work  bare-project      Showcase: c…│
+│    ●   showcase   codex        2d  ·  ∘  repo-a            Showcase: codex child …│
+│    ●   showcase   codex        3d  ·  ∘  repo-a            Showcase: codex parent…│
+│    ●   showcase   codex        7d  ·  ∘  orphan            Showcase: orphan sessi…│
 ```
 
 ## Mux view
@@ -431,8 +486,9 @@ sessions are listed beneath a mux.
 | 2 | Name | the mux name without its backend prefix | always | blue; a column of 18 cells, 20 once the row leaves it 37 cells, 24 from 71, and 30 from 103 (counted after the cursor gutter, the indent, and the prefix); long names keep their start and end |
 | 3 | Chip | its agents' harness chips, as many as fit in a column of at most two, with `+N` for the rest; else the pane's harness; else a program chip; else ` no agent ` | always | 10 cells each; the column is as wide as the widest row's chips, so the age lines up |
 | 4 | Age | the mux's own last activity | always | 4 cells |
-| 5 | State | `⊸` a client is attached, `∘` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
-| 6 | Preview | last message of the one agent | only with exactly one visible agent, and at least 7 cells for it | dim italic |
+| 5 | Live | the state of its agents that needs you first (see [The live cell](#the-live-cell)) | always | 1 cell; never dimmed; keeps its mark while a refresh is pending |
+| 6 | State | `⊸` a client is attached, `∘` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
+| 7 | Preview | last message of the one agent | only with exactly one visible agent, and at least 7 cells for it | dim italic |
 
 ### Stopped mux row
 
@@ -445,37 +501,40 @@ lines up with the running ones, and as a ghost, its `▣` included.
 | 2 | Name | the mux name | always |
 | 3 | Chip | the harness it last ran, dimmed; else ` no agent ` | always |
 | 4 | Age | time since it was last seen running | always |
-| 5 | State | `⊘` stopped, `?` unknown | always |
-| 6 | Content | the directory it ran in | when it gets at least 7 cells |
+| 5 | Live | the state of the agents it still counts; `·` once none has live state | always |
+| 6 | State | `⊘` stopped, `?` unknown | always |
+| 7 | Content | the directory it ran in | when it gets at least 7 cells |
 
 <!-- frame: keys="2" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│►   ▣   ambiguous                  claude      15m  ∘                              │
-│    ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via …│
-│    ▣ ◉ project                    claude       5m  ⊸                              │
-│    ▣   showcase-deck              claude      30m  ∘  Showcase: agent-deck compos…│
-│    ▣ ◎ nightly-refactor           claude       2d  ⊘  ~/repos/project             │
+│►   ▣   ambiguous                  claude      15m  !  ∘                           │
+│    ▣   bare-work                  codex        2h  ·  ∘  Showcase: codex resume v…│
+│    ▣ ◉ project                    claude       5m  »  ⊸                           │
+│    ▣   showcase-deck              claude      30m  ›  ∘  Showcase: agent-deck com…│
+│    ▣ ◎ nightly-refactor           claude       2d  ·  ⊘  ~/repos/project          │
 ```
 
 <!-- frame: keys="2<C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▼ ◆   bare-project  ~/checkouts/bare-project                                     │
-│      ▣   bare-work                  codex        2h  ∘  Showcase: codex resume vi…│
+│      ▣   bare-work                  codex        2h  ·  ∘  Showcase: codex resume…│
 │  ▶ ◆   project       ~/repos/project                                              │
 │  ▶     Ungrouped                                                                  │
 ```
 
 Under a mux with more than one agent attached, each agent is a nested
-[Session row](#session-row).
+[Session row](#session-row), with its own live mark.
 
 ## PRs view
 
 Reached with `3`. Groupings: **checkout** (default), **repo**, and
 **state**. Within a group, PRs are ordered by repository and then newest
 number first; a control floats PRs that have a local branch to the top.
-Sessions working on a PR's branch are nested beneath it.
+Sessions working on a PR's branch are nested beneath it as
+[Session rows](#session-row), live mark included; a PR row has no live
+cell.
 
 ### PR group header
 
@@ -515,6 +574,21 @@ two never disagree.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                │
 │    ▶ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                      │
+│  ▶ ◆   conspectus/project  ~/repos/project  no checkout                           │
+│  ▶     project             conspectus/project                                     │
+```
+
+The sessions under a PR are session rows, each with its live mark:
+
+<!-- frame: keys="3jl" width=170 height=30 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
+│  ▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                │
+│►   ▼ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                      │
+│        ● ◉ showcase   claude       1h  ›  ∘  I expanded `notes.md` into a release…│
+│        ●   showcase   claude       1m  !  ∘  Showcase: ambiguous mux candidate A  │
+│        ●   showcase   claude       1m  »  ∘  Showcase: ambiguous mux candidate B  │
+│        ●   showcase   claude       1m  »  ∘  Showcase: hook-supersession current …│
 │  ▶ ◆   conspectus/project  ~/repos/project  no checkout                           │
 │  ▶     project             conspectus/project                                     │
 ```
@@ -718,8 +792,8 @@ session's last activity, as everywhere else, not the time of the match.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
 │►   ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
-│    ● ◉ showcase   claude       1h  ∘  project           2 hits│
-│    ●   showcase   pi           2h  ∘  repo-a            2 hits│
+│    ● ◉ showcase   claude       1h  ›  ∘  project        2 hits│
+│    ●   showcase   pi           2h  ×  ∘  repo-a         2 hits│
 ```
 
 <!-- frame: keys="6sthe<C-f><C-g>" width=130 height=20 -->
@@ -729,9 +803,9 @@ session's last activity, as everywhere else, not the time of the match.
 │► ▼   Mux panes                                                │
 │      ▣ ◉ project 0.0   2 hits          ready once they pass.  │
 │  ▼   project    (1)  ▲                                        │
-│      ● ◉ showcase   claude       1h  ∘  project         2 hits│
+│      ● ◉ showcase   claude       1h  ›  ∘  project      2 hits│
 │  ▼   repo-a     (1)                                           │
-│      ●   showcase   pi           2h  ∘  repo-a          2 hits│
+│      ●   showcase   pi           2h  ×  ∘  repo-a       2 hits│
 ```
 
 ### Hit row
@@ -797,7 +871,7 @@ It takes the [hit row](#hit-row)'s columns after the mux glyph.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
 │►   ▣ ◉ project 0.0   4 hits            0s from feature/extra… │
-│    ● ◉ showcase   claude       1h  ∘  project           4 hits│
+│    ● ◉ showcase   claude       1h  ›  ∘  project        4 hits│
 ```
 
 ### Pane hit row
@@ -833,6 +907,6 @@ column, then the mux's name and the pane's place, then:
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/2 "the" · All · 2 sessions · 1 pane · 4 skipped · sca…│
 │►   ▣ ◉ project 0.0   2 hits            0s …once they pass.    │
-│    ● ◉ showcase   claude       1h  ∘  project           2 hits│
-│    ●   showcase   pi           2h  ∘  repo-a            2 hits│
+│    ● ◉ showcase   claude       1h  ›  ∘  project        2 hits│
+│    ●   showcase   pi           2h  ×  ∘  repo-a         2 hits│
 ```

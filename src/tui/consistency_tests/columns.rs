@@ -128,7 +128,7 @@ fn drawn_rows(app: &mut App, width: u16) -> Vec<(Kind, u8, String)> {
 }
 
 /// Where a row's lined-up cells sit (see [`grid`]).
-type Grid = (Option<usize>, Option<usize>);
+type Grid = (Option<usize>, Option<usize>, Option<usize>);
 
 fn is_state(token: &str) -> bool {
     [
@@ -170,8 +170,9 @@ fn header_path(line: &str) -> Option<usize> {
 }
 
 /// Where a row's lined-up cells sit: for a session or a mux, where its age
-/// ends and where its state glyph is; for a header, where its count ends.
-/// `None` for a cell the row does not show.
+/// ends, where its live mark is, and where its state glyph is (a PR row
+/// has no live mark); for a header, where its count ends. `None` for a
+/// cell the row does not show.
 fn grid(kind: Kind, line: &str) -> Grid {
     let tokens: Vec<Token> = tokens(line);
     match kind {
@@ -181,13 +182,22 @@ fn grid(kind: Kind, line: &str) -> Grid {
                 .find(|token| token.text.starts_with('(') && token.text.ends_with(')'))
                 .map(|token| token.end),
             None,
+            None,
         ),
         Kind::Session | Kind::Mux | Kind::Pr => {
             let age = tokens.iter().position(|token| is_age(&token.text));
-            let state = age
+            let live = age
+                .map(|at| at + 1)
+                .filter(|at| kind != Kind::Pr && tokens.get(*at).is_some_and(|t| is_live(&t.text)));
+            let state = live
+                .or(age)
                 .and_then(|at| tokens.get(at + 1))
                 .filter(|token| is_state(&token.text));
-            (age.map(|at| tokens[at].end), state.map(|token| token.start))
+            (
+                age.map(|at| tokens[at].end),
+                live.map(|at| tokens[at].start),
+                state.map(|token| token.start),
+            )
         }
         // The age, and the state word before it: the cell after the label.
         Kind::Mixed => {
@@ -196,10 +206,15 @@ fn grid(kind: Kind, line: &str) -> Grid {
             let word = label.and_then(|at| next_cell(&tokens, at));
             (
                 age.map(|at| tokens[at].end),
+                None,
                 word.map(|at| tokens[at].start),
             )
         }
     }
+}
+
+fn is_live(token: &str) -> bool {
+    crate::tui::icons::live::ALL.contains(&token)
 }
 
 /// The column the first token after a mux's glyph and marker starts in:
@@ -264,7 +279,13 @@ fn the_lined_up_cells_of_every_row_kind_share_their_columns_at_every_width() {
             let mut names: std::collections::BTreeMap<u8, usize> =
                 std::collections::BTreeMap::new();
             for (kind, depth, line) in &drawn {
-                let (end, glyph) = grid(*kind, line);
+                let (end, live, glyph) = grid(*kind, line);
+                if matches!(kind, Kind::Session | Kind::Mux) && end.is_some() {
+                    assert!(
+                        live.is_some() && glyph.is_some(),
+                        "{name} at {width}: a {kind:?} row keeps its live mark and its state\n{line}"
+                    );
+                }
                 if *kind == Kind::Header {
                     // A header's count is in one column at every depth,
                     // and so is its path.
@@ -281,21 +302,21 @@ fn the_lined_up_cells_of_every_row_kind_share_their_columns_at_every_width() {
                 if *kind == Kind::Mixed {
                     // A Pinned or History row's age and state word are in
                     // one column at every depth.
-                    let first = *mixed.get_or_insert((end, glyph));
+                    let first = *mixed.get_or_insert((end, live, glyph));
                     assert_eq!(
                         first,
-                        (end, glyph),
+                        (end, live, glyph),
                         "{name} at {width}: Pinned or History rows put their age and state \
                          word in different columns\n{line}"
                     );
                     continue;
                 }
-                let entry = seen.entry((*kind, *depth)).or_insert((end, glyph));
+                let entry = seen.entry((*kind, *depth)).or_insert((end, live, glyph));
                 assert_eq!(
                     *entry,
-                    (end, glyph),
-                    "{name} at {width}: {kind:?} rows at depth {depth} put their age and state \
-                     in different columns\n{line}"
+                    (end, live, glyph),
+                    "{name} at {width}: {kind:?} rows at depth {depth} put their age, live mark, \
+                     and state in different columns\n{line}"
                 );
                 if *kind == Kind::Mux {
                     let column = mux_name_column(line).expect("a mux name");
@@ -318,8 +339,12 @@ fn a_session_row_lays_its_cells_out_alike_in_every_view_that_lists_it() {
             .find(|token| token.text == "●")
             .map(|token| token.start)
             .expect("the session glyph");
-        let (age, state) = grid(Kind::Session, line);
-        (age.map(|at| at - glyph), state.map(|at| at - glyph))
+        let (age, live, state) = grid(Kind::Session, line);
+        (
+            age.map(|at| at - glyph),
+            live.map(|at| at - glyph),
+            state.map(|at| at - glyph),
+        )
     };
     for width in WIDTHS {
         let mut layouts: Vec<(String, Grid)> = Vec::new();
@@ -342,7 +367,7 @@ fn a_session_row_lays_its_cells_out_alike_in_every_view_that_lists_it() {
         for (name, layout) in &layouts {
             assert_eq!(
                 *layout, first,
-                "at {width}, a session row in {name} puts its age and state elsewhere"
+                "at {width}, a session row in {name} puts its age, live mark, and state elsewhere"
             );
         }
     }

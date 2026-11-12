@@ -9,7 +9,8 @@
 //! TUI bound from the store since) at one moment: an effective state
 //! depends on the time it is read at.
 //!
-//! The rows carry the values; nothing draws them yet.
+//! The rows carry the values; the left pane draws them
+//! ([`super::LiveSign`]) and no builder reads them.
 
 use std::collections::BTreeMap;
 

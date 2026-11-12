@@ -338,7 +338,8 @@ pub struct MixedRow {
     /// The pin marker cell after the kind glyph.
     pub marker: PinMarker,
     /// The live state of the session or mux the row stands for (a pin's
-    /// row: the entity it points at). Not drawn.
+    /// row: the entity it points at). A stopped mux draws its agents' mark
+    /// in the live cell.
     pub live: MixedLive,
 }
 
@@ -563,7 +564,8 @@ pub struct AgentSessionRow {
     pub pin_id: Option<String>,
     /// What the active content search found in this session.
     pub content_hit: Option<ContentHitCell>,
-    /// The session's live state, `None` without evidence. Not drawn.
+    /// The session's live state, `None` without evidence: the mark in
+    /// the cell after the age.
     pub live: Option<LiveCell>,
 }
 
@@ -687,7 +689,8 @@ pub struct MuxSessionRow {
     /// session; unset for muxes with none or several.
     pub content_hit: Option<ContentHitCell>,
     /// How many of the agents the mux hosts are in each live state;
-    /// empty without evidence. Not drawn.
+    /// empty without evidence. The cell after the age shows the state
+    /// that ranks first.
     pub live: crate::model::live::LiveCounts,
 }
 

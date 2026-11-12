@@ -1,7 +1,8 @@
 //! Live state rides on the rows the same way in every view: a session or
 //! a mux carries one live value wherever it is listed, whether the rows
 //! read the snapshot's own table or the overlay the live TUI binds from
-//! the store. Nothing draws it yet, so carrying it changes no frame.
+//! the store, and it draws as one mark (or, in Pinned, one word) for that
+//! entity everywhere. The mark is the only cell live state changes.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -315,37 +316,367 @@ fn the_overlay_puts_one_live_value_on_every_listing_of_an_entity() {
     assert_one_value_per_entity(&bound, overlay);
 }
 
-#[test]
-fn live_state_on_the_rows_changes_no_frame() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = written_store(dir.path());
-    let bare = live_world();
-    let tabled = with_table();
-    for view in ALL_VIEWS {
-        for (width, height) in [(220, 40), (150, 34), (80, 24)] {
-            let draw = |snapshot: &GraphSnapshot, overlay: LiveOverlay| {
-                let mut app = listing_with(view, snapshot, overlay);
-                let buffer = buffer_of(&mut app, width, height);
-                tuikit::testkit::ansi::to_ansi(&buffer, buffer.area)
+/// What a drawn row says about its entity's live state: the mark after
+/// the age on a row of a view of one kind, or the state word on a Pinned
+/// or History row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Shown {
+    Mark(String),
+    Word(String),
+}
+
+/// The left pane's lines of `app`, one per showing row: the Search view's
+/// header line is not a row.
+fn row_lines(app: &mut App, width: u16) -> Vec<String> {
+    let buffer = buffer_of(app, width, 80);
+    let mut lines = super::columns::left_pane(&buffer);
+    if app.active_view() == View::Search {
+        lines.remove(0);
+    }
+    lines
+}
+
+/// Every session and mux row `app` draws, with the entity it stands for,
+/// what it shows of the entity's live state, and its line.
+fn shown(app: &mut App, snapshot: &GraphSnapshot) -> Vec<(NodeId, Shown, String)> {
+    let lines = row_lines(app, 220);
+    let rows = app.visible_rows();
+    assert!(rows.len() <= lines.len(), "the pane shows every row");
+    let mark = |line: &str| {
+        let tokens = tuikit::testkit::buffer::tokens(line);
+        let age = tokens
+            .iter()
+            .position(|token| is_age(&token.text))
+            .unwrap_or_else(|| panic!("no age: {line}"));
+        Shown::Mark(tokens[age + 1].text.clone())
+    };
+    rows.iter()
+        .zip(lines)
+        .filter_map(|(row, line)| match &row.kind {
+            RowKind::AgentSession(session) => {
+                Some((session.primary_node.clone(), mark(&line), line))
+            }
+            RowKind::MuxSession(mux) => Some((mux.primary_node.clone(), mark(&line), line)),
+            RowKind::Mixed(mixed) if mixed.state.is_some() => {
+                Some((mixed.primary_node.clone(), mark(&line), line))
+            }
+            RowKind::Mixed(mixed) => {
+                let entity = entity_of(snapshot, &mixed.primary_node).filter(|node| {
+                    matches!(node, NodeId::AgentSession(_) | NodeId::MuxSession(_))
+                })?;
+                let (_, rest) = line.split_once(&mixed.label)?;
+                let word = rest.trim_start().split("  ").next().unwrap_or_default();
+                Some((entity, Shown::Word(word.to_string()), line))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// What `snapshot`'s live tables say a row standing for `node` shows, read
+/// through the model alone: a session's mark from its effective state, a
+/// mux's from its counts by the default precedence, and on a Pinned row
+/// its own `status`.
+fn expected(snapshot: &GraphSnapshot, node: &NodeId, mixed: Option<&str>) -> Shown {
+    let now_ms = crate::tui::rows::tree_current_unix_ms();
+    let state = |node: &NodeId| snapshot.live_state_of(node, now_ms);
+    let session_mark = |node: &NodeId| match state(node).map(|live| live.state) {
+        None | Some(LiveState::Exited) => "·",
+        Some(LiveState::Waiting) => "!",
+        Some(LiveState::Working | LiveState::Compacting | LiveState::Starting) => "»",
+        Some(LiveState::Ready) => "›",
+        Some(LiveState::Error) => "×",
+        Some(LiveState::Unknown) => "?",
+    };
+    match (node, mixed) {
+        (NodeId::MuxSession(id), None) => {
+            let counts = snapshot.live_counts_of_mux(id, now_ms);
+            let mark = match counts.dominant() {
+                None | Some(LiveState::Exited) => "·",
+                Some(LiveState::Waiting) => "!",
+                Some(LiveState::Error) => "×",
+                Some(LiveState::Ready) => "›",
+                Some(LiveState::Working | LiveState::Compacting | LiveState::Starting) => "»",
+                Some(LiveState::Unknown) => "?",
             };
-            let without = draw(&bare, LiveOverlay::off());
+            Shown::Mark(mark.to_string())
+        }
+        (_, None) => Shown::Mark(session_mark(node).to_string()),
+        (_, Some(status)) => Shown::Word(status.to_string()),
+    }
+}
+
+/// Every view draws each session and mux of `snapshot` with the mark (or
+/// word) its live state gives it, its rows reading live state through
+/// `overlay`; returns what was drawn for each entity.
+fn assert_one_mark_per_entity(
+    snapshot: &GraphSnapshot,
+    overlay: impl Fn() -> LiveOverlay,
+) -> BTreeMap<NodeId, Vec<(View, Shown)>> {
+    let mut seen: BTreeMap<NodeId, Vec<(View, Shown)>> = BTreeMap::new();
+    for view in ALL_VIEWS {
+        let mut app = listing_with(view, snapshot, overlay());
+        let statuses: BTreeMap<String, String> = app
+            .tree()
+            .rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::Mixed(mixed) if mixed.state.is_none() => {
+                    Some((mixed.label.clone(), mixed.status.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        for (node, drawn, line) in shown(&mut app, snapshot) {
+            let status = match &drawn {
+                Shown::Mark(_) => None,
+                Shown::Word(_) => statuses
+                    .iter()
+                    .find(|(label, _)| line.contains(label.as_str()))
+                    .map(|(_, status)| status.as_str()),
+            };
             assert_eq!(
-                draw(&tabled, LiveOverlay::off()),
-                without,
-                "{view:?} at {width}x{height}: the snapshot's live table shows"
+                drawn,
+                expected(snapshot, &node, status),
+                "{view:?} draws {node} unlike its live state:\n{line}"
             );
-            assert_eq!(
-                draw(&bare, overlay_over(&store)),
-                without,
-                "{view:?} at {width}x{height}: the overlay's live table shows"
-            );
+            seen.entry(node).or_default().push((view, drawn));
         }
     }
-    // The rows did carry it.
-    let app = listing_with(View::Sessions, &bare, overlay_over(&store));
+    seen
+}
+
+#[test]
+fn one_entity_shows_one_mark_in_every_view() {
+    let snapshot = with_table();
+    let seen = assert_one_mark_per_entity(&snapshot, LiveOverlay::off);
+    // The check means something only if live entities are drawn in
+    // several views, with marks of several shapes.
+    let marks = |node: &NodeId| -> Vec<Shown> {
+        seen.get(node)
+            .unwrap_or_else(|| panic!("no view draws {node}"))
+            .iter()
+            .map(|(_, shown)| shown.clone())
+            .collect()
+    };
+    let hosted = marks(&session(HOSTED));
+    assert!(hosted.contains(&Shown::Mark("!".into())), "{hosted:?}");
+    let solo = marks(&session(SOLO));
+    assert!(solo.contains(&Shown::Mark("›".into())), "{solo:?}");
+    let beside = marks(&session(BESIDE));
+    assert!(beside.contains(&Shown::Mark("×".into())), "{beside:?}");
+    // The mux hosts a waiting agent and a failed one: waiting first.
+    let main = marks(&NodeId::MuxSession(mux("conspectus-main")));
+    assert!(main.contains(&Shown::Mark("!".into())), "{main:?}");
     assert!(
-        carried(&app, &bare)
-            .into_iter()
-            .any(|(_, live)| has_state(live))
+        seen.values()
+            .flatten()
+            .any(|(_, shown)| *shown == Shown::Mark("·".into())),
+        "a row with no live state"
     );
+}
+
+#[test]
+fn the_overlay_draws_one_mark_on_every_listing_of_an_entity() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = written_store(dir.path());
+    let snapshot = live_world();
+    let mut binder = overlay_over(&store);
+    binder.rebind(&snapshot, Instant::now());
+    let mut bound = snapshot.clone();
+    let tables = binder.table(&snapshot);
+    bound.node_live = tables.nodes.clone();
+    bound.pane_live = tables.panes.clone();
+    let seen = assert_one_mark_per_entity(&bound, || overlay_over(&store));
+    assert!(
+        seen.values()
+            .flatten()
+            .any(|(_, shown)| *shown == Shown::Mark("!".into())),
+        "the store's states are drawn"
+    );
+}
+
+/// [`live_world`] with the marks [`with_table`] leaves out: a working
+/// agent gone quiet, one whose evidence is too old to trust, and one that
+/// exited.
+fn with_quiet_and_stale() -> GraphSnapshot {
+    let mut snapshot = live_world();
+    let quiet = LiveObservation::new(
+        LiveState::Working,
+        LiveSource::Hook,
+        NOW * 1000 - 11 * 60_000,
+    )
+    .with_detail(LiveDetail::Tool);
+    let stale = LiveObservation::new(
+        LiveState::Waiting,
+        LiveSource::Hook,
+        NOW * 1000 - 20 * 60_000,
+    );
+    let exited = LiveObservation::new(LiveState::Exited, LiveSource::Hook, NOW * 1000)
+        .with_detail(LiveDetail::Ended);
+    snapshot.node_live = BTreeMap::from([
+        (session(HOSTED), LiveBinding::new(quiet, Liveness::Alive)),
+        (session(BESIDE), LiveBinding::new(stale, Liveness::Unknown)),
+        (session(SOLO), LiveBinding::new(exited, Liveness::Unknown)),
+    ]);
+    snapshot
+}
+
+#[test]
+fn quiet_stale_and_exited_agents_show_their_marks() {
+    let snapshot = with_quiet_and_stale();
+    let seen = assert_one_mark_per_entity(&snapshot, LiveOverlay::off);
+    let shown = |key: &str| -> Vec<Shown> {
+        seen[&session(key)]
+            .iter()
+            .map(|(_, shown)| shown.clone())
+            .collect()
+    };
+    assert!(shown(HOSTED).contains(&Shown::Mark("»".into())));
+    assert!(shown(BESIDE).contains(&Shown::Mark("?".into())));
+    assert!(shown(SOLO).contains(&Shown::Mark("·".into())));
+
+    // Quiet dims the same shape; fresh does not.
+    let mut app = listing_with(View::Sessions, &snapshot, LiveOverlay::off());
+    let buffer = buffer_of(&mut app, 220, 40);
+    let lines = tuikit::testkit::buffer::rows(&buffer);
+    let y = lines
+        .iter()
+        .position(|line| line.contains("e44d01cb"))
+        .expect("the hosted session's row");
+    let x = lines[y]
+        .chars()
+        .position(|c| c == '»')
+        .expect("the working mark");
+    let cell = &buffer[(u16::try_from(x).unwrap(), u16::try_from(y).unwrap())];
+    let theme = crate::tui::Theme::default();
+    assert_eq!(cell.fg, theme.info);
+    assert!(cell.modifier.contains(theme.muted), "quiet is dimmed");
+}
+
+#[test]
+fn live_state_changes_the_live_cells_and_nothing_else() {
+    let bare = live_world();
+    let tabled = with_table();
+    let live_marks = crate::tui::icons::live::ALL;
+    for view in [View::Sessions, View::Mux, View::Prs, View::Search] {
+        for width in [220, 110, 80, 60] {
+            let lines = |snapshot: &GraphSnapshot| {
+                let mut app = listing_with(view, snapshot, LiveOverlay::off());
+                row_lines(&mut app, width)
+            };
+            let (without, with) = (lines(&bare), lines(&tabled));
+            assert_eq!(without.len(), with.len(), "{view:?} at {width}");
+            let mut changed = 0;
+            for (before, after) in without.iter().zip(&with) {
+                let diffs: Vec<(char, char)> = before
+                    .chars()
+                    .zip(after.chars())
+                    .filter(|(a, b)| a != b)
+                    .collect();
+                assert!(
+                    diffs.len() <= 1,
+                    "{view:?} at {width}: more than the live cell changed:\n{before}\n{after}"
+                );
+                if let Some((was, is)) = diffs.first() {
+                    assert!(
+                        was.to_string() == crate::tui::icons::live::NONE
+                            && live_marks.contains(&is.to_string().as_str()),
+                        "{view:?} at {width}: the change is not a live mark:\n{before}\n{after}"
+                    );
+                    changed += 1;
+                }
+            }
+            if view != View::Prs {
+                assert!(changed > 0, "{view:?} at {width} drew no live state");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_live_mark_reads_on_the_cursor_row_focused_and_not() {
+    let snapshot = with_table();
+    let theme = crate::tui::Theme::default();
+    let mut app = listing_with(View::Sessions, &snapshot, LiveOverlay::off());
+    select(&mut app, HOSTED);
+    for focused in [true, false] {
+        if !focused {
+            app.update(Msg::CycleFocus);
+        }
+        let buffer = buffer_of(&mut app, 220, 40);
+        let lines = tuikit::testkit::buffer::rows(&buffer);
+        let y = lines
+            .iter()
+            .position(|line| {
+                line.contains("e44d01cb")
+                    && line
+                        .trim_start_matches('│')
+                        .starts_with(tuikit::glyphs::marks::POINTER)
+            })
+            .expect("the cursor row");
+        let x = lines[y]
+            .chars()
+            .position(|c| c == '!')
+            .unwrap_or_else(|| panic!("no mark on the cursor row:\n{}", lines.join("\n")));
+        let cell = &buffer[(u16::try_from(x).unwrap(), u16::try_from(y).unwrap())];
+        assert_eq!(cell.symbol(), "!", "the shape is drawn");
+        assert_eq!(cell.fg, theme.warning, "the mark keeps its color");
+        let highlight = if focused {
+            theme.selection_active
+        } else {
+            theme.selection_inactive
+        };
+        assert!(
+            cell.modifier.contains(highlight),
+            "focused {focused}: the mark takes the row's highlight: {:?}",
+            cell.modifier
+        );
+    }
+}
+
+#[test]
+fn a_store_change_redraws_the_mark_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = written_store(dir.path());
+    let snapshot = live_world();
+    let mut app = listing_with(View::Sessions, &snapshot, overlay_over(&store));
+    select(&mut app, HOSTED);
+    let selected = app.selection().cloned();
+    let mark_of_hosted = |app: &mut App| {
+        let lines = row_lines(app, 220);
+        let line = lines
+            .iter()
+            .find(|line| line.contains("e44d01cb"))
+            .expect("the hosted row")
+            .clone();
+        let tokens = tuikit::testkit::buffer::tokens(&line);
+        let age = tokens.iter().position(|t| is_age(&t.text)).expect("an age");
+        tokens[age + 1].text.clone()
+    };
+    assert_eq!(mark_of_hosted(&mut app), "!");
+    let ended = LiveEvent::new(
+        "claude-code",
+        HOSTED,
+        now_ms(),
+        LiveEventKind::TurnEnded { interrupted: false },
+    );
+    // The permission was answered and the turn ended.
+    store
+        .apply_event(&LiveEvent::new(
+            "claude-code",
+            HOSTED,
+            now_ms(),
+            LiveEventKind::WaitEnded { agent: None },
+        ))
+        .expect("the store takes the event");
+    store
+        .apply_event(&ended)
+        .expect("the store takes the event");
+    app.poll_live(
+        Instant::now() + std::time::Duration::from_secs(5),
+        crate::tui::rows::tree_current_unix_ms(),
+    );
+    assert_eq!(mark_of_hosted(&mut app), "›", "the row reads ready");
+    assert_eq!(app.selection().cloned(), selected, "the cursor stays");
 }
