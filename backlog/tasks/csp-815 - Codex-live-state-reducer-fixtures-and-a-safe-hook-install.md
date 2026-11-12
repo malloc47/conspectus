@@ -4,7 +4,7 @@ title: 'Codex live state: reducer, fixtures, and a safe hook install'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 06:06'
+updated_date: '2026-11-12 08:07'
 labels:
   - live-state
   - ls-emit
@@ -57,4 +57,6 @@ Planning note (after CSP-809): the neutral `LiveEvent` vocabulary and the shared
 Planning note (after CSP-810): the writer seam is on `HarnessAdapter` (`src/discovery/harness/mod.rs`): `live_events_from_payload(payload, context, observed_ms)` for event sources, `live_snapshot_from_payload` for plugin snapshots, `live_reducer` for a harness reducer, and `is_attribution_event`, which defaults to `true`. Override `is_attribution_event` so only the events that name the session (session start) take the spool and daemon path; every other event then reaches only the live-state store. `hook write` (`src/cli/hook_write.rs`) fills pid, pid start, and tmux pane/socket/session into the context; the adapter adds cwd and transcript path from its payload view. Claude Code's `LiveHook` view in `claude_code.rs` is the pattern (borrowed serde struct of whitelisted fields).
 
 Note from CSP-811: `tests/fixtures/hooks/codex-sessionstart.json` also carries `"source": "user"` and a Claude model name; re-check both against the Codex hook docs when building the Codex fixtures. The Claude Code slice keeps its install logic in `src/cli/hook_claude.rs` and its subscription list (`HOOK_SUBSCRIPTIONS`) beside the mapping in `src/discovery/harness/claude_code_live.rs`, and adds the neutral `WaitConfirmed` event; the same shape may suit Codex.
+
+From CSP-813: `hook status` reports this harness's live-state health as `unsupported` until its adapter's `HarnessAdapter::reports_live_state` returns true; flip it when the hooks report live state, and update the `unsupported` row of the health table in `docs/operations.md`.
 <!-- SECTION:NOTES:END -->
