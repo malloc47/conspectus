@@ -1,7 +1,5 @@
-use super::hook::{
-    ensure_claude_hook, harness_binaries, has_claude_hook, remove_claude_hook,
-    resolve_harness_pid_with,
-};
+use super::hook::{ensure_claude_hook, has_claude_hook, remove_claude_hook};
+use super::hook_write::{harness_binaries, resolve_harness_pid_with};
 use super::tui::parse_tui_duration;
 use super::*;
 use std::time::Duration;
@@ -668,18 +666,18 @@ mod help_text {
 
 #[test]
 fn opencode_shared_service_is_a_background_hook_harness() {
-    assert!(super::hook::is_background_harness_command(
+    assert!(super::hook_write::is_background_harness_command(
         "opencode",
         "/home/user/.opencode/bin/opencode serve --service"
     ));
-    assert!(!super::hook::is_background_harness_command(
+    assert!(!super::hook_write::is_background_harness_command(
         "opencode",
         "opencode --session ses_16d204c1dffeIkBjxxbpD9uujI"
     ));
-    assert!(!super::hook::is_background_harness_command(
+    assert!(!super::hook_write::is_background_harness_command(
         "opencode", "opencode"
     ));
-    assert!(!super::hook::is_background_harness_command(
+    assert!(!super::hook_write::is_background_harness_command(
         "not-a-harness",
         "opencode serve"
     ));
