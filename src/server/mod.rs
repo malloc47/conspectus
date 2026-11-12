@@ -434,17 +434,31 @@ pub fn client_refresh(class: Option<&str>) -> ClientOutcome<u64> {
     }
 }
 
+/// How long a hook writer waits on each read and write of a
+/// `hook_ingest` call before it gives up on the daemon and writes the
+/// spool itself. A harness waits for its hook, so this bounds what a
+/// stuck daemon costs a session start, well inside the 5 s timeout of
+/// an installed hook entry (ADR 0204 decision 6, ADR 0206 decision 7).
+pub const HOOK_INGEST_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// Send a hook observation to the daemon so it can update the
 /// live in-memory graph and persist the result via `graph.bin`.
 /// If the daemon has not completed its first snapshot cycle, it
 /// returns `snapshot_unavailable`; callers should fall back to
-/// the daemonless latest-hook spool.
+/// the daemonless latest-hook spool. A daemon that does not answer
+/// within [`HOOK_INGEST_TIMEOUT`] is a `Transport` error.
 pub fn client_hook_ingest(record: &HookRecord) -> ClientOutcome<()> {
     let args = match serde_json::to_value(record) {
         Ok(record) => serde_json::json!({ "record": record }),
         Err(err) => return ClientOutcome::Transport(anyhow!(err).context("serialize hook record")),
     };
-    match call_command("hook_ingest", args, "hook-ingest") {
+    match call_socket(
+        &socket_path(),
+        "hook_ingest",
+        args,
+        "hook-ingest",
+        Some(HOOK_INGEST_TIMEOUT),
+    ) {
         ClientOutcome::Ok(_) => ClientOutcome::Ok(()),
         ClientOutcome::DaemonError { code, message } => {
             ClientOutcome::DaemonError { code, message }
@@ -494,14 +508,28 @@ pub fn client_snapshot() -> ClientOutcome<Vec<u8>> {
 
 /// Common framing for client-side calls. Connects to the
 /// canonical socket path, sends the framed request, reads the
-/// framed response, parses the JSON envelope.
+/// framed response, parses the JSON envelope. Waits as long as the
+/// daemon takes: a refresh can rebuild the whole graph.
 fn call_command(
     command: &str,
     args: serde_json::Value,
     id: &str,
 ) -> ClientOutcome<serde_json::Value> {
-    let path = socket_path();
-    let mut stream = match UnixStream::connect(&path) {
+    call_socket(&socket_path(), command, args, id, None)
+}
+
+/// [`call_command`] against the socket at `path`. `timeout` bounds
+/// each read and write on the connection, so a daemon that accepts and
+/// never answers ends the call with a `Transport` error; `None` waits
+/// indefinitely.
+fn call_socket(
+    path: &Path,
+    command: &str,
+    args: serde_json::Value,
+    id: &str,
+    timeout: Option<Duration>,
+) -> ClientOutcome<serde_json::Value> {
+    let mut stream = match UnixStream::connect(path) {
         Ok(stream) => stream,
         Err(err)
             if err.kind() == std::io::ErrorKind::NotFound
@@ -515,6 +543,12 @@ fn call_command(
             );
         }
     };
+    if let Err(err) = stream
+        .set_read_timeout(timeout)
+        .and_then(|()| stream.set_write_timeout(timeout))
+    {
+        return ClientOutcome::Transport(anyhow!(err).context("set socket timeout"));
+    }
     let request = serde_json::json!({
         "command": command,
         "args": args,

@@ -736,3 +736,108 @@ fn a_full_refresh_also_asks_the_mux_server_again() {
 
     assert_eq!(served_muxes(&ctx).0, ["alpha"]);
 }
+
+/// A socket in a fresh directory, short enough for `sun_path`.
+fn client_socket() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("socket dir");
+    let path = dir.path().join("server.sock");
+    (dir, path)
+}
+
+fn times_out(outcome: &ClientOutcome<serde_json::Value>) -> bool {
+    matches!(outcome, ClientOutcome::Transport(_))
+}
+
+#[test]
+fn a_daemon_that_never_accepts_times_the_call_out() {
+    let (_dir, path) = client_socket();
+    // Bound and listening, but nothing ever accepts: the connection
+    // waits in the backlog and no answer comes.
+    let _listener = UnixListener::bind(&path).expect("bind");
+    let started = Instant::now();
+    let outcome = call_socket(
+        &path,
+        "hook_ingest",
+        serde_json::Value::Null,
+        "t",
+        Some(Duration::from_millis(150)),
+    );
+    let waited = started.elapsed();
+    assert!(times_out(&outcome), "{outcome:?}");
+    assert!(waited >= Duration::from_millis(150), "{waited:?}");
+    assert!(waited < Duration::from_secs(5), "{waited:?}");
+}
+
+#[test]
+fn a_daemon_that_reads_the_request_and_never_answers_times_the_call_out() {
+    let (_dir, path) = client_socket();
+    let listener = UnixListener::bind(&path).expect("bind");
+    let (done, finished) = std::sync::mpsc::channel::<()>();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let _request = read_frame(&mut stream).expect("request");
+        // Hold the connection open, silent, until the client is gone.
+        let _ = finished.recv_timeout(Duration::from_secs(10));
+    });
+    let started = Instant::now();
+    let outcome = call_socket(
+        &path,
+        "hook_ingest",
+        serde_json::json!({"record": {}}),
+        "t",
+        Some(Duration::from_millis(150)),
+    );
+    let waited = started.elapsed();
+    let _ = done.send(());
+    server.join().expect("server thread");
+    assert!(times_out(&outcome), "{outcome:?}");
+    assert!(waited < Duration::from_secs(5), "{waited:?}");
+}
+
+#[test]
+fn a_bounded_call_still_reads_a_prompt_answer() {
+    let (_dir, path) = client_socket();
+    let listener = UnixListener::bind(&path).expect("bind");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let _request = read_frame(&mut stream).expect("request");
+        write_frame(
+            &mut stream,
+            br#"{"id":"t","result":"ok","data":{"done":true}}"#,
+        )
+        .expect("answer");
+    });
+    let outcome = call_socket(
+        &path,
+        "hook_ingest",
+        serde_json::Value::Null,
+        "t",
+        Some(Duration::from_secs(2)),
+    );
+    server.join().expect("server thread");
+    assert!(
+        matches!(&outcome, ClientOutcome::Ok(data) if data["done"] == true),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn no_socket_is_no_daemon_for_a_bounded_call() {
+    let (_dir, path) = client_socket();
+    let outcome = call_socket(
+        &path,
+        "hook_ingest",
+        serde_json::Value::Null,
+        "t",
+        Some(HOOK_INGEST_TIMEOUT),
+    );
+    assert!(matches!(outcome, ClientOutcome::NoDaemon), "{outcome:?}");
+}
+
+#[test]
+fn the_hook_ingest_bound_leaves_room_inside_a_hook_entry_timeout() {
+    // An installed hook entry gets 5 s; the writer's other work (the
+    // store lock wait, a tmux query, the spool write) needs the rest.
+    assert!(HOOK_INGEST_TIMEOUT >= Duration::from_millis(500));
+    assert!(HOOK_INGEST_TIMEOUT <= Duration::from_secs(3));
+}
