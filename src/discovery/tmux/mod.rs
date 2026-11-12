@@ -226,7 +226,9 @@ pub trait MuxBackend: Send + Sync {
     /// Returning `None` means either the backend is unavailable in
     /// this environment or the caller isn't inside one of its
     /// sessions. The default returns `None`; SystemTmux overrides
-    /// with a `$TMUX` + `tmux display-message` probe. Zellij will
+    /// with a `$TMUX` + `tmux display-message` probe of the caller's
+    /// own pane (`TMUX_PANE`), so a caller with no terminal, such as
+    /// a detached hook, isn't told about another pane. Zellij will
     /// override when its equivalent probe is decided (defer to a
     /// follow-up story alongside a `$ZELLIJ` env-var contract).
     fn current_session_context(&self) -> Option<MuxSessionContext> {
@@ -965,18 +967,36 @@ impl MuxBackend for SystemTmux {
     }
 
     fn current_session_context(&self) -> Option<MuxSessionContext> {
-        // Probe `$TMUX` and `tmux display-message` for
-        // the caller's mux context. Migrated from
-        // `cli::tmux_context` so the tmux-specific env-var
-        // reading lives on the backend that owns it; the CLI
-        // hook writer iterates registered backends and asks each
-        // for its answer.
-        std::env::var_os("TMUX")?;
-        let socket_path = std::env::var("TMUX")
-            .ok()
+        // The tmux-specific environment is read on the backend that
+        // owns it; the hook writer and the TUI ask each backend for
+        // its answer.
+        self.session_context_of(
+            std::env::var_os("TMUX").as_deref(),
+            std::env::var("TMUX_PANE").ok(),
+        )
+    }
+}
+
+impl SystemTmux {
+    /// The mux context of a process whose environment holds `tmux`
+    /// (`$TMUX`) and `tmux_pane` (`TMUX_PANE`), from `tmux
+    /// display-message`. tmux is asked about that pane (`-t`): without
+    /// a target it answers for whichever pane it considers current,
+    /// which for a hook the harness runs with no terminal can be the
+    /// session's active pane rather than the hook's. A `TMUX_PANE` that
+    /// is not a pane id leaves the question untargeted.
+    fn session_context_of(
+        &self,
+        tmux: Option<&std::ffi::OsStr>,
+        tmux_pane: Option<String>,
+    ) -> Option<MuxSessionContext> {
+        let socket_path = tmux?
+            .to_str()
             .and_then(|value| value.split_once(',').map(|(socket, _)| socket.to_string()));
-        let session_name = display_message_value(&self.binary, "#{session_name}");
-        let pane_id = display_message_value(&self.binary, "#{pane_id}");
+        let target = tmux_pane.filter(|pane| is_pane_id(pane));
+        let session_name =
+            display_message_value(&self.binary, target.as_deref(), "#{session_name}");
+        let pane_id = display_message_value(&self.binary, target.as_deref(), "#{pane_id}");
         let ctx = MuxSessionContext {
             backend: TMUX_BACKEND,
             session_name,
@@ -990,9 +1010,27 @@ impl MuxBackend for SystemTmux {
     }
 }
 
-fn display_message_value(binary: &Path, format: &str) -> Option<String> {
+/// Whether `value` is a tmux pane id: `%` and its number.
+fn is_pane_id(value: &str) -> bool {
+    value
+        .strip_prefix('%')
+        .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// `display-message` printing `format` for pane `target`, or for the
+/// pane tmux considers current when there is none.
+fn display_message_args<'a>(target: Option<&'a str>, format: &'a str) -> Vec<&'a str> {
+    let mut args = vec!["display-message", "-p"];
+    if let Some(target) = target {
+        args.extend(["-t", target]);
+    }
+    args.push(format);
+    args
+}
+
+fn display_message_value(binary: &Path, target: Option<&str>, format: &str) -> Option<String> {
     let output = crate::exec::command(crate::exec::Program::Tmux, binary)
-        .args(["display-message", "-p", format])
+        .args(display_message_args(target, format))
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()

@@ -114,7 +114,28 @@ impl World {
     }
 
     fn tmux_calls(&self) -> usize {
-        fs::read_to_string(&self.tmux_log).map_or(0, |log| log.lines().count())
+        self.tmux_args().len()
+    }
+
+    /// The arguments of each tmux call the stand-in saw, in order.
+    fn tmux_args(&self) -> Vec<String> {
+        fs::read_to_string(&self.tmux_log)
+            .map(|log| log.lines().map(str::to_string).collect())
+            .unwrap_or_default()
+    }
+
+    /// The spool's records, keyed by session id.
+    fn spool_records(&self) -> serde_json::Map<String, serde_json::Value> {
+        let spool = read_json(&self.spool_path());
+        spool["records"]
+            .as_object()
+            .expect("records")
+            .values()
+            .map(|record| {
+                let session = record["session_key"].as_str().expect("session key");
+                (session.to_string(), record.clone())
+            })
+            .collect()
     }
 
     /// A daemon socket that is bound but never accepts a connection.
@@ -122,6 +143,92 @@ impl World {
         let path = self.runtime.join("conspectus/server.sock");
         fs::create_dir_all(path.parent().expect("socket dir")).expect("socket dir");
         UnixListener::bind(&path).expect("bind the daemon socket")
+    }
+}
+
+/// A tmux server of the test's own: its socket sits in the test's scratch
+/// directory, every call names that socket with `-S` and drops `$TMUX`,
+/// and the server is killed when the test ends, so nothing reaches the
+/// host's tmux.
+struct PrivateTmux {
+    socket: PathBuf,
+    tmpdir: PathBuf,
+}
+
+impl PrivateTmux {
+    /// A server with one detached session `session`; `None` when tmux is
+    /// not installed.
+    fn start(root: &Path, session: &str) -> Option<Self> {
+        let installed = std::process::Command::new("tmux")
+            .arg("-V")
+            .output()
+            .is_ok_and(|output| output.status.success());
+        if !installed {
+            return None;
+        }
+        // Short names: a socket path must fit in a `sockaddr_un`.
+        let tmpdir = root.join("t");
+        fs::create_dir_all(&tmpdir).expect("tmux tmpdir");
+        let server = Self {
+            socket: tmpdir.join("s"),
+            tmpdir,
+        };
+        assert!(
+            server.run(&[
+                "-f",
+                "/dev/null",
+                "new-session",
+                "-d",
+                "-s",
+                session,
+                "-x",
+                "120",
+                "-y",
+                "40",
+                "sleep 600",
+            ]),
+            "start a private tmux server at {}",
+            server.socket.display()
+        );
+        Some(server)
+    }
+
+    fn command(&self, args: &[&str]) -> std::process::Command {
+        let mut cmd = std::process::Command::new("tmux");
+        cmd.arg("-S")
+            .arg(&self.socket)
+            .args(args)
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .env("TMUX_TMPDIR", &self.tmpdir)
+            .env("LC_CTYPE", "C.UTF-8");
+        cmd
+    }
+
+    fn run(&self, args: &[&str]) -> bool {
+        self.command(args)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    fn lines(&self, args: &[&str]) -> Vec<String> {
+        let output = self.command(args).output().expect("run tmux");
+        assert!(output.status.success(), "tmux {args:?}");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// `$TMUX` as tmux sets it in the server's panes.
+    fn tmux_env(&self) -> String {
+        format!("{},1,0", self.socket.display())
+    }
+}
+
+impl Drop for PrivateTmux {
+    fn drop(&mut self) {
+        let _ = self.run(&["kill-server"]);
     }
 }
 
@@ -318,6 +425,94 @@ fn a_missing_tmux_is_no_error_and_the_pane_still_comes_from_tmux_pane() {
         world.entry()["tmux"],
         serde_json::json!({ "socket": world.tmux_socket(), "pane": "%7" })
     );
+}
+
+#[test]
+fn a_session_start_asks_tmux_about_the_hooks_own_pane() {
+    let world = World::new();
+    run_silently(world.hook_in_tmux("claude-code"), session_start());
+
+    assert_eq!(
+        world.tmux_args(),
+        [
+            "display-message -p -t %7 #{session_name}",
+            "display-message -p -t %7 #{pane_id}",
+        ]
+    );
+}
+
+#[test]
+fn without_a_pane_id_in_tmux_pane_tmux_is_asked_as_before() {
+    for pane in [None, Some(""), Some("not-a-pane"), Some("work:0.1")] {
+        let world = World::new();
+        let mut cmd = world.hook_in_tmux("claude-code");
+        match pane {
+            Some(value) => cmd.env("TMUX_PANE", value),
+            None => cmd.env_remove("TMUX_PANE"),
+        };
+        run_silently(cmd, session_start());
+
+        assert_eq!(
+            world.tmux_args(),
+            [
+                "display-message -p #{session_name}",
+                "display-message -p #{pane_id}",
+            ],
+            "TMUX_PANE {pane:?}"
+        );
+        assert_eq!(world.spool_record()["tmux"]["pane_id"], "%7");
+    }
+}
+
+#[test]
+fn split_panes_of_one_tmux_session_get_their_own_records() {
+    let world = World::new();
+    let Some(server) = PrivateTmux::start(&world.root, "work") else {
+        eprintln!("tmux not installed; skipping");
+        return;
+    };
+    assert!(server.run(&["split-window", "-t", "work", "sleep 600"]));
+    let panes = server.lines(&["list-panes", "-t", "work", "-F", "#{pane_id}"]);
+    let [left, right] = panes.as_slice() else {
+        panic!("two panes: {panes:?}");
+    };
+    // The split leaves the right pane active, so tmux's idea of the
+    // current pane is not the left one's.
+    let active = server.lines(&["display-message", "-p", "-t", "work", "#{pane_id}"]);
+    assert_eq!(active, std::slice::from_ref(right));
+
+    let sessions = [
+        ("11111111-1111-4111-8111-111111111111", left),
+        ("22222222-2222-4222-8222-222222222222", right),
+    ];
+    for (session, pane) in sessions {
+        let mut cmd = world.hook("claude-code");
+        cmd.env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("LC_CTYPE", "C.UTF-8")
+            .env("TMUX_TMPDIR", &server.tmpdir)
+            .env("TMUX", server.tmux_env())
+            .env("TMUX_PANE", pane);
+        let payload = serde_json::json!({
+            "session_id": session,
+            "cwd": "/work/project",
+            "hook_event_name": "SessionStart",
+            "source": "startup",
+        });
+        run_silently(cmd, payload.to_string());
+    }
+
+    let records = world.spool_records();
+    assert_eq!(records.len(), 2, "{records:#?}");
+    let socket = server.socket.display().to_string();
+    for (session, pane) in sessions {
+        let tmux = &records[session]["tmux"];
+        assert_eq!(tmux["session_name"], "work", "{session}");
+        assert_eq!(tmux["pane_id"], pane.as_str(), "{session}");
+        assert_eq!(tmux["socket_path"], socket.as_str(), "{session}");
+        let entry = &world.store()["entries"][format!("claude-code:{session}")];
+        assert_eq!(entry["tmux"]["pane"], pane.as_str(), "{entry}");
+        assert_eq!(entry["tmux"]["session"], "work", "{entry}");
+    }
 }
 
 #[test]

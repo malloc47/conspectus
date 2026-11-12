@@ -9,8 +9,8 @@
 //!   [`crate::live_store::LOCK_WAIT`] for the store's lock, opens no
 //!   socket, and starts no process once the store has an entry for the
 //!   session: the pane comes from `TMUX_PANE` and the server from
-//!   `$TMUX`, and tmux is asked for the session's name only the first
-//!   time.
+//!   `$TMUX`, and tmux is asked about that pane, for its session's name,
+//!   only the first time.
 //! - **The attribution record** (ADR 0028, ADR 0146), only for the
 //!   events the adapter says name the session a process runs, such as a
 //!   session start. It goes to the daemon's `hook_ingest` command,
@@ -140,8 +140,8 @@ pub(super) fn tmux_env(tmux: Option<String>, pane: Option<String>) -> Option<Tmu
 /// What the writer does beyond the live-state store. Tests stand in for
 /// it to see what a payload triggers.
 pub(super) trait WriterEffects {
-    /// The mux context of the writer's terminal, from the mux itself.
-    /// Starts tmux.
+    /// The mux context of the writer's own pane (`TMUX_PANE`'s, when it
+    /// names one), from the mux itself. Starts tmux.
     fn mux_context(&mut self) -> Option<HookTmuxRecord>;
     /// Record `record` for attribution: through the daemon, or in the
     /// spool.
@@ -522,8 +522,8 @@ fn tmux_context() -> Option<HookTmuxRecord> {
     // Iterate the registered mux backends and ask
     // each for its current-session context. The first backend
     // to answer wins. `SystemTmux` reads `$TMUX` and runs `tmux
-    // display-message`; other backends supply their own env-var
-    // contract via the same trait method.
+    // display-message` about `TMUX_PANE`'s pane; other backends
+    // supply their own env-var contract via the same trait method.
     let backends: Vec<Box<dyn crate::discovery::tmux::MuxBackend>> = vec![
         Box::new(crate::discovery::tmux::SystemTmux::new()),
         Box::new(crate::discovery::zellij::SystemZellij::new()),
