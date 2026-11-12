@@ -85,6 +85,12 @@ pub struct RunConfig {
     /// `--grouping` or `--sessions-grouping`. When `false`, persisted
     /// state may override.
     pub explicit_grouping: bool,
+    /// Whether each view reopens with the rows the last run left
+    /// expanded and selected, from persisted state. Off under
+    /// `--no-resume-view` and `--snapshot`, so the start is the same
+    /// every time; the view to start in is decided before the TUI
+    /// starts.
+    pub resume_view: bool,
     /// Background graph refresh cadence.
     pub refresh_interval: Duration,
     /// Selected mux pane capture cadence.
@@ -184,6 +190,7 @@ impl RunConfig {
             explicit_filter: false,
             explicit_sort: false,
             explicit_grouping: false,
+            resume_view: true,
             refresh_interval: Duration::from_secs(30),
             mux_preview_interval: Duration::from_secs(2),
             live_preview_enabled: true,

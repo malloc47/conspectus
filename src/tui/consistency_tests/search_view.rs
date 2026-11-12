@@ -302,6 +302,45 @@ fn the_search_view_is_not_the_view_a_restart_opens_on() {
 }
 
 #[test]
+fn the_search_view_remembers_neither_its_folds_nor_its_selection() {
+    let (a, b) = two();
+    let mut app = searched(&[(&a, summary(2, 0, 1_000)), (&b, summary(5, 0, 900))]);
+    assert!(!app.tree().rows.is_empty(), "the search lists rows");
+    app.update(Msg::End);
+    app.update(Msg::ToggleExpand);
+    assert!(app.selection().is_some());
+    let state = app.build_persisted_state();
+    assert!(state.view_states[&View::Search].tree.is_empty());
+
+    // Nor does a file that names some take them back.
+    let dir = tempfile::tempdir().unwrap();
+    let cache = crate::tui_state::TuiStateCache::new().with_xdg_state_home(dir.path());
+    let path = cache.path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        r#"{"schema_version": 1, "row_keys": 1, "view_states": {"search": {
+            "expanded": ["bucket:a"], "selected": {"row": "bucket:a", "path": []}}}}"#,
+    )
+    .unwrap();
+    let read = crate::tui_state::read_tui_state(&cache).unwrap();
+    assert!(read.view_states[&View::Search].tree.is_empty());
+    let mut written = read;
+    written
+        .view_states
+        .get_mut(&View::Search)
+        .unwrap()
+        .tree
+        .selected = Some(crate::tui_state::PersistedSelection {
+        row: "bucket:a".into(),
+        path: Vec::new(),
+    });
+    crate::tui_state::write_tui_state(&cache, &written).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("bucket:a"), "{text}");
+}
+
+#[test]
 fn live_preview_off_says_so_instead_of_searching() {
     let mut config = RunConfig::defaults();
     config.live_preview_enabled = false;

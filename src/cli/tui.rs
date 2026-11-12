@@ -26,11 +26,11 @@ pub(super) struct TuiArgs {
     /// `[tui].default_view`, then `sessions`.
     #[arg(long, value_enum)]
     view: Option<ViewFlag>,
-    /// Don't restore or remember the last-used view for this run.
-    /// The session still uses the standard precedence
-    /// (`--view` > config default > `sessions`) for its starting
-    /// view but does not write the sidecar on view switches.
-    /// `--snapshot` implies this automatically.
+    /// Don't reopen the last-used view, or the rows each view last had
+    /// expanded and selected, for this run. The starting view follows
+    /// `--view`, then the config default, then `sessions`, and each
+    /// view opens on its default folds. `--snapshot` implies this
+    /// automatically.
     #[arg(long = "no-resume-view")]
     no_resume_view: bool,
     /// Deprecated alias for `--grouping` when `--view sessions` is
@@ -341,8 +341,9 @@ impl TuiArgs {
         //      `$XDG_STATE_HOME/conspectus/tui-state.json`.
         //   3. otherwise fall back to `[tui].default_view` /
         //      `View::Sessions`.
-        // `--no-resume-view` and `--snapshot` both skip step 2 so the
-        // start view stays deterministic for scripts and the
+        // `--no-resume-view` and `--snapshot` both skip step 2, and the
+        // TUI then reopens no view's expanded and selected rows either,
+        // so the start stays deterministic for scripts and the
         // snapshot fixture path.
         #[cfg(feature = "snapshot")]
         let suppress_resume = self.no_resume_view || self.snapshot;
@@ -441,6 +442,7 @@ impl TuiArgs {
             explicit_sort,
             explicit_grouping: self.filter_args.grouping.is_some()
                 || self.sessions_grouping.is_some(),
+            resume_view: !suppress_resume,
             refresh_interval,
             mux_preview_interval,
             live_preview_enabled: !self.no_live_preview,

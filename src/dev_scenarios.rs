@@ -261,6 +261,7 @@ impl ScenarioWorld {
             explicit_filter: false,
             explicit_sort: false,
             explicit_grouping: false,
+            resume_view: true,
             refresh_interval: Duration::from_secs(24 * 60 * 60),
             mux_preview_interval: Duration::from_secs(24 * 60 * 60),
             live_preview_enabled: false,

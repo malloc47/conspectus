@@ -126,8 +126,26 @@ fn run_loop(
     config: RunConfig,
     mut mode: impl LoopMode,
 ) -> Result<()> {
+    let result = drive_loop(terminal, &mut app, &config, &mut mode);
+    // The state file is written however the loop ended, a quit or an
+    // error. View switches and settings changes write it as they happen,
+    // but the expanded and selected rows change with every key and are
+    // written only with those, before a hand-off of the terminal, and
+    // here, so this write is what keeps the last of them.
+    app.persist_state();
+    result
+}
+
+/// The event loop itself: draw, read a key, dispatch it, until the app
+/// signals quit or the terminal fails.
+fn drive_loop(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    mode: &mut impl LoopMode,
+) -> Result<()> {
     let poll_timeout = Duration::from_millis(100);
-    mode.init(terminal, &mut app, &config)?;
+    mode.init(terminal, app, config)?;
 
     // The preview source the last pass resolved, and whether the last
     // key asked for a refresh.
@@ -136,34 +154,27 @@ fn run_loop(
     while !app.should_quit() {
         // A contents query that has rested starts its scan.
         app.search_overlay_tick(Instant::now(), false);
-        mode.drain(&mut app, &config)?;
-        shown = refresh_preview_if_needed(&mut app, &config, &mut mode, shown, force_preview);
-        draw_frame(&mut app, terminal)?;
+        mode.drain(app, config)?;
+        shown = refresh_preview_if_needed(app, config, mode, shown, force_preview);
+        draw_frame(app, terminal)?;
         force_preview = false;
         if event::poll(poll_timeout)? {
             let event = event::read()?;
             if let Event::Paste(text) = &event {
                 let mut dispatched = Ok(());
-                type_paste(&mut app, text, &mut |app, action| {
+                type_paste(app, text, &mut |app, action| {
                     if dispatched.is_ok() {
-                        dispatched = mode.dispatch(terminal, app, &config, Some(action));
+                        dispatched = mode.dispatch(terminal, app, config, Some(action));
                     }
                 });
                 dispatched?;
                 continue;
             }
-            let action = action_for_event(&app, event);
+            let action = action_for_event(app, event);
             force_preview = matches!(action, Some(Action::Refresh | Action::HardRefresh));
-            mode.dispatch(terminal, &mut app, &config, action)?;
+            mode.dispatch(terminal, app, config, action)?;
         }
     }
-
-    // Belt-and-suspenders shutdown persist: the view / grouping /
-    // filter / sort reducer arms emit `Effect::Persist` per ADR
-    // 0085 contract 2 Phase E, so this final call is redundant
-    // on the happy path. Kept so any state a future non-reducer
-    // path mutates just before shutdown still lands on disk.
-    app.persist_state();
     Ok(())
 }
 
@@ -968,10 +979,24 @@ pub fn run_from_fixture(config: RunConfig, fixture_path: std::path::PathBuf) -> 
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn read_fixture(path: &std::path::Path) -> Result<crate::model::GraphSnapshot> {
+pub(in crate::tui) fn read_fixture(path: &std::path::Path) -> Result<crate::model::GraphSnapshot> {
     let raw = std::fs::read_to_string(path)?;
     let snapshot: crate::model::GraphSnapshot = serde_json::from_str(&raw)?;
     Ok(resolve_snapshot(snapshot))
+}
+
+/// The app an interactive run starts with: persistence on at `cache`,
+/// and the state file read back, sort, filters, groupings, and each
+/// view's expanded and selected rows (applied once the view lists rows,
+/// unless `--no-resume-view`).
+pub(in crate::tui) fn resumed_app(
+    config: &RunConfig,
+    cache: crate::tui_state::TuiStateCache,
+) -> App {
+    let mut app = App::new(config.clone());
+    app.enable_view_persistence(cache);
+    app.restore_persisted_state();
+    app
 }
 
 /// Block on terminal input, dispatching crossterm events to the
@@ -981,13 +1006,9 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
     // cached listings, a background worker fetches them, and only
     // Ctrl-R fetches in its refresh (ADR 0136).
     config.forge_fetch = crate::discovery::forge::ForgeFetch::CachedOnly;
-    let mut app = App::new(config.clone());
-    // Enable last-active-view persistence. Snapshot mode and
-    // `--no-resume-view` both go through a different entry point
-    // (or skip this branch) so the file only ever moves under
-    // genuine interactive runs.
-    app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
-    app.restore_persisted_state();
+    // Snapshot mode goes through a different entry point, so the
+    // file only ever moves under interactive runs.
+    let app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
     let (preview_tx, preview_rx) = mpsc::channel();
     let (confirmed_tx, confirmed_rx) = mpsc::channel();
@@ -1021,14 +1042,11 @@ fn static_event_loop(
     tmux: Box<dyn MuxBackend>,
     recordings: Option<std::path::PathBuf>,
 ) -> Result<()> {
-    let mut app = App::new(config.clone());
-    // Enable last-active-view persistence for the static
-    // fixture-replay TUI mode too. Snapshot mode (ADR 0067) uses a
-    // distinct entry point in `src/tui/snapshot.rs` that
-    // deliberately skips this so the on-disk file stays
+    // The static fixture-replay TUI mode persists too. Snapshot mode
+    // (ADR 0067) uses a distinct entry point in `src/tui/snapshot.rs`
+    // that deliberately skips this so the on-disk file stays
     // unconditionally unmoved when the snapshot tooling runs.
-    app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
-    app.restore_persisted_state();
+    let app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
     let mode = StaticMode {
         tmux,
         snapshot: initial_snapshot,
@@ -1039,7 +1057,11 @@ fn static_event_loop(
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn set_static_data(app: &mut App, config: &RunConfig, snapshot: &crate::model::GraphSnapshot) {
+pub(in crate::tui) fn set_static_data(
+    app: &mut App,
+    config: &RunConfig,
+    snapshot: &crate::model::GraphSnapshot,
+) {
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         snapshot, app,
     ));
@@ -1974,7 +1996,14 @@ pub(super) fn execute_effects_live(
             Effect::Exec(crate::tui::effect::ExecSpec::PaneScrollback { pane, line, text }) => {
                 open_pane_scrollback(app, tmux, &pane, line, &text);
             }
-            Effect::Exec(spec) => execute_exec_spec(terminal, app, config, spec, policy),
+            Effect::Exec(spec) => {
+                // The terminal goes to another program, which the
+                // operator may never come back from (a closed terminal
+                // ends this process too), so the state file is written
+                // first.
+                app.persist_state();
+                execute_exec_spec(terminal, app, config, spec, policy);
+            }
             Effect::RunMux(op) => execute_mux_op(app, tmux, op),
             Effect::WriteStore(op) => execute_store_op(app, tmux, op),
             other => execute_pure_effect(app, other),

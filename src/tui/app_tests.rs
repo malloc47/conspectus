@@ -2552,6 +2552,7 @@ fn restore_persisted_state_applies_state_and_mirrors_config() {
             grouping: Some(crate::tui::Grouping::Sessions(
                 crate::tui::SessionsGrouping::Repo,
             )),
+            tree: crate::tui_state::PersistedTree::default(),
         },
     );
     crate::tui_state::write_tui_state(&cache, &persisted).expect("seed state");
@@ -2592,6 +2593,7 @@ fn restore_persisted_state_preserves_explicit_cli_overrides() {
             grouping: Some(crate::tui::Grouping::Sessions(
                 crate::tui::SessionsGrouping::Repo,
             )),
+            tree: crate::tui_state::PersistedTree::default(),
         },
     );
     crate::tui_state::write_tui_state(&cache, &persisted).expect("seed state");

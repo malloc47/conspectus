@@ -2,8 +2,9 @@
 //!
 //! The selection, the expanded rows, and the window the tree drew are the
 //! framework's [`TreeState`]; this file loads rebuilt rows into it, keeps
-//! the selection across the rebuild, and points the right pane at the row
-//! a move lands on.
+//! the selection across the rebuild (or, the first time a view lists rows,
+//! puts back the tree the last run left it with), and points the right
+//! pane at the row a move lands on.
 
 use super::*;
 
@@ -29,6 +30,7 @@ impl App {
         // operator's selection, so the hint never fights it.
         self.tree_state
             .finish_rebuild(before, &self.tree.rows, initial_selection_hint.as_ref());
+        self.reopen_saved_tree();
         self.recompute_explorer();
     }
 
@@ -68,6 +70,7 @@ impl App {
         self.tree = tree;
         self.tree_state
             .finish_rebuild(before, &self.tree.rows, None);
+        self.reopen_saved_tree();
         self.recompute_explorer();
     }
 

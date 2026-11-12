@@ -30,6 +30,7 @@ mod handoff;
 mod listing;
 mod msg;
 mod overlays;
+mod restore;
 mod search_open;
 mod tree;
 mod viewport;
@@ -297,14 +298,17 @@ pub struct App {
     /// active fields. Sort stays global, so it lives on `App`
     /// rather than per-view.
     view_states: BTreeMap<View, ViewStateSlot>,
-    /// Optional persistence sink for the last-active view.
-    /// When `Some`, every view switch best-effort writes
-    /// the new active view to
-    /// `$XDG_STATE_HOME/conspectus/tui-state.json`. The runtime
-    /// sets this at startup; `--no-resume-view` and `--snapshot`
-    /// leave it `None` so the file stays untouched. Test apps
-    /// likewise default to `None`.
+    /// Optional persistence sink for the TUI state file.
+    /// When `Some`, every view switch and settings change, and the
+    /// end of the run, best-effort write the state to
+    /// `$XDG_STATE_HOME/conspectus/tui-state.json`. The live and
+    /// fixture runtimes set this at startup; `--snapshot` leaves it
+    /// `None` so the file stays untouched. Test apps likewise
+    /// default to `None`.
     tui_state_cache: Option<crate::tui_state::TuiStateCache>,
+    /// The trees the state file saved, by view, each waiting for its
+    /// view to list rows (see [`restore`]).
+    saved_trees: BTreeMap<View, crate::tui_state::PersistedTree>,
 }
 
 /// Saved-per-view UI state. Each entry holds everything that needs
@@ -318,6 +322,9 @@ pub(crate) struct ViewStateSlot {
     pub filter: crate::filter::RowFilter,
     pub grouping: super::Grouping,
     pub tree: TreeState<RowId>,
+    /// The tree as the state file keeps it, worked out when the
+    /// operator left the view, while its rows were at hand.
+    pub remembered: crate::tui_state::PersistedTree,
 }
 
 impl ViewStateSlot {
@@ -326,6 +333,7 @@ impl ViewStateSlot {
             filter: crate::filter::RowFilter::default(),
             grouping: super::Grouping::default_for(view),
             tree: TreeState::new(),
+            remembered: crate::tui_state::PersistedTree::default(),
         }
     }
 }
@@ -473,6 +481,7 @@ impl App {
             grouping,
             view_states: BTreeMap::new(),
             tui_state_cache: None,
+            saved_trees: BTreeMap::new(),
         }
     }
 
@@ -484,6 +493,7 @@ impl App {
             filter: self.filter.clone(),
             grouping: self.grouping,
             tree: self.tree_state.clone(),
+            remembered: self.remembered_tree(),
         }
     }
 
@@ -529,6 +539,7 @@ impl App {
     /// in the new layout: open the default groups, select the first
     /// row, and scroll to the top so every group header is on screen.
     fn show_top_of_tree(&mut self) {
+        self.drop_saved_tree();
         self.tree_state
             .set_expanded(tree::initial_expanded_rows(&self.tree));
         if let Some(first) = self.visible_rows().first().map(|row| row.id.clone()) {
@@ -642,17 +653,20 @@ impl App {
         &mut self.config
     }
 
-    /// Enable last-active-view persistence. The runtime calls
+    /// Enable TUI state persistence. The runtime calls
     /// this at startup with a `TuiStateCache` resolver pointed at
     /// `$XDG_STATE_HOME/conspectus/tui-state.json`. Snapshot mode
-    /// and the `--no-resume-view` flag both leave the cache unset
-    /// so view switches never touch the on-disk file.
+    /// leaves the cache unset so nothing touches the on-disk file;
+    /// `--no-resume-view` keeps it, and only skips what it would
+    /// reopen ([`RunConfig::resume_view`]).
     pub fn enable_view_persistence(&mut self, cache: crate::tui_state::TuiStateCache) {
         self.tui_state_cache = Some(cache);
     }
 
     /// Restore persisted sort, filter, and grouping from the state
-    /// file. Called once at startup after [`Self::enable_view_persistence`].
+    /// file, and hold each view's expanded and selected rows until the
+    /// view lists rows ([`restore`]). Called once at startup after
+    /// [`Self::enable_view_persistence`].
     ///
     /// Fields explicitly set via CLI flags (`--sort`, `--grouping`,
     /// `--harness`, `--max-age`, `--mux-state`) are not overridden.
@@ -685,6 +699,12 @@ impl App {
         }
 
         // Pre-populate view_states from persisted state.
+        self.hold_saved_trees(
+            persisted
+                .view_states
+                .iter()
+                .map(|(view, slot)| (*view, slot.tree.clone())),
+        );
         for (view, slot) in persisted.view_states {
             let is_active = view == self.active_view;
             let filter = if is_active && self.config.explicit_filter {
@@ -704,6 +724,7 @@ impl App {
                     filter,
                     grouping,
                     tree: TreeState::new(),
+                    remembered: crate::tui_state::PersistedTree::default(),
                 });
 
             // Apply to active fields for the current view.
@@ -723,9 +744,9 @@ impl App {
 
     /// Build a `PersistedState` snapshot of the current app state
     /// for writing to the state file. Captures the last-active view,
-    /// global sort, and per-view filter/grouping from `view_states`
-    /// (plus the active view's current state, which may not yet be
-    /// in `view_states`).
+    /// global sort, and per-view filter, grouping, and tree from
+    /// `view_states` (plus the active view's current state, which may
+    /// not yet be in `view_states`).
     pub fn build_persisted_state(&self) -> crate::tui_state::PersistedState {
         let mut view_states: BTreeMap<View, crate::tui_state::PersistedViewSlot> = BTreeMap::new();
         let active_view = self.active_view;
@@ -735,6 +756,7 @@ impl App {
             crate::tui_state::PersistedViewSlot {
                 filter: self.filter.clone(),
                 grouping: Some(self.grouping),
+                tree: self.tree_to_persist(active_view, None),
             },
         );
         // Merge other views from saved slots (skip the active one).
@@ -745,6 +767,7 @@ impl App {
                     .or_insert_with(|| crate::tui_state::PersistedViewSlot {
                         filter: slot.filter.clone(),
                         grouping: Some(slot.grouping),
+                        tree: self.tree_to_persist(view, Some(slot)),
                     });
             }
         }
