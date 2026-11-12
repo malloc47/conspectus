@@ -4,7 +4,9 @@
 
 Accepted. Amends ADR 0104 (the TUI rescans live classes after tmux
 hand-offs). Amended by ADR 0132: the marked rows refuse actions until
-the refresh lands.
+the refresh lands. Amended by ADR 0201: each returned mux is released on
+its own, by the refresh started after its return or at once by an
+existence check, and only a mux the check can't confirm is probed again.
 
 ## Context
 

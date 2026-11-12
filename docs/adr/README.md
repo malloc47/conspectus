@@ -121,11 +121,12 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0091](0091-serve-idle-cost-and-class-gated-mutators.md) | Serve Idle Cost And Class-Gated Mutators | Accepted |
 | [0099](0099-caller-owned-discovery-caches.md) | Caller-Owned Discovery Caches | Accepted |
 | [0104](0104-tui-rescans-live-classes-after-tmux-handoffs.md) | The TUI Rescans Live Classes After Tmux Hand-Offs | Accepted (amended by 0108) |
-| [0108](0108-handoff-refreshes-run-in-the-background.md) | Hand-Off Refreshes Run In The Background | Accepted (amended by 0132) |
+| [0108](0108-handoff-refreshes-run-in-the-background.md) | Hand-Off Refreshes Run In The Background | Accepted (amended by 0132, 0201) |
 | [0146](0146-the-hook-spool-is-the-durable-hook-record.md) | The Hook Spool Is The Durable Hook Record | Accepted |
 | [0147](0147-session-content-search.md) | Session Content Search | Accepted (amended by 0149) |
 | [0148](0148-opt-in-transcript-search-index.md) | Opt-In Transcript Search Index | Accepted (decided, not built) |
 | [0149](0149-two-level-search-current-and-wider-context.md) | Two-Level Search: Current Context And Wider Context | Accepted (amended by 0157, 0158, 0198) |
+| [0201](0201-tui-a-hand-off-freeze-ends-per-mux-and-at-once-when-the-mux-is-still-there.md) | A Hand-Off Freeze Ends Per Mux, And At Once When The Mux Is Still There | Accepted |
 
 ## CLI output and exports
 
@@ -278,7 +279,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0129](0129-pr-local-branch-symbol-filter-and-ranking.md) | PRs Show Whether They Have A Local Branch, With A Filter And A Ranking | Accepted (amended by 0130, 0131) |
 | [0130](0130-pr-config-keys-and-no-checkout-catch-all.md) | PR Tracking Config Keys, And No "No checkout" Catch-All | Accepted |
 | [0131](0131-pr-titles-and-the-pr-row-layout.md) | PR Titles And The PR Row Layout | Accepted (amended by 0184) |
-| [0132](0132-refuse-actions-on-rows-awaiting-a-handoff-refresh.md) | Refuse Actions On Rows Awaiting A Hand-Off Refresh | Accepted (amended by 0142) |
+| [0132](0132-refuse-actions-on-rows-awaiting-a-handoff-refresh.md) | Refuse Actions On Rows Awaiting A Hand-Off Refresh | Accepted (amended by 0142, 0201) |
 | [0133](0133-launches-attach-before-they-refresh.md) | Launches Attach Before They Refresh | Accepted (amended by 0142) |
 | [0134](0134-pr-state-filter.md) | A PR State Filter | Accepted |
 | [0135](0135-pin-commands-skip-forge-discovery.md) | Pin Commands Skip Forge Discovery | Accepted (amended by 0141, 0142) |
