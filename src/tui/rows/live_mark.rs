@@ -1,6 +1,7 @@
 //! What an agent's live state reads as, in every view.
 
 use ratatui::style::Style;
+use tuikit::chip::Tone;
 
 use crate::model::live::{LiveConfidence, LiveCounts, LiveState};
 use crate::tui::Theme;
@@ -73,18 +74,32 @@ impl LiveMark {
         }
     }
 
-    /// The style the glyph and the word are drawn in: the theme's warning,
-    /// info, success, and error colors for the four states, and the muted
-    /// look for evidence that can't be trusted and for none.
-    pub fn style(self, theme: &Theme) -> Style {
-        let hue = |color| Style::default().fg(color);
+    /// The tone the mark is drawn in: the theme's warning, info, success,
+    /// and error colors for the four states, and the muted look for
+    /// evidence that can't be trusted and for none. A chip that counts
+    /// agents by their mark takes the same tone.
+    pub fn tone(self) -> Tone {
         match self {
-            Self::Waiting => hue(theme.warning),
-            Self::Working => hue(theme.info),
-            Self::Ready => hue(theme.success),
-            Self::Error => hue(theme.error),
-            Self::Unknown | Self::None => Style::default().add_modifier(theme.muted),
+            Self::Waiting => Tone::Warning,
+            Self::Working => Tone::Info,
+            Self::Ready => Tone::Success,
+            Self::Error => Tone::Error,
+            Self::Unknown | Self::None => Tone::Muted,
         }
+    }
+
+    /// The style the glyph and the word are drawn in: the mark's
+    /// [tone](Self::tone).
+    pub fn style(self, theme: &Theme) -> Style {
+        self.tone().style(theme)
+    }
+
+    /// How many of the agents `counts` counts draw this mark.
+    pub fn count_in(self, counts: LiveCounts) -> u32 {
+        LiveState::ALL
+            .into_iter()
+            .filter(|state| Self::of_state(*state) == self)
+            .fold(0u32, |total, state| total.saturating_add(counts.get(state)))
     }
 }
 

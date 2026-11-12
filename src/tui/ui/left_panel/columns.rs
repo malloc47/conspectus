@@ -21,7 +21,7 @@ use crate::tui::rows::{
     Row,
 };
 use crate::tui::widgets::badge::{
-    command_badge, harness_badge, hits_chip, no_agent_chip, was_in_chip,
+    command_badge, harness_badge, hits_chip, no_agent_chip, waiting_count_chip, was_in_chip,
 };
 use crate::tui::widgets::search::{
     Hit, HitChip, HitCol, HitShape, hit_columns, hits_tag, line_tag, snippet_cell, turn_tag,
@@ -49,6 +49,8 @@ pub(super) enum Col {
     Detail,
     /// A group header's session count.
     Count,
+    /// How many agents beneath a group header wait on the operator.
+    Waiting,
     /// A group header's ambiguous-link warning.
     Warning,
     /// A session's harness key.
@@ -182,13 +184,16 @@ impl Schemas {
             // The label ends in one column at every depth (a nested
             // header's is narrower by its indent), so the path after it
             // starts where its parent's does, and the path spaces the
-            // counts, so every count in the tree is in one column.
+            // counts, so every count in the tree is in one column. The
+            // waiting count keeps its mark in one column after them; like
+            // the count and the warning, it never gives way.
             Column::cap(Col::HeaderLabel, usize::MAX).absorbs_lead(),
             Column::cap(Col::Detail, usize::MAX)
                 .ragged()
                 .shrinks(0, DETAIL_FLOOR)
                 .drops(0),
             Column::cap(Col::Count, usize::MAX).right(),
+            Column::cap(Col::Waiting, usize::MAX),
             Column::cap(Col::Warning, 1),
         ]);
         let mut session = prefix(Some(Col::Glyph), Col::Marker);
@@ -453,8 +458,9 @@ impl LeftColumns<'_> {
 impl LeftColumns<'_> {
     /// A group header's cells after its prefix: the bold label, the path
     /// or members (with `(cwd)` on the launch directory's group), the
-    /// count of sessions beneath it, and `▲` when one of them has an
-    /// ambiguous mux link.
+    /// count of sessions beneath it, `! N` when N agents beneath it wait
+    /// on the operator, and `▲` when one of the sessions has an ambiguous
+    /// mux link.
     fn header_cells(&self, group: &GroupRow, summary: GroupSummary) -> Cells<Col> {
         let theme = self.theme;
         let cwd_style = Style::default()
@@ -484,17 +490,25 @@ impl LeftColumns<'_> {
                     Style::default().add_modifier(theme.muted),
                 ),
             ));
-            if summary.ambiguous > 0 {
-                cells.push((
-                    Col::Warning,
-                    Cell::text(
-                        marks::WARNING,
-                        Style::default()
-                            .fg(theme.warning)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ));
-            }
+        }
+        // A Mux view header counts its muxes' agents, which need not be
+        // listed as rows, so it can wait without a session count.
+        if summary.waiting > 0 {
+            cells.push((
+                Col::Waiting,
+                Cell::chip(waiting_count_chip(summary.waiting, theme)),
+            ));
+        }
+        if summary.agents > 0 && summary.ambiguous > 0 {
+            cells.push((
+                Col::Warning,
+                Cell::text(
+                    marks::WARNING,
+                    Style::default()
+                        .fg(theme.warning)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ));
         }
         cells
     }

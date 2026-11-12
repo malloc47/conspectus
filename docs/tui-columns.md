@@ -127,7 +127,7 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `∘` | not linked: a session with no definitive mux (none or ambiguous), or a mux with no client | dim | Session rows, Mux rows, nested sessions |
 | `⊘` | a mux that has stopped | ghost | Stopped mux rows in the Mux view |
 | `?` | can't be checked: a mux whose server didn't answer, or a PR with no state yet; in the live cell, an agent whose evidence is too old to trust | dim | Mux rows, stopped mux rows, PR rows; the live cell |
-| `!` | live state: the agent is waiting on you (a permission prompt, a question, a plan, other input) | yellow (the theme's warning color) | The live cell of session and mux rows, nested ones included, in every view |
+| `!` | live state: the agent is waiting on you (a permission prompt, a question, a plan, other input); before a number, how many wait | yellow (the theme's warning color) | The live cell of session and mux rows, nested ones included, in every view; group headers, with the count |
 | `»` | live state: working (a turn, a compaction, or a start under way) | green (the theme's info color); dimmed when quiet | The live cell |
 | `›` | live state: ready, the turn is over and the agent takes a prompt | green (the theme's success color) | The live cell |
 | `·` | live state: no evidence, or the session exited; on a mux, no agent with live state but exited ones | dim | The live cell |
@@ -185,7 +185,9 @@ then the rest. The agents nested under a mux keep their own marks. A
 quiet state (work with no news past its source's quiet window) draws the
 same mark dimmed; a mux's mark is never dimmed, since its counts do not
 say how fresh each agent's evidence is. Nothing animates: the Braille
-spinner keeps meaning a pending refresh.
+spinner keeps meaning a pending refresh. A group header above the rows
+counts the agents beneath it that wait on you, as `! N` (see
+[Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings)).
 
 ## State words
 
@@ -278,8 +280,21 @@ the entity's last activity, not when its live state began.
 - **Counts.** A group header ends with `(N)`: the number of agent
   sessions anywhere beneath it, shown only when N is more than zero.
   Pinned and History buckets have none.
+- **Waiting count.** After `(N)`, `! N` in the waiting mark's yellow:
+  how many agents beneath the header wait on you, shown only when N is
+  more than zero. Each agent counts once however many rows beneath the
+  header list it (a session under two pull requests of one checkout), and
+  a header counts what is beneath it, nested headers included, so a
+  checkout's waiting session counts in its repo's header too. In the
+  Sessions, PRs, and Search views the header counts its session rows. In
+  the Mux view it counts every agent of the muxes beneath it, through each
+  mux's own counts: a mux's one agent, which has no row of its own, and
+  agents in panes no session matches count, the agents nested under a mux
+  count once, and a header can wait without a `(N)`. Pinned and History
+  buckets have none. Once any header shows a count, its column is
+  reserved on every header, so the warnings stay in line.
 - **Warning.** `▲` ends a group header when a session beneath it has an
-  ambiguous mux link.
+  ambiguous mux link. It follows the waiting count.
 - **Previews.** The last message of a session (or of the one agent in a
   mux) shows in dim italics at the end of the row, if room remains.
 
@@ -301,7 +316,8 @@ row gives the column up by the steps below.
    chip, age, live mark, and state; a mux's name, chips, age, live mark,
    and state; a PR's
    label, tracking mark, age, and state; every cell of a Pinned or
-   History row; a header's label, path, count, and warning; every cell
+   History row; a header's label, path, count, waiting count, and
+   warning; every cell
    of a hit, pane, or pane hit row) keep the widths they have on every
    row: a padded column is as wide as its widest cell in the whole tree,
    folded groups included. When they do not fit, they give way in a fixed
@@ -330,7 +346,7 @@ row gives the column up by the steps below.
 
 | Row | Gives way first to last | Never gives way |
 |---|---|---|
-| Group header | the path or members (narrowing first) | the label, the count, the warning |
+| Group header | the path or members (narrowing first) | the label, the count, the waiting count, the warning |
 | Session row, cells that line up | the key, the chip, the age | the live mark, the state glyph |
 | Session row, the rest | the preview or snippet, the `was in` note, the project (narrowing first), the hit count, the label (narrowing first) | |
 | Mux row, cells that line up | the chips narrow to one chip and `+N`, the name narrows, the age, the chips | the name, the live mark, the state glyph |
@@ -345,6 +361,11 @@ the row is doing, which a narrow pane is no reason to hide. It takes three
 cells with its gap, so a narrow row loses its label, project, and preview
 three cells sooner than it would without it, and a mux name narrows three
 cells sooner.
+
+A group header's waiting count never gives way either. Once any header
+of the tree shows one, its column is reserved on every header, so on a
+narrow pane every header's path narrows, and leaves, by the count's width
+and its gap sooner.
 
 A Pinned row in a narrow pane keeps its name and its state word:
 
@@ -384,7 +405,8 @@ others.
 | 2 | Path | full path with `~`, or members and provider for a workspace | when it differs from the label | dim, cut in the middle to fit |
 | 3 | `(cwd)` | the launch directory | only the group containing where Conspectus was started | cyan |
 | 4 | Count | agent sessions beneath | N > 0 | dim, in one column across the tree's headers |
-| 5 | `▲` | ambiguous links beneath | any | yellow bold |
+| 5 | Waiting | `! N`: agents beneath that wait on you (see [Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings)) | N > 0 | the waiting mark's yellow, the `!` in one column across the tree's headers |
+| 6 | `▲` | ambiguous links beneath | any | yellow bold |
 
 A checkout header adds `(linked · locked · prunable)` for those states.
 A checkout nested under its repo starts its path and ends its count in
@@ -400,7 +422,7 @@ the repo header's columns:
 │  ▶ ◆   repo-b                   ~/atelier-demo/repo-b     (1)                     │
 │► ▼ ◆   bare-project             ~/checkouts/bare-project  (1)                     │
 │    ▶ ◇   bare-project (linked)  ~/checkouts/bare-project  (1)                     │
-│  ▶ ◆   project                  ~/repos/project           (4)  ▲                  │
+│  ▶ ◆   project                  ~/repos/project           (4)  ! 1  ▲             │
 │  ▶     Ungrouped                                          (3)                     │
 ```
 
@@ -435,7 +457,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 │  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
 │  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
 │  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
-│  ▶ ◆   project        ~/repos/project                       (4)  ▲                │
+│  ▶ ◆   project        ~/repos/project                       (4)  ! 1  ▲           │
 │  ▶     Ungrouped                                            (1)                   │
 ```
 
@@ -447,7 +469,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 │  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
 │  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
 │  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
-│  ▼ ◆   project        ~/repos/project                       (4)  ▲                │
+│  ▼ ◆   project        ~/repos/project                       (4)  ! 1  ▲           │
 │►     ●   showcase   claude       1m  !  ∘  ambiguous mux candidate A  Showcase: a…│
 │      ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  Showcase: a…│
 │      ●   showcase   claude       1m  »  ∘  hook-supersession current sessi…       │
@@ -485,7 +507,9 @@ points at. A control shows every stopped mux; any narrowing filter
 hides all stopped ones. The header counts stopped muxes either way.
 
 Group headers are the same as in Sessions, and carry a count only when
-sessions are listed beneath a mux.
+sessions are listed beneath a mux. Their waiting count counts every agent
+of the muxes beneath them, listed as a row or not, each once through its
+mux, so a header can show `! N` with no `(N)`.
 
 ### Mux row
 
@@ -529,7 +553,24 @@ lines up with the running ones, and as a ghost, its `▣` included.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▼ ◆   bare-project  ~/checkouts/bare-project                                     │
 │      ▣   bare-work                  codex        2h  ·  ∘  Showcase: codex resume…│
-│  ▶ ◆   project       ~/repos/project                                              │
+│  ▶ ◆   project       ~/repos/project  ! 1                                         │
+│  ▶     Ungrouped                                                                  │
+```
+
+A header counts the waiting agents of its muxes whether or not they are
+listed: the `ambiguous` mux below is where a waiting session runs, and
+lists none of its agents as a row, so `project` reads `! 1` with no
+`(N)`:
+
+<!-- frame: keys="2<C-g><C-g>jjl" width=170 height=30 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
+│  ▼ ◆   bare-project  ~/checkouts/bare-project                                     │
+│      ▣   bare-work                  codex        2h  ·  ∘  Showcase: codex resume…│
+│► ▼ ◆   project       ~/repos/project  ! 1                                         │
+│      ▣   ambiguous                  claude      15m  !  ∘                         │
+│      ▣ ◉ project                    claude       5m  »  ⊸                         │
+│      ▣ ◎ nightly-refactor           claude       2d  ·  ⊘  ~/repos/project        │
 │  ▶     Ungrouped                                                                  │
 ```
 
@@ -555,8 +596,9 @@ cell.
 | PRs with no local repo | a blank glyph cell, so the name lines up with the others; the repo name in bold, the forge name dim |
 | state | no glyph; `Open`, `Draft`, `Merged`, `Closed`, or `Other` |
 
-Each ends with the count of sessions beneath its PRs, and `▲` when one of
-them has an ambiguous mux link.
+Each ends with the count of sessions beneath its PRs, the waiting count
+of those sessions (a session under two of the group's PRs counts once),
+and `▲` when one of them has an ambiguous mux link.
 
 ### PR row
 
@@ -581,7 +623,7 @@ two never disagree.
 <!-- frame: keys="3" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│► ▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                │
+│► ▼ ◇   conspectus/project  ~/repos/project  (4)  ! 1  ▲                           │
 │    ▶ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                      │
 │  ▶ ◆   conspectus/project  ~/repos/project  no checkout                           │
 │  ▶     project             conspectus/project                                     │
@@ -592,7 +634,7 @@ The sessions under a PR are session rows, each with its live mark:
 <!-- frame: keys="3jl" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│  ▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                │
+│  ▼ ◇   conspectus/project  ~/repos/project  (4)  ! 1  ▲                           │
 │►   ▼ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                      │
 │        ● ◉ showcase   claude       1h  ›  ∘  I expanded `notes.md` into a release…│
 │        ●   showcase   claude       1m  !  ∘  Showcase: ambiguous mux candidate A  │
@@ -605,7 +647,7 @@ The sessions under a PR are session rows, each with its live mark:
 <!-- frame: keys="3<C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│► ▼   Draft   (4)  ▲                                                               │
+│► ▼   Draft   (4)  ! 1  ▲                                                          │
 │      ⇄   conspectus/project#8 ⌥    1d  ◐  main  Pin the toolchain and refresh the…│
 │    ▶ ⇄   conspectus/project#7 ⌥    2h  ◐  feature/extra  Release notes for 0.3    │
 │  ▶   Merged                                                                       │

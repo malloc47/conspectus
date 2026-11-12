@@ -131,9 +131,29 @@ pub(super) fn lay_out(
     width: usize,
     spinner: Option<&'static str>,
 ) -> Vec<Line<'static>> {
+    lay_out_in(
+        crate::tui::rows::ViewLabel::Sessions,
+        rows,
+        theme,
+        now,
+        width,
+        spinner,
+    )
+}
+
+/// [`lay_out`] for a tree of `view`, whose headers count by its rule.
+#[cfg(test)]
+pub(super) fn lay_out_in(
+    view: crate::tui::rows::ViewLabel,
+    rows: &[Row],
+    theme: &Theme,
+    now: i64,
+    width: usize,
+    spinner: Option<&'static str>,
+) -> Vec<Line<'static>> {
     let tree = crate::tui::rows::RowTree {
         rows: rows.to_vec(),
-        ..crate::tui::rows::RowTree::default()
+        view,
     };
     let columns = LeftColumns {
         theme,
@@ -424,20 +444,25 @@ pub(super) fn empty_left_panel(app: &App) -> EmptyState {
     ))
 }
 
-/// What a group header counts: the sessions beneath it, and how many of
-/// them have an ambiguous mux link. Counts walk the full row tree (not
-/// just the rows that show) so a collapsed group still says what is
-/// inside.
+/// What a group header counts: the sessions beneath it, how many of
+/// them have an ambiguous mux link, and how many agents beneath it wait
+/// on the operator. Counts walk the full row tree (not just the rows
+/// that show) so a collapsed group still says what is inside.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct GroupSummary {
     pub(super) agents: usize,
     pub(super) ambiguous: usize,
+    /// The agents beneath the header waiting on the operator, each once
+    /// ([`waiting_of`]).
+    pub(super) waiting: usize,
 }
 
 /// Walk the row tree once and compute the [`GroupSummary`] for every
-/// group row. Each group's summary aggregates every `AgentSession`
-/// row that sits below it in the flat tree (continuous depth >
-/// group depth) until the next sibling-or-shallower row.
+/// group row. Each group's summary aggregates every row that sits below
+/// it in the flat tree (continuous depth > group depth) until the next
+/// sibling-or-shallower row: its `AgentSession` rows for the session
+/// count and the warning, and the agents those rows (or, in the Mux
+/// view, its muxes) stand for for the waiting count.
 pub(super) fn compute_group_summaries(
     tree: &crate::tui::rows::RowTree,
 ) -> std::collections::HashMap<RowId, GroupSummary> {
@@ -449,6 +474,7 @@ pub(super) fn compute_group_summaries(
         }
         let parent_depth = row.depth;
         let mut summary = GroupSummary::default();
+        let mut counted = std::collections::HashSet::new();
         for child in &rows[i + 1..] {
             if child.depth <= parent_depth {
                 break;
@@ -459,10 +485,42 @@ pub(super) fn compute_group_summaries(
                     summary.ambiguous += 1;
                 }
             }
+            if let Some((entity, waiting)) = waiting_of(child, tree.view)
+                && counted.insert(entity)
+            {
+                summary.waiting += waiting;
+            }
         }
         out.insert(row.id.clone(), summary);
     }
     out
+}
+
+/// The agents waiting on the operator that a row beneath a group header
+/// counts toward it, with the entity that holds them, so an entity
+/// listed twice beneath one header (a session under two pull requests of
+/// one checkout) counts once. A header counts through the rows of its
+/// view's own kind: in the Mux view its muxes, running or stopped, each
+/// with every agent it hosts (its one agent, its agents in panes no
+/// session matches, and the agents nested beneath it, which the mux
+/// already counts); elsewhere its session rows. Pinned and History rows
+/// count toward nothing: their buckets carry no counts.
+pub(super) fn waiting_of(row: &Row, view: crate::tui::rows::ViewLabel) -> Option<(&NodeId, usize)> {
+    use crate::tui::rows::{LiveMark, LiveSign, MixedLive, ViewLabel};
+    let waiting =
+        |counts| usize::try_from(LiveMark::Waiting.count_in(counts)).unwrap_or(usize::MAX);
+    match (&row.kind, view) {
+        (RowKind::MuxSession(mux), ViewLabel::Mux) => Some((&mux.primary_node, waiting(mux.live))),
+        (RowKind::Mixed(mixed), ViewLabel::Mux) => match mixed.live {
+            MixedLive::Mux(counts) => Some((&mixed.primary_node, waiting(counts))),
+            MixedLive::Session(_) | MixedLive::None => None,
+        },
+        (RowKind::AgentSession(_), ViewLabel::Mux) => None,
+        (RowKind::AgentSession(session), _) => (LiveSign::of_session(session.live).mark
+            == LiveMark::Waiting)
+            .then_some((&session.primary_node, 1)),
+        _ => None,
+    }
 }
 
 /// The pin marker cell of a row, the same in every view: the filled pin
@@ -596,3 +654,6 @@ pub(super) fn mux_indicator_span(indicator: MuxIndicator, theme: &Theme) -> Span
 #[cfg(test)]
 #[path = "left_panel/hits_tests.rs"]
 mod hits_tests;
+#[cfg(test)]
+#[path = "left_panel/waiting_tests.rs"]
+mod waiting_tests;

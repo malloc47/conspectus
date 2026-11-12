@@ -109,6 +109,7 @@ mod menus;
 mod parity;
 mod registry;
 mod rendering;
+mod rollup;
 mod scrolling;
 mod search_flat;
 mod search_quick;

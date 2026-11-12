@@ -227,6 +227,34 @@ fn help_body_includes_the_agent_state_legend_in_the_marks_styles() {
 }
 
 #[test]
+fn the_agent_state_legend_explains_the_waiting_count() {
+    let theme = Theme::default();
+    let lines = body_lines(&theme);
+    let texts: Vec<String> = lines.iter().map(line_text).collect();
+    let header = texts
+        .iter()
+        .position(|t| t == "Agent state")
+        .expect("agent state section header");
+    let at = texts[header..]
+        .iter()
+        .position(|t| t.contains("Waiting count"))
+        .map(|at| header + at)
+        .expect("the waiting count row");
+    assert!(texts[at].starts_with("  ! N "), "{}", texts[at]);
+    assert!(texts[at].contains("group header"), "{}", texts[at]);
+    let chip = lines[at]
+        .spans
+        .iter()
+        .find(|span| span.content.trim() == "! N")
+        .expect("the count's own span");
+    assert_eq!(
+        chip.style,
+        crate::tui::rows::LiveMark::Waiting.style(&theme),
+        "drawn as the headers draw it"
+    );
+}
+
+#[test]
 fn esc_closes_help_overlay() {
     let mut help = open(&Theme::default());
     assert_eq!(help.handle_key(press(KeyCode::Esc)), Outcome::Close);

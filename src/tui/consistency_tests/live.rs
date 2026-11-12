@@ -2,7 +2,8 @@
 //! a mux carries one live value wherever it is listed, whether the rows
 //! read the snapshot's own table or the overlay the live TUI binds from
 //! the store, and it draws as one mark (or, in Pinned, one word) for that
-//! entity everywhere. The mark is the only cell live state changes.
+//! entity everywhere. The mark, and the waiting count of a group header
+//! above it, are the only cells live state changes.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -20,22 +21,22 @@ use crate::tui::rows::{LiveCell, MixedLive, RowKind};
 
 /// The session the world runs in `conspectus-main`, and a second one
 /// added beside it so the Mux view lists that mux's agents as rows.
-const HOSTED: &str = "e44d01cb5a";
-const BESIDE: &str = "f00dfeed01";
+pub(super) const HOSTED: &str = "e44d01cb5a";
+pub(super) const BESIDE: &str = "f00dfeed01";
 /// The world's loose session, which the Search view finds.
-const SOLO: &str = "solo000001";
+pub(super) const SOLO: &str = "solo000001";
 
-fn session(key: &str) -> NodeId {
+pub(super) fn session(key: &str) -> NodeId {
     NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", key))
 }
 
-fn mux(name: &str) -> MuxSessionId {
+pub(super) fn mux(name: &str) -> MuxSessionId {
     MuxSessionId::new(format!("tmux:{name}"))
 }
 
 /// The shared world with a second agent in `conspectus-main` and no live
 /// state.
-fn live_world() -> GraphSnapshot {
+pub(super) fn live_world() -> GraphSnapshot {
     let mut snapshot = world();
     let mut beside = AgentSessionNode::new(
         AgentSessionId::new("claude-code", "/state", BESIDE),
@@ -62,7 +63,7 @@ fn live_world() -> GraphSnapshot {
 /// A binding of `state` whose process was found running: the states
 /// chosen do not age while it runs, so the rows read them alike at any
 /// time.
-fn running(state: LiveState, detail: Option<LiveDetail>, subagents: u16) -> LiveBinding {
+pub(super) fn running(state: LiveState, detail: Option<LiveDetail>, subagents: u16) -> LiveBinding {
     let mut observation = LiveObservation::new(state, LiveSource::Hook, NOW * 1000)
         .with_since_ms(NOW * 1000 - 90_000)
         .with_subagents(subagents);
@@ -74,7 +75,7 @@ fn running(state: LiveState, detail: Option<LiveDetail>, subagents: u16) -> Live
 
 /// [`live_world`] with live tables: each session in a state of its own,
 /// and two agents no session matched in two panes of `scratch`.
-fn with_table() -> GraphSnapshot {
+pub(super) fn with_table() -> GraphSnapshot {
     let mut snapshot = live_world();
     snapshot.node_live = BTreeMap::from([
         (
@@ -106,7 +107,7 @@ fn with_table() -> GraphSnapshot {
 /// `view` listing every row it can (History with pinned records, the
 /// Search view with its search), its rows reading live state through
 /// `overlay`.
-fn listing_with(view: View, snapshot: &GraphSnapshot, overlay: LiveOverlay) -> App {
+pub(super) fn listing_with(view: View, snapshot: &GraphSnapshot, overlay: LiveOverlay) -> App {
     let mut config = RunConfig::defaults();
     config.default_view = view;
     let mut app = App::new(config);
@@ -250,7 +251,7 @@ fn in_scratch(pane: &str) -> LiveContext {
 
 /// The store [`with_table`]'s tables describe, written the way hooks
 /// write them, in `dir`.
-fn written_store(dir: &std::path::Path) -> LiveStore {
+pub(super) fn written_store(dir: &std::path::Path) -> LiveStore {
     let store = LiveStore::at(dir.join("conspectus"));
     let at = now_ms();
     let event = |key: &str, kind: LiveEventKind| LiveEvent::new("claude-code", key, at, kind);
@@ -286,7 +287,7 @@ fn written_store(dir: &std::path::Path) -> LiveStore {
     store
 }
 
-fn overlay_over(store: &LiveStore) -> LiveOverlay {
+pub(super) fn overlay_over(store: &LiveStore) -> LiveOverlay {
     LiveOverlay::over(
         store.path(),
         Box::new(SystemFiles),
@@ -327,7 +328,7 @@ enum Shown {
 
 /// The left pane's lines of `app`, one per showing row: the Search view's
 /// header line is not a row.
-fn row_lines(app: &mut App, width: u16) -> Vec<String> {
+pub(super) fn row_lines(app: &mut App, width: u16) -> Vec<String> {
     let buffer = buffer_of(app, width, 80);
     let mut lines = super::columns::left_pane(&buffer);
     if app.active_view() == View::Search {
@@ -584,8 +585,29 @@ fn quiet_stale_and_exited_agents_show_their_marks_and_keep_their_words() {
     }
 }
 
+/// The words of a group header's line less its waiting count (`!` and the
+/// number after it), and that count, if it has one.
+pub(super) fn without_waiting_count(line: &str) -> (Vec<String>, Option<String>) {
+    let words: Vec<String> = tuikit::testkit::buffer::tokens(line)
+        .into_iter()
+        .map(|token| token.text)
+        .collect();
+    match words
+        .iter()
+        .position(|word| word == crate::tui::icons::live::WAITING)
+    {
+        Some(at) if at + 1 < words.len() => {
+            let count = words[at + 1].clone();
+            let mut rest = words;
+            rest.drain(at..=at + 1);
+            (rest, Some(count))
+        }
+        _ => (words, None),
+    }
+}
+
 #[test]
-fn live_state_changes_the_live_cells_and_nothing_else() {
+fn live_state_changes_the_live_cells_and_the_waiting_counts_and_nothing_else() {
     let bare = live_world();
     let tabled = with_table();
     let live_marks = crate::tui::icons::live::ALL;
@@ -593,12 +615,34 @@ fn live_state_changes_the_live_cells_and_nothing_else() {
         for width in [220, 110, 80, 60] {
             let lines = |snapshot: &GraphSnapshot| {
                 let mut app = listing_with(view, snapshot, LiveOverlay::off());
-                row_lines(&mut app, width)
+                let headers: Vec<bool> = app
+                    .visible_rows()
+                    .iter()
+                    .map(|row| matches!(row.kind, RowKind::Group(_)))
+                    .collect();
+                let mut lines = row_lines(&mut app, width);
+                lines.truncate(headers.len());
+                (lines, headers)
             };
-            let (without, with) = (lines(&bare), lines(&tabled));
+            let ((without, headers), (with, _)) = (lines(&bare), lines(&tabled));
             assert_eq!(without.len(), with.len(), "{view:?} at {width}");
             let mut changed = 0;
-            for (before, after) in without.iter().zip(&with) {
+            for ((before, after), header) in without.iter().zip(&with).zip(headers) {
+                // A header gains the count of the agents beneath it that
+                // wait, and its warning moves past that column; its other
+                // words stay.
+                if header {
+                    let (words, count) = without_waiting_count(after);
+                    assert_eq!(
+                        without_waiting_count(before),
+                        (words, None),
+                        "{view:?} at {width}: a header changed beyond its waiting count:\n{before}\n{after}"
+                    );
+                    if count.is_some() {
+                        changed += 1;
+                    }
+                    continue;
+                }
                 let diffs: Vec<(char, char)> = before
                     .chars()
                     .zip(after.chars())

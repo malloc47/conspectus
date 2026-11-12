@@ -154,6 +154,70 @@ fn a_mux_shows_the_state_its_agents_rank_first() {
 }
 
 #[test]
+fn a_mux_shows_the_operators_order_whatever_the_counts() {
+    use LiveState::{Compacting, Error, Exited, Ready, Starting, Unknown, Waiting, Working};
+    // The order the operator chose for a mux: what needs them first,
+    // then a finished turn, then work under way, then the rest. One agent
+    // in a state earlier in the order outranks any number in a later one.
+    let order = [
+        Waiting, Error, Ready, Working, Compacting, Starting, Unknown, Exited,
+    ];
+    for (rank, first) in order.iter().enumerate() {
+        for later in &order[rank + 1..] {
+            let mut counts = LiveCounts::default();
+            counts.add(*first);
+            for _ in 0..9 {
+                counts.add(*later);
+            }
+            let sign = LiveSign::of_mux(counts);
+            assert_eq!(
+                sign.mark,
+                LiveMark::of_state(*first),
+                "one {first:?} beside nine {later:?}"
+            );
+            assert!(!sign.quiet, "a mux's mark is never dimmed");
+        }
+    }
+}
+
+#[test]
+fn a_mux_with_one_two_or_mixed_agents_reads_its_agents() {
+    use LiveState::{Error, Ready, Waiting, Working};
+    let mux = |states: &[LiveState]| LiveSign::of_mux(states.iter().copied().collect()).mark;
+    // One agent: its own mark.
+    assert_eq!(mux(&[Ready]), LiveMark::Ready);
+    assert_eq!(mux(&[Working]), LiveMark::Working);
+    // Two in one state: that state.
+    assert_eq!(mux(&[Working, Working]), LiveMark::Working);
+    assert_eq!(mux(&[Waiting, Waiting]), LiveMark::Waiting);
+    // Mixed: the first by the order.
+    assert_eq!(mux(&[Working, Waiting]), LiveMark::Waiting);
+    assert_eq!(mux(&[Ready, Error]), LiveMark::Error);
+    assert_eq!(mux(&[Working, Ready]), LiveMark::Ready);
+}
+
+#[test]
+fn a_mark_counts_the_agents_that_draw_it() {
+    use LiveState::{Compacting, Exited, Starting, Waiting, Working};
+    let counts: LiveCounts = [Waiting, Waiting, Working, Compacting, Starting, Exited]
+        .into_iter()
+        .collect();
+    assert_eq!(LiveMark::Waiting.count_in(counts), 2);
+    assert_eq!(LiveMark::Working.count_in(counts), 3, "work under way");
+    assert_eq!(LiveMark::None.count_in(counts), 1, "exited");
+    assert_eq!(LiveMark::Ready.count_in(counts), 0);
+    assert_eq!(LiveMark::Waiting.count_in(LiveCounts::default()), 0);
+}
+
+#[test]
+fn a_marks_tone_draws_its_style() {
+    let theme = Theme::default();
+    for mark in LiveMark::ALL {
+        assert_eq!(mark.style(&theme), mark.tone().style(&theme), "{mark:?}");
+    }
+}
+
+#[test]
 fn a_mixed_row_reads_the_sign_of_what_it_stands_for() {
     let session = cell(LiveState::Ready, LiveConfidence::Fresh);
     assert_eq!(
