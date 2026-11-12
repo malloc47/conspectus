@@ -132,8 +132,9 @@ matcher `hook init` uses where it uses one; for session start:
 
 Place that in `~/.claude/settings.json` or a local Claude Code
 settings file. The subcommand reads Claude's hook JSON from stdin,
-records `session_id`, `transcript_path`, `cwd`, and tmux context when
-available, then exits without writing to the transcript. Only a session
+records `session_id`, `transcript_path`, `cwd`, and the tmux session
+and pane the hook runs in (`TMUX_PANE`'s) when available, then exits
+without writing to the transcript. Only a session
 start also writes the attribution record.
 
 `hook write` never disturbs the harness that runs it. It prints nothing

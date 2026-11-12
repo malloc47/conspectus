@@ -737,6 +737,12 @@ forms, lists, readers, and keys look and behave alike.
   where both stayed tied to the mux until the next refresh. A hook
   record has no time limit: it counts until a newer one from its pane
   replaces it, and is ignored once its agent has exited.
+- **A hook in a split pane records its own pane.** `conspectus hook
+  write` asked tmux about whichever pane tmux considered current, which
+  for a hook run without a terminal (Codex since 0.155 and the opencode
+  plugin run theirs detached) is the session's active pane, so an agent
+  in another pane could be recorded as running in the active one. It
+  now asks about the pane in `TMUX_PANE`.
 - **An opencode pane no longer names a running subagent.** The opencode
   1.x plugin recorded every session's events for attribution, children
   included, so while a subagent ran its pane briefly showed the child

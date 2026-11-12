@@ -487,7 +487,10 @@ Consequences:
   '#{pane_id}'` **without `-t "$TMUX_PANE"`**. It therefore relies on tmux
   falling back to `$TMUX_PANE` when the client has no tty (**UNVERIFIED**).
   In a multi-pane session it could record the session's active pane instead.
-  Recommendation: read `TMUX_PANE` directly and pass `-t`.
+  Recommendation: read `TMUX_PANE` directly and pass `-t`. (Checked
+  2026-11-12 on a private tmux 3.6a and 3.7c server: with no terminal and
+  `TMUX_PANE=%0`, an untargeted query answers the active pane `%1`. `hook
+  write` now passes `-t`, CSP-845.)
 - `codex --remote` against a shared app-server (UNVERIFIED): hooks probably
   run in the app-server's environment. That is the opencode 2.x
   shared-service case, so the record should be `background_harness = true`.
@@ -756,7 +759,8 @@ Other:
 6. Confirm whether quiet hooks show as rows in the Codex TUI (**UNVERIFIED**
    [S28]).
 7. Confirm that `tmux display-message` without `-t` picks the hook's pane
-   when Codex has several.
+   when Codex has several. (Answered for a hook with no terminal: it does
+   not; see §4.4.)
 
 ## 7. Open questions for the operator
 

@@ -213,3 +213,10 @@ code. The decision to attribute through `conspectus hook write` stands.
   was created after it, or when the mux's active pane runs another
   harness; otherwise it stays evidence until a fresher record for its
   pane supersedes it.
+- **The hook's own pane.** `hook write` asks tmux about the pane named
+  by `TMUX_PANE` (`display-message -t`), so the record's tmux session and
+  pane are the hook's. Untargeted, tmux answers a caller with no
+  terminal, such as a hook a harness runs detached, with the session's
+  active pane (checked on tmux 3.6 and 3.7). A `TMUX_PANE` that is not a
+  pane id leaves the question untargeted; a pane tmux doesn't know gets
+  no answer rather than another pane's.
