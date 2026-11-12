@@ -656,5 +656,8 @@ pub(super) fn mux_indicator_span(indicator: MuxIndicator, theme: &Theme) -> Span
 #[path = "left_panel/hits_tests.rs"]
 mod hits_tests;
 #[cfg(test)]
+#[path = "left_panel/subagents_tests.rs"]
+mod subagents_tests;
+#[cfg(test)]
 #[path = "left_panel/waiting_tests.rs"]
 mod waiting_tests;

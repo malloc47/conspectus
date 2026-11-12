@@ -75,6 +75,22 @@ pub fn was_in_chip(mux: &str, named_after_it: bool, theme: &Theme) -> Span<'stat
     StatusChip::new(label, Tone::Inert).span(theme)
 }
 
+/// The most running subagents the chip counts exactly; more read as this
+/// and a `+`, so the chip is never wider than three cells.
+pub const SUBAGENTS_SHOWN: u16 = 9;
+
+/// The note after a session's label while its agent runs subagents:
+/// `+N`, receding, up to [`SUBAGENTS_SHOWN`], then `+9+`. The row's column
+/// gap sets it apart.
+pub fn subagents_chip(running: u16, theme: &Theme) -> Span<'static> {
+    let label = if running > SUBAGENTS_SHOWN {
+        format!("+{SUBAGENTS_SHOWN}+")
+    } else {
+        format!("+{running}")
+    };
+    StatusChip::new(label, Tone::Inert).span(theme)
+}
+
 /// How many agents wait on the operator: `! N`, the waiting live mark and
 /// the count, in the mark's style, so it reads as the rows it counts do.
 /// A group header shows it for the agents beneath it, and the header line

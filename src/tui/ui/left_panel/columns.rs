@@ -21,7 +21,8 @@ use crate::tui::rows::{
     Row,
 };
 use crate::tui::widgets::badge::{
-    command_badge, harness_badge, hits_chip, no_agent_chip, waiting_count_chip, was_in_chip,
+    command_badge, harness_badge, hits_chip, no_agent_chip, subagents_chip, waiting_count_chip,
+    was_in_chip,
 };
 use crate::tui::widgets::search::{
     Hit, HitChip, HitCol, HitShape, hit_columns, hits_tag, line_tag, snippet_cell, turn_tag,
@@ -65,6 +66,8 @@ pub(super) enum Col {
     State,
     /// A session's alias, title, or mux name.
     Label,
+    /// The `+N` note of the subagents a session's agent runs.
+    Subagents,
     /// The `was in <mux>` note.
     WasIn,
     /// A flat session's project.
@@ -205,14 +208,23 @@ impl Schemas {
             // neither gives way.
             Column::fixed(Col::Live, 1),
             Column::fixed(Col::State, 1),
+            // After the label, what follows it gives way first: the
+            // preview, the `was in` note, the project, the subagents
+            // note, and the hit count; then the label narrows and leaves.
             Column::hug(Col::Label, SESSION_LABEL_CELLS)
-                .shrinks(4, LABEL_FLOOR)
-                .drops(4),
+                .shrinks(5, LABEL_FLOOR)
+                .drops(5),
+            // As wide as the widest the chip reads, its cap.
+            Column::hug(
+                Col::Subagents,
+                text::width(&subagents_chip(u16::MAX, theme).content),
+            )
+            .drops(3),
             Column::hug(Col::WasIn, usize::MAX).drops(1),
             Column::fixed(Col::Project, PROJECT_CELLS)
                 .shrinks(2, LABEL_FLOOR)
                 .drops(2),
-            Column::hug(Col::Hits, usize::MAX).drops(3),
+            Column::hug(Col::Hits, usize::MAX).drops(4),
             Column::fill(Col::Preview).drops(0),
         ]);
         // A mux's chips are up to two of its agents' and a count of the
@@ -516,8 +528,8 @@ impl LeftColumns<'_> {
     /// A session row's cells after its prefix: the harness key, the
     /// harness chip, the age, the live-state mark, the mux link glyph (a
     /// spinner while the row awaits the hand-off), and then the label, the
-    /// `was in` note, the project in flat grouping, and the last message
-    /// or what a content search found.
+    /// subagents its agent runs, the `was in` note, the project in flat
+    /// grouping, and the last message or what a content search found.
     fn session_cells(&self, session: &AgentSessionRow, pending: bool) -> Cells<Col> {
         let theme = self.theme;
         let secondary = Style::default().fg(theme.inert);
@@ -557,6 +569,10 @@ impl LeftColumns<'_> {
                 Style::default()
             };
             cells.push((Col::Label, Cell::text(label, style)));
+        }
+        let subagents = session.live.map_or(0, |cell| cell.running_subagents());
+        if subagents > 0 {
+            cells.push((Col::Subagents, Cell::chip(subagents_chip(subagents, theme))));
         }
         if let Some(mux) = session.gone_mux_name() {
             // An untitled session is already named after its mux, so the

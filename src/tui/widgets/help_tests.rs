@@ -261,6 +261,33 @@ fn the_agent_state_legend_explains_the_waiting_count() {
 }
 
 #[test]
+fn the_agent_state_legend_explains_the_subagent_chip() {
+    let theme = Theme::default();
+    let lines = body_lines(&theme);
+    let texts: Vec<String> = lines.iter().map(line_text).collect();
+    let header = texts
+        .iter()
+        .position(|t| t == "Agent state")
+        .expect("agent state section header");
+    let at = texts[header..]
+        .iter()
+        .position(|t| t.contains("Subagents"))
+        .map(|at| header + at)
+        .expect("the subagents row");
+    assert!(texts[at].starts_with("  +1 "), "{}", texts[at]);
+    let chip = lines[at]
+        .spans
+        .iter()
+        .find(|span| span.content.trim() == "+1")
+        .expect("the chip's own span");
+    assert_eq!(
+        chip.style,
+        crate::tui::widgets::badge::subagents_chip(1, &theme).style,
+        "drawn as the rows draw it"
+    );
+}
+
+#[test]
 fn esc_closes_help_overlay() {
     let mut help = open(&Theme::default());
     assert_eq!(help.handle_key(press(KeyCode::Esc)), Outcome::Close);

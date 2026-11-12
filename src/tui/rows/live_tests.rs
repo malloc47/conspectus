@@ -289,3 +289,38 @@ fn the_waiting_count_follows_the_table_the_rows_read() {
     );
     assert_eq!(tree.waiting_anywhere, 0, "nothing waits in an empty table");
 }
+
+#[test]
+fn a_cell_shows_its_subagents_until_the_session_exits_or_cannot_be_told() {
+    let with = |state, liveness| {
+        let mut binding = running(state, 1);
+        binding.observation = binding.observation.with_subagents(3);
+        binding.liveness = liveness;
+        LiveCell::of(&binding, NOW_MS)
+    };
+    assert_eq!(
+        with(LiveState::Working, Liveness::Alive).running_subagents(),
+        3
+    );
+    assert_eq!(
+        with(LiveState::Ready, Liveness::Alive).running_subagents(),
+        3
+    );
+    assert_eq!(
+        with(LiveState::Exited, Liveness::Alive).running_subagents(),
+        0
+    );
+    // A process found gone reads exited, whatever it last said.
+    assert_eq!(
+        with(LiveState::Working, Liveness::Dead).running_subagents(),
+        0
+    );
+    let mut stale = running(LiveState::Working, 30);
+    stale.observation = stale.observation.with_subagents(2);
+    stale.observation.pid = None;
+    stale.liveness = Liveness::Unknown;
+    let stale = LiveCell::of(&stale, NOW_MS);
+    assert_eq!(stale.state, LiveState::Unknown);
+    assert_eq!(stale.subagents, 2, "the cell keeps what was recorded");
+    assert_eq!(stale.running_subagents(), 0, "but shows none");
+}

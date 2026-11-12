@@ -117,6 +117,7 @@ mod search_view;
 mod selection;
 mod state;
 mod styling;
+mod subagents;
 mod text;
 mod text_entry;
 mod undo;

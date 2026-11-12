@@ -52,6 +52,17 @@ impl LiveCell {
             subagents,
         }
     }
+
+    /// The child agents worth showing beside the state: none once the
+    /// session reads exited or unknown, whatever count was last recorded,
+    /// as `conspectus table` shows them.
+    pub fn running_subagents(&self) -> u16 {
+        if self.state.shows_subagents() {
+            self.subagents
+        } else {
+            0
+        }
+    }
 }
 
 /// The live state of a row that can stand for an entity of any kind (the

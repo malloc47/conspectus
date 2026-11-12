@@ -2,8 +2,9 @@
 //! a mux carries one live value wherever it is listed, whether the rows
 //! read the snapshot's own table or the overlay the live TUI binds from
 //! the store, and it draws as one mark (or, in Pinned, one word) for that
-//! entity everywhere. The mark, and the waiting count of a group header
-//! above it, are the only cells live state changes.
+//! entity everywhere. The mark, the waiting count of a group header
+//! above it, and a session's subagent chip (`subagents`) are the only
+//! cells live state changes.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -606,10 +607,25 @@ pub(super) fn without_waiting_count(line: &str) -> (Vec<String>, Option<String>)
     }
 }
 
+/// `snapshot` with every agent's subagent count cleared, so live state
+/// draws its marks and counts but no subagent chip.
+pub(super) fn without_subagents(mut snapshot: GraphSnapshot) -> GraphSnapshot {
+    for binding in snapshot
+        .node_live
+        .values_mut()
+        .chain(snapshot.pane_live.values_mut())
+    {
+        binding.observation.subagents = 0;
+    }
+    snapshot
+}
+
 #[test]
 fn live_state_changes_the_live_cells_and_the_waiting_counts_and_nothing_else() {
+    // The subagent chip is live state's one other change; its own suite
+    // checks it is all subagents change.
     let bare = live_world();
-    let tabled = with_table();
+    let tabled = without_subagents(with_table());
     let live_marks = crate::tui::icons::live::ALL;
     for view in [View::Sessions, View::Mux, View::Prs, View::Search] {
         for width in [220, 110, 80, 60] {

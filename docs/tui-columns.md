@@ -187,7 +187,8 @@ quiet state (work with no news past its source's quiet window) draws the
 same mark dimmed; a mux's mark is never dimmed, since its counts do not
 say how fresh each agent's evidence is. Nothing animates: the Braille
 spinner keeps meaning a pending refresh. A group header above the rows
-counts the agents beneath it that wait on you, as `! N` (see
+counts the agents beneath it that wait on you, as `! N`, and a session
+whose agent runs subagents says how many after its label, as `+N` (see
 [Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings)).
 
 ## State words
@@ -275,6 +276,15 @@ the entity's last activity, not when its live state began.
   Because the group decides, flat grouping shows more titles than
   grouped views. The detail pane and search always use alias, then
   title, then mux name, then the short id.
+- **Subagent chip.** Right after a session's label (or after its link
+  cell when it has none), dim: `+N`, the subagents its agent runs now,
+  `+1` to `+9`, then `+9+` for ten or more. It shows while the agent
+  reports one or more, and not once the session has exited or its state
+  can't be told, whatever count it last reported (`conspectus table`
+  follows the same rule). A session whose subagent waits on you reads `!`
+  itself. It is on every session row, nested ones included; a mux row
+  shows none (its agents' rows do), and on a mux row `+N` instead counts
+  the agents' chips that did not fit. Pinned and History rows show none.
 - **`was in <mux>` chip.** After a session's label, dim: the session's
   last mux no longer runs. When the label already is that mux's name it
   reads `(mux stopped)`. Sessions view only.
@@ -326,8 +336,8 @@ row gives the column up by the steps below.
    keep their places. Rows whose
    label ends in one column at every depth (headers, Pinned and History
    rows) give way alike at every depth too.
-2. What follows them on a row (a session's label, `was in` note,
-   project, hit count, and preview or snippet; a mux's hit count and
+2. What follows them on a row (a session's label, subagent chip, `was
+   in` note, project, hit count, and preview or snippet; a mux's hit count and
    preview, snippet, or directory; a PR's branch and title) takes the
    cells that row has left, and gives way in its own order, row by row.
 3. A cell that gives way narrows, cut with `…`, or leaves the row with
@@ -349,7 +359,7 @@ row gives the column up by the steps below.
 |---|---|---|
 | Group header | the path or members (narrowing first) | the label, the count, the waiting count, the warning |
 | Session row, cells that line up | the key, the chip, the age | the live mark, the state glyph |
-| Session row, the rest | the preview or snippet, the `was in` note, the project (narrowing first), the hit count, the label (narrowing first) | |
+| Session row, the rest | the preview or snippet, the `was in` note, the project (narrowing first), the subagent chip, the hit count, the label (narrowing first) | |
 | Mux row, cells that line up | the chips narrow to one chip and `+N`, the name narrows, the age, the chips | the name, the live mark, the state glyph |
 | Mux row, the rest | the preview, snippet, or directory, the hit count | |
 | PR row, cells that line up | the label narrows (its number stays whole), the age, the tracking mark | the label, the state glyph |
@@ -475,9 +485,10 @@ the repo header's columns:
 | 5 | Live | what the agent is doing now (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when quiet; keeps its mark while a refresh is pending |
 | 6 | State | `⊸` linked to a definitive mux, `∘` not | always | 1 cell; a spinner while a refresh is pending |
 | 7 | Label | alias, title, or mux name (see above) | when one applies | cut at 32 cells |
-| 8 | `was in` chip | the session's last mux | only if that mux is stopped | dim |
-| 9 | Project | repo or directory name | only in flat grouping | 16 cells, cut with `…` |
-| 10 | Preview | last message | only if it gets at least 7 cells | dim italic |
+| 8 | Subagents | `+N`: the subagents its agent runs now (see [Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings)) | while its agent reports one or more | dim; `+9+` from ten on, so at most 3 cells |
+| 9 | `was in` chip | the session's last mux | only if that mux is stopped | dim |
+| 10 | Project | repo or directory name | only in flat grouping | 16 cells, cut with `…` |
+| 11 | Preview | last message | only if it gets at least 7 cells | dim italic |
 
 While a content filter is active (`--contains TEXT`, or the Content row in
 Controls), the rows are the sessions whose transcripts mention the text, and
