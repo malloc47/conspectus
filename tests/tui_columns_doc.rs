@@ -8,8 +8,9 @@
 //! ```
 //!
 //! The test renders the left pane of the showcase world with those keys
-//! and compares. After a deliberate change to the TUI, regenerate the
-//! blocks with `just tui-columns` (`UPDATE_TUI_COLUMNS=1`).
+//! (or the pane a `pane=` attribute names, such as `pane=header`) and
+//! compares. After a deliberate change to the TUI, regenerate the blocks
+//! with `just tui-columns` (`UPDATE_TUI_COLUMNS=1`).
 
 use std::path::{Path, PathBuf};
 
@@ -70,7 +71,7 @@ fn normalize(frame: &str) -> String {
     lines.join("\n")
 }
 
-fn render(scratch: &Path, keys: &str, width: u32, height: u32) -> String {
+fn render(scratch: &Path, pane: &str, keys: &str, width: u32, height: u32) -> String {
     let output = conspectus(scratch)
         .args(["tui", "--snapshot", "--snapshot-fixture"])
         .arg(concat!(
@@ -87,7 +88,7 @@ fn render(scratch: &Path, keys: &str, width: u32, height: u32) -> String {
             "--snapshot-height",
             &height.to_string(),
             "--snapshot-pane",
-            "left",
+            pane,
             "--snapshot-keys",
             keys,
         ])
@@ -103,6 +104,8 @@ fn render(scratch: &Path, keys: &str, width: u32, height: u32) -> String {
 
 /// One marker and the fenced block under it.
 struct Frame {
+    /// The pane drawn: `left` unless the marker names another.
+    pane: String,
     keys: String,
     width: u32,
     height: u32,
@@ -142,6 +145,7 @@ fn frames_in(lines: &[&str]) -> Vec<Frame> {
         let line = lines[index];
         if line.trim_start().starts_with("<!-- frame:") {
             let keys = attribute(line, "keys").unwrap_or_default();
+            let pane = attribute(line, "pane").unwrap_or_else(|| "left".to_string());
             let width = attribute(line, "width")
                 .and_then(|w| w.parse().ok())
                 .unwrap_or(170);
@@ -154,6 +158,7 @@ fn frames_in(lines: &[&str]) -> Vec<Frame> {
             let close = fence_after(lines, open + 1)
                 .unwrap_or_else(|| panic!("{DOC}:{}: unterminated fenced block", open + 1));
             frames.push(Frame {
+                pane,
                 keys,
                 width,
                 height,
@@ -191,7 +196,13 @@ fn the_example_frames_match_what_the_tui_draws() {
     let mut cursor = 0;
     let mut mismatches = Vec::new();
     for frame in &frames {
-        let fresh = render(scratch.path(), &frame.keys, frame.width, frame.height);
+        let fresh = render(
+            scratch.path(),
+            &frame.pane,
+            &frame.keys,
+            frame.width,
+            frame.height,
+        );
         let current = lines[frame.body_start..frame.body_end].join("\n");
         if fresh != current {
             let diff: Vec<String> = fresh
