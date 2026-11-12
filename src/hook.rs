@@ -11,7 +11,6 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 pub const SCHEMA_VERSION: u16 = 1;
-pub const ACTIVE_TTL_SECONDS: i64 = 15 * 60;
 pub const LATEST_FILENAME: &str = "hooks-latest.json";
 /// The most records the spool keeps. A write past it drops the records
 /// observed longest ago. One record per pane has no natural bound, since
