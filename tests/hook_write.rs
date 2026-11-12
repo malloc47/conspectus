@@ -418,6 +418,241 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// A sentinel for payload text.
+const TEXT_SENTINEL: &str = "SENTINEL-claude-fixture-text-5c1e9a";
+/// A sentinel shaped like an id or a name, so the store's own id check
+/// would let it through if a mapping routed it there.
+const NAME_SENTINEL: &str = "SENTINELclaudename5c1e9a";
+
+/// Fields the Claude Code mapping reads to identify the session or
+/// classify the event; they keep their fixture value.
+const READ_FIELDS: &[&str] = &[
+    "session_id",
+    "cwd",
+    "transcript_path",
+    "agent_transcript_path",
+    "hook_event_name",
+    "agent_id",
+    "source",
+    "notification_type",
+    "trigger",
+    "reason",
+    "permission_mode",
+    "stop_hook_active",
+    "is_interrupt",
+];
+
+/// Tool names that classify an event: kept in the payload, never in a file.
+const CLASSIFYING_TOOLS: &[&str] = &["AskUserQuestion", "ExitPlanMode", "Agent", "Task"];
+
+/// Fields holding a name or an id rather than prose.
+const NAME_FIELDS: &[&str] = &[
+    "agent_type",
+    "model",
+    "prompt_id",
+    "tool_use_id",
+    "name",
+    "subagent_type",
+    "id",
+    "filePath",
+    "file_path",
+];
+
+/// The payload with a sentinel in every field that carries payload
+/// rather than an id the mapping reads, every nested key included, and
+/// the documented payload-bearing fields added where the fixture lacks
+/// them.
+fn plant_sentinels(payload: &mut serde_json::Value) {
+    let event = payload["hook_event_name"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let fields = payload.as_object_mut().expect("payload object");
+    let tool = fields
+        .get("tool_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    for (key, value) in fields.iter_mut() {
+        match key.as_str() {
+            key if READ_FIELDS.contains(&key) => {}
+            "tool_name" if CLASSIFYING_TOOLS.contains(&tool.as_str()) => {}
+            "tool_name" => *value = serde_json::json!(format!("mcp__{NAME_SENTINEL}__tool")),
+            // Read to classify a failure, then dropped.
+            "error" if event == "StopFailure" => {}
+            "tool_response" if tool == "Agent" || tool == "Task" => {
+                plant_except(value, &["status", "agentId"]);
+            }
+            "background_tasks" => {
+                for task in value.as_array_mut().into_iter().flatten() {
+                    plant_except(task, &["id", "type", "status"]);
+                }
+            }
+            key => plant_all(value, key),
+        }
+    }
+    for key in [
+        "prompt",
+        "message",
+        "title",
+        "last_assistant_message",
+        "session_title",
+        "error_details",
+        "compact_summary",
+        "custom_instructions",
+    ] {
+        fields
+            .entry(key)
+            .or_insert_with(|| serde_json::json!(TEXT_SENTINEL));
+    }
+    for key in ["agent_type", "model", "prompt_id", "tool_use_id"] {
+        fields
+            .entry(key)
+            .or_insert_with(|| serde_json::json!(NAME_SENTINEL));
+    }
+    fields
+        .entry("tool_input")
+        .or_insert_with(|| serde_json::json!({ "command": TEXT_SENTINEL }));
+    fields.entry("permission_suggestions").or_insert_with(|| {
+        serde_json::json!([{ "type": "addRules", "rules": [{ "toolName": NAME_SENTINEL, "ruleContent": TEXT_SENTINEL }] }])
+    });
+    if event != "StopFailure" {
+        fields
+            .entry("error")
+            .or_insert_with(|| serde_json::json!(TEXT_SENTINEL));
+    }
+}
+
+fn plant_except(value: &mut serde_json::Value, keep: &[&str]) {
+    if let Some(map) = value.as_object_mut() {
+        for (key, item) in map.iter_mut() {
+            if !keep.contains(&key.as_str()) {
+                plant_all(item, key);
+            }
+        }
+    }
+}
+
+fn plant_all(value: &mut serde_json::Value, key: &str) {
+    match value {
+        serde_json::Value::String(text) => {
+            let sentinel = if NAME_FIELDS.contains(&key) {
+                NAME_SENTINEL
+            } else {
+                TEXT_SENTINEL
+            };
+            *text = sentinel.to_string();
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(|item| plant_all(item, key)),
+        serde_json::Value::Object(map) => {
+            // A nested key can be text too (an answer keyed by its
+            // question).
+            let planted = std::mem::take(map)
+                .into_iter()
+                .enumerate()
+                .map(|(index, (key, mut item))| {
+                    plant_all(&mut item, &key);
+                    let key = if NAME_FIELDS.contains(&key.as_str()) || key.len() < 24 {
+                        key
+                    } else {
+                        format!("{TEXT_SENTINEL}-{index}")
+                    };
+                    (key, item)
+                })
+                .collect();
+            *map = planted;
+        }
+        _ => {}
+    }
+}
+
+fn claude_fixture_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hooks/claude-code")
+}
+
+/// Every Claude Code fixture payload in file order: the single payloads,
+/// then each sequence's steps.
+fn claude_fixture_payloads() -> Vec<(String, serde_json::Value)> {
+    let mut names: Vec<PathBuf> = fs::read_dir(claude_fixture_dir())
+        .expect("fixture directory")
+        .map(|entry| entry.expect("fixture entry").path())
+        .collect();
+    names.sort();
+    let mut payloads = Vec::new();
+    for path in names
+        .iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+    {
+        payloads.push((path.display().to_string(), read_json(path)));
+    }
+    for path in names
+        .iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+    {
+        let text = fs::read_to_string(path).expect("sequence");
+        for (index, line) in text.lines().enumerate().skip(1) {
+            let step: serde_json::Value = serde_json::from_str(line).expect("step");
+            if let Some(payload) = step.get("payload") {
+                payloads.push((format!("{}:{}", path.display(), index + 1), payload.clone()));
+            }
+        }
+    }
+    payloads
+}
+
+/// The first sentinel or classifying name in `text`, if any.
+fn leaked(text: &str) -> Option<String> {
+    let quoted = CLASSIFYING_TOOLS
+        .iter()
+        .chain(&["rate_limit", "authentication_failed"])
+        .map(|name| format!("\"{name}\""));
+    [TEXT_SENTINEL.to_string(), NAME_SENTINEL.to_string()]
+        .into_iter()
+        .chain(quoted)
+        .find(|needle| text.contains(needle.as_str()))
+}
+
+#[test]
+fn no_payload_text_of_any_claude_code_fixture_reaches_a_file_or_an_output() {
+    let world = World::new();
+    let payloads = claude_fixture_payloads();
+    assert!(payloads.len() > 100, "{}", payloads.len());
+    for (place, mut payload) in payloads {
+        plant_sentinels(&mut payload);
+        let planted = payload.to_string();
+        assert!(planted.contains(TEXT_SENTINEL), "{place}: nothing planted");
+        let output = world
+            .hook_in_tmux("claude-code")
+            .write_stdin(planted)
+            .output()
+            .expect("run hook write");
+        assert_eq!(output.status.code(), Some(0), "{place}");
+        assert!(
+            output.stdout.is_empty() && output.stderr.is_empty(),
+            "{place} was not silent"
+        );
+        // Every file after every event, since a later event can drop
+        // what an earlier one leaked.
+        let mut files = Vec::new();
+        collect_files(&world.state, &mut files);
+        collect_files(&world.runtime, &mut files);
+        for file in files {
+            let text =
+                String::from_utf8_lossy(&fs::read(&file).expect("read state file")).into_owned();
+            if let Some(needle) = leaked(&text) {
+                panic!("after {place}, {} holds {needle}", file.display());
+            }
+        }
+    }
+
+    // The writes happened: the fixtures' session has an entry, and its
+    // session starts reached the spool.
+    let store = world.store();
+    let entry = &store["entries"]["claude-code:3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f"];
+    assert!(entry["observation"]["state"].is_string(), "{store}");
+    assert!(world.spool_path().is_file());
+}
+
 /// The median wall time of `runs` runs of `payload`, outside tmux and
 /// with no daemon.
 fn median_run(world: &World, payload: &str, runs: usize) -> Duration {

@@ -420,3 +420,7 @@ fn failure_class(error: Option<&str>) -> FailureClass {
 #[cfg(test)]
 #[path = "claude_code_live_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "claude_code_sequence_tests.rs"]
+mod sequence_tests;

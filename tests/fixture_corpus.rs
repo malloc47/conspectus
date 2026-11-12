@@ -351,7 +351,7 @@ fn claude_system_record_as_first_uuid_bearing_does_not_break_discovery() {
 #[test]
 fn claude_hook_payload_converts_to_record() {
     let payload: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(fixture_path("hooks/claude-sessionstart.json")).unwrap(),
+        &fs::read_to_string(fixture_path("hooks/claude-code/sessionstart-startup.json")).unwrap(),
     )
     .unwrap();
 
@@ -372,11 +372,11 @@ fn claude_hook_payload_converts_to_record() {
     .expect("convert claude hook payload");
 
     assert_eq!(record.harness_key, "claude-code");
-    assert_eq!(record.session_key, "cccccccc-1111-2222-3333-444444444444");
+    assert_eq!(record.session_key, "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f");
     assert_eq!(
         record.transcript_path.as_deref(),
         Some(
-            "/home/user/.claude/projects/home-user-projects-my-project/cccccccc-1111-2222-3333-444444444444.jsonl"
+            "/home/user/.claude/projects/-home-user-projects-my-project/3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f.jsonl"
         )
     );
     assert_eq!(
@@ -387,9 +387,12 @@ fn claude_hook_payload_converts_to_record() {
 }
 
 #[test]
-fn claude_ephemeral_hook_handles_null_transcript_path() {
+fn claude_hook_without_a_transcript_handles_null_transcript_path() {
     let payload: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(fixture_path("hooks/claude-ephemeral.json")).unwrap(),
+        &fs::read_to_string(fixture_path(
+            "hooks/claude-code/sessionstart-no-transcript.json",
+        ))
+        .unwrap(),
     )
     .unwrap();
 
@@ -408,7 +411,7 @@ fn claude_ephemeral_hook_handles_null_transcript_path() {
         record.transcript_path.is_none(),
         "null transcript_path should be None"
     );
-    assert_eq!(record.session_key, "dddddddd-1111-2222-3333-444444444444");
+    assert_eq!(record.session_key, "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f");
 }
 
 #[test]
