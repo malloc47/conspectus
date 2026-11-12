@@ -4,7 +4,8 @@
 
 Accepted. Refines ADR 0028 (hook sidecars) and the daemon hook ingest
 path from the graph snapshot migration; stays inside ADR 0143
-category 2.
+category 2. Amended 2026-11-12: one record per pane, no time limit,
+and an ingest that supersedes the pane's older link.
 
 ## Context
 
@@ -63,3 +64,59 @@ pane.
 - **Exempt hook-sidecar links from refresh eviction.** Stale or
   superseded records would never leave the graph, and the pass would no
   longer be a pure function of its inputs.
+
+## Amendment: one record per pane, and no time limit (2026-11-12)
+
+The spool kept the latest record per tmux session, so two agents in
+split panes of one session overwrote each other's attribution, and a
+daemon ingest left two Active hook links for one pane until the next
+cycle. The docs also still promised a 15-minute limit that nothing
+applied. Everything above stands except as follows.
+
+1. **One record per pane.** A record's slot is derived from the record:
+   `tmux:{socket}:{session}:pane:{pane}` for a pane of a mux session;
+   `tmux:{socket}:{session}` for a mux record that names no pane, which
+   attribution already treats as one per session; and outside a mux,
+   the harness process (`pid:{pid}`), else the directory (`cwd:{cwd}`),
+   else the session. A newer record replaces an older one in its slot,
+   as before.
+2. **Records under the old key migrate on read.** Readers never trust
+   the stored key: they derive each record's slot and keep the newest
+   per slot (on a tie, the record already stored under its slot), so a
+   spool written under the per-session key reads correctly, and the
+   next accepted write stores every record under its derived key. The
+   schema version stays 1, so a binary from before this amendment reads
+   the spool and adds its own record under the per-session key without
+   dropping any other.
+3. **A newer spool is never overwritten.** A spool whose schema version
+   is higher than the binary's reads as empty and refuses writes. A
+   later schema change can then bump the version without an older
+   binary on `PATH` wiping the spool, which the plugins spawn. A missing
+   or corrupt spool is still replaced by the next write.
+4. **A size bound.** Per-pane slots grow with every pane a hook ever ran
+   in, so the spool keeps at most 256 records and a write past that
+   drops the ones observed longest ago. The cap only matters for an
+   agent that reported nothing while 256 other panes or processes did,
+   and its pane falls back to process evidence.
+5. **No time limit.** No time-based TTL applies to hook records, and the
+   unused 15-minute constant is gone. ADR 0028's v1 limit was removed
+   from attribution because it dropped the links of idle but live
+   sessions. A record stays evidence until a fresher record for its pane
+   supersedes it. Attribution ignores it when its process is no longer
+   running, when its mux was created after it, or when the mux's active
+   pane runs another harness. That is what "stale" means in the
+   consequences above.
+6. **An ingest supersedes the pane's older link.** The hook-sidecar pass
+   seeds its per-pane winners from the graph's Active hook links. An
+   ingested record that wins its pane overrides the older link and
+   drops its process observation, and one older than the graph's link
+   is overridden by it, which is what the next cycle replays. A cycle
+   runs the pass on a graph whose hook links were evicted, so it is
+   unchanged.
+
+Alternatives considered: replaying the whole spool on every ingest,
+which would evict the pass's sessions and drop the live-state entries
+bound to them until the next cycle; a liveness prune of records whose
+process is gone, which can't bound records without a pid (every record
+on hosts without `/proc`); and a schema version bump, which an older
+binary would answer by replacing the spool with its one record.
