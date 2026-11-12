@@ -980,13 +980,59 @@ fn hook_status_reports_codex_live_state_health() {
 }
 
 #[test]
-fn hook_status_says_when_a_harness_s_hook_reports_no_live_state() {
+fn hook_status_reports_pi_live_state_health() {
     let home = tempfile::TempDir::new().expect("home temp");
-    let line = health_line(home.path(), "pi");
-    assert!(line.starts_with("unsupported\tpi\t"), "{line}");
+    let store = home.path().join(".local/state/conspectus/live-state.json");
+    assert_eq!(
+        health_line(home.path(), "pi"),
+        format!(
+            "off\tpi\t{}\tlive state: off; `conspectus hook init pi` installs the hooks that \
+             report it",
+            store.display()
+        )
+    );
+    isolated_cmd(home.path())
+        .args(["hook", "init", "pi"])
+        .assert()
+        .success();
     assert!(
-        line.ends_with("\tlive state: not reported by this harness's hook"),
+        health_line(home.path(), "pi").starts_with("no-events\tpi\t"),
+        "installed, with nothing heard and no agent running"
+    );
+
+    // A snapshot the extension sends, through the writer.
+    let snapshot = serde_json::json!({
+        "session_id": "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d",
+        "cwd": "/home/user/projects/my-project",
+        "hook_event_name": "live:agent_start",
+        "live": {
+            "instance": "mhv8k2b5-2c4e6a8b0d2f4a63", "seq": 2,
+            "observed_ms": conspectus::live_store::now_ms(), "heartbeat_s": 60,
+            "state": "working", "detail": "generating", "subagents": 0,
+            "since_ms": conspectus::live_store::now_ms(),
+        },
+    });
+    isolated_cmd(home.path())
+        .args(["hook", "write", "pi"])
+        .write_stdin(snapshot.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::is_empty());
+    let line = health_line(home.path(), "pi");
+    assert!(
+        line.starts_with(&format!(
+            "receiving\tpi\t{}\tlive state: 1 session, newest event ",
+            store.display()
+        )),
         "{line}"
+    );
+    assert!(
+        !home
+            .path()
+            .join(".local/state/conspectus/hooks/hooks-latest.json")
+            .exists(),
+        "a live-state snapshot is no attribution record"
     );
 }
 

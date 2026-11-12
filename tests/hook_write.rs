@@ -1127,3 +1127,241 @@ fn an_opencode_payload_without_live_state_is_attributed_as_before() {
         "no live state"
     );
 }
+
+const PI_SESSION: &str = "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d";
+
+/// The payloads the Pi extension's state machine emits in the shared
+/// event scripts, in file and step order.
+fn pi_payloads() -> Vec<(String, serde_json::Value)> {
+    pi_steps()
+        .into_iter()
+        .flat_map(|(place, step)| {
+            step["emit"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |payload| (place.clone(), payload))
+        })
+        .collect()
+}
+
+fn pi_steps() -> Vec<(String, serde_json::Value)> {
+    let dir = fixture_dir("pi-live");
+    let mut names: Vec<PathBuf> = fs::read_dir(&dir)
+        .expect("fixture directory")
+        .map(|entry| entry.expect("fixture entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .collect();
+    names.sort();
+    let mut steps = Vec::new();
+    for path in names {
+        let text = fs::read_to_string(&path).expect("script");
+        for (index, line) in text.lines().enumerate().skip(1) {
+            let step: serde_json::Value = serde_json::from_str(line).expect("step");
+            steps.push((format!("{}:{}", path.display(), index + 1), step));
+        }
+    }
+    steps
+}
+
+/// What must never reach a file from the Pi scripts: any sentinel, and
+/// every tool name and error message their events carry, quoted as JSON
+/// holds them.
+fn pi_words() -> Vec<String> {
+    let mut words = vec!["SENTINEL".to_string()];
+    for (_, step) in pi_steps() {
+        let event = &step["event"];
+        for text in [
+            &event["toolName"],
+            &event["message"]["errorMessage"],
+            &event["errorMessage"],
+        ] {
+            if let Some(text) = text.as_str() {
+                words.push(serde_json::Value::String(text.to_string()).to_string());
+            }
+        }
+    }
+    words.sort();
+    words.dedup();
+    words
+}
+
+/// `payload` with payload text in every field the Pi parser does not
+/// read, at the top level and in `live`, and with text in place of its
+/// state and detail.
+fn plant_pi_sentinels(payload: &serde_json::Value) -> serde_json::Value {
+    let mut planted = payload.clone();
+    let fields = planted.as_object_mut().expect("payload object");
+    for key in [
+        "title",
+        "message",
+        "messages",
+        "content",
+        "args",
+        "result",
+        "errorMessage",
+        "systemPrompt",
+        "headers",
+    ] {
+        fields.insert(
+            key.to_string(),
+            serde_json::json!([TEXT_SENTINEL, { "text": TEXT_SENTINEL }]),
+        );
+    }
+    fields.insert("toolName".to_string(), serde_json::json!(NAME_SENTINEL));
+    if let Some(live) = fields
+        .get_mut("live")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        live.insert("state".to_string(), serde_json::json!(TEXT_SENTINEL));
+        live.insert("detail".to_string(), serde_json::json!(NAME_SENTINEL));
+        live.insert("errorMessage".to_string(), serde_json::json!(TEXT_SENTINEL));
+        live.insert("error_class".to_string(), serde_json::json!(NAME_SENTINEL));
+        live.insert("toolName".to_string(), serde_json::json!(NAME_SENTINEL));
+    }
+    planted
+}
+
+#[test]
+fn no_payload_text_of_any_pi_payload_reaches_a_file_or_an_output() {
+    let world = World::new();
+    let payloads = pi_payloads();
+    assert!(payloads.len() > 100, "{}", payloads.len());
+    let words = pi_words();
+    assert!(words.iter().any(|word| word == "\"bash\""), "{words:?}");
+    // The events themselves, as an extension that forwarded them whole
+    // would send them: as a live-state event and as a session start.
+    let events = pi_steps()
+        .into_iter()
+        .filter_map(|(_, step)| step.get("event").cloned())
+        .flat_map(|event| {
+            ["live:forwarded", "session_start:forwarded"].map(|name| {
+                let mut forwarded = event.clone();
+                forwarded["session_id"] = serde_json::json!(PI_SESSION);
+                forwarded["hook_event_name"] = serde_json::json!(name);
+                forwarded
+            })
+        });
+    let inputs = payloads
+        .iter()
+        .flat_map(|(place, payload)| {
+            [
+                (format!("{place} as emitted"), payload.clone()),
+                (format!("{place} planted"), plant_pi_sentinels(payload)),
+            ]
+        })
+        .chain(
+            events
+                .enumerate()
+                .map(|(index, event)| (format!("forwarded event {index}"), event)),
+        );
+    for (place, payload) in inputs {
+        let output = world
+            .hook_in_tmux("pi")
+            .write_stdin(payload.to_string())
+            .output()
+            .expect("run hook write");
+        assert_eq!(output.status.code(), Some(0), "{place}");
+        assert!(
+            output.stdout.is_empty() && output.stderr.is_empty(),
+            "{place} was not silent"
+        );
+        let mut files = Vec::new();
+        collect_files(&world.state, &mut files);
+        collect_files(&world.runtime, &mut files);
+        for file in files {
+            let text =
+                String::from_utf8_lossy(&fs::read(&file).expect("read state file")).into_owned();
+            if let Some(word) = words.iter().find(|word| text.contains(word.as_str())) {
+                panic!("after {place}, {} holds {word}", file.display());
+            }
+            if let Some(needle) = leaked(&text) {
+                panic!("after {place}, {} holds {needle}", file.display());
+            }
+        }
+    }
+
+    // The writes happened: the scripts' first session has an entry, and
+    // its session starts reached the spool.
+    let store = world.store();
+    let entry = &store["entries"][format!("pi:{PI_SESSION}")];
+    assert!(entry["observation"]["state"].is_string(), "{store}");
+    assert!(world.spool_path().is_file());
+}
+
+#[test]
+fn a_pi_snapshot_touches_no_socket_no_process_and_no_spool() {
+    let world = World::new();
+    let script: Vec<serde_json::Value> = pi_payloads()
+        .into_iter()
+        .filter(|(place, _)| place.contains("permission-gate-during-tool.jsonl"))
+        .map(|(_, payload)| payload)
+        .collect();
+    let (started, rest) = script.split_first().expect("payloads");
+    assert_eq!(started["hook_event_name"], "session_start:startup");
+    run_silently(world.hook_in_tmux("pi"), started.to_string());
+    let spool = fs::read(world.spool_path()).expect("spool");
+    let record = world.spool_record();
+    assert_eq!(record["harness_key"], "pi");
+    assert_eq!(record["session_key"], PI_SESSION);
+    assert_eq!(record["hook_event_name"], "session_start:startup");
+    assert_eq!(record["pid"], 48213, "the extension's process");
+    assert_eq!(record["tmux"]["pane_id"], "%7");
+    let tmux_calls = world.tmux_calls();
+
+    // The run, its dialogs, and its tool calls reach only the store.
+    let listener = world.stuck_daemon();
+    listener.set_nonblocking(true).expect("nonblocking");
+    assert!(rest.len() >= 6, "{}", rest.len());
+    for payload in rest {
+        assert!(
+            payload["hook_event_name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("live:")),
+            "{payload}"
+        );
+        run_silently(world.hook_in_tmux("pi"), payload.to_string());
+    }
+    assert_eq!(world.tmux_calls(), tmux_calls, "tmux was not started");
+    assert_eq!(fs::read(world.spool_path()).expect("spool"), spool);
+    assert!(
+        matches!(listener.accept(), Err(err) if err.kind() == std::io::ErrorKind::WouldBlock),
+        "nothing connected to the daemon socket"
+    );
+    let entry = &world.store()["entries"][format!("pi:{PI_SESSION}")];
+    assert_eq!(entry["observation"]["state"], "ready", "{entry}");
+    assert_eq!(entry["observation"]["detail"], "finished", "{entry}");
+    assert_eq!(
+        entry["observation"]["pid"], 48213,
+        "the extension's process"
+    );
+    assert_eq!(entry["observation"]["heartbeat_s"], 60);
+    assert_eq!(entry["instance"], "mhv8k2a2-5c7e9a1b3d5f7092");
+    assert_eq!(entry["tmux"]["session"], "work");
+    assert_eq!(entry["tmux"]["pane"], "%7");
+    assert_eq!(entry["cwd"], "/home/user/projects/my-project");
+    assert!(
+        entry["transcript_path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with(&format!("_{PI_SESSION}.jsonl"))),
+        "{entry}"
+    );
+}
+
+#[test]
+fn a_pi_payload_of_the_first_extension_version_is_attributed_as_before() {
+    let world = World::new();
+    let legacy =
+        fs::read_to_string(fixture_dir("pi-live").join("payload-legacy-session-start.json"))
+            .expect("legacy payload");
+    run_silently(world.hook_in_tmux("pi"), legacy);
+    let record = world.spool_record();
+    assert_eq!(record["session_key"], PI_SESSION);
+    assert_eq!(record["hook_event_name"], "session_start:resume");
+    assert!(
+        !world.store_path().exists()
+            || world.store()["entries"][format!("pi:{PI_SESSION}")].is_null(),
+        "no live state"
+    );
+}

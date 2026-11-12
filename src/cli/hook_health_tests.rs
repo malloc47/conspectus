@@ -87,14 +87,14 @@ fn a_hook_not_installed_says_how_to_install_it() {
 #[test]
 fn a_hook_that_reports_no_live_state_is_never_called_silent() {
     for installed in [true, false] {
-        let health = Health::assess("pi", false, installed, &LiveFile::default(), never_asked);
+        let health = Health::assess("aider", false, installed, &LiveFile::default(), never_asked);
         assert_eq!(health, Health::Unsupported);
         assert_eq!(health.label(), "unsupported");
     }
 }
 
 #[test]
-fn the_claude_code_codex_and_opencode_hooks_report_live_state_and_pis_not_yet() {
+fn the_claude_code_codex_opencode_and_pi_hooks_report_live_state() {
     let reports = |harness: &str| {
         crate::discovery::harness::registered_adapters()
             .find(|adapter| adapter.harness_key() == harness)
@@ -103,7 +103,8 @@ fn the_claude_code_codex_and_opencode_hooks_report_live_state_and_pis_not_yet() 
     assert!(reports("claude-code"));
     assert!(reports("codex"));
     assert!(reports("opencode"));
-    assert!(!reports("pi"));
+    assert!(reports("pi"));
+    assert!(!reports("aider"));
 }
 
 struct Table(&'static [i64]);
