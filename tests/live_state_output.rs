@@ -1,15 +1,18 @@
 //! Live state in the text output: `conspectus table`'s `live` columns
 //! over a scratch live-state store that discovery binds, read at a fixed
-//! time. Every store is populated with synthetic events, and every table
+//! time, and `conspectus node show`'s `live state` section over a fixture
+//! graph. Every store is populated with synthetic events, and every table
 //! is rendered once with them and once with an empty store.
 
 mod support;
 
 use conspectus::config::Projection;
 use conspectus::live_store::{LiveContext, LiveEvent, LiveEventKind, WaitKind};
-use conspectus::model::GraphSnapshot;
+use conspectus::model::{GraphSnapshot, NodeId};
+use conspectus::output::node_show::render_node_show_at;
 use conspectus::output::render::RenderOptions;
 use conspectus::output::table::render_with;
+use support::fixtures;
 use support::replay::{ReplayWorld, TmuxReplayRow};
 
 const MINUTE_MS: i64 = 60_000;
@@ -163,4 +166,46 @@ fn the_live_columns_show_nothing_for_an_empty_store() {
             now_ms
         )
     );
+}
+
+/// The fixture's evidence is from 2026-09-30; read it at noon that day.
+const FIXTURE_NOW_MS: i64 = 1_790_769_600_000;
+
+fn fixture_node(snapshot: &GraphSnapshot, display: &str) -> NodeId {
+    conspectus::output::node_show::resolve_node_id(display, snapshot).expect("fixture node")
+}
+
+#[test]
+fn node_show_prints_a_session_s_live_state() {
+    let snapshot = fixtures::live_state_graph();
+    let id = fixture_node(&snapshot, "codex:session-a");
+    insta::assert_snapshot!(
+        "live_node_show_session",
+        render_node_show_at(&snapshot, &id, false, FIXTURE_NOW_MS)
+    );
+}
+
+#[test]
+fn node_show_prints_a_mux_s_counts_and_its_pane_agent() {
+    let snapshot = fixtures::live_state_graph();
+    let id = fixture_node(&snapshot, "tmux:main");
+    insta::assert_snapshot!(
+        "live_node_show_mux",
+        render_node_show_at(&snapshot, &id, false, FIXTURE_NOW_MS)
+    );
+}
+
+#[test]
+fn node_show_prints_no_live_state_without_evidence() {
+    let snapshot = fixtures::live_state_graph();
+    let id = fixture_node(&snapshot, "codex:session-quiet");
+    let rendered = render_node_show_at(&snapshot, &id, false, FIXTURE_NOW_MS);
+    assert!(!rendered.contains("live state"), "{rendered}");
+    insta::assert_snapshot!("live_node_show_no_evidence", rendered);
+
+    let mut empty = snapshot;
+    empty.node_live.clear();
+    let mux = fixture_node(&empty, "tmux:main");
+    let rendered = render_node_show_at(&empty, &mux, false, FIXTURE_NOW_MS);
+    assert!(!rendered.contains("live state"), "{rendered}");
 }

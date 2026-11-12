@@ -1,8 +1,9 @@
 //! `conspectus node show <id>`.
 //!
-//! Read-only single-node view: prints the node itself plus every
-//! candidate link, resolved relationship, source metadata, and
-//! diagnostic that touches the node. The accepted forms for
+//! Read-only single-node view: prints the node itself, its live state
+//! when it has any, and every candidate link, resolved relationship,
+//! source metadata, and diagnostic that touches the node. The accepted
+//! forms for
 //! `<id>` are:
 //!
 //! - The short content-addressed prefix from the session-table `ID`
@@ -134,11 +135,25 @@ pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, 
 // Render entry point
 // -----------------------------------------------------------------------------
 
+/// `id`'s detail panel, read at the current time.
 pub fn render_node_show(snapshot: &GraphSnapshot, id: &NodeId, color: bool) -> String {
+    render_node_show_at(snapshot, id, color, crate::live_store::now_ms())
+}
+
+/// `id`'s detail panel read at `now_ms` (Unix epoch milliseconds): the
+/// time a gone node's last sighting and a live state's age are measured
+/// against, and the time live state is read at.
+pub fn render_node_show_at(
+    snapshot: &GraphSnapshot,
+    id: &NodeId,
+    color: bool,
+    now_ms: i64,
+) -> String {
     let mut out = String::new();
-    if !write_node_summary(&mut out, snapshot, id, color) {
+    if !write_node_summary(&mut out, snapshot, id, color, now_ms) {
         return format!("node {id} not found in snapshot\n");
     }
+    write_live_state(&mut out, snapshot, id, color, now_ms);
     write_candidate_links(&mut out, snapshot, id, color);
     write_resolved(&mut out, snapshot, id, color);
     write_diagnostics(&mut out, snapshot, id, color);
@@ -207,6 +222,7 @@ fn write_node_summary(
     snapshot: &GraphSnapshot,
     id: &NodeId,
     color: bool,
+    now_ms: i64,
 ) -> bool {
     let display = id.to_string();
     let id_short = node_short_id_from_display(&display);
@@ -224,7 +240,7 @@ fn write_node_summary(
             presence.label_for(crate::model::NodeKind::from(id)),
             crate::output::render::format_relative_age(
                 presence.last_seen(),
-                crate::discovery::current_epoch()
+                now_ms.div_euclid(1000)
             )
         );
     }
@@ -539,6 +555,28 @@ fn write_forge_pr_summary(out: &mut String, pr: &ForgePrNode) {
     );
     if let Some(url) = &pr.url {
         let _ = writeln!(out, "  url:   {url}");
+    }
+}
+
+/// The `live state` section: what an agent session is doing now, or for
+/// a mux the counts over the agents it hosts. Left out when the node has
+/// no live state, which is no evidence, not idleness.
+fn write_live_state(
+    out: &mut String,
+    snapshot: &GraphSnapshot,
+    id: &NodeId,
+    color: bool,
+    now_ms: i64,
+) {
+    let lines = super::live::node_show_lines(snapshot, id, now_ms);
+    if lines.is_empty() {
+        return;
+    }
+    out.push('\n');
+    write_section_header(out, "live state", color);
+    for line in lines {
+        out.push_str(&line);
+        out.push('\n');
     }
 }
 

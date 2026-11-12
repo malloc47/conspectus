@@ -196,3 +196,97 @@ fn a_mux_cell_counts_its_sessions_and_its_pane_agent() {
     );
     assert_eq!(mux_cell(&snapshot(&["silent"]), &mux_id(), NOW_MS), None);
 }
+
+#[test]
+fn node_show_lists_every_field_of_a_session_entry() {
+    let mut graph = snapshot(&["waiter"]);
+    let mut observation = observed(LiveState::Waiting, 2)
+        .with_detail(LiveDetail::Permission)
+        .with_since_ms(NOW_MS - 11 * MINUTE_MS)
+        .with_subagents(1)
+        .with_pid(4242, Some(7));
+    observation.via_subagent = true;
+    bind(
+        &mut graph,
+        session_id("waiter"),
+        observation,
+        Liveness::Alive,
+    );
+
+    assert_eq!(
+        node_show_lines(&graph, &session_id("waiter"), NOW_MS),
+        vec![
+            "  state:      waiting",
+            "  detail:     permission",
+            "  via:        a subagent",
+            "  since:      2026-09-30T11:49:00Z",
+            "  age:        11m",
+            "  last event: 2026-09-30T11:58:00Z",
+            "  confidence: fresh",
+            "  subagents:  1",
+            "  source:     hook",
+            "  process:    pid 4242, alive",
+        ]
+    );
+}
+
+#[test]
+fn node_show_names_the_recorded_state_the_read_rules_replaced() {
+    let mut graph = snapshot(&["gone"]);
+    bind(
+        &mut graph,
+        session_id("gone"),
+        observed(LiveState::Working, 4)
+            .with_detail(LiveDetail::Tool)
+            .with_since_ms(NOW_MS - 60 * MINUTE_MS),
+        Liveness::Dead,
+    );
+    let lines = node_show_lines(&graph, &session_id("gone"), NOW_MS);
+    assert_eq!(
+        lines[..4],
+        [
+            "  state:      exited",
+            "  detail:     killed",
+            "  recorded:   working:tool",
+            "  since:      2026-09-30T11:56:00Z",
+        ]
+    );
+    assert_eq!(lines.last().map(String::as_str), Some("  process:    dead"));
+}
+
+#[test]
+fn node_show_lists_a_mux_s_counts_and_its_pane_agent() {
+    let mut graph = snapshot(&["waiter"]);
+    bind(
+        &mut graph,
+        session_id("waiter"),
+        observed(LiveState::Waiting, 1),
+        Liveness::Alive,
+    );
+    bind(
+        &mut graph,
+        NodeId::MuxSession(mux_id()),
+        observed(LiveState::Starting, 1),
+        Liveness::Unknown,
+    );
+    let lines = node_show_lines(&graph, &NodeId::MuxSession(mux_id()), NOW_MS);
+    assert_eq!(
+        lines[..3],
+        [
+            "  counts:     1 waiting, 1 starting",
+            "  pane agent with no session:",
+            "    state:      starting",
+        ]
+    );
+    assert_eq!(
+        lines.last().map(String::as_str),
+        Some("    process:    unknown")
+    );
+}
+
+#[test]
+fn node_show_lists_nothing_without_live_state() {
+    let graph = snapshot(&["silent"]);
+    assert!(node_show_lines(&graph, &session_id("silent"), NOW_MS).is_empty());
+    assert!(node_show_lines(&graph, &NodeId::MuxSession(mux_id()), NOW_MS).is_empty());
+}

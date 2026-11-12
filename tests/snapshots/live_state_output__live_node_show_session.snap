@@ -1,0 +1,33 @@
+---
+source: tests/live_state_output.rs
+expression: "render_node_show_at(&snapshot, &id, false, FIXTURE_NOW_MS)"
+---
+node 8fd90016f5dc2f49
+  kind: agent_session
+  id:   agent_session:codex:/home/me/.codex:session-a
+  harness:     codex
+  state_scope: /home/me/.codex
+  session_key: session-a
+  cwd:         /workspace
+
+live state
+  state:      waiting
+  detail:     permission
+  since:      2026-09-30T11:49:00Z
+  age:        11m
+  last event: 2026-09-30T11:50:00Z
+  confidence: fresh
+  subagents:  1
+  source:     hook
+  process:    pid 4242, alive
+
+outgoing candidate links: 1
+  - linked_to_mux   → tmux:main [SD/M, active] (link=mux-session-a)
+      adapter: process
+
+incoming candidate links: 0
+
+resolved relationships: 1
+  - linked_to_mux   codex:session-a → tmux:main (selected=mux-session-a)
+
+diagnostics: 0

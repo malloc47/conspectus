@@ -1,0 +1,22 @@
+---
+source: tests/live_state_output.rs
+expression: rendered
+---
+node 5579e35d6677f246
+  kind: agent_session
+  id:   agent_session:codex:/home/me/.codex:session-quiet
+  harness:     codex
+  state_scope: /home/me/.codex
+  session_key: session-quiet
+  cwd:         /workspace
+
+outgoing candidate links: 1
+  - linked_to_mux   → tmux:main [SD/M, active] (link=mux-session-quiet)
+      adapter: process
+
+incoming candidate links: 0
+
+resolved relationships: 1
+  - linked_to_mux   codex:session-quiet → tmux:main (selected=mux-session-quiet)
+
+diagnostics: 0

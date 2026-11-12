@@ -1,5 +1,5 @@
 //! Live agent state in the text output: the `live` cells of `conspectus
-//! table`.
+//! table` and the `live state` section of `conspectus node show`.
 //!
 //! Every value is read through the snapshot's accessors
 //! ([`GraphSnapshot::live_state_of`], [`GraphSnapshot::live_counts_of_mux`])
@@ -111,6 +111,89 @@ pub(crate) fn counts_text(counts: &LiveCounts) -> Option<String> {
             .map(|state| format!("{} {}", counts.get(*state), state.name()))
             .collect::<Vec<_>>()
             .join(", "),
+    )
+}
+
+/// The body of `node show`'s `live state` section for `id`, one line per
+/// field, or nothing when the node has no live state. A session lists its
+/// own entry. A mux lists the counts over the agents it hosts and, when
+/// one of its panes holds an agent that no session matched yet, that
+/// agent's entry.
+pub(crate) fn node_show_lines(snapshot: &GraphSnapshot, id: &NodeId, now_ms: i64) -> Vec<String> {
+    let mut lines = Vec::new();
+    let own = snapshot.node_live.get(id);
+    match id {
+        NodeId::AgentSession(_) => {
+            if let Some(binding) = own {
+                binding_lines(&mut lines, binding, now_ms, "  ");
+            }
+        }
+        NodeId::MuxSession(mux) => {
+            if let Some(counts) = counts_text(&snapshot.live_counts_of_mux(mux, now_ms)) {
+                lines.push(format!("  counts:     {counts}"));
+            }
+            if let Some(binding) = own {
+                lines.push("  pane agent with no session:".to_string());
+                binding_lines(&mut lines, binding, now_ms, "    ");
+            }
+        }
+        _ => {}
+    }
+    lines
+}
+
+/// The fields of one entry as `node show` lists them, each line led by
+/// `indent`. Lines for a detail, a subagent origin, a recorded state the
+/// read rules replaced, subagents, and a pid appear only when there is
+/// one.
+fn binding_lines(lines: &mut Vec<String>, binding: &LiveBinding, now_ms: i64, indent: &str) {
+    let observation = &binding.observation;
+    let effective = binding.effective(now_ms);
+    let mut field = |name: &str, value: String| {
+        lines.push(format!("{indent}{:<12}{value}", format!("{name}:")));
+    };
+    field("state", effective.state.name().to_string());
+    if let Some(detail) = effective.detail {
+        field("detail", detail.name().to_string());
+    }
+    if observation.via_subagent {
+        field("via", "a subagent".to_string());
+    }
+    if effective.state != observation.state {
+        let recorded = EffectiveLive {
+            state: observation.state,
+            detail: observation
+                .detail
+                .filter(|detail| observation.state.accepts(*detail)),
+            confidence: LiveConfidence::Fresh,
+        };
+        field("recorded", state_label(&recorded));
+    }
+    let since_ms = shown_since_ms(binding, &effective);
+    field("since", timestamp(since_ms));
+    field("age", age(since_ms, now_ms));
+    field("last event", timestamp(observation.observed_ms));
+    field("confidence", effective.confidence.name().to_string());
+    let subagents = shown_subagents(binding, &effective);
+    if subagents > 0 {
+        field("subagents", subagents.to_string());
+    }
+    field("source", observation.source.name().to_string());
+    field(
+        "process",
+        match observation.pid {
+            Some(pid) => format!("pid {pid}, {}", binding.liveness.name()),
+            None => binding.liveness.name().to_string(),
+        },
+    );
+}
+
+/// `ms` as an RFC 3339 UTC time to the second, or the raw milliseconds
+/// when the value is out of range.
+fn timestamp(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms).map_or_else(
+        || ms.to_string(),
+        |time| time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
     )
 }
 
