@@ -239,6 +239,49 @@ fn state_glyphs_do_not_reuse_a_node_kind_glyph_except_the_pin_marker() {
     }
 }
 
+#[test]
+fn live_marks_are_one_cell_wide_all_different_and_vetted() {
+    let table = host_table();
+    let mut seen = std::collections::BTreeSet::new();
+    for glyph in live::ALL {
+        assert_eq!(cell_width(glyph), 1, "`{glyph}` must be one cell wide");
+        assert!(seen.insert(glyph), "`{glyph}` stands for two live states");
+        assert!(table.contains(glyph), "live mark `{glyph}` is not vetted");
+    }
+}
+
+#[test]
+fn live_marks_reuse_only_the_shared_failure_and_cant_tell_marks() {
+    // An error is a failure and stale evidence can't be told, so those
+    // two reuse the marks every surface draws for that; no other live
+    // mark is a kind glyph, a row-state glyph, or a framework mark.
+    assert_eq!(live::ERROR, marks::FAIL);
+    assert_eq!(live::UNKNOWN, state::UNKNOWN);
+    for glyph in [live::WAITING, live::WORKING, live::READY, live::NONE] {
+        assert!(!state::ALL.contains(&glyph), "`{glyph}` is a state glyph");
+        assert!(
+            NodeKind::ALL
+                .into_iter()
+                .all(|kind| kind.default_glyph() != glyph),
+            "`{glyph}` is a kind glyph"
+        );
+        assert!(
+            ![
+                marks::POINTER,
+                marks::BACK,
+                marks::EXPANDED,
+                marks::COLLAPSED,
+                marks::WARNING,
+                marks::NO_VALUE,
+                marks::OK,
+                marks::BULLET,
+            ]
+            .contains(&glyph),
+            "`{glyph}` is a row mark"
+        );
+    }
+}
+
 fn host_table() -> tuikit::glyphs::VettedGlyphs {
     vetted_glyphs().expect("the host's glyph registrations are valid")
 }

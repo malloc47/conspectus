@@ -27,6 +27,7 @@ use crate::tui::View;
 pub(crate) mod content;
 pub mod history;
 pub(crate) mod live;
+mod live_mark;
 pub mod mux;
 pub mod pinned;
 mod pr_status;
@@ -35,6 +36,7 @@ pub mod search;
 pub mod sessions;
 
 pub use live::{LiveCell, MixedLive};
+pub use live_mark::{LiveMark, LiveSign};
 pub use pr_status::PrStatus;
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
@@ -279,6 +281,14 @@ pub mod words {
     pub const PR_DRAFT: &str = "draft";
     pub const PR_MERGED: &str = "merged";
     pub const PR_CLOSED: &str = "closed";
+    /// A session blocked on the operator.
+    pub const WAITING: &str = "waiting";
+    /// A session whose turn is running.
+    pub const WORKING: &str = "working";
+    /// A session whose turn is over, ready for a prompt.
+    pub const READY: &str = "ready";
+    /// A session whose turn ended on an error.
+    pub const ERROR: &str = "error";
 
     /// Every word, in the order the reference lists them.
     pub const ALL: [&str; 12] = [
