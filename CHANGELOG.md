@@ -110,6 +110,11 @@ forms, lists, readers, and keys look and behave alike.
   `no-events`, `off` (with the command that installs the hooks, or for
   an older Pi extension that reports no live state), or `unsupported`
   (a hook that reports sessions but no live state).
+- **An operator guide for live state.** `docs/operations.md` has a "Live
+  agent state" section: turning it on for each harness, what each state
+  and detail means, how a state turns quiet or unknown, where it shows
+  today, the known gaps and what repairs each, what the store keeps and
+  never keeps, and what to do for each `hook status` health label.
 - **opencode reports what each session is doing.** The opencode plugin
   (0.3.0) now sends each session's state (working, waiting for a
   permission, a question, or input, ready, compacting, failed, and its
