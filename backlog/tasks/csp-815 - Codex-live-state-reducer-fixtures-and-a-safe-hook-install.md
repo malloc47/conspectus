@@ -4,7 +4,7 @@ title: 'Codex live state: reducer, fixtures, and a safe hook install'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 02:27'
+updated_date: '2026-11-12 03:52'
 labels:
   - live-state
   - ls-emit
@@ -48,3 +48,9 @@ Blockers: The fast writer.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Planning note (after CSP-809): the neutral `LiveEvent` vocabulary and the shared reducer (`src/live_store/`) already exist. This story maps Codex payloads to `LiveEvent`s and extends the shared reducer only where Codex needs something the vocabulary lacks (for example plan-mode `Stop`). Read `src/live_store/event.rs` and `reducer.rs` first.
+<!-- SECTION:NOTES:END -->

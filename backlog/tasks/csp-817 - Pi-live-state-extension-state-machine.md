@@ -4,7 +4,7 @@ title: 'Pi live state: extension state machine'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 02:27'
+updated_date: '2026-11-12 03:53'
 labels:
   - live-state
   - ls-emit
@@ -47,3 +47,9 @@ Blockers: The fast writer.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Planning note (after CSP-809): the extension is a snapshot source. It sends a `LiveSnapshot` (`src/live_store/`), which the store applies by `(instance, seq)`; the shared reducer is not involved. Read `LiveStore::apply_snapshot` and the `LiveSnapshot` type first.
+<!-- SECTION:NOTES:END -->
