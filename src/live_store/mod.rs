@@ -49,3 +49,7 @@ pub use file::{
 pub use process::{process_liveness, process_start_time};
 pub use reducer::{Reducer, SharedReducer, fold};
 pub use store::{Applied, LIVE_STATE_FILE, LIVE_STATE_LOCK, LOCK_WAIT, LiveStore};
+
+#[cfg(test)]
+#[path = "privacy_tests.rs"]
+mod privacy_tests;
