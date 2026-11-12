@@ -183,7 +183,7 @@ named.
 | Host records | Why not here |
 | --- | --- |
 | 0031, 0034, 0045, 0055, 0061, 0062, 0063, 0064, 0065, 0071, 0107, 0114, 0139, 0144, 0198, 0202 | The host's views: which lists it shows, how it groups, sorts, and filters them, what each view remembers, and where a reveal lands. The tree, column schemas, palettes, and the settings panel draw them (records 0054, 0055, 0059, 0060). |
-| 0072, 0120, 0145 | The host's state glyphs and state words, and what they mean. The framework vets the glyphs a host registers (record 0015). |
+| 0072, 0120, 0145, 0209 | The host's state glyphs and state words, and what they mean. The framework vets the glyphs a host registers (record 0015). |
 | 0023, 0033, 0074, 0075, 0112 | What the host's detail pane and preview say about one thing (0033 was superseded before the framework existed). The property grid, the explorer, and the scroll region draw it (records 0021, 0061, 0062). |
 | 0078 | What each of the host's chrome lines carries. How a line gives way is records 0018 and 0064, and which keys the status bar names is record 0066. |
 | 0019, 0052, 0053, 0122 | The host's document viewer: its model, its parsers, and its toggles. Its reader is the pager (record 0056). |

@@ -10,6 +10,13 @@ The glyph choices were revised after the first link pair and the merged and
 closed marks drew wider than one cell in a real terminal font; the table below
 is the current set, and every glyph is vetted for width (see ADR 0073's
 2026-10 amendment).
+Amended by
+[ADR 0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md):
+live agent state is a cell of its own after the age on session and mux
+rows, with six marks (`!` waiting, `»` working, `›` ready, `×` error, `?`
+can't tell, `·` none), and a running session's Pinned and History word
+is its live word (`waiting`, `working`, `ready`, `error`) in place of
+`in mux` or `resumable`.
 
 ## Context
 
