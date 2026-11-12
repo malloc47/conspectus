@@ -188,6 +188,10 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     ) -> Vec<LiveEvent> {
         live::live_events(payload, context, observed_ms)
     }
+
+    fn reports_live_state(&self) -> bool {
+        true
+    }
 }
 
 #[path = "claude_code_live.rs"]

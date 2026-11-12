@@ -423,6 +423,15 @@ pub trait HarnessAdapter: Send + Sync {
         None
     }
 
+    /// Whether the hooks `conspectus hook init` installs for this harness
+    /// report live state, through [`Self::live_events_from_payload`] or
+    /// [`Self::live_snapshot_from_payload`]. `hook status` reads it to
+    /// tell a hook that has nothing to report from one that is silent.
+    /// Defaults to `false`.
+    fn reports_live_state(&self) -> bool {
+        false
+    }
+
     /// The reducer that folds this harness's live events into a
     /// session's entry. Defaults to the shared one; a harness whose
     /// events need a transition of their own returns a reducer that

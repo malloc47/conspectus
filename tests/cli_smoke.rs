@@ -809,6 +809,146 @@ fn hook_init_claude_code_refuses_a_hooks_table_it_would_replace() {
     assert_eq!(fs::read_to_string(&settings).expect("read"), text);
 }
 
+/// The last line `hook status <harness>` prints: the live-state health.
+fn health_line(home: &Path, harness: &str) -> String {
+    let assert = isolated_cmd(home)
+        .env("CODEX_HOME", home.join(".codex"))
+        .args(["hook", "status", harness])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    stdout.lines().last().expect("a health line").to_string()
+}
+
+fn install_claude_hooks(home: &Path) {
+    isolated_cmd(home)
+        .args([
+            "hook",
+            "init",
+            "claude-code",
+            "--command",
+            "conspectus hook write claude-code",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn hook_status_says_how_to_turn_live_state_on_when_the_hooks_are_not_installed() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let store = home.path().join(".local/state/conspectus/live-state.json");
+    assert_eq!(
+        health_line(home.path(), "claude-code"),
+        format!(
+            "off\tclaude-code\t{}\tlive state: off; `conspectus hook init claude-code` installs \
+             the hooks that report it",
+            store.display()
+        )
+    );
+}
+
+#[test]
+fn hook_status_counts_the_sessions_whose_hooks_report_live_state() {
+    use conspectus::live_store::{LiveEvent, LiveEventKind, LiveStore, now_ms};
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    install_claude_hooks(home.path());
+    assert!(
+        health_line(home.path(), "claude-code").starts_with("no-events\tclaude-code\t"),
+        "installed, with nothing heard and no agent running"
+    );
+
+    let store = LiveStore::at(home.path().join(".local/state/conspectus"));
+    for session in ["alpha", "beta"] {
+        store
+            .apply_event(&LiveEvent::new(
+                "claude-code",
+                session,
+                now_ms(),
+                LiveEventKind::TurnStarted,
+            ))
+            .expect("write live state");
+    }
+    let line = health_line(home.path(), "claude-code");
+    assert!(
+        line.starts_with(&format!(
+            "receiving\tclaude-code\t{}\tlive state: 2 sessions, newest event ",
+            store.path().display()
+        )),
+        "{line}"
+    );
+    assert!(line.ends_with(" ago"), "{line}");
+}
+
+#[test]
+fn hook_status_calls_an_installed_hook_silent_when_its_agent_runs_without_events() {
+    use conspectus::model::{
+        GraphNode, GraphSnapshot, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole,
+    };
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    install_claude_hooks(home.path());
+    // The graph the last discovery saved holds a Claude Code agent: this
+    // test's own process, which runs while `hook status` looks.
+    let agent = GraphSnapshot {
+        nodes: vec![GraphNode::RuntimeProcess(RuntimeProcessNode {
+            id: RuntimeProcessId::new("mux_session:tmux:work:root:1:pid:2"),
+            observation_key: "mux_session:tmux:work:root:1:pid:2".to_string(),
+            pid: Some(i64::from(std::process::id())),
+            parent_pid: None,
+            root_pane_pid: None,
+            command: Some("claude".to_string()),
+            cwd: None,
+            harness_key: Some("claude-code".to_string()),
+            role: Some(RuntimeProcessRole::HumanAgent),
+            depth: Some(0),
+            observed_epoch: None,
+        })],
+        ..GraphSnapshot::empty()
+    };
+    conspectus::snapshot::write_atomic(
+        &home.path().join(".local/share/conspectus/graph.bin"),
+        &agent,
+    )
+    .expect("write graph.bin");
+
+    let line = health_line(home.path(), "claude-code");
+    assert!(
+        line.starts_with("silent\tclaude-code\t"),
+        "an installed hook with a running agent and no events: {line}"
+    );
+    assert!(
+        line.ends_with(
+            "\tlive state: active but no events: hooks may be untrusted, disabled, or the \
+             agent was started before they were installed"
+        ),
+        "{line}"
+    );
+
+    // Not installed, the same agent is told how to install the hooks.
+    isolated_cmd(home.path())
+        .args(["hook", "remove", "claude-code"])
+        .assert()
+        .success();
+    assert!(health_line(home.path(), "claude-code").starts_with("off\tclaude-code\t"));
+}
+
+#[test]
+fn hook_status_says_when_a_harness_s_hook_reports_no_live_state() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    for harness in ["codex", "pi"] {
+        let line = health_line(home.path(), harness);
+        assert!(
+            line.starts_with(&format!("unsupported\t{harness}\t")),
+            "{line}"
+        );
+        assert!(
+            line.ends_with("\tlive state: not reported by this harness's hook"),
+            "{line}"
+        );
+    }
+}
+
 fn read_settings(path: &std::path::Path) -> serde_json::Value {
     serde_json::from_str(&fs::read_to_string(path).expect("read settings")).expect("settings json")
 }

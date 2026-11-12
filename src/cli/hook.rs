@@ -5,7 +5,8 @@
 //! harness's hook: settings entries for Claude Code, one per event it
 //! reports, in [`super::hook_claude`]; a settings entry for Codex; an
 //! owned extension file for Pi), and `status` (reports whether the
-//! hook is installed).
+//! hook is installed, then whether it feeds live state; that line comes
+//! from [`super::hook_health`]).
 //!
 //! Every helper this module needs is either hook-specific
 //! (moved here alongside the args) or comes from external
@@ -22,6 +23,7 @@ use toml_edit::{Array, DocumentMut, Item, Table, Value};
 use super::hook_claude::{
     claude_hook_coverage, coverage_label, ensure_claude_hook, remove_claude_hook,
 };
+use super::hook_health::print_health;
 use super::hook_write::HookWriteArgs;
 
 #[derive(Debug, Args)]
@@ -51,7 +53,7 @@ enum HookCommand {
     /// Install a Conspectus hook into harness configuration.
     Init(HookInitArgs),
     /// Report whether a Conspectus hook is installed (for Claude Code,
-    /// event by event).
+    /// event by event) and whether it feeds live state.
     Status(HookStatusArgs),
     /// Remove a Conspectus hook from harness configuration.
     Remove(HookRemoveArgs),
@@ -213,17 +215,30 @@ impl HookInitArgs {
 }
 
 impl HookStatusArgs {
+    /// The install lines, then the live-state health line
+    /// (`<health>\t<harness>\t<store file>\t<message>`).
     fn run(self) -> Result<()> {
-        match self.harness {
-            HookHarnessFlag::ClaudeCode => self.run_claude_status(),
-            HookHarnessFlag::Codex => self.run_codex_status(),
-            HookHarnessFlag::Pi => self.run_pi_status(),
+        let (harness, installed) = match self.harness {
+            HookHarnessFlag::ClaudeCode => ("claude-code", self.run_claude_status()?),
+            HookHarnessFlag::Codex => ("codex", self.run_codex_status()?),
+            HookHarnessFlag::Pi => ("pi", self.run_pi_status()?),
+        };
+        print_health(harness, installed, self.scope_flag());
+        Ok(())
+    }
+
+    /// The scope's flag as an install hint spells it.
+    fn scope_flag(&self) -> &'static str {
+        match self.scope {
+            HookScopeFlag::User => "",
+            HookScopeFlag::Project => " --scope project",
         }
     }
 
     /// One line for the install as a whole, then one per subscribed
-    /// event, each `<label>\tclaude-code\t<path>\t<event>`.
-    fn run_claude_status(self) -> Result<()> {
+    /// event, each `<label>\tclaude-code\t<path>\t<event>`. Returns
+    /// whether any event is installed.
+    fn run_claude_status(&self) -> Result<bool> {
         let path = claude_settings_path(self.scope)?;
         let document = read_json_document(&path)?;
         let coverage = claude_hook_coverage(&document);
@@ -237,39 +252,44 @@ impl HookStatusArgs {
             );
         }
         if overall == "partial" {
-            let scope = match self.scope {
-                HookScopeFlag::User => "",
-                HookScopeFlag::Project => " --scope project",
-            };
             eprintln!(
-                "some events are missing or outdated; `{} hook init claude-code{scope}` completes the install",
-                crate::invocation::invoked_name()
+                "some events are missing or outdated; `{} hook init claude-code{}` completes the install",
+                crate::invocation::invoked_name(),
+                self.scope_flag()
             );
         }
-        Ok(())
+        Ok(overall != "not-installed")
     }
 
-    fn run_codex_status(self) -> Result<()> {
+    /// Returns whether the hook is installed.
+    fn run_codex_status(&self) -> Result<bool> {
         let path = codex_config_path(self.scope)?;
         let document = read_toml_document(&path)?;
-        if has_codex_hook(&document) {
+        let installed = has_codex_hook(&document);
+        if installed {
             println!("installed\tcodex\t{}", path.display());
         } else {
             println!("not-installed\tcodex\t{}", path.display());
         }
-        Ok(())
+        Ok(installed)
     }
 
-    fn run_pi_status(self) -> Result<()> {
+    /// Returns whether a Conspectus extension, current or older, is
+    /// installed.
+    fn run_pi_status(&self) -> Result<bool> {
         let path = pi_extension_path(self.scope)?;
-        let label = match pi_extension_state(&path)? {
+        let state = pi_extension_state(&path)?;
+        let label = match state {
             PiExtensionState::Installed => "installed",
             PiExtensionState::Outdated => "outdated",
             PiExtensionState::Absent => "not-installed",
             PiExtensionState::Foreign => "foreign",
         };
         println!("{label}\tpi\t{}", path.display());
-        Ok(())
+        Ok(matches!(
+            state,
+            PiExtensionState::Installed | PiExtensionState::Outdated
+        ))
     }
 }
 

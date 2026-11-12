@@ -143,6 +143,7 @@ mod hook;
 use hook::HookArgs;
 
 mod hook_claude;
+mod hook_health;
 mod hook_write;
 
 mod node;
