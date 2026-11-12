@@ -20,6 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -820,6 +821,20 @@ impl World {
     /// Start `conspectus <args>` under strace, tracing into a new
     /// directory.
     fn spawn(&self, strace: &Path, label: &str, args: &[&str], cwd: &Path) -> (Child, PathBuf) {
+        self.spawn_with(strace, label, args, cwd, &[], false)
+    }
+
+    /// [`Self::spawn`] with `env` added to the world's environment, and
+    /// stdin a pipe the caller writes when `piped` is set.
+    fn spawn_with(
+        &self,
+        strace: &Path,
+        label: &str,
+        args: &[&str],
+        cwd: &Path,
+        env: &[(&str, &str)],
+        piped: bool,
+    ) -> (Child, PathBuf) {
         let dir = self.root.join("traces").join(label);
         fs::create_dir_all(&dir).expect("trace dir");
         let child = Command::new(strace)
@@ -841,12 +856,49 @@ impl World {
             .current_dir(cwd)
             .env_clear()
             .envs(self.env.iter().map(|(key, value)| (key, value)))
-            .stdin(Stdio::null())
+            .envs(env.iter().copied())
+            .stdin(if piped { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn strace");
         (child, dir)
+    }
+
+    /// Run `conspectus hook write <harness>` to completion under strace,
+    /// as a harness inside tmux pane `%1` runs it, with `payload` on
+    /// stdin. Like every hook write it must succeed silently.
+    fn hook_write(
+        &self,
+        strace: &Path,
+        label: &str,
+        harness: &str,
+        payload: &str,
+        cwd: &Path,
+    ) -> PathBuf {
+        let tmux = format!("{},1,0", self.root.join("tmux-sock").display());
+        let (mut child, dir) = self.spawn_with(
+            strace,
+            label,
+            &["hook", "write", harness],
+            cwd,
+            &[("TMUX", &tmux), ("TMUX_PANE", "%1")],
+            true,
+        );
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(payload.as_bytes())
+            .expect("write the payload");
+        let output = child.wait_with_output().expect("wait for strace");
+        assert!(
+            output.status.success() && output.stdout.is_empty() && output.stderr.is_empty(),
+            "`conspectus hook write {harness}` was not silent: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        dir
     }
 
     /// Run `conspectus <args>` to completion under strace. The command
@@ -882,6 +934,18 @@ fn traced_root(dir: &Path) -> Option<i32> {
                     .ok()
             })?
     })
+}
+
+/// A synthetic Claude Code hook payload for `event`.
+fn hook_payload(event: &str) -> String {
+    serde_json::json!({
+        "session_id": "5e1f0c3a-7d2b-4a9e-8c61-2f4b9d0e7a33",
+        "cwd": "/work/project",
+        "transcript_path": "/work/project/5e1f0c3a.jsonl",
+        "hook_event_name": event,
+        "source": "startup",
+    })
+    .to_string()
 }
 
 fn wait_for(path: &Path, timeout: Duration) {
@@ -1035,6 +1099,14 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             project,
         ),
         world.run(&strace, "client-table", &["table", "mux"], project),
+        // A session start goes to the daemon's hook ingest.
+        world.hook_write(
+            &strace,
+            "hook-write-daemon",
+            "claude-code",
+            &hook_payload("SessionStart"),
+            project,
+        ),
     ];
     let pid = traced_root(&serve_dir).expect("traced serve pid");
     // SAFETY: `kill` with a pid this test spawned and a valid signal.
@@ -1273,6 +1345,47 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             pager: None,
         },
         &hooks,
+        project,
+    );
+
+    // Hook writes with no daemon: a session start asks tmux for the
+    // pane's session and writes the live state and the spool; a state
+    // event of the same session after it writes only the live state.
+    let start = world.hook_write(
+        &strace,
+        "hook-write-start",
+        "claude-code",
+        &hook_payload("SessionStart"),
+        project,
+    );
+    let state = world.hook_write(
+        &strace,
+        "hook-write-state",
+        "claude-code",
+        &hook_payload("Stop"),
+        project,
+    );
+    let quiet: Vec<Event> = conspectus_events(&state, project)
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event,
+                Event::Exec { .. } | Event::Socket { .. } | Event::Connect { .. }
+            )
+        })
+        .collect();
+    assert!(
+        quiet.is_empty(),
+        "a state event after the session's first started a process or opened a socket: {quiet:?}"
+    );
+    record(
+        &Scenario {
+            name: "hook write",
+            contexts: &["read"],
+            vars: &vars,
+            pager: None,
+        },
+        &[start, state],
         project,
     );
 

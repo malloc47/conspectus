@@ -17,7 +17,9 @@
 # Every allowance belongs to a context:
 #
 # - `read`: any command, including discovery, tables, exports, the TUI,
-#   and the daemon. Read-only, apart from rebuildable caches.
+#   the daemon, and `hook write`. Read-only, apart from rebuildable caches
+#   and observations: `hook write` records the hook spool and the
+#   live-state store under `$STATE` (ADR 0146, ADR 0204).
 # - `act`: commands the operator runs to change something (pin, mux,
 #   rename, declared, worktree, launch and attach from the TUI).
 # - `hook`: `conspectus hook init` and `hook remove`.
@@ -152,7 +154,7 @@ act = ["SIGTERM", "SIGKILL", "0"]
 # `$SCRATCH` is the directory the dev scenario builder was given.
 # Creating the missing parents of an allowed path is allowed too.
 [writes]
-adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0143", "0121"]
+adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0143", "0121", "0146", "0204"]
 # Terminals and the null device, in every context.
 always = ["/dev/null", "/dev/tty", "/dev/pts/*"]
 # Rebuildable caches and observations.
