@@ -4170,6 +4170,148 @@
       "last_seen": 1790424000
     }
   ],
+  "node_live": [
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-claude"
+      },
+      "state": "ready",
+      "detail": "finished",
+      "since_ms": 1790766000000,
+      "observed_ms": 1790769300000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-claude-ambig-a"
+      },
+      "state": "waiting",
+      "detail": "permission",
+      "since_ms": 1790769540000,
+      "observed_ms": 1790769540000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-claude-ambig-b"
+      },
+      "state": "working",
+      "detail": "tool",
+      "since_ms": 1790769480000,
+      "observed_ms": 1790769570000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-deck-launcher"
+      },
+      "state": "ready",
+      "detail": "finished",
+      "since_ms": 1790769540000,
+      "observed_ms": 1790769540000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-hook-current"
+      },
+      "state": "working",
+      "detail": "generating",
+      "since_ms": 1790768760000,
+      "observed_ms": 1790768880000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/harness/codex",
+        "session_key": "showcase-bare-codex"
+      },
+      "state": "exited",
+      "detail": "ended",
+      "since_ms": 1790726400000,
+      "observed_ms": 1790726400000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "opencode",
+        "state_scope": "/fixture/harness/opencode",
+        "session_key": "showcase-opencode"
+      },
+      "state": "working",
+      "detail": "generating",
+      "since_ms": 1790768100000,
+      "observed_ms": 1790768400000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "pi",
+        "state_scope": "/fixture/harness/pi",
+        "session_key": "showcase-pi"
+      },
+      "state": "error",
+      "detail": "rate_limited",
+      "since_ms": 1790762400000,
+      "observed_ms": 1790769540000,
+      "source": "hook",
+      "heartbeat_s": 60,
+      "liveness": "unknown"
+    }
+  ],
+  "pane_live": [
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:project"
+      },
+      "pane": "%3",
+      "state": "working",
+      "detail": "generating",
+      "since_ms": 1790769420000,
+      "observed_ms": 1790769580000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:project"
+      },
+      "pane": "%4",
+      "state": "starting",
+      "since_ms": 1790769570000,
+      "observed_ms": 1790769570000,
+      "source": "hook",
+      "liveness": "unknown"
+    }
+  ],
   "history": {
     "muxes": [
       {

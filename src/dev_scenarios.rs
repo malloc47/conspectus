@@ -966,6 +966,189 @@ fn build_showcase(world: &mut ScenarioWorld) -> Result<()> {
     add_forge_prs_to_showcase(world, &project)?;
     add_hook_supersession_to_showcase(world, &project)?;
     add_pins_and_history_to_showcase(world, &project)?;
+    add_live_state_to_showcase(world)?;
+    Ok(())
+}
+
+/// What the showcase's agents are doing, in the world's own live-state
+/// store, so every live-state mark shows somewhere: a session waiting on
+/// the operator, one working and one gone quiet at it, ready ones (the
+/// pinned session among them), an error, evidence too old to trust, an
+/// exited session, and sessions with none. The `ambiguous` mux's two
+/// candidates are waiting and working, so its row rolls the two up, and
+/// two agents in panes of `project` that no session matches yet count
+/// there.
+///
+/// No entry records a process, so each holds for fifteen minutes from its
+/// latest evidence, measured from the showcase's anchor time; the
+/// scenario TUI, which reads them against today's clock, shows them all
+/// as stale.
+fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
+    use crate::live_store::{LiveContext, LiveSnapshot, LiveStore, LiveTmux};
+    use crate::model::live::{LiveDetail, LiveState};
+
+    /// One agent's report: its harness and session, its state, when the
+    /// state began and when the agent was last heard from (milliseconds
+    /// before the anchor), the seconds between its heartbeats, and the
+    /// pane of `project` it runs in when no session matches it.
+    struct Report {
+        harness: &'static str,
+        session: &'static str,
+        state: LiveState,
+        detail: Option<LiveDetail>,
+        began: i64,
+        heard: i64,
+        heartbeat_s: u32,
+        pane: Option<&'static str>,
+    }
+    let report = |session, state, detail, began, heard| Report {
+        harness: "claude-code",
+        session,
+        state,
+        detail,
+        began,
+        heard,
+        heartbeat_s: 0,
+        pane: None,
+    };
+
+    let now_ms = SHOWCASE_NOW_EPOCH * 1_000;
+    let minute = 60_000;
+    let store = LiveStore::at(world.root.join("state/conspectus"));
+    let reports = [
+        report(
+            "showcase-claude-ambig-a",
+            LiveState::Waiting,
+            Some(LiveDetail::Permission),
+            minute,
+            minute,
+        ),
+        report(
+            "showcase-claude-ambig-b",
+            LiveState::Working,
+            Some(LiveDetail::Tool),
+            2 * minute,
+            minute / 2,
+        ),
+        report(
+            "showcase-deck-launcher",
+            LiveState::Ready,
+            Some(LiveDetail::Finished),
+            minute,
+            minute,
+        ),
+        // Twelve minutes without news is past the ten-minute quiet window
+        // and inside the fifteen minutes an unchecked process holds its
+        // state.
+        report(
+            "showcase-hook-current",
+            LiveState::Working,
+            Some(LiveDetail::Generating),
+            14 * minute,
+            12 * minute,
+        ),
+        report(
+            "showcase-claude",
+            LiveState::Ready,
+            Some(LiveDetail::Finished),
+            60 * minute,
+            5 * minute,
+        ),
+        Report {
+            harness: "pi",
+            heartbeat_s: 60,
+            ..report(
+                "showcase-pi",
+                LiveState::Error,
+                Some(LiveDetail::RateLimited),
+                120 * minute,
+                minute,
+            )
+        },
+        // Twenty minutes without news from a process nobody can check.
+        Report {
+            harness: "opencode",
+            ..report(
+                "showcase-opencode",
+                LiveState::Working,
+                Some(LiveDetail::Generating),
+                25 * minute,
+                20 * minute,
+            )
+        },
+        Report {
+            harness: "codex",
+            ..report(
+                "showcase-bare-codex",
+                LiveState::Exited,
+                Some(LiveDetail::Ended),
+                12 * 60 * minute,
+                12 * 60 * minute,
+            )
+        },
+        // Two agents in panes of `project` that no session matches yet:
+        // one working, and a newer one starting beside it.
+        Report {
+            pane: Some("%3"),
+            ..report(
+                "showcase-new-pane",
+                LiveState::Working,
+                Some(LiveDetail::Generating),
+                3 * minute,
+                minute / 3,
+            )
+        },
+        Report {
+            pane: Some("%4"),
+            ..report(
+                "showcase-new-pane-2",
+                LiveState::Starting,
+                None,
+                minute / 2,
+                minute / 2,
+            )
+        },
+    ];
+    for (seq, report) in (1u64..).zip(reports) {
+        let Report {
+            harness,
+            session,
+            state,
+            detail,
+            began,
+            heard,
+            heartbeat_s,
+            pane,
+        } = report;
+        let context = LiveContext {
+            tmux: pane.map(|pane| LiveTmux {
+                socket: Some("/tmp/tmux-showcase/default".to_string()),
+                session: Some("project".to_string()),
+                pane: Some(pane.to_string()),
+            }),
+            ..LiveContext::default()
+        };
+        let snapshot = LiveSnapshot {
+            harness: harness.to_string(),
+            session_id: session.to_string(),
+            instance: "showcase".to_string(),
+            seq,
+            observed_ms: now_ms - heard,
+            context,
+            state,
+            detail,
+            since_ms: now_ms - began,
+            subagents: 0,
+            via_subagent: false,
+            heartbeat_s,
+        };
+        let applied = store
+            .apply_snapshot(&snapshot)
+            .with_context(|| format!("record the showcase's live state for {session}"))?;
+        if !matches!(applied, crate::live_store::Applied::Written { .. }) {
+            bail!("the showcase's live state for {session} was not recorded: {applied:?}");
+        }
+    }
     Ok(())
 }
 

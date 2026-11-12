@@ -16,6 +16,7 @@
 
 use std::collections::BTreeSet;
 
+use conspectus::model::live::LiveState;
 use conspectus::model::{GraphSnapshot, RelationKind};
 
 #[cfg(debug_assertions)]
@@ -118,6 +119,32 @@ fn assert_layer_coverage(snapshot: &GraphSnapshot) {
     assert!(has_forge_pr, "showcase missing forge_pr coverage");
     assert!(has_fork, "showcase missing fork coverage");
     assert!(has_mux, "showcase missing mux coverage");
+
+    // Live state for every mark the TUI draws: a session waiting, one
+    // working, one ready, one failed, one exited, and agents in a mux's
+    // panes that no session matches yet.
+    let live: BTreeSet<LiveState> = snapshot
+        .node_live
+        .values()
+        .map(|binding| binding.observation.state)
+        .collect();
+    for state in [
+        LiveState::Waiting,
+        LiveState::Working,
+        LiveState::Ready,
+        LiveState::Error,
+        LiveState::Exited,
+    ] {
+        assert!(
+            live.contains(&state),
+            "showcase missing a session in live state `{}`; have: {live:?}",
+            state.name()
+        );
+    }
+    assert!(
+        !snapshot.pane_live.is_empty(),
+        "showcase missing a pane-only live agent"
+    );
 
     // Lineage relation: codex parent → child fork chain.
     let has_lineage = snapshot

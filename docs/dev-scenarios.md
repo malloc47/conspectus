@@ -308,6 +308,7 @@ Coverage at a glance:
 | Forks | 1 (atelier alpha) |
 | Forge PRs | 2 (open + draft) |
 | Resolved relationships | 37 across 11 distinct relation kinds incl. `parent_session` lineage |
+| Live state | 8 sessions (waiting, working, quiet working, ready × 2, error, stale, exited) and 2 agents in panes of `project` no session matches, in the world's own `state/conspectus/live-state.json`; no process is recorded, so each holds for fifteen minutes from the anchor time and the scenario TUI shows them stale |
 
 ## Adding A Scenario
 
