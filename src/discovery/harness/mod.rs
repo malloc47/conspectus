@@ -373,6 +373,63 @@ pub trait HarnessAdapter: Send + Sync {
             background_harness: false,
         })
     }
+
+    /// Whether `conspectus hook write` records `payload` for attribution
+    /// as well: the hook spool and the daemon's `hook_ingest`, which
+    /// re-resolves the graph (ADR 0146). That suits an event that names
+    /// the session a process now runs, such as a session start, and is
+    /// far too slow for one that fires on every tool call, so an adapter
+    /// that installs such events answers `false` for them: they reach
+    /// only the live-state store. Defaults to `true`, for adapters whose
+    /// hooks report only the session.
+    fn is_attribution_event(&self, payload: &serde_json::Value) -> bool {
+        let _ = payload;
+        true
+    }
+
+    /// The live-state events a hook payload says, in order (ADR 0204,
+    /// ADR 0206), for a harness that runs `conspectus hook write` once
+    /// per event. Each event carries `context`, which says where the
+    /// writer runs, with the cwd and transcript path the payload names
+    /// added, and `observed_ms`, when the writer started.
+    ///
+    /// Read the payload through a borrowed view of the whitelisted
+    /// fields (ADR 0206 decisions 10 to 12): never clone the payload or
+    /// walk into a field the view does not name, so a large
+    /// `tool_response` costs nothing, and never keep text. An event this
+    /// mapping does not cover, or a payload it cannot read, yields
+    /// nothing. Defaults to no events.
+    fn live_events_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        context: &crate::live_store::LiveContext,
+        observed_ms: i64,
+    ) -> Vec<crate::live_store::LiveEvent> {
+        let _ = (payload, context, observed_ms);
+        Vec::new()
+    }
+
+    /// The live-state snapshot a hook payload carries, for a harness
+    /// whose plugin keeps the session's state itself and sends all of
+    /// it (ADR 0204 decision 3). The same rules as
+    /// [`Self::live_events_from_payload`] apply. Defaults to none.
+    fn live_snapshot_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        context: &crate::live_store::LiveContext,
+        observed_ms: i64,
+    ) -> Option<crate::live_store::LiveSnapshot> {
+        let _ = (payload, context, observed_ms);
+        None
+    }
+
+    /// The reducer that folds this harness's live events into a
+    /// session's entry. Defaults to the shared one; a harness whose
+    /// events need a transition of their own returns a reducer that
+    /// handles it and hands the rest to [`crate::live_store::fold`].
+    fn live_reducer(&self) -> &dyn crate::live_store::Reducer {
+        &crate::live_store::SharedReducer
+    }
 }
 
 /// Stub signature used as the [`HarnessAdapter::runtime_signature`]

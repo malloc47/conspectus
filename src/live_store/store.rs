@@ -201,8 +201,9 @@ fn acquire(lock: &fs::File, wait: Duration) -> io::Result<bool> {
     }
 }
 
-/// The store's clock: Unix epoch milliseconds.
-fn now_ms() -> i64 {
+/// The store's clock: Unix epoch milliseconds. Writers stamp their
+/// events' `observed_ms` with it.
+pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| {
