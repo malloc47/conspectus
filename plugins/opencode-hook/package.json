@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@conspectus/opencode-hook",
-  "version": "0.2.0",
-  "description": "OpenCode plugin (1.x root entrypoint, 2.x TUI entrypoint in dist/v2) that forwards session lifecycle events to `conspectus hook write opencode` for mux↔session attribution.",
+  "version": "0.3.0",
+  "description": "OpenCode plugin (1.x root entrypoint, 2.x server and TUI entrypoints in dist/v2) that reports each session's live state and the session a pane shows to `conspectus hook write opencode`.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,7 +20,8 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.14.0"

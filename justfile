@@ -137,3 +137,22 @@ scratch *args='shell':
 # change to the left panel; edit the document's prose by hand.
 tui-columns:
     UPDATE_TUI_COLUMNS=1 cargo nextest run --all-features --test tui_columns_doc
+
+# The opencode plugin's live-state tests (ADR 0206): its reducer replays
+# the event scripts in tests/fixtures/hooks/opencode-live/. They need
+# Node 22.6 or later, which the dev shell does not provide. Without it the
+# recipe says so and fails, since a test run that could not run is no
+# pass; `check` does not run it.
+opencode-plugin-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v node >/dev/null 2>&1; then
+        echo "opencode-plugin-test: node not found on PATH; the plugin tests need Node 22.6 or later" >&2
+        exit 1
+    fi
+    if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 6) ? 0 : 1)'; then
+        echo "opencode-plugin-test: node $(node --version) is too old; the plugin tests need Node 22.6 or later" >&2
+        exit 1
+    fi
+    cd plugins/opencode-hook
+    node --experimental-strip-types --test test/*.test.ts
