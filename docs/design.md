@@ -89,6 +89,11 @@ repo, or a checkout branch with an open PR and no known agent session.
   optional; the one-shot CLI must remain useful without a server running.
   Graph generation cost must not require the one-shot path to rebuild every
   link from scratch on each invocation.
+- Show what an active agent session or mux is doing now: waiting on the
+  operator, ready for a prompt, or working. Live state is a neutral,
+  payload-free observation carried by hooks and plugins, bound to the graph
+  through a sparse side table, and absent (not idle) where there is no
+  evidence. Conspectus observes it and never acts on it.
 
 ## Relationship To Atelier
 
@@ -633,6 +638,38 @@ the one it replaced (`rebuilt_from`), and each live mux's most recent
 hosted session holds its attribution as a `Cached` `linked_to_mux`
 fallback when current evidence drifts. Code that acts on a node checks
 presence first, so nothing attaches to, counts, or renames a ghost.
+
+## Live Agent State
+
+Per ADRs 0202 to 0206 (plan: `docs/plans/live-state/`), Conspectus shows what
+a running agent is doing, in the operator's three buckets: **waiting** on them
+(permission, question, plan, input), **ready** for a new prompt, and
+**working** (generating, running a tool, retrying, compacting, with
+subagents). Around those sit `error`, `starting`, `exited`, and `unknown`.
+The set is closed and harness-neutral; harness words stay in adapters.
+
+State is an observation, not a relationship. Emitters (the hook entries of
+Claude Code and Codex, the OpenCode plugin, the Pi extension) report events.
+`conspectus hook write` folds each event into a per-session entry in
+`$XDG_STATE_HOME/conspectus/live-state.json` (a category 2 observation, ADR
+0203). It never waits on a daemon, prints nothing, and keeps only enums,
+counts, ids, paths, and times. Entries are keyed by harness and session id
+and carry the tmux pane, so split panes do not collide.
+
+A discovery mutator binds entries to `AgentSession` nodes (by harness and
+native session id), or to the `MuxSession` for pane-only entries, into a
+sparse `node_live` snapshot table beside `node_presence` (ADR 0204). The TUI
+re-binds from the store about once a second between snapshots, with or without
+a daemon. A mux has no state of its own: it has counts over what it hosts.
+
+The effective state is computed at read time from `now` and process liveness:
+a dead pid is `exited`; `working`, `compacting`, and `starting` that go quiet
+stay as they are and are flagged quiet; `waiting`, `ready`, and `error` do not
+age while the process lives; with no liveness evidence everything but
+`exited` becomes `unknown` after fifteen minutes. A session with no events has
+no live state. Hook-free sources (pane title, `claude agents --json`,
+transcript tails) need their own decisions (ADR 0206). Which glyphs, columns,
+rollups, and orderings show it in the TUI is open (the plan's parked list).
 
 ## Pin Slots
 
@@ -1803,6 +1840,7 @@ migration helper and harmless if it fails.
   - cache/index: `$XDG_DATA_HOME/conspectus/`
   - pin slots: `$XDG_DATA_HOME/conspectus/pins.toml`
   - history: `$XDG_STATE_HOME/conspectus/history/`
+  - live agent state: `$XDG_STATE_HOME/conspectus/live-state.json`
 - Local declared-link files are write-on-demand only.
 - Declared links win over discovered links; conflicts are displayed, not fatal.
 - Durable declared state should be TOML; cache/index internals may use another
