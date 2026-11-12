@@ -151,6 +151,11 @@ forms, lists, readers, and keys look and behave alike.
   header can wait without a session count. The counts line up in one
   column and never give way, so once one header shows a count, the paths
   of the others narrow a few cells sooner on a narrow pane.
+- **The header counts every agent waiting on you.** `! N` appears in the
+  header line, before `▲ N`, when N agents anywhere wait on you, whatever
+  the view lists or the filter hides, and goes when none does. It is the
+  group headers' chip and changes as they do. On a narrow screen it
+  outlasts `▲ N` and the stopped count, which now leave sooner.
 
 ### Changed
 

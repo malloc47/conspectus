@@ -286,7 +286,8 @@ synthetic, built from the documented payload shapes.
 | 10 | Real-payload verification (needs the operator) | CSP-822 |
 | 11 | TUI live cell and Pinned words (ADR 0209) | CSP-823 (done) |
 | 12 | TUI group headers count waiting agents (ADR 0210) | CSP-824 (done) |
-| decided | TUI header, order, jump, seen, detail, notify, subagents | CSP-825 to CSP-830, CSP-854 |
+| 13 | TUI header chip for waiting agents (ADR 0211) | CSP-825 (done) |
+| decided | TUI order, jump, seen, detail, notify, subagents | CSP-826 to CSP-830, CSP-854 |
 | parked | Hook-free sources (pane title, `claude agents --json`, tails, other orchestrators) | CSP-831 to CSP-834 |
 
 Follow-ups the stories filed (labels `live-state`, milestone m-26):
@@ -406,8 +407,9 @@ state must rebuild the tree on such a change instead.
 12. Staleness display (quiet vs dim vs unknown). CSP-829.
 
 The live cell on session and mux rows and the Pinned words landed with
-CSP-823 (ADR 0209), and the group headers' waiting counts with CSP-824
-(ADR 0210); the rest of the list above is still to build, and the
+CSP-823 (ADR 0209), the group headers' waiting counts with CSP-824
+(ADR 0210), and the header's with CSP-825 (ADR 0211); the rest of the
+list above is still to build, and the
 CLI and the graph JSON keep the fuller view
 ([`docs/operations.md`](../../operations.md#live-agent-state)).
 
@@ -467,8 +469,9 @@ Where the build differs from, or settles, the draft above:
 - **The TUI keeps the data current.** It binds the store again within
   about a second of a change and re-checks bound agents' processes once a
   second (CSP-843); the row models carry `live` fields (CSP-814), which
-  the live cell and the Pinned words draw (CSP-823, ADR 0209) and the
-  group headers count (CSP-824, ADR 0210).
+  the live cell and the Pinned words draw (CSP-823, ADR 0209), the
+  group headers count (CSP-824, ADR 0210), and the header line counts
+  over the whole graph (CSP-825, ADR 0211).
 - **CLI surfaces.** An opt-in `live` column on `table sessions` and
   `table mux`, a `live state` section in `node show`, the two lists in
   the graph JSON, and a health line at the end of `hook status`

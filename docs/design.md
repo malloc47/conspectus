@@ -707,9 +707,10 @@ session's live state as `waiting`, `working`, `ready`, or `error` in place
 of its link word. The cell never gives way on a narrow row. A group
 header counts the agents beneath it that wait, each once, as `! N` after
 its `(N)` (ADR 0210): its session rows, or in the Mux view every agent of
-its muxes. Ordering, grouping, filtering, the header count, the jump key,
-seen and unseen, and the detail pane's fields are later stories (the
-plan's section 7.1).
+its muxes. The header line counts every waiting agent anywhere, whatever
+the view shows, in the same chip before `▲ N` (ADR 0211). Ordering,
+grouping, filtering, the jump key, seen and unseen, and the detail pane's
+fields are later stories (the plan's section 7.1).
 
 ## Pin Slots
 
