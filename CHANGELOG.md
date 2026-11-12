@@ -51,7 +51,7 @@ forms, lists, readers, and keys look and behave alike.
   `starting`, `exited`, `unknown`) with their details, the observation a
   session's live state is recorded as, the read-time rule that marks a
   long-silent state quiet or stale and a dead process exited, and
-  per-state counts for a mux. Nothing produces or shows live state yet.
+  per-state counts for a mux.
 - **Graph snapshots carry live state.** `GraphSnapshot` has a sparse
   `node_live` table keyed by agent session, and a sparse `pane_live`
   table keyed by tmux mux and pane for agents seen in a pane that no
@@ -75,8 +75,7 @@ forms, lists, readers, and keys look and behave alike.
   start entry now also matches forked sessions. Re-run `conspectus hook
   init claude-code` to turn it on: an install that covered only session
   start is upgraded in place, and nothing changes until you run it. Each
-  event updates the session's entry in `live-state.json`; nothing shows
-  it in the TUI yet.
+  event updates the session's entry in `live-state.json`.
 - **Codex reports what each session is doing.** `conspectus hook init
   codex` now installs an entry for each of the 11 Codex hook events that
   say whether a session is working, waiting for an approval, ready,
@@ -84,7 +83,7 @@ forms, lists, readers, and keys look and behave alike.
   timeout. To turn it on, re-run `conspectus hook init codex`, then open
   `/hooks` in Codex and trust the new entries: recent Codex versions skip
   a hook until you do, and `hook init` reminds you. Each event updates the
-  session's entry in `live-state.json`; nothing shows it in the TUI yet.
+  session's entry in `live-state.json`.
   `hook status codex` reports each event, as for Claude Code.
 - **Discovery binds live state to the graph.** Every discovery (daemon
   cycles, one-shot commands, the daemonless TUI) reads
@@ -93,7 +92,6 @@ forms, lists, readers, and keys look and behave alike.
   session for it yet, with whether its process still runs. `conspectus
   graph --format json` lists them under `node_live`; an entry that
   matches nothing shows nowhere, and live state never adds a session.
-  The TUI shows none of it yet.
 - **Live state in `conspectus table`, `node show`, and `hook status`.**
   An opt-in `live` column on `table sessions` shows what each session is
   doing as the command runs (`waiting:permission +1 3m`,
@@ -123,8 +121,7 @@ forms, lists, readers, and keys look and behave alike.
   every session. A subagent's wait also shows on its root session. To
   turn it on, rebuild the plugin and `conspectus` from the same checkout
   and restart opencode; on 2.x, list `dist/v2` in `opencode.jsonc`
-  instead of `cli.json` and restart the opencode service too. Nothing
-  shows it in the TUI yet.
+  instead of `cli.json` and restart the opencode service too.
 - **Pi reports what its session is doing.** The Pi extension (version 2)
   now sends its session's state (working, waiting on an extension's
   dialog, ready, compacting, failed, ended, and its subagent tool calls)
@@ -135,7 +132,18 @@ forms, lists, readers, and keys look and behave alike.
   `conspectus hook init pi` again to upgrade,
   then restart Pi or run `/reload`; `hook status pi` says when the
   installed copy is older and that waiting needs Pi 0.84.4 or later.
-  Nothing shows it in the TUI yet.
+- **The TUI shows what each agent is doing.** Session and mux rows, in
+  every view that lists them, have a one-cell mark right after the age:
+  `!` waiting on you, `»` working (dimmed once it has been quiet past the
+  quiet window), `›` ready for a prompt, `×` the turn failed, `?` can't
+  tell, `·` no live state. A mux shows the state of its agents that needs
+  you first (waiting, then error, ready, working). In Pinned, a session
+  whose agent is waiting, working, ready, or failed reads `waiting`,
+  `working`, `ready`, or `error` instead of `in mux` or `resumable`. The
+  colors are the theme's `warning`, `info`, `success`, and `error`; the
+  `?` help lists the marks under "Agent state". Every session and mux row
+  is three cells wider before its label, so narrow panes drop labels and
+  previews sooner.
 
 ### Changed
 

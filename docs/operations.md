@@ -184,8 +184,10 @@ state is one Conspectus has no evidence about, not an idle one.
 Conspectus only watches. It never answers a prompt or types into an
 agent's pane; to act on a waiting agent, attach to its mux as usual.
 
-Live state shows in `conspectus table`, `conspectus node show`, and the
-graph JSON. The TUI does not display it yet.
+Live state shows in the TUI (a mark after the age on session and mux
+rows, and a word on pinned sessions; see
+[Live state in the TUI](#live-state-in-the-tui)), in `conspectus table`,
+`conspectus node show`, and the graph JSON.
 
 ### Turning live state on
 
@@ -256,11 +258,52 @@ time you look:
 - **The 15-minute rule.** When the process can't be checked (no pid was
   recorded, or the system has no `/proc`), every state but `exited` reads
   `unknown:stale` once nothing has arrived for fifteen minutes.
-- **No entry is no evidence.** A session without live state shows `—`,
-  never `ready`.
+- **No entry is no evidence.** A session without live state shows `—`
+  in `conspectus table` and `·` in the TUI, never `ready`.
 
 Every window counts from the latest event, so a repeated report keeps a
 state fresh. A recorded `exited` stays as it is.
+
+### Live state in the TUI
+
+Every session row and mux row has one cell right after its age that says
+what the agent is doing, in every view that lists them (Sessions, the
+agents under a mux or a PR, and Search). It is always filled, and each
+state has its own shape, so it reads without color:
+
+| Mark | Means | Color |
+| --- | --- | --- |
+| `!` | Waiting on you: a permission prompt, a question, a plan, other input | yellow |
+| `»` | Working, compacting, or starting | green |
+| `›` | Ready for a prompt: the turn is over | green |
+| `×` | The turn ended on an error | red |
+| `?` | Can't tell: a process that can't be checked has said nothing for fifteen minutes | dim |
+| `·` | No live state: the harness's hooks are off, or the session has ended | dim |
+
+- **Quiet** work (no news past the quiet window) draws the same `»`
+  dimmed.
+- **A mux** shows the state of its agents that needs you first: waiting,
+  then error, then ready, then working, then the rest. Under a mux with
+  several agents, each agent's row shows its own mark.
+- **Pinned** spells it as a word: a pinned session (or one listed under a
+  pinned mux) whose agent is waiting, working, ready, or failed reads
+  `waiting`, `working`, `ready`, or `error` instead of `in mux` or
+  `resumable`. Can't-tell, ended, and no-state sessions keep `in mux` or
+  `resumable`, and the detail pane still says which mux a session runs
+  in.
+- **Nothing animates.** The spinner still means a refresh is pending, and
+  takes the link cell, not the live mark, which keeps its value until the
+  agent reports again.
+- The colors are the theme's `warning`, `info`, `success`, and `error`
+  colors and its `muted` look, which
+  [`[tui.theme]`](#tuitheme--palette-overrides-adr-0032-adr-0153) sets.
+  `info` and `success` are both green by default; set `info` to tell
+  working from ready by color too (it also colors Info messages).
+- `?` in the TUI lists the marks under "Agent state".
+
+A `·` on every row means no harness reports live state yet: turn it on as
+in [Turning live state on](#turning-live-state-on). The TUI picks up a new
+state within about a second, with or without `conspectus serve`.
 
 ### Where live state shows
 
@@ -765,10 +808,10 @@ muted              = "dim"             # hints, placeholders, notes, rules, foot
 inert              = "dark_gray"       # short ids, previews, gone or stopped rows (a color)
 selection_active   = "reversed,bold"   # the cursor row of the list that has focus: a pane, menu, form, or picker
 selection_inactive = "bold"            # the cursor row of a list without focus, such as the other pane
-success            = "green"           # confirmations: toasts, the status line, Messages
-warning            = "yellow"          # refusals and fallbacks, in the same three places
-error              = "red"             # failures, in the same three places
-info               = "green"           # hints and notes, in the same three places
+success            = "green"           # confirmations: toasts, the status line, Messages; the ready agent mark
+warning            = "yellow"          # refusals and fallbacks, in the same three places; the waiting agent mark
+error              = "red"             # failures, in the same three places; the failed agent mark
+info               = "green"           # hints and notes, in the same three places; the working agent mark
 link               = "blue"            # mux names and link rows
 match_highlight    = "yellow"          # text a search matched (bold, underlined)
 badge              = "reversed,bold"   # the chip look

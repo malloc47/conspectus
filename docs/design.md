@@ -697,8 +697,16 @@ an agent running with none). In the TUI the row models carry it: session rows
 the effective state with its detail, confidence, start, and subagents, mux
 rows the counts, and Pinned and History rows the value of the entity they
 stand for, filled for every view by one pass, so an entity carries the same
-value wherever it is listed. Nothing draws it yet; which glyphs, columns,
-rollups, and orderings show it is open (the plan's parked list).
+value wherever it is listed. Session and mux rows draw it in a one-cell
+column right after the age (ADR 0209): `!` waiting, `»` working (also
+compacting and starting), `›` ready, `×` error, `?` unknown or stale, `·`
+no evidence or exited, a quiet state dimmed, in the theme's status colors,
+never animated. A mux shows the state of its agents that ranks first
+(waiting, error, ready, working, then the rest). Pinned spells a running
+session's live state as `waiting`, `working`, `ready`, or `error` in place
+of its link word. The cell never gives way on a narrow row. Ordering,
+grouping, filtering, the header count, the jump key, seen and unseen, and
+the detail pane's fields are later stories (the plan's section 7.1).
 
 ## Pin Slots
 

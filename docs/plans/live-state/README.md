@@ -284,7 +284,8 @@ synthetic, built from the documented payload shapes.
 | any | Spool defects, key order, Pi mtime | CSP-818, CSP-819, CSP-820 (done) |
 | 9 | Operator guide | CSP-821 (done) |
 | 10 | Real-payload verification (needs the operator) | CSP-822 |
-| parked | TUI rendering (cell, rollup, header, order, jump, seen, detail, notify, subagents) | CSP-823 to CSP-830, CSP-854 |
+| 11 | TUI live cell and Pinned words (ADR 0209) | CSP-823 (done) |
+| decided | TUI rollup, header, order, jump, seen, detail, notify, subagents | CSP-824 to CSP-830, CSP-854 |
 | parked | Hook-free sources (pane title, `claude agents --json`, tails, other orchestrators) | CSP-831 to CSP-834 |
 
 Follow-ups the stories filed (labels `live-state`, milestone m-26):
@@ -403,8 +404,10 @@ state must rebuild the tree on such a change instead.
     ingesting another orchestrator's state). CSP-831 to CSP-834.
 12. Staleness display (quiet vs dim vs unknown). CSP-829.
 
-Until those land, the operator reads live state through the CLI and the
-graph JSON ([`docs/operations.md`](../../operations.md#live-agent-state)).
+The live cell on session and mux rows and the Pinned words landed with
+CSP-823 (ADR 0209); the rest of the list above is still to build, and the
+CLI and the graph JSON keep the fuller view
+([`docs/operations.md`](../../operations.md#live-agent-state)).
 
 The mockups and a recommended default for each are in
 [`tui-options.md`](tui-options.md).
@@ -459,10 +462,10 @@ Where the build differs from, or settles, the draft above:
   count (CSP-841). Readers use `GraphSnapshot::live_state_of`,
   `live_counts_of_mux`, `live_panes_of`, and `live_tables`. `graph.bin`
   is at format version 12.
-- **The TUI keeps the data current but draws nothing.** It binds the store
-  again within about a second of a change and re-checks bound agents'
-  processes once a second (CSP-843); the row models carry `live` fields
-  (CSP-814) for the parked rendering stories.
+- **The TUI keeps the data current.** It binds the store again within
+  about a second of a change and re-checks bound agents' processes once a
+  second (CSP-843); the row models carry `live` fields (CSP-814), which
+  the live cell and the Pinned words draw (CSP-823, ADR 0209).
 - **CLI surfaces.** An opt-in `live` column on `table sessions` and
   `table mux`, a `live state` section in `node show`, the two lists in
   the graph JSON, and a health line at the end of `hook status`
