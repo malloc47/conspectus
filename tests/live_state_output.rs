@@ -205,6 +205,7 @@ fn node_show_prints_no_live_state_without_evidence() {
 
     let mut empty = snapshot;
     empty.node_live.clear();
+    empty.pane_live.clear();
     let mux = fixture_node(&empty, "tmux:main");
     let rendered = render_node_show_at(&empty, &mux, false, FIXTURE_NOW_MS);
     assert!(!rendered.contains("live state"), "{rendered}");

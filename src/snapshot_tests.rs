@@ -140,6 +140,33 @@ fn write_atomic_then_open_mmap_round_trips() {
 }
 
 #[test]
+fn graph_bin_carries_every_pane_agent_of_a_mux() {
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    use crate::model::{LivePane, MuxSessionId};
+
+    let (_temp, path) = fresh_path("graph.bin");
+    let mut snap = sample_snapshot();
+    for (pane, state) in [
+        (Some("%1"), LiveState::Waiting),
+        (Some("%2"), LiveState::Starting),
+        (None, LiveState::Working),
+    ] {
+        snap.pane_live.insert(
+            LivePane::new(MuxSessionId::new("tmux:work"), pane.map(str::to_string)),
+            LiveBinding::new(
+                LiveObservation::new(state, LiveSource::Hook, 1_790_769_600_000),
+                Liveness::Alive,
+            ),
+        );
+    }
+    write_atomic(&path, &snap).expect("write");
+
+    let decoded = deserialize_owned(&open_mmap(&path).expect("open")).expect("deserialize");
+    assert_eq!(decoded.pane_live, snap.pane_live);
+    assert_eq!(decoded.pane_live.len(), 3);
+}
+
+#[test]
 fn open_mmap_rejects_corrupted_payload_byte() {
     let (_temp, path) = fresh_path("graph.bin");
     let snap = sample_snapshot();

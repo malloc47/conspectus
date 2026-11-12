@@ -37,10 +37,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::discovery::live_state::bind_live;
+use crate::discovery::live_state::{BoundLive, bind_live};
 use crate::live_store::{LiveFile, LiveStore, PidProbe, ProcProbe};
-use crate::model::live::{LiveBinding, LiveState, Liveness};
-use crate::model::{GraphSnapshot, NodeId};
+use crate::model::live::{LiveState, Liveness};
+use crate::model::{GraphSnapshot, LivePane, LiveTables, NodeId};
 use crate::tui::rows::LiveCell;
 use crate::tui::rows::live::cells_at;
 
@@ -110,9 +110,9 @@ pub(crate) struct LiveOverlay {
     /// Where the store is read from; `None` while the overlay is off.
     source: Option<Source>,
     /// The store bound to the last snapshot it was bound to.
-    table: BTreeMap<NodeId, LiveBinding>,
-    /// The cells of the active table at the last age check.
-    checked: BTreeMap<NodeId, LiveCell>,
+    table: BoundLive,
+    /// The cells of the active tables at the last age check.
+    checked: (BTreeMap<NodeId, LiveCell>, BTreeMap<LivePane, LiveCell>),
     checked_at: Option<Instant>,
     /// When the bound entries' processes were last checked, by a bind or
     /// a [`LiveOverlay::recheck`].
@@ -151,8 +151,8 @@ impl LiveOverlay {
     pub(crate) fn off() -> Self {
         Self {
             source: None,
-            table: BTreeMap::new(),
-            checked: BTreeMap::new(),
+            table: BoundLive::default(),
+            checked: Default::default(),
             checked_at: None,
             probed_at: None,
         }
@@ -196,16 +196,13 @@ impl LiveOverlay {
         self.source.is_some()
     }
 
-    /// The live table the rows of `snapshot` read: the overlay's own when
-    /// it is on, else the snapshot's.
-    pub(crate) fn table<'a>(
-        &'a self,
-        snapshot: &'a GraphSnapshot,
-    ) -> &'a BTreeMap<NodeId, LiveBinding> {
+    /// The live tables the rows of `snapshot` read: the overlay's own
+    /// when it is on, else the snapshot's.
+    pub(crate) fn table<'a>(&'a self, snapshot: &'a GraphSnapshot) -> LiveTables<'a> {
         if self.is_on() {
-            &self.table
+            self.table.tables()
         } else {
-            &snapshot.node_live
+            snapshot.live_tables()
         }
     }
 
@@ -264,7 +261,7 @@ impl LiveOverlay {
         }
         self.probed_at = Some(now);
         let mut changed = false;
-        for binding in self.table.values_mut() {
+        for binding in self.table.bindings_mut() {
             if binding.observation.state == LiveState::Exited || binding.liveness == Liveness::Dead
             {
                 continue;
@@ -290,7 +287,11 @@ impl LiveOverlay {
             return false;
         }
         self.checked_at = Some(now);
-        let cells = cells_at(self.table(snapshot), now_ms);
+        let tables = self.table(snapshot);
+        let cells = (
+            cells_at(tables.nodes, now_ms),
+            cells_at(tables.panes, now_ms),
+        );
         let moved = cells != self.checked;
         self.checked = cells;
         moved
@@ -321,7 +322,8 @@ impl fmt::Debug for LiveOverlay {
         f.debug_struct("LiveOverlay")
             .field("on", &self.is_on())
             .field("path", &self.source.as_ref().map(|source| &source.path))
-            .field("entries", &self.table.len())
+            .field("sessions", &self.table.nodes.len())
+            .field("panes", &self.table.panes.len())
             .finish()
     }
 }

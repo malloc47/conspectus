@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use crate::model::live::{
     LiveBinding, LiveConfidence, LiveCounts, LiveDetail, LiveObservation, LiveState,
 };
-use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, NodeId};
+use crate::model::{GraphNode, GraphSnapshot, LiveTables, MuxSessionId, NodeId};
 
 use super::{RowKind, RowTree};
 
@@ -76,16 +76,12 @@ pub(crate) struct LiveValues {
 }
 
 impl LiveValues {
-    /// `table`, bound to `snapshot`, read at `now_ms`. A mux counts by
+    /// `tables`, bound to `snapshot`, read at `now_ms`. A mux counts by
     /// the rule of [`GraphSnapshot::live_counts_of_mux`].
-    pub(crate) fn at(
-        snapshot: &GraphSnapshot,
-        table: &BTreeMap<NodeId, LiveBinding>,
-        now_ms: i64,
-    ) -> Self {
+    pub(crate) fn at(snapshot: &GraphSnapshot, tables: LiveTables<'_>, now_ms: i64) -> Self {
         Self {
-            cells: cells_at(table, now_ms),
-            counts: snapshot.live_counts_by_mux(table, now_ms),
+            cells: cells_at(tables.nodes, now_ms),
+            counts: snapshot.live_counts_by_mux(tables, now_ms),
         }
     }
 
@@ -114,13 +110,13 @@ impl LiveValues {
 /// The cell of every entry of `table` at `now_ms`. The values change with
 /// time only through these, so comparing two of them tells whether time
 /// alone moved what the rows show.
-pub(crate) fn cells_at(
-    table: &BTreeMap<NodeId, LiveBinding>,
+pub(crate) fn cells_at<K: Clone + Ord>(
+    table: &BTreeMap<K, LiveBinding>,
     now_ms: i64,
-) -> BTreeMap<NodeId, LiveCell> {
+) -> BTreeMap<K, LiveCell> {
     table
         .iter()
-        .map(|(id, binding)| (id.clone(), LiveCell::of(binding, now_ms)))
+        .map(|(key, binding)| (key.clone(), LiveCell::of(binding, now_ms)))
         .collect()
 }
 

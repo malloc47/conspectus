@@ -4,7 +4,7 @@ use std::rc::Rc;
 use super::*;
 use crate::live_store::{LiveEntry, LiveTmux, PidStatus};
 use crate::model::live::{
-    LiveConfidence, LiveDetail, LiveObservation, LiveSource, LiveState, Liveness,
+    LiveBinding, LiveConfidence, LiveDetail, LiveObservation, LiveSource, LiveState, Liveness,
 };
 use crate::model::{AgentSessionId, AgentSessionNode, GraphNode, MuxSessionId, MuxSessionNode};
 
@@ -138,8 +138,8 @@ fn session(key: &str) -> NodeId {
     NodeId::AgentSession(session_id(key))
 }
 
-fn mux(name: &str) -> NodeId {
-    NodeId::MuxSession(MuxSessionId::new(format!("tmux:{name}")))
+fn mux_id(name: &str) -> MuxSessionId {
+    MuxSessionId::new(format!("tmux:{name}"))
 }
 
 /// A graph with these sessions and the tmux mux `work`.
@@ -185,8 +185,10 @@ fn store(entries: impl IntoIterator<Item = LiveEntry>) -> String {
     file.render().expect("the store renders")
 }
 
-fn states(table: &BTreeMap<NodeId, LiveBinding>) -> Vec<(NodeId, LiveState)> {
-    table
+/// The state of each session entry of `tables`.
+fn states(tables: LiveTables<'_>) -> Vec<(NodeId, LiveState)> {
+    tables
+        .nodes
         .iter()
         .map(|(id, binding)| (id.clone(), binding.observation.state))
         .collect()
@@ -208,7 +210,7 @@ fn an_overlay_that_is_off_reads_the_snapshots_own_table() {
     assert!(!off.poll(Instant::now(), Some(&snapshot)));
     assert!(!off.recheck(Instant::now()));
     off.rebind(&snapshot, Instant::now());
-    assert_eq!(off.table(&snapshot), &snapshot.node_live);
+    assert_eq!(off.table(&snapshot).nodes, &snapshot.node_live);
 }
 
 #[test]
@@ -232,7 +234,7 @@ fn the_rows_read_the_overlays_table_in_place_of_the_snapshots() {
         vec![(session("s1"), LiveState::Waiting)]
     );
     assert_eq!(
-        overlay.table(&snapshot)[&session("s1")].liveness,
+        overlay.table(&snapshot).nodes[&session("s1")].liveness,
         Liveness::Alive,
         "the process was checked when the store was bound"
     );
@@ -385,7 +387,7 @@ fn a_corrupt_or_newer_store_is_an_empty_table() {
     files.write(&store([entry("s1", LiveState::Working, 0)]));
     assert!(overlay.poll(start + REREAD_INTERVAL, Some(&snapshot)));
     assert_eq!(
-        overlay.table(&snapshot).len(),
+        overlay.table(&snapshot).nodes.len(),
         1,
         "the repaired store binds"
     );
@@ -439,15 +441,24 @@ fn a_new_snapshot_rebinds_the_store_to_its_own_nodes() {
     let mut overlay = overlay(&files, &pids);
     let start = Instant::now();
 
-    // No session `new` yet: its entry binds to the mux it runs in.
+    // No session `new` yet: its entry binds to the pane it runs in.
     let before = graph(&["old"]);
     overlay.rebind(&before, start);
     assert_eq!(
         states(overlay.table(&before)),
-        vec![
-            (session("old"), LiveState::Ready),
-            (mux("work"), LiveState::Starting),
-        ]
+        vec![(session("old"), LiveState::Ready)]
+    );
+    assert_eq!(
+        overlay
+            .table(&before)
+            .panes
+            .iter()
+            .map(|(pane, binding)| (pane.clone(), binding.observation.state))
+            .collect::<Vec<_>>(),
+        vec![(
+            LivePane::new(mux_id("work"), Some("%1".into())),
+            LiveState::Starting
+        )]
     );
 
     // The next snapshot has `new` and no longer has `old`.
@@ -458,6 +469,7 @@ fn a_new_snapshot_rebinds_the_store_to_its_own_nodes() {
         vec![(session("new"), LiveState::Starting)],
         "nothing stays keyed to the nodes of the snapshot replaced"
     );
+    assert!(overlay.table(&after).panes.is_empty());
     assert_eq!(files.reads(), 1, "the swap binds what was read");
 }
 
@@ -489,7 +501,7 @@ fn time_alone_moves_a_state_and_is_checked_at_most_once_a_second() {
         overlay.aged(&snapshot, start + 2 * AGE_CHECK_INTERVAL, NOW_MS + 120_000),
         "past the quiet window"
     );
-    let cells = cells_at(overlay.table(&snapshot), NOW_MS + 120_000);
+    let cells = cells_at(overlay.table(&snapshot).nodes, NOW_MS + 120_000);
     assert_eq!(cells[&session("s1")].state, LiveState::Working);
     assert_eq!(cells[&session("s1")].confidence, LiveConfidence::Quiet);
 
@@ -520,7 +532,7 @@ fn an_empty_table_never_ages() {
 
 /// The cell `overlay` gives session `key` at [`NOW_MS`].
 fn cell(overlay: &LiveOverlay, snapshot: &GraphSnapshot, key: &str) -> LiveCell {
-    cells_at(overlay.table(snapshot), NOW_MS)[&session(key)]
+    cells_at(overlay.table(snapshot).nodes, NOW_MS)[&session(key)]
 }
 
 #[test]
@@ -615,7 +627,7 @@ fn only_entries_whose_process_may_still_run_are_checked_again() {
     let snapshot = graph(&["s1", "s2", "s3"]);
     let start = Instant::now();
     overlay.rebind(&snapshot, start);
-    assert_eq!(overlay.table(&snapshot).len(), 3);
+    assert_eq!(overlay.table(&snapshot).nodes.len(), 3);
     let checks = pids.checks();
 
     for second in 1..=3 {

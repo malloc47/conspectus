@@ -4,7 +4,7 @@ use conspectus::model::live::{
 use conspectus::model::{
     AgentSessionId, AgentSessionNode, BranchId, BranchNode, Confidence, ForgePrId, ForgePrNode,
     ForkId, ForkNode, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
-    MuxSessionId, MuxSessionNode, NodeId, Provenance, RelationKind, RepoId, RepoNode,
+    LivePane, MuxSessionId, MuxSessionNode, NodeId, Provenance, RelationKind, RepoId, RepoNode,
     SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
 };
 use conspectus::resolve;
@@ -236,13 +236,25 @@ pub fn live_state_graph() -> GraphSnapshot {
             Liveness::Alive,
         ),
     );
-    snapshot.node_live.insert(
-        main.id(),
+    // Two agents no session matched yet, each in a pane of `main`.
+    let main_id = MuxSessionId::new("tmux:main");
+    snapshot.pane_live.insert(
+        LivePane::new(main_id.clone(), Some("%2".to_string())),
         LiveBinding::new(
             LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_790_769_500_000)
                 .with_detail(LiveDetail::Generating)
                 .with_heartbeat_s(30),
             Liveness::Unknown,
+        ),
+    );
+    snapshot.pane_live.insert(
+        LivePane::new(main_id, Some("%3".to_string())),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Ready, LiveSource::Hook, 1_790_769_540_000)
+                .with_detail(LiveDetail::Finished)
+                .with_since_ms(1_790_769_520_000)
+                .with_pid(4343, Some(654_321)),
+            Liveness::Alive,
         ),
     );
     resolved(snapshot)

@@ -76,6 +76,7 @@ fn an_empty_live_table_leaves_the_json_as_it_was() {
     );
     let json = serde_json::to_string_pretty(&snapshot).expect("serialize snapshot");
     assert!(!json.contains("node_live"), "{json}");
+    assert!(!json.contains("pane_live"), "{json}");
 
     let read: GraphSnapshot =
         serde_json::from_str(&json).expect("a snapshot without the table loads");
@@ -93,14 +94,18 @@ fn a_live_table_serializes_as_a_list_beside_each_node_id() {
                 .with_pid(4242, Some(99)),
         ),
     );
-    snapshot.node_live.insert(
-        NodeId::MuxSession(mux("main")),
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), Some("%3".into())),
         LiveBinding::new(observed(LiveState::Working, 0), Liveness::Unknown),
+    );
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), None),
+        LiveBinding::new(observed(LiveState::Ready, 0), Liveness::Unknown),
     );
 
     let value = serde_json::to_value(&snapshot).expect("serialize snapshot");
     let entries = value["node_live"].as_array().expect("node_live is a list");
-    assert_eq!(entries.len(), 2);
+    assert_eq!(entries.len(), 1);
     assert_eq!(
         entries[0],
         serde_json::json!({
@@ -120,16 +125,29 @@ fn a_live_table_serializes_as_a_list_beside_each_node_id() {
             "liveness": "alive",
         })
     );
+    let panes = value["pane_live"].as_array().expect("pane_live is a list");
     assert_eq!(
-        entries[1],
-        serde_json::json!({
-            "node_id": { "type": "mux_session", "native_id": "tmux:main" },
-            "state": "working",
-            "since_ms": NOW_MS,
-            "observed_ms": NOW_MS,
-            "source": "hook",
-            "liveness": "unknown",
-        })
+        panes,
+        &[
+            serde_json::json!({
+                "node_id": { "type": "mux_session", "native_id": "tmux:main" },
+                "state": "ready",
+                "since_ms": NOW_MS,
+                "observed_ms": NOW_MS,
+                "source": "hook",
+                "liveness": "unknown",
+            }),
+            serde_json::json!({
+                "node_id": { "type": "mux_session", "native_id": "tmux:main" },
+                "pane": "%3",
+                "state": "working",
+                "since_ms": NOW_MS,
+                "observed_ms": NOW_MS,
+                "source": "hook",
+                "liveness": "unknown",
+            }),
+        ],
+        "one entry per pane, the pane left out when the entry named none"
     );
 }
 
@@ -147,12 +165,16 @@ fn a_live_table_round_trips_through_json() {
                 .with_heartbeat_s(30),
         ),
     );
-    snapshot.node_live.insert(
-        NodeId::MuxSession(mux("main")),
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), Some("%1".into())),
         LiveBinding::new(
             observed(LiveState::Ready, 0).with_detail(LiveDetail::Finished),
             Liveness::Dead,
         ),
+    );
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), Some("%2".into())),
+        alive(observed(LiveState::Waiting, 1).with_detail(LiveDetail::Input)),
     );
 
     let json = serde_json::to_string(&snapshot).expect("serialize snapshot");
@@ -172,9 +194,13 @@ fn a_live_table_round_trips_through_rkyv() {
             Liveness::Dead,
         ),
     );
-    snapshot.node_live.insert(
-        NodeId::MuxSession(mux("main")),
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), Some("%1".into())),
         alive(observed(LiveState::Starting, 1)),
+    );
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), None),
+        alive(observed(LiveState::Working, 2)),
     );
 
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&snapshot).expect("archive snapshot");
@@ -191,15 +217,29 @@ fn an_entry_with_names_this_version_does_not_know_still_loads() {
         "resolved_relationships": [],
         "diagnostics": [],
         "node_live": [{
-            "node_id": { "type": "mux_session", "native_id": "tmux:main" },
+            "node_id": {
+                "type": "agent_session",
+                "harness_key": "codex",
+                "state_scope": "/home/me/.codex",
+                "session_key": "a",
+            },
             "state": "dreaming",
             "detail": "lucid",
             "since_ms": 1,
             "observed_ms": 2,
             "source": "telepathy",
             "liveness": "undead",
-        }, {
+        }],
+        "pane_live": [{
             "node_id": { "type": "mux_session", "native_id": "tmux:other" },
+            "pane": "%1",
+            "state": "ready",
+            "since_ms": 1,
+            "observed_ms": 2,
+            "source": "hook",
+        }, {
+            "node_id": { "type": "repo", "common_dir": "/not/a/mux" },
+            "pane": "%1",
             "state": "ready",
             "since_ms": 1,
             "observed_ms": 2,
@@ -207,7 +247,7 @@ fn an_entry_with_names_this_version_does_not_know_still_loads() {
         }],
     });
     let read: GraphSnapshot = serde_json::from_value(json).expect("deserialize snapshot");
-    let binding = read.node_live[&NodeId::MuxSession(mux("main"))];
+    let binding = read.node_live[&session("a")];
     assert_eq!(binding.liveness, Liveness::Unknown);
     let observation = binding.observation;
     assert_eq!(observation.state, LiveState::Unknown);
@@ -215,9 +255,16 @@ fn an_entry_with_names_this_version_does_not_know_still_loads() {
     assert_eq!(observation.source, LiveSource::Unknown);
     assert_eq!((observation.since_ms, observation.observed_ms), (1, 2));
     assert_eq!(
-        read.node_live[&NodeId::MuxSession(mux("other"))].liveness,
-        Liveness::Unknown,
-        "a binding without a liveness reads as unchecked"
+        read.pane_live
+            .iter()
+            .map(|(pane, binding)| (pane.clone(), binding.liveness))
+            .collect::<Vec<_>>(),
+        vec![(
+            LivePane::new(mux("other"), Some("%1".into())),
+            Liveness::Unknown
+        )],
+        "a binding without a liveness reads as unchecked, and a pane entry \
+         whose node is not a mux is dropped"
     );
 }
 
@@ -256,17 +303,24 @@ fn evicting_a_provider_drops_the_live_state_of_its_nodes_only() {
             },
         );
     }
-    for id in [&session("a"), &mux_id, &unowned] {
+    for id in [&session("a"), &unowned] {
         snapshot
             .node_live
             .insert(id.clone(), alive(observed(LiveState::Working, 0)));
     }
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), Some("%1".into())),
+        alive(observed(LiveState::Working, 0)),
+    );
 
     snapshot.evict_provider("tmux");
     assert_eq!(
         snapshot.node_live.keys().cloned().collect::<Vec<_>>(),
         vec![session("a"), unowned.clone()],
-        "the mux's pane-only entry goes with the mux"
+    );
+    assert!(
+        snapshot.pane_live.is_empty(),
+        "the mux's pane entries go with the mux"
     );
 
     snapshot.evict_provider("claude_code");
@@ -333,20 +387,38 @@ fn live_state_of_reads_the_effective_state_with_the_bound_liveness() {
 }
 
 #[test]
-fn live_state_of_reads_a_pane_only_entry_on_its_mux() {
-    let mut snapshot = hosted(&[("a", "main", Provenance::StrongDiscovered)]);
-    let mux_id = NodeId::MuxSession(mux("main"));
-    snapshot
-        .node_live
-        .insert(mux_id.clone(), alive(observed(LiveState::Starting, 0)));
+fn a_mux_has_no_state_of_its_own_and_lists_its_pane_agents() {
+    let mut snapshot = hosted(&[
+        ("a", "main", Provenance::StrongDiscovered),
+        ("b", "other", Provenance::StrongDiscovered),
+    ]);
+    for (name, pane, state) in [
+        ("main", "%2", LiveState::Starting),
+        ("main", "%1", LiveState::Working),
+        ("other", "%1", LiveState::Ready),
+    ] {
+        snapshot.pane_live.insert(
+            LivePane::new(mux(name), Some(pane.into())),
+            alive(observed(state, 0)),
+        );
+    }
 
     assert_eq!(
-        snapshot
-            .live_state_of(&mux_id, NOW_MS)
-            .map(|live| live.state),
-        Some(LiveState::Starting)
+        snapshot.live_state_of(&NodeId::MuxSession(mux("main")), NOW_MS),
+        None
     );
     assert_eq!(snapshot.live_state_of(&session("a"), NOW_MS), None);
+    assert_eq!(
+        snapshot
+            .live_panes_of(&mux("main"))
+            .map(|(pane, binding)| (pane.pane.as_deref(), binding.observation.state))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("%1"), LiveState::Working),
+            (Some("%2"), LiveState::Starting),
+        ],
+        "in pane order, and only this mux's"
+    );
 }
 
 // ---- live_counts_of_mux ----
@@ -433,7 +505,7 @@ fn a_mux_counts_every_session_it_prefers_and_no_other() {
 }
 
 #[test]
-fn a_pane_only_entry_counts_on_its_mux_beside_its_sessions() {
+fn every_pane_agent_counts_on_its_mux_beside_its_sessions() {
     let mut snapshot = hosted(&[
         ("a", "main", Provenance::StrongDiscovered),
         ("b", "other", Provenance::StrongDiscovered),
@@ -441,12 +513,16 @@ fn a_pane_only_entry_counts_on_its_mux_beside_its_sessions() {
     snapshot
         .node_live
         .insert(session("a"), alive(observed(LiveState::Working, 0)));
-    snapshot.node_live.insert(
-        NodeId::MuxSession(mux("main")),
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), Some("%2".into())),
         alive(observed(LiveState::Waiting, 0).with_detail(LiveDetail::Input)),
     );
-    snapshot.node_live.insert(
-        NodeId::MuxSession(mux("other")),
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), Some("%3".into())),
+        alive(observed(LiveState::Waiting, 0).with_detail(LiveDetail::Permission)),
+    );
+    snapshot.pane_live.insert(
+        LivePane::new(mux("other"), Some("%2".into())),
         alive(observed(LiveState::Ready, 0)),
     );
 
@@ -455,11 +531,12 @@ fn a_pane_only_entry_counts_on_its_mux_beside_its_sessions() {
         counts,
         LiveCounts {
             working: 1,
-            waiting: 1,
+            waiting: 2,
             ..LiveCounts::default()
-        }
+        },
+        "two agents in two panes count twice"
     );
-    assert_eq!(counts.total(), 2);
+    assert_eq!(counts.total(), 3);
 }
 
 #[test]
@@ -537,8 +614,8 @@ fn counts_for_every_mux_at_once_agree_with_each_muxs_own() {
             .node_live
             .insert(session(key), alive(observed(state, 0)));
     }
-    snapshot.node_live.insert(
-        NodeId::MuxSession(mux("main")),
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), Some("%9".into())),
         alive(observed(LiveState::Ready, 0)),
     );
     // A session no mux hosts counts nowhere.
@@ -546,7 +623,7 @@ fn counts_for_every_mux_at_once_agree_with_each_muxs_own() {
         .node_live
         .insert(session("loose"), alive(observed(LiveState::Error, 0)));
 
-    let by_mux = snapshot.live_counts_by_mux(&snapshot.node_live, NOW_MS);
+    let by_mux = snapshot.live_counts_by_mux(snapshot.live_tables(), NOW_MS);
     for name in ["main", "other", "quiet"] {
         assert_eq!(
             by_mux.get(&mux(name)).copied().unwrap_or_default(),
@@ -562,7 +639,14 @@ fn counts_for_every_mux_at_once_agree_with_each_muxs_own() {
     // Another table over the same snapshot reads the same way.
     let mut later = BTreeMap::new();
     later.insert(session("b"), alive(observed(LiveState::Ready, 0)));
-    let by_mux = snapshot.live_counts_by_mux(&later, NOW_MS);
+    let no_panes = BTreeMap::new();
+    let by_mux = snapshot.live_counts_by_mux(
+        LiveTables {
+            nodes: &later,
+            panes: &no_panes,
+        },
+        NOW_MS,
+    );
     assert_eq!(
         by_mux,
         BTreeMap::from([(

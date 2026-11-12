@@ -331,8 +331,8 @@ impl From<GraphSnapshot> for GraphFragment {
         // is named here, so a new field has to be placed on one side or
         // the other: the resolver re-derives `resolved_relationships`,
         // the overlays reload `aliases` and `pins`, and `node_presence`,
-        // `node_live`, and `history` are rebuilt after the merge by the
-        // passes that own them (ADRs 0140 and 0205).
+        // `node_live`, `pane_live`, and `history` are rebuilt after the
+        // merge by the passes that own them (ADRs 0140 and 0205).
         let GraphSnapshot {
             nodes,
             candidate_links,
@@ -343,6 +343,7 @@ impl From<GraphSnapshot> for GraphFragment {
             node_provenance,
             node_presence: _,
             node_live: _,
+            pane_live: _,
             mux_probes,
             history: _,
         } = snapshot;
@@ -1346,7 +1347,7 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Bind no live state: `node_live` stays empty.
+    /// Bind no live state: `node_live` and `pane_live` stay empty.
     pub fn without_live_state(mut self) -> Self {
         self.live_state_root = None;
         self
@@ -1446,6 +1447,7 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
         node_provenance,
         node_presence: BTreeMap::new(),
         node_live: BTreeMap::new(),
+        pane_live: BTreeMap::new(),
         mux_probes,
         history: Default::default(),
     };
@@ -1466,9 +1468,9 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
 /// `pins`, and `aliases` from the prior snapshot are intentionally
 /// dropped: the resolver re-runs on the merged candidate set, and
 /// pin slots / aliases reload from disk alongside the fresh
-/// discovery pass. The live-state table (ADR 0205) is fresh's
+/// discovery pass. The live-state tables (ADR 0205) are fresh's
 /// alone: the prior's observations are a cycle old, and the
-/// live-state pass rebinds the table from its store after the
+/// live-state pass rebinds the tables from its store after the
 /// merge, so carrying them would show a state for a session that
 /// may have ended. Per-provider freshness is handled before
 /// this merge: [`discover_local_warm_with`] evicts stale slices from
@@ -1480,8 +1482,10 @@ pub fn merge_with_prior(mut fresh: GraphSnapshot, prior: GraphSnapshot) -> Graph
     // loader after this helper returns. Keeping that off the
     // warm-start path avoids round-tripping stale derived state.
     let node_live = std::mem::take(&mut fresh.node_live);
+    let pane_live = std::mem::take(&mut fresh.pane_live);
     let mut merged = merge_fragments([GraphFragment::from(fresh), GraphFragment::from(prior)]);
     merged.node_live = node_live;
+    merged.pane_live = pane_live;
     merged
 }
 

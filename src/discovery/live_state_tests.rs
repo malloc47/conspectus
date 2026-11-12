@@ -71,6 +71,11 @@ fn mux(name: &str) -> NodeId {
     NodeId::MuxSession(mux_id(name))
 }
 
+/// Pane `pane` of the tmux mux `name`.
+fn pane(name: &str, pane: &str) -> LivePane {
+    LivePane::new(mux_id(name), Some(pane.to_string()))
+}
+
 fn snapshot(nodes: Vec<GraphNode>) -> GraphSnapshot {
     GraphSnapshot {
         nodes,
@@ -118,6 +123,20 @@ fn states(table: &BTreeMap<NodeId, LiveBinding>) -> Vec<(NodeId, LiveState)> {
         .collect()
 }
 
+fn pane_states(table: &BTreeMap<LivePane, LiveBinding>) -> Vec<(LivePane, LiveState)> {
+    table
+        .iter()
+        .map(|(pane, binding)| (pane.clone(), binding.observation.state))
+        .collect()
+}
+
+/// Bind `store` to `graph` in place, as the discovery pass does.
+fn bind_into(graph: &mut GraphSnapshot, store: &LiveFile, probe: &dyn PidProbe) {
+    let bound = bind_live(graph, store, probe);
+    graph.node_live = bound.nodes;
+    graph.pane_live = bound.panes;
+}
+
 fn linked(snapshot: &mut GraphSnapshot, from: NodeId, to: &MuxSessionId) {
     snapshot.candidate_links.push(GraphLink::new(
         format!("link-{from}"),
@@ -144,13 +163,14 @@ fn an_entry_binds_to_the_session_with_its_harness_and_native_id() {
         entry("codex", "s2", LiveState::Waiting, 2),
     ]);
 
-    let table = bind_live(&graph, &store, &FakePids::none());
+    let bound = bind_live(&graph, &store, &FakePids::none());
 
     assert_eq!(
-        states(&table),
+        states(&bound.nodes),
         vec![(session("claude-code", "s1"), LiveState::Working)],
         "the match is exact on both harness and session id"
     );
+    assert!(bound.panes.is_empty());
 }
 
 #[test]
@@ -167,12 +187,13 @@ fn a_session_match_wins_over_the_pane_its_entry_names() {
         "%3",
     )]);
 
-    graph.node_live = bind_live(&graph, &store, &FakePids::none());
+    bind_into(&mut graph, &store, &FakePids::none());
 
     assert_eq!(
         states(&graph.node_live),
         vec![(session("claude-code", "s1"), LiveState::Ready)]
     );
+    assert!(graph.pane_live.is_empty());
     assert_eq!(
         graph.live_counts_of_mux(&mux_id("work"), NOW_MS),
         LiveCounts {
@@ -205,13 +226,14 @@ fn a_pane_only_entry_binds_to_the_mux_on_its_server() {
         ),
     ]);
 
-    let table = bind_live(&graph, &store, &FakePids::none());
+    let bound = bind_live(&graph, &store, &FakePids::none());
 
+    assert!(bound.nodes.is_empty());
     assert_eq!(
-        states(&table),
+        pane_states(&bound.panes),
         vec![
-            (mux("scratch:work"), LiveState::Working),
-            (mux("work"), LiveState::Starting),
+            (pane("scratch:work", "%2"), LiveState::Working),
+            (pane("work", "%1"), LiveState::Starting),
         ]
     );
 }
@@ -255,9 +277,9 @@ fn an_entry_that_names_no_known_node_stays_unbound() {
         ),
     ]);
 
-    let table = bind_live(&graph, &store, &FakePids::none());
+    let bound = bind_live(&graph, &store, &FakePids::none());
 
-    assert!(table.is_empty(), "{table:?}");
+    assert!(bound.is_empty(), "{bound:?}");
 }
 
 #[test]
@@ -333,10 +355,11 @@ fn a_session_that_appears_later_takes_the_state_from_its_mux() {
 
     // No transcript yet: the agent shows on its mux.
     let mut before = snapshot(vec![mux_node("work", None)]);
-    before.node_live = bind_live(&before, &store, &probe);
+    bind_into(&mut before, &store, &probe);
+    assert!(before.node_live.is_empty());
     assert_eq!(
-        states(&before.node_live),
-        vec![(mux("work"), LiveState::Working)]
+        pane_states(&before.pane_live),
+        vec![(pane("work", "%1"), LiveState::Working)]
     );
     let working = LiveCounts {
         working: 1,
@@ -347,11 +370,12 @@ fn a_session_that_appears_later_takes_the_state_from_its_mux() {
     // Its session appears: the next bind moves the state to it.
     let mut after = snapshot(vec![mux_node("work", None), session_node("pi", "fresh")]);
     linked(&mut after, session("pi", "fresh"), &mux_id("work"));
-    after.node_live = bind_live(&after, &store, &probe);
+    bind_into(&mut after, &store, &probe);
     assert_eq!(
         states(&after.node_live),
         vec![(session("pi", "fresh"), LiveState::Working)]
     );
+    assert!(after.pane_live.is_empty(), "the pane no longer holds it");
     assert_eq!(after.live_state_of(&mux("work"), NOW_MS), None);
     assert_eq!(
         after.live_counts_of_mux(&mux_id("work"), NOW_MS),
@@ -388,7 +412,7 @@ fn two_agents_in_two_panes_of_one_mux_each_keep_their_own_state() {
         ),
     ]);
 
-    graph.node_live = bind_live(&graph, &store, &FakePids::none());
+    bind_into(&mut graph, &store, &FakePids::none());
 
     assert_eq!(
         graph
@@ -412,6 +436,142 @@ fn two_agents_in_two_panes_of_one_mux_each_keep_their_own_state() {
     );
 }
 
+#[test]
+fn two_agents_in_two_panes_of_one_mux_with_no_session_both_count() {
+    let mut graph = snapshot(vec![
+        mux_node("work", None),
+        session_node("claude-code", "hosted"),
+    ]);
+    linked(
+        &mut graph,
+        session("claude-code", "hosted"),
+        &mux_id("work"),
+    );
+    let mut waiting = in_pane(
+        entry("codex", "fresh-left", LiveState::Waiting, 4),
+        DEFAULT_SOCKET,
+        "work",
+        "%1",
+    );
+    waiting.observation = waiting.observation.with_detail(LiveDetail::Permission);
+    let store = file([
+        waiting,
+        in_pane(
+            entry("pi", "fresh-right", LiveState::Starting, 5),
+            DEFAULT_SOCKET,
+            "work",
+            "%2",
+        ),
+        in_pane(
+            entry("claude-code", "hosted", LiveState::Working, 6),
+            DEFAULT_SOCKET,
+            "work",
+            "%3",
+        ),
+    ]);
+
+    bind_into(&mut graph, &store, &FakePids::none());
+
+    assert_eq!(
+        pane_states(&graph.pane_live),
+        vec![
+            (pane("work", "%1"), LiveState::Waiting),
+            (pane("work", "%2"), LiveState::Starting),
+        ],
+        "each pane keeps its own agent"
+    );
+    assert_eq!(
+        graph
+            .live_panes_of(&mux_id("work"))
+            .map(|(pane, _)| pane.pane.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("%1"), Some("%2")]
+    );
+    assert_eq!(
+        graph.live_counts_of_mux(&mux_id("work"), NOW_MS),
+        LiveCounts {
+            waiting: 1,
+            starting: 1,
+            working: 1,
+            ..LiveCounts::default()
+        },
+        "both pane agents count beside the session the mux hosts"
+    );
+}
+
+#[test]
+fn a_pane_agent_moves_to_its_session_and_its_neighbour_stays() {
+    let store = file([
+        in_pane(
+            entry("pi", "left", LiveState::Working, 1),
+            DEFAULT_SOCKET,
+            "work",
+            "%1",
+        ),
+        in_pane(
+            entry("codex", "right", LiveState::Ready, 2),
+            DEFAULT_SOCKET,
+            "work",
+            "%2",
+        ),
+    ]);
+    let both = LiveCounts {
+        working: 1,
+        ready: 1,
+        ..LiveCounts::default()
+    };
+
+    let mut before = snapshot(vec![mux_node("work", None)]);
+    bind_into(&mut before, &store, &FakePids::none());
+    assert_eq!(before.live_counts_of_mux(&mux_id("work"), NOW_MS), both);
+
+    // The left agent's session appears; the right one has none yet.
+    let mut after = snapshot(vec![mux_node("work", None), session_node("pi", "left")]);
+    linked(&mut after, session("pi", "left"), &mux_id("work"));
+    bind_into(&mut after, &store, &FakePids::none());
+    assert_eq!(
+        states(&after.node_live),
+        vec![(session("pi", "left"), LiveState::Working)]
+    );
+    assert_eq!(
+        pane_states(&after.pane_live),
+        vec![(pane("work", "%2"), LiveState::Ready)]
+    );
+    assert_eq!(
+        after.live_counts_of_mux(&mux_id("work"), NOW_MS),
+        both,
+        "each agent still counts once"
+    );
+}
+
+#[test]
+fn entries_that_name_no_pane_share_one_slot_on_their_mux() {
+    let graph = snapshot(vec![mux_node("work", None)]);
+    let paneless = |key: &str, state, rev| {
+        let mut entry = in_pane(entry("pi", key, state, rev), DEFAULT_SOCKET, "work", "");
+        if let Some(tmux) = &mut entry.tmux {
+            tmux.pane = if key == "a" {
+                None
+            } else {
+                Some(String::new())
+            };
+        }
+        entry
+    };
+    let store = file([
+        paneless("a", LiveState::Working, 1),
+        paneless("b", LiveState::Waiting, 2),
+    ]);
+
+    let bound = bind_live(&graph, &store, &FakePids::none());
+
+    assert_eq!(
+        pane_states(&bound.panes),
+        vec![(LivePane::new(mux_id("work"), None), LiveState::Waiting)],
+        "no pane and an empty pane id are one slot, the last write kept"
+    );
+}
+
 // ---- liveness ----
 
 #[test]
@@ -432,7 +592,7 @@ fn liveness_comes_from_the_recorded_pid_and_start_time() {
     let probe = FakePids::running(&[(100, 5), (300, 6)]);
 
     let mut graph = graph;
-    graph.node_live = bind_live(&graph, &store, &probe);
+    bind_into(&mut graph, &store, &probe);
 
     let liveness: Vec<(NodeId, Liveness)> = graph
         .node_live
@@ -469,21 +629,22 @@ fn liveness_comes_from_the_recorded_pid_and_start_time() {
     );
 }
 
-// ---- several entries for one node ----
+// ---- several entries for one slot ----
 
 #[test]
-fn a_node_keeps_the_entry_written_last() {
+fn a_pane_keeps_the_entry_written_last() {
     let graph = snapshot(vec![mux_node("work", None)]);
     let in_work =
         |key: &str, state, rev| in_pane(entry("pi", key, state, rev), DEFAULT_SOCKET, "work", "%1");
+    let bound = |store: &LiveFile| pane_states(&bind_live(&graph, store, &FakePids::none()).panes);
 
     let newer = file([
         in_work("a", LiveState::Working, 5),
         in_work("b", LiveState::Waiting, 3),
     ]);
     assert_eq!(
-        states(&bind_live(&graph, &newer, &FakePids::none())),
-        vec![(mux("work"), LiveState::Working)],
+        bound(&newer),
+        vec![(pane("work", "%1"), LiveState::Working)],
         "the highest revision wins"
     );
 
@@ -494,16 +655,16 @@ fn a_node_keeps_the_entry_written_last() {
         in_work("b-new", LiveState::Starting, 8),
     ]);
     assert_eq!(
-        states(&bind_live(&graph, &moved, &FakePids::none())),
-        vec![(mux("work"), LiveState::Starting)]
+        bound(&moved),
+        vec![(pane("work", "%1"), LiveState::Starting)]
     );
 
     let mut later = in_work("z-later", LiveState::Ready, 8);
     later.observation.observed_ms += 1;
     let by_time = file([in_work("a-earlier", LiveState::Working, 8), later]);
     assert_eq!(
-        states(&bind_live(&graph, &by_time, &FakePids::none())),
-        vec![(mux("work"), LiveState::Ready)],
+        bound(&by_time),
+        vec![(pane("work", "%1"), LiveState::Ready)],
         "then the newest evidence"
     );
 
@@ -512,8 +673,8 @@ fn a_node_keeps_the_entry_written_last() {
         in_work("a", LiveState::Working, 8),
     ]);
     assert_eq!(
-        states(&bind_live(&graph, &tied, &FakePids::none())),
-        vec![(mux("work"), LiveState::Working)],
+        bound(&tied),
+        vec![(pane("work", "%1"), LiveState::Working)],
         "and the lowest key when nothing else tells them apart"
     );
 }
@@ -531,10 +692,10 @@ fn two_session_nodes_for_one_native_session_bind_the_lower_id() {
     ]);
     let store = file([entry("codex", "s1", LiveState::Working, 1)]);
 
-    let table = bind_live(&graph, &store, &FakePids::none());
+    let bound = bind_live(&graph, &store, &FakePids::none());
 
     let expected = session("codex", "s1").min(NodeId::AgentSession(other_scope.id));
-    assert_eq!(states(&table), vec![(expected, LiveState::Working)]);
+    assert_eq!(states(&bound.nodes), vec![(expected, LiveState::Working)]);
 }
 
 // ---- the pass ----

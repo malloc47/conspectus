@@ -119,9 +119,9 @@ pub const CODEX_LOG: &str = "codex_log";
 pub const HOOK_SIDECAR: &str = "hook_sidecar";
 
 /// Live-state binding pass (`discovery::live_state::apply_live_state`,
-/// ADR 0205). It writes only the snapshot's `node_live` table and stamps
-/// no node or link, so evicting it removes nothing; the table is rebuilt
-/// on every cycle instead.
+/// ADR 0205). It writes only the snapshot's `node_live` and `pane_live`
+/// tables and stamps no node or link, so evicting it removes nothing;
+/// the tables are rebuilt on every cycle instead.
 pub const LIVE_STATE: &str = "live_state";
 
 /// Operator-authored declared link / alias overlay

@@ -116,15 +116,14 @@ pub(crate) fn counts_text(counts: &LiveCounts) -> Option<String> {
 
 /// The body of `node show`'s `live state` section for `id`, one line per
 /// field, or nothing when the node has no live state. A session lists its
-/// own entry. A mux lists the counts over the agents it hosts and, when
-/// one of its panes holds an agent that no session matched yet, that
-/// agent's entry.
+/// own entry. A mux lists the counts over the agents it hosts and the
+/// entry of each agent in one of its panes that no session matched yet,
+/// with the pane's id.
 pub(crate) fn node_show_lines(snapshot: &GraphSnapshot, id: &NodeId, now_ms: i64) -> Vec<String> {
     let mut lines = Vec::new();
-    let own = snapshot.node_live.get(id);
     match id {
         NodeId::AgentSession(_) => {
-            if let Some(binding) = own {
+            if let Some(binding) = snapshot.node_live.get(id) {
                 binding_lines(&mut lines, binding, now_ms, "  ");
             }
         }
@@ -132,8 +131,11 @@ pub(crate) fn node_show_lines(snapshot: &GraphSnapshot, id: &NodeId, now_ms: i64
             if let Some(counts) = counts_text(&snapshot.live_counts_of_mux(mux, now_ms)) {
                 lines.push(format!("  counts:     {counts}"));
             }
-            if let Some(binding) = own {
-                lines.push("  pane agent with no session:".to_string());
+            for (pane, binding) in snapshot.live_panes_of(mux) {
+                lines.push(match &pane.pane {
+                    Some(pane) => format!("  pane agent with no session ({pane}):"),
+                    None => "  pane agent with no session:".to_string(),
+                });
                 binding_lines(&mut lines, binding, now_ms, "    ");
             }
         }

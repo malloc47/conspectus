@@ -6525,7 +6525,7 @@ fn native_app(view: View, filter: RowFilter) -> App {
     let mut app = App::new(config);
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
         snapshot: &snapshot,
-        live: &snapshot.node_live,
+        live: snapshot.live_tables(),
         view,
         grouping: crate::tui::Grouping::default_for(view),
         filter,

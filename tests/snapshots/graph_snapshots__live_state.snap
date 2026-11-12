@@ -136,12 +136,15 @@ expression: rendered
       "pid": 4242,
       "pid_start": 123456,
       "liveness": "alive"
-    },
+    }
+  ],
+  "pane_live": [
     {
       "node_id": {
         "type": "mux_session",
         "native_id": "tmux:main"
       },
+      "pane": "%2",
       "state": "working",
       "detail": "generating",
       "since_ms": 1790769500000,
@@ -149,6 +152,21 @@ expression: rendered
       "source": "hook",
       "heartbeat_s": 30,
       "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:main"
+      },
+      "pane": "%3",
+      "state": "ready",
+      "detail": "finished",
+      "since_ms": 1790769520000,
+      "observed_ms": 1790769540000,
+      "source": "hook",
+      "pid": 4343,
+      "pid_start": 654321,
+      "liveness": "alive"
     }
   ]
 }

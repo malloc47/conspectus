@@ -45,7 +45,7 @@ fn world() -> GraphSnapshot {
 fn built(snapshot: &GraphSnapshot, view: View, now_ms: i64) -> RowTree {
     let mut tree = build_tree_for_view(TreeInputs {
         snapshot,
-        live: &snapshot.node_live,
+        live: snapshot.live_tables(),
         view,
         grouping: Grouping::default_for(view),
         filter: crate::filter::RowFilter::default(),
@@ -57,7 +57,7 @@ fn built(snapshot: &GraphSnapshot, view: View, now_ms: i64) -> RowTree {
     annotate(
         &mut tree,
         snapshot,
-        &LiveValues::at(snapshot, &snapshot.node_live, now_ms),
+        &LiveValues::at(snapshot, snapshot.live_tables(), now_ms),
     );
     tree
 }
@@ -191,7 +191,7 @@ fn a_pins_row_carries_the_value_of_the_entity_it_points_at() {
 
 #[test]
 fn a_mixed_row_for_a_mux_without_evidence_has_empty_counts() {
-    let values = LiveValues::at(&world(), &BTreeMap::new(), NOW_MS);
+    let values = LiveValues::at(&world(), GraphSnapshot::empty().live_tables(), NOW_MS);
 
     assert_eq!(
         values.of_node(&NodeId::MuxSession(main_mux())),
@@ -208,14 +208,16 @@ fn a_mixed_row_for_a_mux_without_evidence_has_empty_counts() {
 #[test]
 fn the_rows_read_the_table_they_are_given() {
     let snapshot = world();
-    let mut later = BTreeMap::new();
-    later.insert(hosted(), running(LiveState::Error, 0));
+    let mut later = GraphSnapshot::empty();
+    later
+        .node_live
+        .insert(hosted(), running(LiveState::Error, 0));
     let mut tree = built(&snapshot, View::Sessions, NOW_MS);
 
     annotate(
         &mut tree,
         &snapshot,
-        &LiveValues::at(&snapshot, &later, NOW_MS),
+        &LiveValues::at(&snapshot, later.live_tables(), NOW_MS),
     );
 
     let states: Vec<_> = tree

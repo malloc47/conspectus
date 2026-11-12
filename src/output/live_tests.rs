@@ -1,7 +1,7 @@
 use super::*;
 use crate::model::live::{LiveDetail, LiveObservation, LiveSource, Liveness};
 use crate::model::{
-    AgentSessionId, AgentSessionNode, GraphLink, GraphNode, LinkEndpoint, MuxSessionNode,
+    AgentSessionId, AgentSessionNode, GraphLink, GraphNode, LinkEndpoint, LivePane, MuxSessionNode,
     Provenance, RelationKind,
 };
 
@@ -63,6 +63,19 @@ fn bind(
     snapshot
         .node_live
         .insert(id, LiveBinding::new(observation, liveness));
+}
+
+/// An agent no session matched, seen in pane `pane` of `tmux:editor`.
+fn bind_pane(
+    snapshot: &mut GraphSnapshot,
+    pane: Option<&str>,
+    observation: LiveObservation,
+    liveness: Liveness,
+) {
+    snapshot.pane_live.insert(
+        LivePane::new(mux_id(), pane.map(str::to_string)),
+        LiveBinding::new(observation, liveness),
+    );
 }
 
 /// An observation of `state` whose latest evidence is `silent_min`
@@ -170,7 +183,7 @@ fn counts_list_the_counted_states_most_urgent_first() {
 }
 
 #[test]
-fn a_mux_cell_counts_its_sessions_and_its_pane_agent() {
+fn a_mux_cell_counts_its_sessions_and_its_pane_agents() {
     let mut graph = snapshot(&["waiter", "builder", "silent"]);
     bind(
         &mut graph,
@@ -184,15 +197,21 @@ fn a_mux_cell_counts_its_sessions_and_its_pane_agent() {
         observed(LiveState::Working, 1),
         Liveness::Alive,
     );
-    bind(
+    bind_pane(
         &mut graph,
-        NodeId::MuxSession(mux_id()),
+        Some("%2"),
+        observed(LiveState::Working, 1),
+        Liveness::Alive,
+    );
+    bind_pane(
+        &mut graph,
+        Some("%3"),
         observed(LiveState::Working, 1),
         Liveness::Alive,
     );
     assert_eq!(
         mux_cell(&graph, &mux_id(), NOW_MS).as_deref(),
-        Some("1 waiting, 2 working")
+        Some("1 waiting, 3 working")
     );
     assert_eq!(mux_cell(&snapshot(&["silent"]), &mux_id(), NOW_MS), None);
 }
@@ -255,7 +274,7 @@ fn node_show_names_the_recorded_state_the_read_rules_replaced() {
 }
 
 #[test]
-fn node_show_lists_a_mux_s_counts_and_its_pane_agent() {
+fn node_show_lists_a_mux_s_counts_and_each_pane_agent() {
     let mut graph = snapshot(&["waiter"]);
     bind(
         &mut graph,
@@ -263,19 +282,30 @@ fn node_show_lists_a_mux_s_counts_and_its_pane_agent() {
         observed(LiveState::Waiting, 1),
         Liveness::Alive,
     );
-    bind(
+    bind_pane(
         &mut graph,
-        NodeId::MuxSession(mux_id()),
+        None,
+        observed(LiveState::Ready, 1),
+        Liveness::Alive,
+    );
+    bind_pane(
+        &mut graph,
+        Some("%4"),
         observed(LiveState::Starting, 1),
         Liveness::Unknown,
     );
     let lines = node_show_lines(&graph, &NodeId::MuxSession(mux_id()), NOW_MS);
+    let headings: Vec<&str> = lines
+        .iter()
+        .map(String::as_str)
+        .filter(|line| !line.starts_with("    "))
+        .collect();
     assert_eq!(
-        lines[..3],
+        headings,
         [
-            "  counts:     1 waiting, 1 starting",
+            "  counts:     1 waiting, 1 ready, 1 starting",
             "  pane agent with no session:",
-            "    state:      starting",
+            "  pane agent with no session (%4):",
         ]
     );
     assert_eq!(

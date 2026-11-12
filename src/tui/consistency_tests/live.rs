@@ -71,8 +71,8 @@ fn running(state: LiveState, detail: Option<LiveDetail>, subagents: u16) -> Live
     LiveBinding::new(observation, Liveness::Alive)
 }
 
-/// [`live_world`] with a live table: each session in a state of its own,
-/// and an agent no session matched in a pane of `scratch`.
+/// [`live_world`] with live tables: each session in a state of its own,
+/// and two agents no session matched in two panes of `scratch`.
 fn with_table() -> GraphSnapshot {
     let mut snapshot = live_world();
     snapshot.node_live = BTreeMap::from([
@@ -88,9 +88,15 @@ fn with_table() -> GraphSnapshot {
             session(SOLO),
             running(LiveState::Ready, Some(LiveDetail::Finished), 0),
         ),
+    ]);
+    snapshot.pane_live = BTreeMap::from([
         (
-            NodeId::MuxSession(mux("scratch")),
+            crate::model::LivePane::new(mux("scratch"), Some("%4".into())),
             running(LiveState::Waiting, Some(LiveDetail::Input), 0),
+        ),
+        (
+            crate::model::LivePane::new(mux("scratch"), Some("%5".into())),
+            running(LiveState::Starting, None, 0),
         ),
     ]);
     snapshot
@@ -229,8 +235,20 @@ fn one_entity_carries_one_live_value_in_every_view() {
     );
 }
 
-/// The store [`with_table`]'s table describes, written the way hooks
-/// write it, in `dir`.
+/// An agent's context in pane `pane` of `scratch`.
+fn in_scratch(pane: &str) -> LiveContext {
+    LiveContext {
+        tmux: Some(LiveTmux {
+            socket: Some("/tmp/tmux-1000/default".into()),
+            session: Some("scratch".into()),
+            pane: Some(pane.into()),
+        }),
+        ..LiveContext::default()
+    }
+}
+
+/// The store [`with_table`]'s tables describe, written the way hooks
+/// write them, in `dir`.
 fn written_store(dir: &std::path::Path) -> LiveStore {
     let store = LiveStore::at(dir.join("conspectus"));
     let at = now_ms();
@@ -257,14 +275,8 @@ fn written_store(dir: &std::path::Path) -> LiveStore {
                 kind: WaitKind::Input,
             },
         )
-        .with_context(LiveContext {
-            tmux: Some(LiveTmux {
-                socket: Some("/tmp/tmux-1000/default".into()),
-                session: Some("scratch".into()),
-                pane: Some("%4".into()),
-            }),
-            ..LiveContext::default()
-        }),
+        .with_context(in_scratch("%4")),
+        event("other-pane-only-agent", LiveEventKind::TurnStarted).with_context(in_scratch("%5")),
     ] {
         store
             .apply_event(&event)
@@ -292,8 +304,14 @@ fn the_overlay_puts_one_live_value_on_every_listing_of_an_entity() {
     let mut binder = overlay_over(&store);
     binder.rebind(&snapshot, Instant::now());
     let mut bound = snapshot.clone();
-    bound.node_live = binder.table(&snapshot).clone();
-    assert_eq!(bound.node_live.len(), 4, "every entry binds");
+    let tables = binder.table(&snapshot);
+    bound.node_live = tables.nodes.clone();
+    bound.pane_live = tables.panes.clone();
+    assert_eq!(
+        (bound.node_live.len(), bound.pane_live.len()),
+        (3, 2),
+        "every entry binds"
+    );
     assert_one_value_per_entity(&bound, overlay);
 }
 

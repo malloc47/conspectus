@@ -21,11 +21,11 @@ impl App {
         self.live = overlay;
     }
 
-    /// The live table the rows of `snapshot` read.
+    /// The live tables the rows of `snapshot` read.
     pub(crate) fn live_table<'a>(
         &'a self,
         snapshot: &'a GraphSnapshot,
-    ) -> &'a BTreeMap<NodeId, crate::model::live::LiveBinding> {
+    ) -> crate::model::LiveTables<'a> {
         self.live.table(snapshot)
     }
 

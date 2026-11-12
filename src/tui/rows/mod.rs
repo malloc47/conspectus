@@ -1313,9 +1313,10 @@ pub(crate) fn session_matches_filter(
 /// see the initial config values through the same read path.
 pub(crate) struct TreeInputs<'a> {
     pub snapshot: &'a crate::model::GraphSnapshot,
-    /// The live table the rows read, bound to `snapshot`: its own
-    /// `node_live`, or the one the TUI bound from the store since.
-    pub live: &'a std::collections::BTreeMap<NodeId, crate::model::live::LiveBinding>,
+    /// The live tables the rows read, bound to `snapshot`: its own
+    /// `node_live` and `pane_live`, or those the TUI bound from the store
+    /// since.
+    pub live: crate::model::LiveTables<'a>,
     pub view: View,
     pub grouping: crate::tui::Grouping,
     pub filter: crate::filter::RowFilter,

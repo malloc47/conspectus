@@ -10,8 +10,8 @@ node f79e7d88bb0dde09
   cwd:       /workspace
 
 live state
-  counts:     1 waiting, 1 working
-  pane agent with no session:
+  counts:     1 waiting, 1 ready, 1 working
+  pane agent with no session (%2):
     state:      working
     detail:     generating
     since:      2026-09-30T11:58:20Z
@@ -20,6 +20,15 @@ live state
     confidence: quiet
     source:     hook
     process:    unknown
+  pane agent with no session (%3):
+    state:      ready
+    detail:     finished
+    since:      2026-09-30T11:58:40Z
+    age:        1m
+    last event: 2026-09-30T11:59:00Z
+    confidence: fresh
+    source:     hook
+    process:    pid 4343, alive
 
 outgoing candidate links: 0
 

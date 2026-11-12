@@ -1409,18 +1409,30 @@ fn discovery_binds_the_live_state_store_to_sessions_and_muxes() {
     let snapshot = world.discover(GraphSnapshot::empty());
 
     let session = codex_session(&snapshot);
-    let alpha = NodeId::MuxSession(MuxSessionId::new("tmux:alpha"));
     let table: Vec<(NodeId, LiveState, Liveness)> = snapshot
         .node_live
         .iter()
         .map(|(id, binding)| (id.clone(), binding.observation.state, binding.liveness))
         .collect();
-    let mut expected = vec![
-        (session, LiveState::Working, Liveness::Alive),
-        (alpha, LiveState::Working, Liveness::Unknown),
-    ];
-    expected.sort_by(|a, b| a.0.cmp(&b.0));
-    assert_eq!(table, expected, "one binding per bound entry");
+    assert_eq!(
+        table,
+        vec![(session, LiveState::Working, Liveness::Alive)],
+        "one binding per bound session entry"
+    );
+    let panes: Vec<(crate::model::LivePane, LiveState, Liveness)> = snapshot
+        .pane_live
+        .iter()
+        .map(|(pane, binding)| (pane.clone(), binding.observation.state, binding.liveness))
+        .collect();
+    assert_eq!(
+        panes,
+        vec![(
+            crate::model::LivePane::new(MuxSessionId::new("tmux:alpha"), Some("%2".into())),
+            LiveState::Working,
+            Liveness::Unknown
+        )],
+        "the agent with no session binds to its pane"
+    );
     assert_eq!(
         snapshot
             .nodes

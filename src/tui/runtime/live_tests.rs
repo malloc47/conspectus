@@ -294,27 +294,28 @@ fn a_new_snapshot_binds_the_store_to_its_own_nodes() {
     rig.lands(world(&[SESSION]), true);
     assert_eq!(row_state(&rig.app, NEWCOMER), None, "no row for it yet");
     let snapshot = rig.app.snapshot_handle().unwrap().snapshot().clone();
+    let tables = rig.app.live_table(&snapshot);
+    assert!(tables.nodes.is_empty());
     assert_eq!(
-        rig.app
-            .live_table(&snapshot)
+        tables
+            .panes
             .keys()
-            .cloned()
+            .map(|pane| pane.mux.clone())
             .collect::<Vec<_>>(),
-        vec![NodeId::MuxSession(mux_id())]
+        vec![mux_id()],
+        "it binds to its pane of the mux"
     );
 
     // The next snapshot has its session, and the store has not changed.
     rig.lands(world(&[SESSION, NEWCOMER]), true);
     assert_eq!(row_state(&rig.app, NEWCOMER), Some(Some(LiveState::Ready)));
     let snapshot = rig.app.snapshot_handle().unwrap().snapshot().clone();
+    let tables = rig.app.live_table(&snapshot);
     assert_eq!(
-        rig.app
-            .live_table(&snapshot)
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>(),
+        tables.nodes.keys().cloned().collect::<Vec<_>>(),
         vec![session(NEWCOMER)],
         "the entry moved to its session"
     );
+    assert!(tables.panes.is_empty());
     assert_eq!(rig.discoveries.load(Ordering::SeqCst), 0);
 }

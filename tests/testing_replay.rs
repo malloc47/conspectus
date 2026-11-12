@@ -714,11 +714,14 @@ fn replay_moves_a_pane_only_state_from_the_mux_to_its_session_when_it_appears() 
     };
 
     let before = world.run().resolved;
-    let mux = conspectus::model::NodeId::MuxSession(editor_mux());
+    assert!(before.node_live.is_empty());
     assert_eq!(
-        before.node_live.keys().collect::<Vec<_>>(),
-        vec![&mux],
-        "with no session yet, the agent shows on its mux"
+        before.pane_live.keys().cloned().collect::<Vec<_>>(),
+        vec![conspectus::model::LivePane::new(
+            editor_mux(),
+            Some("%2".to_string())
+        )],
+        "with no session yet, the agent shows on its pane of the mux"
     );
     assert_eq!(before.live_counts_of_mux(&editor_mux(), now_ms), working);
 
@@ -730,11 +733,55 @@ fn replay_moves_a_pane_only_state_from_the_mux_to_its_session_when_it_appears() 
         vec![&session],
         "the next discovery moves it to the session"
     );
+    assert!(after.pane_live.is_empty());
     assert_eq!(
         after.live_state_of(&session, now_ms).map(|live| live.state),
         Some(LiveState::Working)
     );
     assert_eq!(after.live_counts_of_mux(&editor_mux(), now_ms), working);
+}
+
+#[test]
+fn replay_two_agents_with_no_session_in_two_panes_both_count_on_the_mux() {
+    use conspectus::live_store::{LiveEventKind, WaitKind};
+    use conspectus::model::live::LiveCounts;
+
+    let mut world = ReplayWorld::new();
+    let work = world.mkdir("work");
+    world.add_tmux_row(TmuxReplayRow::new("editor").with_cwd(&work));
+    world.write_live_event(&live_event(
+        "fresh-left",
+        LiveEventKind::WaitStarted {
+            agent: None,
+            kind: WaitKind::Input,
+        },
+        Some(("editor", "%1")),
+    ));
+    // Another agent process: one process holds one live session.
+    world.write_live_event(&live_event_of(
+        i64::from(std::os::unix::process::parent_id()),
+        "fresh-right",
+        LiveEventKind::TurnStarted,
+        Some(("editor", "%2")),
+    ));
+    let now_ms = conspectus::live_store::now_ms();
+
+    let result = world.run();
+
+    assert_eq!(result.snapshot.pane_live.len(), 2, "one entry per pane");
+    assert_eq!(
+        result.resolved.pane_live, result.snapshot.pane_live,
+        "resolving keeps the table"
+    );
+    assert_eq!(
+        result.resolved.live_counts_of_mux(&editor_mux(), now_ms),
+        LiveCounts {
+            waiting: 1,
+            working: 1,
+            ..LiveCounts::default()
+        },
+        "each agent counts once"
+    );
 }
 
 #[test]
