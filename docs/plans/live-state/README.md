@@ -334,7 +334,8 @@ Filed as their own stories; none is required by the first slice except where
 noted.
 
 - `hook init claude-code` matcher misses `source: "fork"`; `CLAUDE_CODE_VERSION`
-  is not a real variable; two fixtures use an invalid `source`.
+  is not a real variable; two fixtures use an invalid `source`. The matcher
+  and the fixtures are fixed (CSP-811); the variable is CSP-837.
 - `hook init` re-sorts the keys of the operator's `settings.json`.
 - `hook init codex` replaces an operator's `[[hooks.SessionStart]]` tables and
   sets no timeout; hooks may be inert until trusted.

@@ -175,7 +175,7 @@ of five enumerated categories:
 - tmux session lifecycle actions (create, rename, attach, tear down) that you
   start yourself;
 - subprocesses that Conspectus launches itself;
-- the hook entry `conspectus hook init` adds to a harness's settings file
+- the hook entries `conspectus hook init` adds to a harness's settings file
   (for Pi, its one extension file), which `hook remove` takes out again.
 
 These prohibitions are absolute:
@@ -304,7 +304,7 @@ conspectus graph --format html > graph.html   # self-contained interactive explo
 Two optional extras:
 
 ```sh
-conspectus hook init claude-code   # let Claude Code report its session id
+conspectus hook init claude-code   # let Claude Code report its session and state
 conspectus serve                   # keep the graph warm in the background
 ```
 

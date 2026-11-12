@@ -86,7 +86,7 @@ records in the same directory remain readable as a compatibility path.
 Install a harness hook automatically:
 
 ```sh
-conspectus hook init claude-code   # a SessionStart entry in ~/.claude/settings.json
+conspectus hook init claude-code   # 14 hook entries in ~/.claude/settings.json
 conspectus hook init codex         # a hook entry in ~/.codex/config.toml
 conspectus hook init pi            # <agent-dir>/extensions/conspectus-hook.ts
 ```
@@ -98,18 +98,21 @@ and `conspectus hook remove <harness>` removes only what Conspectus
 installed. The opencode hook is a plugin; see
 [`plugins/opencode-hook/README.md`](../plugins/opencode-hook/README.md).
 
-Manual Claude Code hook setup:
+Manual Claude Code hook setup puts the same handler under each event
+listed in [Claude Code live state](#claude-code-live-state), with the
+matcher `hook init` uses where it uses one; for session start:
 
 ```json
 {
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "resume|startup|clear|compact",
+        "matcher": "startup|resume|clear|compact|fork",
         "hooks": [
           {
             "type": "command",
-            "command": "conspectus hook write claude-code"
+            "command": "conspectus hook write claude-code",
+            "timeout": 5
           }
         ]
       }
@@ -121,10 +124,8 @@ Manual Claude Code hook setup:
 Place that in `~/.claude/settings.json` or a local Claude Code
 settings file. The subcommand reads Claude's hook JSON from stdin,
 records `session_id`, `transcript_path`, `cwd`, and tmux context when
-available, then exits without writing to the transcript. A session
-start also writes the session's live-state entry to
-`$XDG_STATE_HOME/conspectus/live-state.json` (or
-`$HOME/.local/state/conspectus/live-state.json`); nothing shows it yet.
+available, then exits without writing to the transcript. Only a session
+start also writes the attribution record.
 
 `hook write` never disturbs the harness that runs it. It prints nothing
 on stdout or stderr and exits 0 even when the payload is empty or
@@ -154,6 +155,48 @@ print, JSON, and RPC modes. Besides `installed` and `not-installed`,
 `hook status pi` reports `outdated` (an older copy) and `foreign` (a
 file at that path Conspectus didn't write, which `init` and `remove`
 leave alone). See [`plugins/pi-hook/README.md`](../plugins/pi-hook/README.md).
+
+#### Claude Code live state
+
+`hook init claude-code` installs one entry for each Claude Code hook
+event that says whether a session is working, waiting for you, or ready:
+`SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `PreToolUse`
+(only `AskUserQuestion` and `ExitPlanMode`), `PostToolUse`,
+`PostToolUseFailure`, `Notification` (only the dialog, idle, and
+usage-limit types), `SubagentStart`, `SubagentStop`, `Stop`,
+`StopFailure`, `PreCompact`, `PostCompact`, and `SessionEnd`, each with a
+5 s timeout. An older install that covered only session start is
+upgraded in place when you run `conspectus hook init claude-code` again;
+nothing changes until you do. Your own hook groups are left as they are
+(the file's keys come back sorted). `--command` sets the command every
+Conspectus entry runs.
+
+`conspectus hook status claude-code` prints `installed`, `partial`, or
+`not-installed` for the file, then one line per event (`installed`,
+`outdated`, or `missing`, followed by the event name), and says on
+stderr how to complete a partial install. `hook remove claude-code`
+takes out every Conspectus entry and nothing else.
+
+Each event updates the session's entry in
+`$XDG_STATE_HOME/conspectus/live-state.json` (or
+`$HOME/.local/state/conspectus/live-state.json`); nothing shows it yet.
+Only states, counts, ids, paths, and times are kept: never a prompt, a
+tool's input or output, a message, or an error text, and never a tool
+name. Some gaps come with the hooks:
+
+- Pressing Esc mid-turn fires nothing, so the session reads `working`
+  until the next prompt or Claude Code's idle notification; after ten
+  minutes without an event it is marked quiet, never `ready`.
+- Approving a permission prompt fires nothing either: the session
+  reads `waiting` until the approved tool finishes, which for a long
+  build is the whole build. Denying one reads `waiting` until the next
+  prompt.
+- A killed Claude Code process says nothing; Conspectus finds its pid
+  gone and shows it `exited`.
+- Hooks do not run in a folder until you accept Claude Code's workspace
+  trust dialog, nor with `disableAllHooks`, `--bare`, or managed hooks
+  only. Such a session has no live state, which is not the same as
+  idle.
 
 ## Configuration File
 

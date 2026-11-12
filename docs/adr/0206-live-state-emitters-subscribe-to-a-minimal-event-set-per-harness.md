@@ -106,6 +106,64 @@ are in the research notes and become tests.
     exit 0, bounded time (ADR 0204). Plugin handlers catch and swallow
     their own errors.
 
+### Claude Code, as built
+
+14. **One group of Conspectus's own per event.** A group is Conspectus's
+    when every handler in it runs `hook write claude-code`, in shell form
+    (`command`) or exec form (`command` and `args`). `hook init` appends
+    one to each event that lacks one and brings an older one up to date
+    in place (its matcher, a timeout), so a session-start-only install
+    gains the rest and nothing is duplicated. It never edits a group of
+    the operator's, even one that holds a Conspectus handler (Claude Code
+    runs identical commands once), and refuses a `hooks` value or event
+    list of the wrong type rather than replace it. It writes the shell
+    form, which every Claude Code version runs. New handlers copy the
+    command the existing ones run unless `--command` names another, which
+    then moves them all; a timeout the operator set is kept.
+15. **Remove and status.** `hook remove` takes every Conspectus handler
+    out of every event, then only the groups and event lists that left
+    empty, so an install followed by a remove gives back the operator's
+    values. `hook status` says `installed`, `partial`, or `not-installed`
+    for the file and `installed`, `outdated`, or `missing` per event.
+    A matcher covers an event when it is absent, empty, `*`, or an exact
+    list holding every name the event needs; anything else is outdated.
+16. **The mapping where the research left a choice.**
+    - A notification of an open dialog (`permission_prompt`, the two
+      elicitation dialogs, `agent_needs_input`) names no agent and comes
+      seconds late, only while the dialog is open. It confirms the wait
+      already pending, whoever's it is, and makes one for the main agent
+      only when none is: the neutral "wait confirmed" event (ADR 0204).
+      `quota_auto_resume_stale` is a main-agent wait for input,
+      `quota_auto_resume_fired` starts a turn, and `idle_prompt` and
+      `quota_auto_resume_disabled` confirm an idle prompt, which leaves a
+      finished or failed turn as it was.
+    - `stop_hook_active` changes nothing. A `Stop` fires whenever a
+      response finishes; the flag says only that this response was a
+      continuation a Stop hook forced, so it ends that continuation too.
+      A Stop another hook blocks reads as finished while the forced
+      continuation runs, which no flag can tell.
+    - An event fired inside a child agent carries `agent_id` and is the
+      child's: its waits and tools count for the child, its paths are not
+      recorded, and its turn events (prompt, stop, failure, compaction)
+      are dropped, since the vocabulary has no state for a child's turn.
+    - `PostToolUseFailure` with `is_interrupt` ends the main agent's turn
+      as interrupted. A `PermissionRequest` for `AskUserQuestion` or
+      `ExitPlanMode` keeps the question or plan wait.
+    - The subagent tool's result (`Agent`, formerly `Task`) starts the
+      child its `agentId` names when `async_launched` and stops it when
+      `completed`; the id is taken to be the hooks' `agent_id`.
+    - A `Stop`'s `background_tasks` replaces the child set with its
+      `subagent` entries whose status is not a finished one; a Stop
+      without the list leaves the set alone. `SubagentStop`'s list is not
+      used, since other foreground children may still run.
+    - `StopFailure`: `rate_limit` is rate limited;
+      `authentication_failed`, `oauth_org_not_allowed`, and
+      `cloud_credential_error` are auth; `overloaded` is overloaded;
+      every other type, billing and unknown ones included, is failed.
+
+    The fixtures that encode these are synthetic until a recording
+    confirms them.
+
 ## Consequences
 
 - Claude Code pays two small spawns per tool call (`PostToolUse` and its

@@ -66,6 +66,16 @@ forms, lists, readers, and keys look and behave alike.
   pane, process, cwd, and transcript path) to
   `$XDG_STATE_HOME/conspectus/live-state.json`, before the attribution
   record. Nothing reads or shows it yet.
+- **Claude Code reports what each session is doing.** `conspectus hook
+  init claude-code` now installs an entry for each of the 14 hook events
+  that say whether a session is working, waiting for you (a permission
+  prompt, a question, a plan, other input), ready, compacting, or failed,
+  and how many subagents it runs, each with a 5 s timeout; the session
+  start entry now also matches forked sessions. Re-run `conspectus hook
+  init claude-code` to turn it on: an install that covered only session
+  start is upgraded in place, and nothing changes until you run it. Each
+  event updates the session's entry in `live-state.json`; nothing shows
+  it in the TUI yet.
 
 ### Changed
 
@@ -653,6 +663,13 @@ forms, lists, readers, and keys look and behave alike.
   a session start, then writes the hook spool itself. Only a malformed
   command line still prints a usage message. Claude Code events other
   than `SessionStart` never reach the spool or the daemon.
+- **`conspectus hook status claude-code` reports each event.** After the
+  line for the settings file, which now says `installed`, `partial`, or
+  `not-installed`, it prints one tab-separated line per event: its state
+  (`installed`, `outdated`, or `missing`), `claude-code`, the file, and
+  the event. `hook remove claude-code` removes every entry Conspectus
+  installed under any event, and `hook init claude-code` stops with an
+  error instead of replacing a `hooks` value of the wrong type.
 
 ### Fixed
 

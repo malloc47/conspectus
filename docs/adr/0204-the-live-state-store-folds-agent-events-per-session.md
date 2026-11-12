@@ -64,10 +64,12 @@ Pi run a plugin inside the harness, which can hold it itself.
    started (flagged when it follows compaction, which keeps waits, child
    agents, and an open turn), turn started, retrying (optionally rate
    limited), wait started and wait ended per agent (permission,
-   question, plan, input), tool finished per agent (which ends that
-   agent's wait, since approval itself fires nothing), child agent
-   started and stopped by id, the background list of child agents
-   (which replaces the set), compaction started and ended, turn ended
+   question, plan, input), wait confirmed (a dialog the harness reports
+   late and without saying whose: it is the wait already pending, of
+   any agent, or else one of the main agent), tool finished per agent
+   (which ends that agent's wait, since approval itself fires nothing),
+   child agent started and stopped by id, the background list of child
+   agents (which replaces the set), compaction started and ended, turn ended
    (finished or interrupted), turn failed (rate limited, auth,
    overloaded, failed), idle confirmed, and session ended. One shared
    reducer folds them for every event source; a harness's reducer
