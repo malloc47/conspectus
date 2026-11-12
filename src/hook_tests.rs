@@ -65,6 +65,279 @@ fn latest_store_keeps_only_newest_record_for_mux() {
     assert_eq!(store.read_records(), vec![newer]);
 }
 
+/// A Claude Code record from pane `pane` of tmux session `editor`.
+fn pane_record(session_key: &str, pane: &str, observed_epoch: i64) -> HookRecord {
+    HookRecord {
+        schema_version: SCHEMA_VERSION,
+        harness_key: "claude-code".to_string(),
+        session_key: session_key.to_string(),
+        cwd: Some("/work".to_string()),
+        pid: Some(4242),
+        ppid: None,
+        tmux: Some(HookTmuxRecord {
+            session_name: Some("editor".to_string()),
+            native_id: None,
+            pane_id: Some(pane.to_string()),
+            socket_path: None,
+        }),
+        transcript_path: None,
+        hook_event_name: Some("SessionStart".to_string()),
+        observed_epoch,
+        harness_version: None,
+        background_harness: false,
+    }
+}
+
+fn sessions(store: &HookStore) -> Vec<String> {
+    let mut sessions: Vec<String> = store
+        .read_records()
+        .into_iter()
+        .map(|record| record.session_key)
+        .collect();
+    sessions.sort();
+    sessions
+}
+
+fn spool_json(store: &HookStore) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(store.latest_path()).expect("read spool"))
+        .expect("spool is JSON")
+}
+
+#[test]
+fn two_panes_of_one_tmux_session_keep_separate_records() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = HookStore::new(temp.path());
+
+    store
+        .write_record(&pane_record("alpha", "%1", 100))
+        .expect("write pane 1");
+    store
+        .write_record(&pane_record("beta", "%2", 200))
+        .expect("write pane 2");
+    assert_eq!(sessions(&store), ["alpha", "beta"]);
+
+    // A newer session in pane 1 replaces only pane 1's record.
+    let outcome = store
+        .write_record(&pane_record("gamma", "%1", 300))
+        .expect("write pane 1 again");
+    assert!(outcome.replaced_existing);
+    assert_eq!(sessions(&store), ["beta", "gamma"]);
+    let keys: Vec<String> = spool_json(&store)["records"]
+        .as_object()
+        .expect("records")
+        .keys()
+        .cloned()
+        .collect();
+    assert_eq!(
+        keys,
+        ["tmux:default:editor:pane:%1", "tmux:default:editor:pane:%2"]
+    );
+}
+
+#[test]
+fn a_mux_record_without_a_pane_keeps_one_slot_per_mux_session() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = HookStore::new(temp.path());
+    let mut older = pane_record("old", "%1", 100);
+    older.tmux.as_mut().expect("tmux").pane_id = None;
+    let mut newer = older.clone();
+    newer.session_key = "new".to_string();
+    newer.pid = Some(5151);
+    newer.observed_epoch = 200;
+
+    store.write_record(&older).expect("write older");
+    store.write_record(&newer).expect("write newer");
+    assert_eq!(sessions(&store), ["new"]);
+}
+
+#[test]
+fn a_record_outside_a_mux_takes_its_process_slot_then_its_directory() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = HookStore::new(temp.path());
+    let outside = |session: &str, pid: Option<i64>, epoch: i64| HookRecord {
+        tmux: None,
+        pid,
+        ..pane_record(session, "%1", epoch)
+    };
+
+    // Two processes in one directory keep a record each.
+    store
+        .write_record(&outside("first", Some(10), 100))
+        .expect("write");
+    store
+        .write_record(&outside("second", Some(11), 200))
+        .expect("write");
+    assert_eq!(sessions(&store), ["first", "second"]);
+    // A process that moves on to a new session replaces its own record.
+    store
+        .write_record(&outside("third", Some(10), 300))
+        .expect("write");
+    assert_eq!(sessions(&store), ["second", "third"]);
+    // With no pid, records share their directory's slot.
+    store
+        .write_record(&outside("fourth", None, 400))
+        .expect("write");
+    store
+        .write_record(&outside("fifth", None, 500))
+        .expect("write");
+    assert_eq!(sessions(&store), ["fifth", "second", "third"]);
+}
+
+#[test]
+fn a_spool_under_the_per_session_key_moves_each_record_to_its_pane() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = HookStore::new(temp.path());
+    // What a binary from before the pane slots wrote: one record per
+    // tmux session, whichever pane last reported.
+    fs::write(
+        store.latest_path(),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "records": { "tmux:default:editor": pane_record("alpha", "%1", 100) }
+        }))
+        .expect("serialize"),
+    )
+    .expect("write old spool");
+    assert_eq!(sessions(&store), ["alpha"]);
+
+    // Another pane's record joins it instead of replacing it.
+    store
+        .write_record(&pane_record("beta", "%2", 200))
+        .expect("write pane 2");
+    assert_eq!(sessions(&store), ["alpha", "beta"]);
+    let keys: Vec<String> = spool_json(&store)["records"]
+        .as_object()
+        .expect("records")
+        .keys()
+        .cloned()
+        .collect();
+    assert_eq!(
+        keys,
+        ["tmux:default:editor:pane:%1", "tmux:default:editor:pane:%2"],
+        "the next write stores every record under its pane slot"
+    );
+}
+
+#[test]
+fn an_old_key_and_a_pane_key_for_one_pane_keep_the_newer_record() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = HookStore::new(temp.path());
+    let write_spool = |old: HookRecord, current: HookRecord| {
+        fs::write(
+            store.latest_path(),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "records": {
+                    "tmux:default:editor": old,
+                    "tmux:default:editor:pane:%1": current,
+                }
+            }))
+            .expect("serialize"),
+        )
+        .expect("write spool");
+    };
+
+    write_spool(
+        pane_record("old-key-newer", "%1", 200),
+        pane_record("pane-key-older", "%1", 100),
+    );
+    assert_eq!(sessions(&store), ["old-key-newer"]);
+    write_spool(
+        pane_record("old-key-older", "%1", 100),
+        pane_record("pane-key-newer", "%1", 200),
+    );
+    assert_eq!(sessions(&store), ["pane-key-newer"]);
+    write_spool(
+        pane_record("old-key-tie", "%1", 100),
+        pane_record("pane-key-tie", "%1", 100),
+    );
+    assert_eq!(sessions(&store), ["pane-key-tie"]);
+}
+
+#[test]
+fn a_binary_from_before_the_pane_slots_adds_its_record_without_dropping_any() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = HookStore::new(temp.path());
+    store
+        .write_record(&pane_record("alpha", "%1", 100))
+        .expect("write pane 1");
+    store
+        .write_record(&pane_record("beta", "%2", 200))
+        .expect("write pane 2");
+
+    // The older binary reads the same schema version, inserts its record
+    // under the per-session key, and writes the map back.
+    let mut spool = spool_json(&store);
+    assert_eq!(spool["schema_version"], 1, "the schema version stays 1");
+    spool["records"]["tmux:default:editor"] =
+        serde_json::to_value(pane_record("gamma", "%3", 300)).expect("record");
+    fs::write(
+        store.latest_path(),
+        serde_json::to_vec_pretty(&spool).expect("serialize"),
+    )
+    .expect("old binary write");
+
+    assert_eq!(sessions(&store), ["alpha", "beta", "gamma"]);
+}
+
+#[test]
+fn a_spool_from_a_newer_schema_is_read_as_empty_and_never_overwritten() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = HookStore::new(temp.path());
+    let newer = r#"{"schema_version": 2, "records": {"anything": {"shape": "unknown"}}}"#;
+    fs::write(store.latest_path(), newer).expect("write newer spool");
+
+    assert!(store.read_records().is_empty());
+    let err = store
+        .write_record(&pane_record("alpha", "%1", 100))
+        .expect_err("a newer spool is left alone");
+    assert!(err.to_string().contains("left untouched"), "{err}");
+    assert_eq!(
+        fs::read_to_string(store.latest_path()).expect("read"),
+        newer
+    );
+}
+
+#[test]
+fn a_corrupt_spool_is_replaced_by_the_next_write() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = HookStore::new(temp.path());
+    fs::write(store.latest_path(), "{ not json").expect("write corrupt spool");
+
+    store
+        .write_record(&pane_record("alpha", "%1", 100))
+        .expect("write");
+    assert_eq!(sessions(&store), ["alpha"]);
+}
+
+#[test]
+fn the_spool_keeps_the_newest_records_up_to_its_bound() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = HookStore::new(temp.path());
+    let total = MAX_SPOOL_RECORDS + 2;
+    for index in 0..total {
+        let epoch = 1_000 + i64::try_from(index).expect("small index");
+        store
+            .write_record(&pane_record(
+                &format!("s{index}"),
+                &format!("%{index}"),
+                epoch,
+            ))
+            .expect("write");
+    }
+
+    let records = store.read_records();
+    assert_eq!(records.len(), MAX_SPOOL_RECORDS);
+    for gone in ["s0", "s1"] {
+        assert!(
+            records.iter().all(|record| record.session_key != gone),
+            "{gone} was observed longest ago"
+        );
+    }
+    let last = format!("s{}", total - 1);
+    assert!(records.iter().any(|record| record.session_key == last));
+}
+
 #[test]
 fn claude_payload_requires_session_id() {
     let err = hook_record_from_payload(
