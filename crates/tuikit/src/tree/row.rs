@@ -88,8 +88,9 @@ pub(crate) fn visible_indices<R: TreeRow>(rows: &[R], expanded: &BTreeSet<R::Id>
 }
 
 /// The indices of the rows above `index` that hold it: each shallower row
-/// met walking up from it, nearest first.
-pub(crate) fn ancestors<R: TreeRow>(rows: &[R], index: usize) -> Vec<usize> {
+/// met walking up from it, nearest first. Empty for a top-level row and for
+/// an `index` past the rows.
+pub fn ancestors<R: TreeRow>(rows: &[R], index: usize) -> Vec<usize> {
     let Some(row) = rows.get(index) else {
         return Vec::new();
     };

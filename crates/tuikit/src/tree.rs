@@ -26,7 +26,10 @@
 //!   it.
 //! - **Folding.** The selected row expands, collapses, or toggles; a row
 //!   without children ignores all three. [`TreeState::reveal`] opens the
-//!   ancestors of a row a host jumps to.
+//!   ancestors of a row a host jumps to, and [`TreeState::select_at`]
+//!   opens them and puts the cursor on that copy of the row, as a host
+//!   does when it puts back a cursor it saved with the rows above it
+//!   ([`ancestors`]).
 //! - **Rebuilding.** One routine keeps the cursor across a rebuild of the
 //!   rows: on the same identity when it still shows, else where it was,
 //!   else on a row the host hints at on its first load, else on the first
@@ -134,7 +137,7 @@ mod state;
 mod view;
 
 pub use columns::{INDENT, RowColumns, TreeColumns, disclosure};
-pub use row::{Row, TreeRow};
+pub use row::{Row, TreeRow, ancestors};
 pub use state::{Rebuild, TreeState};
 pub use view::{RowCtx, RowMark, RowState, TreeView};
 

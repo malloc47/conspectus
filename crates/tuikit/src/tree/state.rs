@@ -140,6 +140,26 @@ impl<Id: Ord + Clone> TreeState<Id> {
         true
     }
 
+    /// Put the cursor on the row at `index` of `rows`, expanding its
+    /// collapsed ancestors so it shows ([`reveal`](Self::reveal)). Unlike a
+    /// jump to an identity ([`select`](Self::select)), the cursor is on this
+    /// copy when the identity is listed more than once, and keeps its
+    /// position for the moves and rebuilds that follow, as a host needs
+    /// when it puts back a cursor it saved with the rows above it. Returns
+    /// whether `rows` has an `index`; when it does not, nothing changes.
+    pub fn select_at<R: TreeRow<Id = Id>>(&mut self, rows: &[R], index: usize) -> bool {
+        let Some(row) = rows.get(index) else {
+            return false;
+        };
+        self.reveal(rows, index);
+        self.position = self
+            .visible_indices(rows)
+            .iter()
+            .position(|&shown| shown == index);
+        self.selected = Some(row.id().clone());
+        true
+    }
+
     /// Select nothing.
     pub fn deselect(&mut self) {
         self.selected = None;

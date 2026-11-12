@@ -125,8 +125,10 @@ assert_eq!(state.selected().map(String::as_str), Some("fruit/plum"));
 | `selected`, `position`, `cursor(rows)` | the selected identity, the position it was placed at, the position of its showing copy | the copy nearest the position wins when an identity shows twice |
 | `step(rows, delta)`, `page_down`, `page_up`, `home`, `end` | move the cursor through the showing rows, stopping at the ends | a page is the kept window's page (one row before the first frame); each returns the new position, or `None` (nothing selected) when no row shows |
 | `select(rows, id)`, `deselect` | jump to an identity a row has, shown or not; select nothing | a jump forgets the position, so it lands on the first showing copy |
+| `select_at(rows, index)` | put the cursor on the row at `index`, expanding its closed ancestors | lands on that copy and keeps its position, as a host putting back a cursor it saved needs; `false` for an index past the rows |
 | `expand(rows)`, `collapse(rows)`, `toggle(rows)` | fold the selected row | a row without children is left alone; each says whether the folds changed |
 | `reveal(rows, index)` | expand the ancestors of the row at `index` | for a jump to a row inside closed groups |
+| `ancestors(rows, index)` | the indices of the rows that hold the row at `index`, nearest first | a host saves the identities above a row with it, so it can fall back to one of them when the row is gone |
 | `is_expanded`, `expanded`, `set_expanded`, `expand_id` | read and set the folds | a host opens a tree on its default folds with `set_expanded` |
 | `visible(rows)`, `visible_indices(rows)` | the rows that show, in display order | a row is hidden while an ancestor with children is collapsed |
 | `begin_rebuild(rows)`, `finish_rebuild(before, rows, hint)`, `rebuild(old, new, hint)` | keep the cursor across a rebuild of the rows | the rules below; the host may change the folds between the two halves |

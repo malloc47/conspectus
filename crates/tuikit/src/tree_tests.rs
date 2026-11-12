@@ -206,6 +206,51 @@ fn revealing_a_row_expands_its_ancestors_only() {
 }
 
 #[test]
+fn the_ancestors_of_a_row_are_the_shallower_rows_above_it_nearest_first() {
+    let tree = groups();
+    assert_eq!(
+        ancestors(&tree, 8),
+        [6, 4],
+        "the nested group, then its group"
+    );
+    assert_eq!(ancestors(&tree, 5), [4]);
+    assert!(ancestors(&tree, 4).is_empty(), "a top-level row has none");
+    assert!(
+        ancestors(&tree, 42).is_empty(),
+        "nor does a row past the end"
+    );
+}
+
+#[test]
+fn selecting_a_row_by_index_reveals_it_and_lands_on_that_copy() {
+    let tree = duplicated();
+    let mut state = open(&[1]);
+    assert!(
+        state.select_at(&tree, 3),
+        "the second copy, in a closed group"
+    );
+    assert_eq!(state.expanded(), &BTreeSet::from([1, 2]), "its group opens");
+    assert_eq!(
+        (state.selected(), state.cursor(&tree)),
+        (Some(&9), Some(3)),
+        "the cursor is on the copy asked for, not the first that shows"
+    );
+    assert_eq!(state.position(), Some(3));
+    assert_eq!(state.step(&tree, 1), Some(4), "and moves on from it");
+
+    let mut nested = open(&[]);
+    assert!(nested.select_at(&groups(), 8));
+    assert_eq!(nested.expanded(), &BTreeSet::from([5, 7]));
+    assert_eq!(nested.selected(), Some(&9));
+
+    assert!(
+        !nested.select_at(&groups(), 42),
+        "an index past the rows selects nothing"
+    );
+    assert_eq!(nested.selected(), Some(&9), "and changes nothing");
+}
+
+#[test]
 fn a_rebuild_keeps_the_cursor_on_its_row() {
     let tree = groups();
     let mut state = open(&[1, 5]);
