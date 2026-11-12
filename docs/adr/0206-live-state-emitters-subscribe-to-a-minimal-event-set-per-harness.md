@@ -5,7 +5,8 @@
 Accepted. Part of the live agent state plan with ADRs 0203, 0204, 0205,
 and 0207. Extends ADR 0028 (hook sidecars) with state events. Hook
 installation remains operator-initiated, ADR 0143 category 5. Refines
-ADR 0086 for hook payloads.
+ADR 0086 for hook payloads. Amended by ADR 0208: the Claude Code install
+edits `settings.json` in place.
 
 ## Context
 
@@ -439,7 +440,9 @@ are in the research notes and become tests.
 - *Preserving key order in `settings.json`.* Enabling `serde_json`'s
   `preserve_order` adds a transitive dependency, which needs its own ADR.
   Until then `hook init` keeps values and re-sorts keys, as today, and
-  the plan files a story for it.
+  the plan files a story for it. Settled by ADR 0208: the install edits
+  the file's text in place, so order and layout survive, and
+  `preserve_order` stays off.
 - *Codex: Tier A only, synchronous, and where when a `hooks.json`
   exists?* Tier A, synchronous, 5 s timeouts, and always `config.toml`
   (decisions 17 and 18). `notify` is never touched, and trust is only
