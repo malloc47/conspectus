@@ -3480,10 +3480,10 @@ fn handoff_return_marks_mux_and_linked_sessions_until_settled() {
 
     app.update(Msg::HandoffReturned(mux.clone()));
     let handoff = app.handoff().expect("pending hand-off");
-    assert!(handoff.muxes.contains(&mux));
+    assert!(handoff.muxes().contains(&mux));
     assert!(
         handoff
-            .sessions
+            .sessions()
             .contains(&AgentSessionId::new("claude-code", "/state", "abc"))
     );
     assert!(app.row_awaits_handoff(&session_row));
@@ -3491,9 +3491,9 @@ fn handoff_return_marks_mux_and_linked_sessions_until_settled() {
         let entry = app.previews().get(source).expect("content stays on screen");
         assert!(entry.stale, "{source:?} reloads after the hand-off");
     }
-    assert!(app.take_handoff_refresh_request());
+    assert!(app.take_handoff_refresh_request().is_some());
     assert!(
-        !app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_none(),
         "one refresh per hand-off"
     );
 
@@ -3523,11 +3523,11 @@ fn the_pane_coming_back_into_view_asks_for_a_refresh_without_freezing_rows() {
     app.update(Msg::ViewRegained);
 
     assert!(
-        app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_some(),
         "coming back refreshes like returning from an attach"
     );
     assert!(
-        !app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_none(),
         "one refresh per return"
     );
     assert!(
@@ -3544,13 +3544,13 @@ fn repeated_handoffs_accumulate_until_settled() {
     let first = crate::model::MuxSessionId::new("one");
     let second = crate::model::MuxSessionId::new("two");
     app.update(Msg::HandoffReturned(first.clone()));
-    assert!(app.take_handoff_refresh_request());
+    assert!(app.take_handoff_refresh_request().is_some());
     let started_at = app.handoff().expect("pending").started_at;
 
     app.update(Msg::HandoffReturned(second.clone()));
     let handoff = app.handoff().expect("pending");
     assert_eq!(
-        handoff.muxes,
+        handoff.muxes(),
         BTreeSet::from([first, second]),
         "a second return before the refresh lands keeps the first mux pending"
     );
@@ -3559,11 +3559,11 @@ fn repeated_handoffs_accumulate_until_settled() {
         "the spinner keeps its phase"
     );
     assert!(
-        handoff.sessions.is_empty(),
+        handoff.sessions().is_empty(),
         "muxes without linked sessions mark no session rows"
     );
     assert!(
-        app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_some(),
         "the second return asks again"
     );
 }
@@ -3576,9 +3576,9 @@ fn launch_started_marks_the_mux_without_requesting_a_refresh() {
     app.update(Msg::LaunchStarted(mux.clone()));
 
     let handoff = app.handoff().expect("launch marks the row");
-    assert!(handoff.muxes.contains(&mux));
+    assert!(handoff.muxes().contains(&mux));
     assert!(
-        !app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_none(),
         "the attach that follows asks for the refresh, not the launch"
     );
 }
@@ -3593,9 +3593,9 @@ fn launch_aborted_drops_only_its_own_mark() {
     app.update(Msg::HandoffReturned(other.clone()));
     app.update(Msg::LaunchAborted(launching.clone()));
     let handoff = app.handoff().expect("the other hand-off stays pending");
-    assert_eq!(handoff.muxes, BTreeSet::from([other]));
+    assert_eq!(handoff.muxes(), BTreeSet::from([other]));
     assert!(
-        app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_some(),
         "the other hand-off's refresh request survives"
     );
 
@@ -3619,7 +3619,7 @@ fn launch_mark_survives_the_attach_return_until_settled() {
         handoff.started_at, started_at,
         "the spinner keeps its phase"
     );
-    assert!(app.take_handoff_refresh_request());
+    assert!(app.take_handoff_refresh_request().is_some());
     app.update(Msg::HandoffSettled);
     assert!(app.handoff().is_none());
 }

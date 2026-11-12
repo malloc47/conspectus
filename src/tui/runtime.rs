@@ -11,7 +11,7 @@
 //! background channel and never block input.
 
 use std::process::Output;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -44,6 +44,7 @@ use crate::tui::{RunConfig, ui};
 /// the app's current view config.
 mod content;
 mod executor;
+mod handoff;
 mod launch;
 mod mux_name;
 mod overlay_keys;
@@ -176,6 +177,14 @@ struct LiveMode {
     result_rx: mpsc::Receiver<DiscoveryResult>,
     preview_tx: mpsc::Sender<(PreviewSource, PreviewContent)>,
     preview_rx: mpsc::Receiver<(PreviewSource, PreviewContent)>,
+    /// Muxes the existence check after a hand-off confirmed.
+    confirmed_tx: mpsc::Sender<handoff::Confirmed>,
+    confirmed_rx: mpsc::Receiver<handoff::Confirmed>,
+    /// Asks a returned mux's server whether it is still the same
+    /// incarnation.
+    probe: Arc<dyn handoff::IncarnationProbe>,
+    /// The discovery every background refresh runs.
+    discover: Arc<Discover>,
     workers: WorkerLedger,
     last_refresh: Instant,
     refresh_interval: Duration,
@@ -225,23 +234,31 @@ const FORGE_POLL: Duration = Duration::from_secs(10);
 /// Bookkeeping for background discovery workers. Each spawn takes the
 /// next generation. Results apply only when newer than the last one
 /// applied, so a slow worker spawned before a tmux hand-off can't
-/// overwrite the post-hand-off snapshot (ADR 0108).
+/// overwrite the post-hand-off snapshot (ADR 0108). Each mux a hand-off
+/// froze waits for the refresh spawned after its own return, so a later
+/// hand-off never holds it (ADR 0201).
 #[derive(Debug, Default)]
 struct WorkerLedger {
     next: u64,
     in_flight: usize,
     applied: u64,
-    /// First generation spawned after the latest hand-off; its result
-    /// (or any newer one) settles the hand-off's pending rows.
+    /// Each frozen mux and the generation spawned after its latest
+    /// return: that result, or any newer one, releases it, unless the
+    /// existence check releases it first.
+    frozen: std::collections::BTreeMap<MuxSessionId, u64>,
+    /// The generation spawned after the latest hand-off; its result (or
+    /// any newer one) ends the hand-off.
     settles_handoff_at: Option<u64>,
 }
 
 /// What [`WorkerLedger::finish`] decided about one worker's result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct WorkerVerdict {
     /// The result is newer than what's on screen.
     apply: bool,
-    /// The result settles the pending hand-off.
+    /// The frozen muxes the result releases.
+    released: Vec<MuxSessionId>,
+    /// The result ends the pending hand-off.
     settles_handoff: bool,
 }
 
@@ -252,8 +269,13 @@ impl WorkerLedger {
         self.next
     }
 
-    fn start_for_handoff(&mut self) -> u64 {
+    /// Start the refresh after a hand-off that returned from `muxes`
+    /// (none when the TUI's pane came back into view).
+    fn start_for_handoff(&mut self, muxes: impl IntoIterator<Item = MuxSessionId>) -> u64 {
         let generation = self.start();
+        for mux in muxes {
+            self.frozen.insert(mux, generation);
+        }
         self.settles_handoff_at = Some(generation);
         generation
     }
@@ -264,14 +286,36 @@ impl WorkerLedger {
         if apply {
             self.applied = generation;
         }
+        let mut released = Vec::new();
+        if apply {
+            self.frozen.retain(|mux, waits_for| {
+                let release = *waits_for <= generation;
+                if release {
+                    released.push(mux.clone());
+                }
+                !release
+            });
+        }
         let settles_handoff = apply && self.settles_handoff_at.is_some_and(|at| generation >= at);
         if settles_handoff {
             self.settles_handoff_at = None;
         }
         WorkerVerdict {
             apply,
+            released,
             settles_handoff,
         }
+    }
+
+    /// The existence check confirmed `mux` for the refresh with
+    /// `generation`. Returns whether that releases it: a later return
+    /// to the mux froze it again for a newer refresh.
+    fn confirm(&mut self, mux: &MuxSessionId, generation: u64) -> bool {
+        let current = self.frozen.get(mux) == Some(&generation);
+        if current {
+            self.frozen.remove(mux);
+        }
+        current
     }
 
     fn idle(&self) -> bool {
@@ -284,7 +328,13 @@ impl LiveMode {
     /// any worker runs.
     fn spawn_discovery(&mut self, app: &mut App, nudge: DaemonNudge, generation: u64) {
         self.last_refresh = Instant::now();
-        spawn_discovery_worker(app.config(), &self.result_tx, nudge, generation);
+        spawn_discovery_worker(
+            app.config(),
+            &self.result_tx,
+            nudge,
+            generation,
+            &self.discover,
+        );
         let label = match nudge {
             DaemonNudge::LiveAndForge => "Refreshing forges",
             DaemonNudge::None | DaemonNudge::LiveClasses => "Discovering",
@@ -304,19 +354,28 @@ impl LiveMode {
         // Returning from tmux paints the old snapshot right away; the
         // live classes rescan in the background even if another
         // worker is already running, since that one predates the
-        // hand-off (ADR 0108).
-        if app.take_handoff_refresh_request() {
-            let generation = self.workers.start_for_handoff();
-            let before = app
-                .snapshot_handle()
-                .map(|handle| live_mux_ids(handle.snapshot()));
-            self.last_refresh = Instant::now();
-            spawn_discovery_worker_settling(
-                app.config(),
-                &self.result_tx,
-                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
+        // hand-off (ADR 0108). Beside it, each returned mux's server is
+        // asked whether the mux is still there (ADR 0201).
+        if let Some(request) = app.take_handoff_refresh_request() {
+            let generation = self
+                .workers
+                .start_for_handoff(request.returned.iter().map(|returned| returned.mux.clone()));
+            let job = handoff::HandoffJob::new(
                 generation,
-                before,
+                app.config().clone(),
+                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
+                request,
+                app.snapshot_handle().map(SnapshotHandle::snapshot),
+            );
+            self.last_refresh = Instant::now();
+            handoff::spawn_refresh(
+                job,
+                Arc::clone(&self.probe),
+                Arc::clone(&self.discover),
+                handoff::HandoffChannels {
+                    results: self.result_tx.clone(),
+                    confirmed: self.confirmed_tx.clone(),
+                },
             );
             app.update(Msg::InFlightStart {
                 kind: crate::tui::app::InFlightKind::Discovery,
@@ -335,6 +394,7 @@ impl LiveMode {
                 &self.result_tx,
                 DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
                 generation,
+                &self.discover,
             );
             app.update(Msg::InFlightStart {
                 kind: crate::tui::app::InFlightKind::Discovery,
@@ -380,6 +440,13 @@ impl LoopMode for LiveMode {
             }
             if returned {
                 app.update(Msg::ViewRegained);
+            }
+        }
+        // A returned mux is still the incarnation the screen shows: its
+        // rows stop waiting for the refresh, which updates them behind.
+        while let Ok(handoff::Confirmed { mux, generation }) = self.confirmed_rx.try_recv() {
+            if self.workers.confirm(&mux, generation) {
+                app.update(Msg::HandoffReleased(mux));
             }
         }
         // Drain completed background discovery results without
@@ -443,6 +510,9 @@ impl LoopMode for LiveMode {
                 Err(err) => {
                     report_refresh_failure(app, &err);
                 }
+            }
+            for mux in verdict.released {
+                app.update(Msg::HandoffReleased(mux));
             }
             if verdict.settles_handoff {
                 app.update(Msg::HandoffSettled);
@@ -920,6 +990,7 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
     app.restore_persisted_state();
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
     let (preview_tx, preview_rx) = mpsc::channel();
+    let (confirmed_tx, confirmed_rx) = mpsc::channel();
     let refresh_interval = config.refresh_interval;
     let mode = LiveMode {
         tmux: Box::new(SystemTmux::new()),
@@ -927,6 +998,10 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         result_rx,
         preview_tx,
         preview_rx,
+        confirmed_tx,
+        confirmed_rx,
+        probe: Arc::new(handoff::TmuxIncarnation::default()),
+        discover: Arc::new(nudged_discovery),
         workers: WorkerLedger::default(),
         last_refresh: Instant::now(),
         refresh_interval,
@@ -1037,7 +1112,47 @@ impl DaemonNudge {
     }
 }
 
-/// Spawn a background thread that runs discovery and sends the resolved
+/// One discovery a background refresh runs: nudge the daemon as `nudge`
+/// says, then load a snapshot. The live loop runs [`nudged_discovery`];
+/// tests give canned snapshots.
+type Discover = dyn Fn(&mut RunConfig, DaemonNudge) -> Discovered + Send + Sync;
+
+/// What one [`Discover`] call produced.
+struct Discovered {
+    snapshot: Result<crate::model::GraphSnapshot>,
+    /// The snapshot came from a running daemon.
+    from_daemon: bool,
+    /// Why the daemon nudge failed; the snapshot is then a local
+    /// rebuild.
+    warning: Option<String>,
+}
+
+/// Rescan what `nudge` names, through the daemon when there is one, and
+/// load a snapshot. A failed nudge leaves `config` asking for a local
+/// rebuild, so a later probe by the same worker skips the daemon too.
+fn nudged_discovery(config: &mut RunConfig, nudge: DaemonNudge) -> Discovered {
+    prepare_rescan(config, nudge);
+    let warning = nudge_daemon(nudge.classes()).err();
+    if warning.is_some() {
+        // The daemon's snapshot may be stale; rebuild locally so the
+        // operator still sees current state.
+        config.refresh = true;
+    }
+    match discover_and_resolve_sourced(config) {
+        Ok((snapshot, from_daemon)) => Discovered {
+            snapshot: Ok(snapshot),
+            from_daemon,
+            warning,
+        },
+        Err(err) => Discovered {
+            snapshot: Err(err),
+            from_daemon: false,
+            warning,
+        },
+    }
+}
+
+/// Spawn a background thread that runs `discover` and sends the resolved
 /// snapshot through `tx`. Row-tree building stays on the main thread so
 /// it can use the app's current view state.
 fn spawn_discovery_worker(
@@ -1045,50 +1160,19 @@ fn spawn_discovery_worker(
     tx: &mpsc::Sender<DiscoveryResult>,
     nudge: DaemonNudge,
     generation: u64,
-) {
-    spawn_discovery_worker_settling(config, tx, nudge, generation, None);
-}
-
-/// [`spawn_discovery_worker`] for the refresh after a mux hand-off.
-/// `before` is the live mux set the screen showed before the hand-off;
-/// a result that equals it is probed again a moment later (see
-/// [`SETTLE_TRIES`]), since the hand-off nearly always changes it.
-fn spawn_discovery_worker_settling(
-    config: &RunConfig,
-    tx: &mpsc::Sender<DiscoveryResult>,
-    nudge: DaemonNudge,
-    generation: u64,
-    before: Option<std::collections::BTreeSet<crate::model::NodeId>>,
+    discover: &Arc<Discover>,
 ) {
     let mut config = config.clone();
     config.forge_fetch = worker_forge_fetch(nudge, config.forge_fetch);
     let tx = tx.clone();
+    let discover = Arc::clone(discover);
     std::thread::spawn(move || {
-        let mut warning = None;
-        let (snapshot, from_daemon) = probe_until_changed(
-            before.as_ref(),
-            SETTLE_TRIES,
-            SETTLE_DELAY,
-            std::thread::sleep,
-            || {
-                prepare_rescan(&config, nudge);
-                if let Err(message) = nudge_daemon(nudge.classes()) {
-                    // The daemon's snapshot may be stale; rebuild
-                    // locally so the operator still sees current state.
-                    config.refresh = true;
-                    warning = Some(message);
-                }
-                match discover_and_resolve_sourced(&config) {
-                    Ok((snapshot, from_daemon)) => (Ok(snapshot), from_daemon),
-                    Err(err) => (Err(err), false),
-                }
-            },
-        );
+        let found = discover(&mut config, nudge);
         let _ = tx.send(DiscoveryResult {
             generation,
-            snapshot,
-            warning,
-            from_daemon,
+            snapshot: found.snapshot,
+            warning: found.warning,
+            from_daemon: found.from_daemon,
         });
     });
 }
@@ -1100,33 +1184,6 @@ fn spawn_discovery_worker_settling(
 pub(in crate::tui) fn prepare_rescan(config: &RunConfig, nudge: DaemonNudge) {
     if nudge.rescans_mux() {
         config.discovery_caches.clear_mux();
-    }
-}
-
-/// Run `probe` and, while its snapshot's live mux set still equals
-/// `before` (nothing changed across a hand-off, which is almost never
-/// true), wait `delay` and probe again, at most `tries` more times.
-/// Returns the last probe's result.
-fn probe_until_changed<T>(
-    before: Option<&std::collections::BTreeSet<crate::model::NodeId>>,
-    tries: u32,
-    delay: Duration,
-    mut sleep: impl FnMut(Duration),
-    mut probe: impl FnMut() -> (Result<crate::model::GraphSnapshot>, T),
-) -> (Result<crate::model::GraphSnapshot>, T) {
-    let mut retried = 0;
-    loop {
-        let (snapshot, extra) = probe();
-        let unchanged = match (before, &snapshot) {
-            (Some(before), Ok(snapshot)) => live_mux_ids(snapshot) == *before,
-            _ => false,
-        };
-        if unchanged && retried < tries {
-            retried += 1;
-            sleep(delay);
-            continue;
-        }
-        return (snapshot, extra);
     }
 }
 
@@ -1176,14 +1233,6 @@ fn spawn_forge_fetch(
         let _ = tx.send(fetched);
     });
 }
-
-/// How many times a refresh after a mux hand-off re-probes when the
-/// mux set came back exactly as it was before the hand-off, and how
-/// long it waits between tries. A session that ended, or a server that
-/// was killed, can still answer a listing for a moment; both probes
-/// rescan in well under a second.
-const SETTLE_TRIES: u32 = 2;
-const SETTLE_DELAY: Duration = Duration::from_millis(150);
 
 /// Ask a running `conspectus serve` daemon to rescan
 /// the live classes now. The daemon otherwise serves its last tick,

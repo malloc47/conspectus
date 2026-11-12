@@ -140,18 +140,25 @@ pub enum Msg {
     /// The operator returned from a tmux attach to `mux` (ADR 0108).
     /// Marks the mux and its linked sessions as awaiting a refresh,
     /// marks their cached previews for reload, and asks the runtime
-    /// for a background refresh. Repeats before that refresh lands add to
-    /// the same pending set.
+    /// for a background refresh, with the mux's incarnation from before
+    /// the attach for its existence check (ADR 0201). Repeats before
+    /// that refresh lands add to the same pending set.
     HandoffReturned(MuxSessionId),
     /// The TUI's tmux pane came back into view after the operator was
     /// in another session. Asks for the same background refresh as a
     /// returned attach, without marking any row as awaiting it.
     ViewRegained,
+    /// `mux`'s rows (and its linked sessions' rows) stop awaiting the
+    /// hand-off: the existence check found it still running as the same
+    /// incarnation, or the refresh started after its return landed
+    /// (ADR 0201). Other muxes stay frozen, and the hand-off itself
+    /// lasts until [`Msg::HandoffSettled`].
+    HandoffReleased(MuxSessionId),
     /// After the next refresh that settles the pending action, move to
     /// the view where `node` now lives and select its row.
     FollowEntity(crate::model::NodeId),
-    /// A refresh spawned after the last hand-off landed (or failed);
-    /// the pending rows show current values again.
+    /// The newest refresh spawned after a hand-off landed (or failed);
+    /// every pending row shows current values again.
     HandoffSettled,
     /// A launch is starting `mux` (ADR 0127). Marks the mux row
     /// and its linked sessions with the hand-off's dim-and-spinner

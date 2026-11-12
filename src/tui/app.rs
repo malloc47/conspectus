@@ -26,6 +26,7 @@ mod content;
 mod content_history;
 mod controls;
 mod explorer_nav;
+mod handoff;
 mod listing;
 mod msg;
 mod overlays;
@@ -38,6 +39,7 @@ pub(crate) use content::MAX_DETAIL_SESSIONS;
 pub use content::{
     ContentSearch, ContentStatus, DetailRequest, PaneScope, ScanRequest, grouping_description,
 };
+pub use handoff::{HandoffRequest, MuxIncarnationTarget, PendingHandoff, ReturnCheck, ReturnedMux};
 pub use listing::Listing;
 pub use msg::Msg;
 #[cfg(test)]
@@ -197,9 +199,9 @@ pub struct App {
     /// render order matches the emit order; entries are keyed by
     /// `InFlightKind` for idempotent start/finish semantics.
     in_flight_ops: Vec<InFlightOp>,
-    /// Rows whose values predate the operator's last tmux hand-off
-    /// (ADR 0108). Cleared when a refresh spawned after the hand-off
-    /// lands.
+    /// Rows whose values predate the operator's last tmux hand-offs
+    /// (ADR 0108), released mux by mux (ADR 0201). Cleared when the
+    /// newest refresh spawned after a hand-off lands.
     handoff: Option<PendingHandoff>,
     /// An action that changed state asked for a background refresh; the
     /// runtime takes the request on its next pass.
@@ -380,21 +382,6 @@ pub struct InFlightOp {
     pub kind: InFlightKind,
     pub label: String,
     pub started_at: Instant,
-}
-
-/// Mux sessions the operator just returned from, plus the agent
-/// sessions linked to them, whose rows still show the pre-hand-off
-/// snapshot (ADR 0108). The renderer dims these rows and puts a
-/// spinner in their attach-glyph cell until the follow-up refresh
-/// lands.
-#[derive(Debug, Clone)]
-pub struct PendingHandoff {
-    pub muxes: BTreeSet<MuxSessionId>,
-    pub sessions: BTreeSet<AgentSessionId>,
-    pub started_at: Instant,
-    /// Set by the reducer, taken by the runtime, which then spawns
-    /// the background refresh that settles the hand-off.
-    refresh_requested: bool,
 }
 
 /// What the status bar says when an action on a row is refused because
@@ -960,8 +947,8 @@ impl App {
             return false;
         };
         match row {
-            RowKind::MuxSession(mux) => handoff.muxes.contains(&mux.mux),
-            RowKind::AgentSession(session) => handoff.sessions.contains(&session.session),
+            RowKind::MuxSession(mux) => handoff.holds_mux(&mux.mux),
+            RowKind::AgentSession(session) => handoff.holds_session(&session.session),
             _ => false,
         }
     }
@@ -982,8 +969,8 @@ impl App {
             return false;
         };
         match node {
-            NodeId::MuxSession(mux) => handoff.muxes.contains(&mux),
-            NodeId::AgentSession(session) => handoff.sessions.contains(&session),
+            NodeId::MuxSession(mux) => handoff.holds_mux(&mux),
+            NodeId::AgentSession(session) => handoff.holds_session(&session),
             _ => false,
         }
     }
@@ -1008,20 +995,20 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// Take the hand-off's refresh request. Returns `true` once per
-    /// [`Msg::HandoffReturned`] batch; the runtime answers it with a
-    /// background refresh that rescans the live classes.
-    pub fn take_handoff_refresh_request(&mut self) -> bool {
-        self.handoff
-            .as_mut()
-            .is_some_and(|handoff| std::mem::take(&mut handoff.refresh_requested))
+    /// Take the hand-off's refresh request: what the returns since the
+    /// last take (a [`Msg::HandoffReturned`] or [`Msg::ViewRegained`]
+    /// batch) left to settle. The runtime answers it with a background
+    /// refresh that rescans the live classes and checks each returned
+    /// mux.
+    pub fn take_handoff_refresh_request(&mut self) -> Option<HandoffRequest> {
+        self.handoff.as_mut()?.take_request()
     }
 
     /// Whether a hand-off refresh is already waiting to be spawned.
     pub fn handoff_refresh_pending(&self) -> bool {
         self.handoff
             .as_ref()
-            .is_some_and(|handoff| handoff.refresh_requested)
+            .is_some_and(PendingHandoff::refresh_requested)
     }
 
     /// Take the request for a background refresh that a state-changing
@@ -1257,24 +1244,30 @@ impl App {
                     self.preview_store
                         .mark_stale(&PreviewSource::Transcript(session.clone()));
                 }
-                let handoff = self.handoff.get_or_insert_with(|| PendingHandoff {
-                    muxes: BTreeSet::new(),
-                    sessions: BTreeSet::new(),
-                    started_at: Instant::now(),
-                    refresh_requested: false,
-                });
-                handoff.muxes.insert(mux);
-                handoff.sessions.extend(sessions);
-                handoff.refresh_requested = true;
+                let launched = self
+                    .handoff
+                    .as_ref()
+                    .is_some_and(|handoff| handoff.is_launching(&mux));
+                // The snapshot still shows the mux as it was before the
+                // attach, so its incarnation is the one to check.
+                let check = handoff::return_check(
+                    self.handle.as_ref().map(SnapshotHandle::snapshot),
+                    &mux,
+                    launched,
+                );
+                self.handoff
+                    .get_or_insert_with(PendingHandoff::new)
+                    .returned(mux, sessions, check);
             }
             Msg::ViewRegained => {
-                let handoff = self.handoff.get_or_insert_with(|| PendingHandoff {
-                    muxes: BTreeSet::new(),
-                    sessions: BTreeSet::new(),
-                    started_at: Instant::now(),
-                    refresh_requested: false,
-                });
-                handoff.refresh_requested = true;
+                self.handoff
+                    .get_or_insert_with(PendingHandoff::new)
+                    .regained();
+            }
+            Msg::HandoffReleased(mux) => {
+                if let Some(handoff) = &mut self.handoff {
+                    handoff.release(&mux);
+                }
             }
             Msg::FollowEntity(node) => {
                 self.pending_follow = Some(node);
@@ -1286,28 +1279,17 @@ impl App {
             }
             Msg::LaunchStarted(mux) => {
                 let sessions = self.sessions_linked_to(&mux);
-                let handoff = self.handoff.get_or_insert_with(|| PendingHandoff {
-                    muxes: BTreeSet::new(),
-                    sessions: BTreeSet::new(),
-                    started_at: Instant::now(),
-                    refresh_requested: false,
-                });
-                handoff.muxes.insert(mux);
-                handoff.sessions.extend(sessions);
+                self.handoff
+                    .get_or_insert_with(PendingHandoff::new)
+                    .launch_started(mux, sessions);
             }
             Msg::LaunchAborted(mux) => {
-                let sessions = self.sessions_linked_to(&mux);
-                if let Some(handoff) = &mut self.handoff {
-                    handoff.muxes.remove(&mux);
-                    for session in &sessions {
-                        handoff.sessions.remove(session);
-                    }
-                    if handoff.muxes.is_empty()
-                        && handoff.sessions.is_empty()
-                        && !handoff.refresh_requested
-                    {
-                        self.handoff = None;
-                    }
+                if self
+                    .handoff
+                    .as_mut()
+                    .is_some_and(|handoff| handoff.launch_aborted(&mux))
+                {
+                    self.handoff = None;
                 }
             }
             Msg::AttachSelected => {

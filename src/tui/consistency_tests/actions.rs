@@ -363,6 +363,10 @@ fn following_waits_for_the_hand_off_to_settle() {
     app.update(Msg::FollowEntity(mux("scratch")));
     app.forget_follow_row();
     assert_eq!(app.active_view(), View::History, "still on stale data");
+    // The existence check released the mux's rows; the data to follow
+    // the entity into is still the stale snapshot.
+    app.update(Msg::HandoffReleased(MuxSessionId::new("tmux:scratch")));
+    assert_eq!(app.active_view(), View::History, "still on stale data");
     app.update(Msg::HandoffSettled);
     assert_eq!(app.active_view(), View::Mux);
 }

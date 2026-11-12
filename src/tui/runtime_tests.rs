@@ -1374,27 +1374,34 @@ fn launch_entry_level_follows_outcome_and_stderr() {
 mod worker_ledger {
     use super::*;
 
-    const APPLY: WorkerVerdict = WorkerVerdict {
-        apply: true,
-        settles_handoff: false,
-    };
-    const SETTLE: WorkerVerdict = WorkerVerdict {
-        apply: true,
-        settles_handoff: true,
-    };
-    const DROP: WorkerVerdict = WorkerVerdict {
-        apply: false,
-        settles_handoff: false,
-    };
+    fn mux(name: &str) -> MuxSessionId {
+        MuxSessionId::new(format!("tmux:{name}"))
+    }
+
+    fn verdict(apply: bool, released: &[&str], settles_handoff: bool) -> WorkerVerdict {
+        WorkerVerdict {
+            apply,
+            released: released.iter().map(|name| mux(name)).collect(),
+            settles_handoff,
+        }
+    }
+
+    fn applied() -> WorkerVerdict {
+        verdict(true, &[], false)
+    }
+
+    fn dropped() -> WorkerVerdict {
+        verdict(false, &[], false)
+    }
 
     #[test]
     fn older_result_landing_after_a_newer_one_is_dropped() {
         let mut ledger = WorkerLedger::default();
         let timer = ledger.start();
-        let handoff = ledger.start_for_handoff();
-        assert_eq!(ledger.finish(handoff), SETTLE);
+        let handoff = ledger.start_for_handoff([mux("a")]);
+        assert_eq!(ledger.finish(handoff), verdict(true, &["a"], true));
         assert!(!ledger.idle());
-        assert_eq!(ledger.finish(timer), DROP);
+        assert_eq!(ledger.finish(timer), dropped());
         assert!(ledger.idle());
     }
 
@@ -1402,28 +1409,83 @@ mod worker_ledger {
     fn worker_spawned_before_the_handoff_does_not_settle_it() {
         let mut ledger = WorkerLedger::default();
         let timer = ledger.start();
-        let handoff = ledger.start_for_handoff();
-        assert_eq!(ledger.finish(timer), APPLY);
-        assert_eq!(ledger.finish(handoff), SETTLE);
+        let handoff = ledger.start_for_handoff([mux("a")]);
+        assert_eq!(ledger.finish(timer), applied());
+        assert_eq!(ledger.finish(handoff), verdict(true, &["a"], true));
     }
 
     #[test]
-    fn a_later_handoff_moves_the_settle_point() {
+    fn each_mux_is_released_by_the_refresh_after_its_own_return() {
+        // Outside tmux, the return from B comes after A's refresh already
+        // finished: A's result waits in the channel while B's refresh
+        // starts, and the first drain releases A without waiting for B.
         let mut ledger = WorkerLedger::default();
-        let first = ledger.start_for_handoff();
-        let second = ledger.start_for_handoff();
-        assert_eq!(ledger.finish(first), APPLY);
-        assert_eq!(ledger.finish(second), SETTLE);
+        let first = ledger.start_for_handoff([mux("a")]);
+        let second = ledger.start_for_handoff([mux("b")]);
+        assert_eq!(ledger.finish(first), verdict(true, &["a"], false));
+        assert_eq!(ledger.finish(second), verdict(true, &["b"], true));
+    }
+
+    #[test]
+    fn a_refresh_after_a_return_releases_every_earlier_freeze() {
+        let mut ledger = WorkerLedger::default();
+        let first = ledger.start_for_handoff([mux("a")]);
+        let second = ledger.start_for_handoff([mux("b")]);
+        assert_eq!(ledger.finish(second), verdict(true, &["a", "b"], true));
+        assert_eq!(ledger.finish(first), dropped());
     }
 
     #[test]
     fn worker_spawned_after_the_handoff_settles_it() {
         let mut ledger = WorkerLedger::default();
-        let handoff = ledger.start_for_handoff();
+        let handoff = ledger.start_for_handoff([mux("a")]);
         let refresh = ledger.start();
-        assert_eq!(ledger.finish(refresh), SETTLE);
-        assert_eq!(ledger.finish(handoff), DROP);
+        assert_eq!(ledger.finish(refresh), verdict(true, &["a"], true));
+        assert_eq!(ledger.finish(handoff), dropped());
         assert!(ledger.idle());
+    }
+
+    #[test]
+    fn the_pane_coming_back_into_view_does_not_hold_an_earlier_freeze() {
+        // Inside tmux the attach returns at once and the pane's return
+        // starts another refresh; A still waits only for its own.
+        let mut ledger = WorkerLedger::default();
+        let attach_a = ledger.start_for_handoff([mux("a")]);
+        let attach_b = ledger.start_for_handoff([mux("b")]);
+        let regained = ledger.start_for_handoff([]);
+        assert_eq!(ledger.finish(attach_a), verdict(true, &["a"], false));
+        assert_eq!(ledger.finish(attach_b), verdict(true, &["b"], false));
+        assert_eq!(ledger.finish(regained), verdict(true, &[], true));
+    }
+
+    #[test]
+    fn a_confirmed_mux_is_released_before_its_refresh_lands() {
+        let mut ledger = WorkerLedger::default();
+        let handoff = ledger.start_for_handoff([mux("a")]);
+        assert!(ledger.confirm(&mux("a"), handoff));
+        assert!(
+            !ledger.confirm(&mux("a"), handoff),
+            "a mux is released once"
+        );
+        assert_eq!(
+            ledger.finish(handoff),
+            verdict(true, &[], true),
+            "the refresh still ends the hand-off"
+        );
+    }
+
+    #[test]
+    fn a_confirmation_for_an_earlier_return_does_not_release_a_later_one() {
+        let mut ledger = WorkerLedger::default();
+        let first = ledger.start_for_handoff([mux("a")]);
+        let second = ledger.start_for_handoff([mux("a")]);
+        assert!(!ledger.confirm(&mux("a"), first));
+        assert_eq!(
+            ledger.finish(first),
+            verdict(true, &[], false),
+            "the first refresh predates the second return"
+        );
+        assert!(ledger.confirm(&mux("a"), second));
     }
 }
 
@@ -1997,103 +2059,6 @@ fn saving_the_pin_edit_form_sets_and_drops_overrides_in_the_store() {
         ..request
     };
     assert!(!executor::apply_pin_overrides(&store, &none).unwrap());
-}
-
-mod settle {
-    use std::cell::RefCell;
-    use std::collections::BTreeSet;
-
-    use super::*;
-    use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId};
-
-    fn world(names: &[&str]) -> GraphSnapshot {
-        GraphSnapshot {
-            nodes: names
-                .iter()
-                .map(|name| {
-                    GraphNode::MuxSession(MuxSessionNode::new(
-                        MuxSessionId::new(format!("tmux:{name}")),
-                        "tmux",
-                        *name,
-                    ))
-                })
-                .collect(),
-            ..GraphSnapshot::empty()
-        }
-    }
-
-    fn ids(names: &[&str]) -> BTreeSet<NodeId> {
-        live_mux_ids(&world(names))
-    }
-
-    /// Probe results in order; the last repeats.
-    fn run(
-        before: Option<&BTreeSet<NodeId>>,
-        results: &[&[&str]],
-    ) -> (usize, usize, GraphSnapshot) {
-        let calls = RefCell::new(0usize);
-        let sleeps = RefCell::new(0usize);
-        let (snapshot, ()) = probe_until_changed(
-            before,
-            2,
-            Duration::from_millis(150),
-            |_| *sleeps.borrow_mut() += 1,
-            || {
-                let i = (*calls.borrow()).min(results.len() - 1);
-                *calls.borrow_mut() += 1;
-                (Ok(world(results[i])), ())
-            },
-        );
-        (calls.into_inner(), sleeps.into_inner(), snapshot.unwrap())
-    }
-
-    #[test]
-    fn a_changed_mux_set_is_taken_at_once() {
-        let before = ids(&["a"]);
-        let (calls, sleeps, snapshot) = run(Some(&before), &[&["a", "b"]]);
-        assert_eq!((calls, sleeps), (1, 0));
-        assert_eq!(live_mux_ids(&snapshot), ids(&["a", "b"]));
-    }
-
-    #[test]
-    fn an_unchanged_set_is_probed_again_until_it_changes() {
-        let before = ids(&["a", "b"]);
-        // The first probe still sees the session that just ended.
-        let (calls, sleeps, snapshot) = run(Some(&before), &[&["a", "b"], &["a"]]);
-        assert_eq!((calls, sleeps), (2, 1));
-        assert_eq!(live_mux_ids(&snapshot), ids(&["a"]));
-    }
-
-    #[test]
-    fn a_set_that_never_changes_stops_after_the_bounded_retries() {
-        let before = ids(&["a"]);
-        let (calls, sleeps, _) = run(Some(&before), &[&["a"]]);
-        assert_eq!((calls, sleeps), (3, 2));
-    }
-
-    #[test]
-    fn without_a_hand_off_set_it_probes_once() {
-        let (calls, sleeps, _) = run(None, &[&["a"]]);
-        assert_eq!((calls, sleeps), (1, 0));
-    }
-
-    #[test]
-    fn a_failed_probe_is_returned_without_retrying() {
-        let before = ids(&["a"]);
-        let calls = RefCell::new(0);
-        let (result, ()) = probe_until_changed(
-            Some(&before),
-            2,
-            Duration::ZERO,
-            |_| {},
-            || {
-                *calls.borrow_mut() += 1;
-                (Err(anyhow::anyhow!("boom")), ())
-            },
-        );
-        assert!(result.is_err());
-        assert_eq!(calls.into_inner(), 1);
-    }
 }
 
 mod viewer_find_prompt {

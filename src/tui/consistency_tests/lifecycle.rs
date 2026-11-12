@@ -186,7 +186,7 @@ fn returning_from_an_attach_freezes_every_row_that_shows_the_mux() {
         let mut app = app_in(view);
         app.update(Msg::HandoffReturned(mux.clone()));
         assert!(
-            app.take_handoff_refresh_request(),
+            app.take_handoff_refresh_request().is_some(),
             "{view:?} asks to refresh"
         );
         for id in rows_standing_for_mux(&app, "conspectus-main") {
