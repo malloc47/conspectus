@@ -66,7 +66,7 @@ fn liveness(value: &Value) -> Liveness {
 
 /// Check the effective state of `harness`'s `session` against `expect`
 /// at `at_ms`.
-fn assert_shown(
+pub(crate) fn assert_shown(
     store: &LiveStore,
     harness: &str,
     session: &str,

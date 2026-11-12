@@ -912,3 +912,218 @@ fn a_codex_state_event_touches_no_socket_no_process_and_no_spool() {
     assert_eq!(entry["tmux"]["session"], "work");
     assert_eq!(entry["cwd"], "/home/user/projects/my-project");
 }
+
+/// The payloads the opencode plugin's reducer emits in the shared event
+/// scripts, in file and step order.
+fn opencode_payloads() -> Vec<(String, serde_json::Value)> {
+    let dir = fixture_dir("opencode-live");
+    let mut names: Vec<PathBuf> = fs::read_dir(&dir)
+        .expect("fixture directory")
+        .map(|entry| entry.expect("fixture entry").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .collect();
+    names.sort();
+    let mut payloads = Vec::new();
+    for path in names {
+        let text = fs::read_to_string(&path).expect("script");
+        for (index, line) in text.lines().enumerate().skip(1) {
+            let step: serde_json::Value = serde_json::from_str(line).expect("step");
+            for payload in step["emit"].as_array().into_iter().flatten() {
+                payloads.push((format!("{}:{}", path.display(), index + 1), payload.clone()));
+            }
+        }
+    }
+    payloads
+}
+
+/// The opencode events of the shared scripts, as they would reach the
+/// writer from a plugin that forwarded them whole.
+fn opencode_events() -> Vec<serde_json::Value> {
+    let dir = fixture_dir("opencode-live");
+    let mut events = Vec::new();
+    for entry in fs::read_dir(&dir).expect("fixture directory") {
+        let path = entry.expect("fixture entry").path();
+        if path.extension().is_none_or(|ext| ext != "jsonl") {
+            continue;
+        }
+        let text = fs::read_to_string(&path).expect("script");
+        for line in text.lines().skip(1) {
+            let step: serde_json::Value = serde_json::from_str(line).expect("step");
+            if let Some(event) = step.get("event") {
+                events.push(event.clone());
+            }
+        }
+    }
+    events
+}
+
+/// `payload` with payload text in every field the opencode parser does
+/// not read, at the top level and in `live`, and with text in place of
+/// its state and detail.
+fn plant_opencode_sentinels(payload: &serde_json::Value) -> serde_json::Value {
+    let mut planted = payload.clone();
+    let fields = planted.as_object_mut().expect("payload object");
+    for key in [
+        "title",
+        "message",
+        "patterns",
+        "resources",
+        "questions",
+        "fields",
+        "metadata",
+        "error",
+        "transcript_path",
+    ] {
+        fields.insert(
+            key.to_string(),
+            serde_json::json!([TEXT_SENTINEL, { "message": TEXT_SENTINEL }]),
+        );
+    }
+    fields.insert("permission".to_string(), serde_json::json!(NAME_SENTINEL));
+    if let Some(live) = fields
+        .get_mut("live")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        live.insert("state".to_string(), serde_json::json!(TEXT_SENTINEL));
+        live.insert("detail".to_string(), serde_json::json!(NAME_SENTINEL));
+        live.insert("message".to_string(), serde_json::json!(TEXT_SENTINEL));
+        live.insert("reason".to_string(), serde_json::json!(NAME_SENTINEL));
+        live.insert(
+            "error".to_string(),
+            serde_json::json!({ "type": NAME_SENTINEL, "message": TEXT_SENTINEL }),
+        );
+    }
+    planted
+}
+
+#[test]
+fn no_payload_text_of_any_opencode_payload_reaches_a_file_or_an_output() {
+    let world = World::new();
+    let payloads = opencode_payloads();
+    assert!(payloads.len() > 150, "{}", payloads.len());
+    let events = opencode_events();
+    assert!(
+        events
+            .iter()
+            .any(|event| event.to_string().contains("SENTINEL"))
+    );
+    let inputs = payloads
+        .iter()
+        .flat_map(|(place, payload)| {
+            [
+                (format!("{place} as emitted"), payload.clone()),
+                (
+                    format!("{place} planted"),
+                    plant_opencode_sentinels(payload),
+                ),
+            ]
+        })
+        .chain(
+            events
+                .into_iter()
+                .enumerate()
+                .map(|(index, event)| (format!("raw event {index}"), event)),
+        );
+    for (place, payload) in inputs {
+        let output = world
+            .hook_in_tmux("opencode")
+            .write_stdin(payload.to_string())
+            .output()
+            .expect("run hook write");
+        assert_eq!(output.status.code(), Some(0), "{place}");
+        assert!(
+            output.stdout.is_empty() && output.stderr.is_empty(),
+            "{place} was not silent"
+        );
+        let mut files = Vec::new();
+        collect_files(&world.state, &mut files);
+        collect_files(&world.runtime, &mut files);
+        for file in files {
+            let text =
+                String::from_utf8_lossy(&fs::read(&file).expect("read state file")).into_owned();
+            if let Some(needle) = leaked(&text) {
+                panic!("after {place}, {} holds {needle}", file.display());
+            }
+        }
+    }
+
+    // The writes happened: the scripts' root session has an entry, and its
+    // attribution payloads reached the spool.
+    let store = world.store();
+    let entry = &store["entries"]["opencode:ses_7Kq2mX9vB4nL1pZ8"];
+    assert!(entry["observation"]["state"].is_string(), "{store}");
+    assert!(world.spool_path().is_file());
+}
+
+#[test]
+fn an_opencode_snapshot_touches_no_socket_no_process_and_no_spool() {
+    let world = World::new();
+    let script: Vec<serde_json::Value> = opencode_payloads()
+        .into_iter()
+        .filter(|(place, _)| place.contains("v1-permission.jsonl"))
+        .map(|(_, payload)| payload)
+        .collect();
+    let (created, rest) = script.split_first().expect("payloads");
+    assert_eq!(created["attribution"], true);
+    run_silently(world.hook_in_tmux("opencode"), created.to_string());
+    let spool = fs::read(world.spool_path()).expect("spool");
+    let record = world.spool_record();
+    assert_eq!(record["harness_key"], "opencode");
+    assert_eq!(record["hook_event_name"], "session.created");
+    assert_eq!(record["tmux"]["pane_id"], "%7");
+    let tmux_calls = world.tmux_calls();
+
+    // The snapshots of the turn that are not marked for attribution: a
+    // permission ask, its reply, and the rest.
+    let listener = world.stuck_daemon();
+    listener.set_nonblocking(true).expect("nonblocking");
+    let unmarked: Vec<&serde_json::Value> = rest
+        .iter()
+        .filter(|payload| payload.get("attribution").is_none())
+        .collect();
+    assert!(unmarked.len() >= 4, "{}", unmarked.len());
+    for payload in unmarked {
+        run_silently(world.hook_in_tmux("opencode"), payload.to_string());
+    }
+    assert_eq!(world.tmux_calls(), tmux_calls, "tmux was not started");
+    assert_eq!(fs::read(world.spool_path()).expect("spool"), spool);
+    assert!(
+        matches!(listener.accept(), Err(err) if err.kind() == std::io::ErrorKind::WouldBlock),
+        "nothing connected to the daemon socket"
+    );
+    let entry = &world.store()["entries"]["opencode:ses_7Kq2mX9vB4nL1pZ8"];
+    assert_eq!(entry["observation"]["state"], "working", "{entry}");
+    assert_eq!(entry["observation"]["pid"], 52817, "the plugin's process");
+    assert_eq!(entry["instance"], "lq2c1a02-6a0e4c8b2d6f1a93");
+    assert_eq!(entry["tmux"]["session"], "work");
+    assert_eq!(entry["cwd"], "/home/user/projects/my-project");
+    drop(listener);
+
+    // The turn's end is marked: the spool hears of it as before.
+    let idle = rest.last().expect("the idle");
+    assert_eq!(idle["attribution"], true);
+    run_silently(world.hook_in_tmux("opencode"), idle.to_string());
+    assert_eq!(world.spool_record()["hook_event_name"], "session.status");
+    let entry = &world.store()["entries"]["opencode:ses_7Kq2mX9vB4nL1pZ8"];
+    assert_eq!(entry["observation"]["state"], "ready", "{entry}");
+    assert_eq!(entry["observation"]["detail"], "finished", "{entry}");
+}
+
+#[test]
+fn an_opencode_payload_without_live_state_is_attributed_as_before() {
+    let world = World::new();
+    let legacy = serde_json::json!({
+        "session_id": "ses_7Kq2mX9vB4nL1pZ8",
+        "cwd": "/home/user/projects/my-project",
+        "hook_event_name": "session.idle",
+    });
+    run_silently(world.hook_in_tmux("opencode"), legacy.to_string());
+    let record = world.spool_record();
+    assert_eq!(record["session_key"], "ses_7Kq2mX9vB4nL1pZ8");
+    assert_eq!(record["hook_event_name"], "session.idle");
+    assert!(
+        !world.store_path().exists()
+            || world.store()["entries"]["opencode:ses_7Kq2mX9vB4nL1pZ8"].is_null(),
+        "no live state"
+    );
+}

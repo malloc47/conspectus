@@ -94,7 +94,7 @@ fn a_hook_that_reports_no_live_state_is_never_called_silent() {
 }
 
 #[test]
-fn only_the_claude_code_and_codex_hooks_report_live_state_so_far() {
+fn the_claude_code_codex_and_opencode_hooks_report_live_state_and_pis_not_yet() {
     let reports = |harness: &str| {
         crate::discovery::harness::registered_adapters()
             .find(|adapter| adapter.harness_key() == harness)
@@ -102,6 +102,7 @@ fn only_the_claude_code_and_codex_hooks_report_live_state_so_far() {
     };
     assert!(reports("claude-code"));
     assert!(reports("codex"));
+    assert!(reports("opencode"));
     assert!(!reports("pi"));
 }
 
