@@ -3,9 +3,10 @@
 //! The library contract (ADR 0015) is the [`api`] facade plus the
 //! [`model`], [`discovery`], [`resolve`], [`output`], [`config`],
 //! [`declared`], [`aliases`], and [`rename`] modules. Modules hidden
-//! from these docs (`cli`, `tui`, `snapshot`, `hook`, `filter`, and
-//! `dev_scenarios`) stay reachable for the binary, integration tests,
-//! and the widget preview example, but are not part of that contract.
+//! from these docs (`cli`, `tui`, `snapshot`, `hook`, `live_store`,
+//! `filter`, and `dev_scenarios`) stay reachable for the binary,
+//! integration tests, and the widget preview example, but are not part
+//! of that contract.
 
 pub mod aliases;
 pub mod api;
@@ -33,6 +34,8 @@ pub mod launch_default;
 pub(crate) mod legacy_bindings;
 pub(crate) mod legacy_pins;
 pub(crate) mod legacy_registry;
+#[doc(hidden)]
+pub mod live_store;
 pub mod model;
 pub mod output;
 pub mod pin_migrate;
