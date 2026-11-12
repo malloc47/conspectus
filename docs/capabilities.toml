@@ -184,18 +184,20 @@ act = [
 # `hook remove pi` deletes (ADR 0121).
 # `--scope project` writes the same files under the project,
 # `CODEX_HOME` moves the Codex one, and `PI_CODING_AGENT_DIR` moves the
-# Pi one.
+# Pi one. The Claude Code and Codex settings files are written through
+# a sibling temporary file (`.<name>.tmp-<pid>-<attempt>`), as the
+# user-intent stores are, and a symlinked one through to its target.
 hook = [
     "$HOME/.claude/settings.json",
-    "$HOME/.claude/settings.json.tmp",
+    "$HOME/.claude/.settings.json.tmp-*",
     "$HOME/.codex/config.toml",
-    "$HOME/.codex/config.toml.tmp",
+    "$HOME/.codex/.config.toml.tmp-*",
     "$HOME/.pi/agent/extensions/conspectus-hook.ts",
     "$HOME/.pi/agent/extensions/conspectus-hook.ts.tmp",
     "$PROJECT/.claude/settings.json",
-    "$PROJECT/.claude/settings.json.tmp",
+    "$PROJECT/.claude/.settings.json.tmp-*",
     "$PROJECT/.codex/config.toml",
-    "$PROJECT/.codex/config.toml.tmp",
+    "$PROJECT/.codex/.config.toml.tmp-*",
     "$PROJECT/.pi/extensions/conspectus-hook.ts",
     "$PROJECT/.pi/extensions/conspectus-hook.ts.tmp",
 ]

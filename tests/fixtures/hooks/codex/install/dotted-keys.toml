@@ -1,0 +1,6 @@
+# Synthetic: hooks given as dotted keys at the top of the file.
+model = "gpt-5.4"
+hooks.SessionStart = [{ hooks = [{ type = "command", command = "echo dotted" }] }]
+
+[tui]
+notifications = true

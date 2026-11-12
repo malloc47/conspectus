@@ -29,6 +29,9 @@ fn isolated_cmd(home: &Path) -> Command {
     cmd.env("XDG_CACHE_HOME", home.join(".cache"));
     cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
+    // `hook init codex` writes under `CODEX_HOME`; one inherited from the
+    // host would point it at the developer's real Codex config.
+    cmd.env("CODEX_HOME", home.join(".codex"));
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
     cmd.env_remove("CONSPECTUS_CLAUDE_CODE_STATE");
     cmd.env_remove("CONSPECTUS_OPENCODE_STATE");
@@ -953,61 +956,264 @@ fn read_settings(path: &std::path::Path) -> serde_json::Value {
     serde_json::from_str(&fs::read_to_string(path).expect("read settings")).expect("settings json")
 }
 
-#[test]
-fn hook_init_status_remove_codex_preserves_existing_config() {
+/// A Codex install case from `tests/fixtures/hooks/codex/install/`.
+fn codex_case(name: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/hooks/codex/install")
+        .join(name);
+    fs::read_to_string(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()))
+}
+
+/// The events `hook init codex` installs.
+const CODEX_EVENTS: usize = 1;
+
+/// A scratch home whose `~/.codex/config.toml` holds `text`.
+fn codex_home(text: &str) -> (tempfile::TempDir, PathBuf) {
     let home = tempfile::TempDir::new().expect("home temp");
     let config = home.path().join(".codex/config.toml");
     fs::create_dir_all(config.parent().expect("parent")).expect("config parent");
-    fs::write(
-        &config,
-        r#"
-model = "gpt-5.4-mini"
+    fs::write(&config, text).expect("write config");
+    (home, config)
+}
 
-[hooks]
-SessionStart = [
-  { hooks = [
-      { type = "command", command = "echo existing", async = false },
-    ] },
-]
-"#,
+fn codex_hook(home: &Path, args: &[&str]) -> assert_cmd::assert::Assert {
+    isolated_cmd(home).arg("hook").args(args).assert()
+}
+
+#[test]
+fn hook_init_status_remove_codex_keeps_an_operators_tables_byte_for_byte() {
+    let original = codex_case("operator-array-of-tables.toml");
+    let (home, config) = codex_home(&original);
+    let home = home.path();
+
+    codex_hook(home, &["status", "codex"])
+        .success()
+        .stdout(predicate::str::starts_with("not-installed\tcodex\t"))
+        .stdout(predicate::str::contains("missing\tcodex\t").count(CODEX_EVENTS));
+    codex_hook(home, &["init", "codex", "--dry-run"])
+        .success()
+        .stdout(predicate::str::contains("would install Codex hooks"));
+    assert_eq!(
+        fs::read_to_string(&config).expect("read"),
+        original,
+        "a dry run writes nothing"
+    );
+
+    codex_hook(
+        home,
+        &["init", "codex", "--command", "conspectus hook write codex"],
     )
-    .expect("write config");
-
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("init")
-        .arg("codex")
-        .arg("--command")
-        .arg("conspectus hook write codex")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("installed Codex hook"));
-
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("status")
-        .arg("codex")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("installed\tcodex"));
-
+    .success()
+    .stdout(predicate::str::contains(format!(
+        "installed Codex hooks in {} ({CODEX_EVENTS} added, 0 updated)",
+        config.display()
+    )))
+    .stdout(predicate::str::contains("open /hooks in Codex"))
+    .stderr(predicate::str::is_empty());
     let installed = fs::read_to_string(&config).expect("read");
-    assert!(installed.contains("model = \"gpt-5.4-mini\""));
-    assert!(installed.contains("echo existing"));
-    assert!(installed.contains("hook write codex"));
-    assert!(installed.contains("async = false"));
+    for line in original.lines() {
+        assert!(installed.contains(line), "lost {line:?}:\n{installed}");
+    }
+    assert!(
+        installed.contains(
+            "[[hooks.SessionStart]]\nhooks = [{ type = \"command\", command = \"conspectus hook \
+             write codex\", timeout = 5 }]\n"
+        ),
+        "{installed}"
+    );
 
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("remove")
-        .arg("codex")
-        .assert()
+    codex_hook(home, &["status", "codex"])
         .success()
-        .stdout(predicate::str::contains("removed Codex hook"));
+        .stdout(predicate::str::starts_with("installed\tcodex\t"))
+        .stdout(predicate::str::contains("installed\tcodex\t").count(CODEX_EVENTS + 1))
+        .stdout(predicate::str::contains("\tSessionStart\n"))
+        .stderr(predicate::str::is_empty());
+    codex_hook(home, &["init", "codex"])
+        .success()
+        .stdout(predicate::str::contains("Codex hooks already installed"))
+        .stdout(predicate::str::contains("/hooks"));
+    assert_eq!(fs::read_to_string(&config).expect("read"), installed);
 
+    codex_hook(home, &["remove", "codex"])
+        .success()
+        .stdout(predicate::str::contains("removed Codex hooks"))
+        .stderr(predicate::str::is_empty());
+    assert_eq!(fs::read_to_string(&config).expect("read"), original);
+    codex_hook(home, &["remove", "codex"])
+        .success()
+        .stdout(predicate::str::contains("Codex hooks not installed"));
+}
+
+#[test]
+fn hook_init_codex_upgrades_an_older_install_in_place() {
+    let original = codex_case("inline-lists.toml");
+    let (home, config) = codex_home(&original);
+    let home = home.path();
+
+    codex_hook(home, &["status", "codex"])
+        .success()
+        .stdout(predicate::str::starts_with("partial\tcodex\t"))
+        .stdout(predicate::str::contains("outdated\tcodex\t").count(1))
+        .stderr(predicate::str::contains("conspectus hook init codex"));
+    codex_hook(home, &["init", "codex"])
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "({} added, 1 updated)",
+            CODEX_EVENTS - 1
+        )));
+    let upgraded = fs::read_to_string(&config).expect("read");
+    assert_eq!(
+        upgraded.matches("hook write codex").count(),
+        CODEX_EVENTS,
+        "never duplicated: {upgraded}"
+    );
+    assert!(upgraded.contains("echo existing"));
+    codex_hook(home, &["status", "codex"])
+        .success()
+        .stdout(predicate::str::starts_with("installed\tcodex\t"));
+}
+
+#[test]
+fn hook_init_codex_keeps_inline_and_dotted_hooks_and_the_recorded_trust() {
+    for name in ["inline-hooks.toml", "dotted-keys.toml", "hooks-state.toml"] {
+        let original = codex_case(name);
+        let (home, config) = codex_home(&original);
+        let home = home.path();
+        codex_hook(
+            home,
+            &["init", "codex", "--command", "conspectus hook write codex"],
+        )
+        .success();
+        let installed = fs::read_to_string(&config).expect("read");
+        assert!(installed.contains("hook write codex"), "{name}");
+        assert_eq!(
+            installed.matches("trusted_hash").count(),
+            original.matches("trusted_hash").count(),
+            "{name}: no trust written"
+        );
+        codex_hook(home, &["remove", "codex"]).success();
+        assert_eq!(
+            fs::read_to_string(&config).expect("read"),
+            original,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn hook_remove_codex_takes_its_group_from_between_the_operators() {
+    let original = codex_case("conspectus-between-operator-groups.toml");
+    let (home, config) = codex_home(&original);
+    codex_hook(home.path(), &["remove", "codex"])
+        .success()
+        .stdout(predicate::str::contains("removed Codex hooks"))
+        .stderr(predicate::str::contains("review the hooks that came after"))
+        .stderr(predicate::str::contains("/hooks"));
     let removed = fs::read_to_string(&config).expect("read");
-    assert!(removed.contains("echo existing"));
-    assert!(!removed.contains("hook write codex"));
+    assert!(!removed.contains("hook write codex"), "{removed}");
+    assert!(removed.contains("echo first") && removed.contains("echo third"));
+}
+
+#[test]
+fn hook_init_codex_installs_beside_a_hooks_json_and_leaves_it_alone() {
+    let (home, config) = codex_home("model = \"gpt-5.4\"\n");
+    let hooks_json = config.with_file_name("hooks.json");
+    let json = codex_case("hooks.json");
+    fs::write(&hooks_json, &json).expect("hooks.json");
+
+    codex_hook(home.path(), &["init", "codex"])
+        .success()
+        .stdout(predicate::str::contains("installed Codex hooks"))
+        .stderr(predicate::str::contains(format!(
+            "{} also holds Codex hooks",
+            hooks_json.display()
+        )));
+    assert!(
+        fs::read_to_string(&config)
+            .expect("read")
+            .contains("hook write codex")
+    );
+    codex_hook(home.path(), &["status", "codex"])
+        .success()
+        .stdout(predicate::str::starts_with("installed\tcodex\t"))
+        .stderr(predicate::str::contains("hooks.json"));
+    codex_hook(home.path(), &["remove", "codex"]).success();
+    assert_eq!(fs::read_to_string(&hooks_json).expect("read"), json);
+    assert_eq!(
+        fs::read_to_string(&config).expect("read"),
+        "model = \"gpt-5.4\"\n"
+    );
+}
+
+#[test]
+fn hook_init_codex_refuses_a_hooks_value_it_would_replace() {
+    let text = "[hooks.SessionStart]\nmatcher = \"startup\"\n";
+    let (home, config) = codex_home(text);
+    codex_hook(home.path(), &["init", "codex"])
+        .failure()
+        .stderr(predicate::str::contains("hooks.SessionStart"));
+    assert_eq!(fs::read_to_string(&config).expect("read"), text);
+}
+
+#[test]
+fn hook_init_codex_writes_through_a_symlink_and_keeps_the_files_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    let dotfiles = home.path().join("dotfiles");
+    fs::create_dir_all(&dotfiles).expect("dotfiles");
+    let target = dotfiles.join("codex-config.toml");
+    fs::write(&target, "model = \"gpt-5.4\"\n").expect("target");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).expect("chmod");
+    let link = home.path().join(".codex/config.toml");
+    fs::create_dir_all(link.parent().expect("parent")).expect("codex dir");
+    std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+    codex_hook(home.path(), &["init", "codex"]).success();
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("link")
+            .file_type()
+            .is_symlink()
+    );
+    assert!(
+        fs::read_to_string(&target)
+            .expect("target")
+            .contains("hook write codex")
+    );
+    assert_eq!(
+        fs::metadata(&target).expect("target").permissions().mode() & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn hook_init_codex_project_scope_leaves_the_user_config_alone() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = tempfile::TempDir::new().expect("project temp");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .current_dir(project.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
+    hook(&["init", "codex", "--scope", "project"]).stdout(predicate::str::contains(format!(
+        "({CODEX_EVENTS} added, 0 updated)"
+    )));
+    let config = project.path().join(".codex/config.toml");
+    assert!(
+        fs::read_to_string(&config)
+            .expect("read")
+            .contains("hook write codex")
+    );
+    assert!(!home.path().join(".codex").exists());
+    hook(&["status", "codex", "--scope", "project"])
+        .stdout(predicate::str::starts_with("installed\tcodex\t"));
+    hook(&["status", "codex"]).stdout(predicate::str::starts_with("not-installed\tcodex\t"));
+    hook(&["remove", "codex", "--scope", "project"]);
+    assert_eq!(fs::read_to_string(&config).expect("read"), "");
 }
 
 #[test]

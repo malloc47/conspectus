@@ -1,0 +1,26 @@
+# Synthetic: an operator's Codex config with hooks in the array-of-tables
+# form the Codex docs show.
+model = "gpt-5.4"
+approval_policy = "on-request"
+
+[features]
+hooks = true
+
+# Log every session start.
+[[hooks.SessionStart]]
+matcher = "startup|resume"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "~/.codex/hooks/log-start.sh"
+timeout = 30
+statusMessage = "Logging the session"
+
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = "notify-send 'Codex finished'"
+
+[tui]
+notifications = true

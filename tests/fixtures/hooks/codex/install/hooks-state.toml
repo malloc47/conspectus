@@ -1,0 +1,11 @@
+# Synthetic: hooks the operator reviewed in /hooks, with the trust Codex
+# recorded for them. The key and hash formats are placeholders.
+[hooks.state."/home/user/.codex/config.toml:SessionStart:0:0"]
+enabled = true
+trusted_hash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+[[hooks.SessionStart]]
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "echo trusted"

@@ -51,6 +51,9 @@ const TAIL_SCAN_BYTES: u64 = 32 * 1024;
 
 pub const HARNESS_KEY: &str = crate::discovery::providers::CODEX;
 
+/// The hook events `conspectus hook init codex` installs, in order.
+pub(crate) const HOOK_EVENTS: [&str; 1] = ["SessionStart"];
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CodexAdapter;
 

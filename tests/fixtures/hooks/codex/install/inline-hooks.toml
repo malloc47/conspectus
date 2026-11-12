@@ -1,0 +1,6 @@
+# Synthetic: the whole hooks table written inline.
+model = "gpt-5.4"
+hooks = { SessionStart = [{ matcher = "startup", hooks = [{ type = "command", command = "echo started" }] }] }
+
+[tui]
+notifications = true
