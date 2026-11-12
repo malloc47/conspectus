@@ -3,7 +3,7 @@
 ## Status
 
 Accepted. Part of the live agent state plan with ADRs 0203, 0204, 0206,
-and 0207. Extends the graph snapshot (ADR 0083) with one sparse table,
+and 0207. Extends the graph snapshot (ADR 0083) with two sparse tables,
 following the presence table of ADR 0140. Bumps the rkyv format version.
 
 ## Context
@@ -31,45 +31,51 @@ five representations:
 ## Decision
 
 1. **`GraphSnapshot` gains `node_live: BTreeMap<NodeId,
-   LiveBinding>`**, sparse like `node_presence`: an absent key means
-   no evidence. A `LiveBinding` is the stored `LiveObservation` and the
-   `Liveness` its binder found for the observation's process (decision
-   4). It rides in `graph.bin` and serializes to JSON as a list (as
-   `node_presence` does), each entry the node id beside the
-   observation's fields and `liveness`, omitted when empty so
-   state-less goldens do not change.
+   LiveBinding>` and `pane_live: BTreeMap<LivePane, LiveBinding>`**,
+   sparse like `node_presence`: an absent key means no evidence. A
+   `LiveBinding` is the stored `LiveObservation` and the `Liveness` its
+   binder found for the observation's process (decision 4). A
+   `LivePane` is a tmux mux's id and a pane id (`%3`, or none when the
+   entry named no pane). Both ride in `graph.bin` and serialize to JSON
+   as lists (as `node_presence` does), each `node_live` entry the node
+   id beside the observation's fields and `liveness`, and each
+   `pane_live` entry the mux's node id and `pane` beside the same
+   fields. Each is omitted when empty so state-less goldens do not
+   change.
 
-2. **Keys are `AgentSession` ids, or `MuxSession` ids for pane-only
-   entries.** Binding (the store's entries to nodes) follows three
-   rules, in order:
+2. **`node_live` keys are `AgentSession` ids; `pane_live` keys are a
+   mux and a pane, for pane-only entries.** Binding (the store's
+   entries to nodes) follows three rules, in order:
    1. An entry binds to the `AgentSession` whose harness and native
       session id match. The match is exact. Two session nodes for one
       native session (the same id under two state scopes) bind the
       lower node id.
    2. Otherwise, an entry with a tmux socket and session name binds to
-      the tmux `MuxSession` it names. This covers a new session that has no
-      transcript yet (Pi after `/new`, Codex before the first rollout).
-      A mux holds counts over these and over its hosted sessions. The
-      server is the socket path's last component, the name `tmux -L`
-      gives it, with `default` for the default server, matched against
-      the mux node's socket.
+      the pane it names on the tmux `MuxSession` it names, in
+      `pane_live`. This covers a new session that has no transcript yet
+      (Pi after `/new`, Codex before the first rollout). A mux holds
+      counts over these and over its hosted sessions. The server is the
+      socket path's last component, the name `tmux -L` gives it, with
+      `default` for the default server, matched against the mux node's
+      socket.
    3. Otherwise it stays in the store, unbound, and appears nowhere.
       Live state alone never creates an agent session node (the graph
       is sparse; the hook sidecar already synthesizes sessions where
       attribution needs one).
 
    Only nodes that exist now take live state: a gone or unknown node
-   from history (ADR 0140) binds nothing. The graph has no pane node,
-   so a node holds one entry. When several bind to one node, it keeps
-   the one the store wrote last: the highest entry `rev`, then the
-   newest `observed_ms`, then one that has not exited (a process that
-   moves to a new session ends its old entry in the same write), then
-   the lowest entry key. Two agents in panes of one mux that no session
-   matches yet therefore show as one on the mux until their sessions
-   appear; each session then has its own.
+   from history (ADR 0140) binds nothing. A session holds one entry,
+   and so does a pane: the graph has no pane node, so the pane id is a
+   sub-key of its mux, and two agents in two panes of one mux that no
+   session matches yet each count on it. When several entries bind to
+   one session or one pane, it keeps the one the store wrote last: the
+   highest entry `rev`, then the newest `observed_ms`, then one that has
+   not exited (a process that moves to a new session ends its old entry
+   in the same write), then the lowest entry key. Entries that name no
+   pane share one slot on their mux.
 
 3. **A pure function does the binding**: `bind_live(snapshot, file,
-   probe) -> BTreeMap<NodeId, LiveBinding>` in `discovery::live_state`,
+   probe) -> BoundLive` (both tables) in `discovery::live_state`,
    over the store's file and a `PidProbe` (decision 4). It takes no
    clock: time enters only when a reader computes the effective state.
    Two callers use it:
@@ -78,8 +84,8 @@ five representations:
      `LocalDiscoveryConfig::live_state_root`), which runs with the other
      mutators after the harness providers and the hook sidecar (daemon
      class cycles, one-shot cold rebuilds, and the daemonless TUI's
-     background discovery) and replaces the table, so a snapshot always
-     carries a table rebuilt from the store. It reads one file and
+     background discovery) and replaces both tables, so a snapshot
+     always carries tables rebuilt from the store. It reads one file and
      checks one pid per bound entry, and it starts no process;
    - the TUI's overlay, which re-runs it
      against the snapshot it holds whenever the store changes, so state
@@ -104,30 +110,34 @@ five representations:
 
 5. **Effective state is read through an accessor**, never from the raw
    table: `snapshot.live_state_of(id, now)` returns the ADR 0203
-   effective state, read with the stored liveness.
-   `snapshot.live_counts_of_mux(id, now)` returns `LiveCounts` over the
-   mux's hosted sessions (found with the existing preferred-mux
-   helpers) and its pane-only entry, each read the same way. A reader
-   needs no process check of its own. A hosted session counts when
+   effective state of a session, read with the stored liveness; a mux
+   has none. `snapshot.live_counts_of_mux(id, now)` returns
+   `LiveCounts` over the mux's hosted sessions (found with the existing
+   preferred-mux helpers) and every pane-only entry of the mux, each
+   read the same way, and `snapshot.live_panes_of(id)` lists those
+   entries with their panes. A reader needs no process check of its
+   own. A hosted session counts when
    the mux is its preferred mux and it has an entry; one without an
    entry is not counted at all.
 
-6. **Not in the fingerprint.** `node_live` is not part of the process-tree
+6. **Not in the fingerprint.** Neither table is part of the process-tree
    fingerprint and the fields of identity nodes are unchanged, so a state
    change never reopens the `/proc` walk (ADR 0091).
 
-7. **Eviction and merge** treat the table like presence: the mutator owns
-   it, so it is rebuilt on every cycle, and a provider eviction drops
-   entries for the nodes it owned. A `GraphFragment` (provider output)
-   has no live table; the conversion from a snapshot names it among the
-   fields it leaves behind, and the warm-start merge keeps the fresh
-   snapshot's table and drops the prior's.
+7. **Eviction and merge** treat the tables like presence: the mutator
+   owns them, so they are rebuilt on every cycle, and a provider
+   eviction drops entries for the nodes it owned, a mux's pane entries
+   with the mux. A `GraphFragment` (provider output) has no live table;
+   the conversion from a snapshot names them among the fields it leaves
+   behind, and the warm-start merge keeps the fresh snapshot's tables
+   and drops the prior's.
 
 ## Consequences
 
 - Every output that serializes a snapshot can show live state without new
   plumbing, and the TUI reads it the same way it reads presence.
-- `FORMAT_VERSION` bumps; readers cold-rebuild as ADR 0082 describes.
+- `FORMAT_VERSION` bumps (to 12, which carries both tables); readers
+  cold-rebuild as ADR 0082 describes.
   About 31 full `GraphSnapshot` literals in tests and the library need the
   new field (those that use `..empty()` do not).
 - The table can be stale by one class cycle in a daemon snapshot (at most
@@ -147,6 +157,11 @@ five representations:
 - **C (links).** Would require a relation whose target is not an entity.
 - **E (outside the graph).** Rejected for the machine-readable requirement;
   an in-memory overlay remains as the TUI's fast path in front of D.
+- **A pane sub-key inside `node_live`** (a key of node id and optional
+  pane). One list in JSON, but every reader and test of a session's
+  entry would build the compound key, and the type would allow a pane
+  on a session's key. A second table keeps `node_live` one entry per
+  node and leaves session readers as they were.
 - **Liveness supplied by each reader** (the accessors taking a closure
   from the observation to `Liveness`). Every reader would need a process
   table, a script reading `graph --format json` could not tell a dead
@@ -164,5 +179,5 @@ five representations:
   `--fresh` read that skips the snapshot).
 - *Where is a split pane's state?* Each pane's agent has its own entry. The
   mux shows counts over all of them. A session's own row shows its own
-  state. Until a pane's agent has a session node, its entry binds to the
-  mux, which holds one such entry (decision 2).
+  state. Until a pane's agent has a session node, its entry binds to its
+  pane of the mux in `pane_live`, one entry per pane (decision 2).

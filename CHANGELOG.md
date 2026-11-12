@@ -53,14 +53,15 @@ forms, lists, readers, and keys look and behave alike.
   long-silent state quiet or stale and a dead process exited, and
   per-state counts for a mux. Nothing produces or shows live state yet.
 - **Graph snapshots carry live state.** `GraphSnapshot` has a sparse
-  `node_live` table keyed by agent session, or by mux for an agent seen
-  in a pane that no session matched, read through `live_state_of` and
-  `live_counts_of_mux` (counts over the sessions a mux hosts and its own
-  entry). `graph --format json` lists it as `node_live` only when it
-  has entries, so output without live state is unchanged. `graph.bin`
-  moves to format version 11: the first run after upgrading ignores the
-  old file, with one warning where a refresh or the daemon reads it, and
-  rebuilds it.
+  `node_live` table keyed by agent session, and a sparse `pane_live`
+  table keyed by tmux mux and pane for agents seen in a pane that no
+  session matched, one entry per pane, read through `live_state_of`,
+  `live_panes_of`, and `live_counts_of_mux` (counts over the sessions a
+  mux hosts and every agent in its panes). `graph --format json` lists
+  each table only when it has entries, so output without live state is
+  unchanged. `graph.bin` moves to format version 12: the first run
+  after upgrading ignores the old file, with one warning where a refresh
+  or the daemon reads it, and rebuilds it.
 - **`conspectus hook write` records live state.** A Claude Code
   `SessionStart` now also writes the session's entry (ready, with its
   pane, process, cwd, and transcript path) to

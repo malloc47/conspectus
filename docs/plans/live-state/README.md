@@ -190,9 +190,10 @@ path), plus a lock file.
 A snapshot side table, `node_live: BTreeMap<NodeId, LiveObservation>`, next to
 `node_presence` and `node_provenance`:
 
-- Keyed by `AgentSession` id (exact match on harness and native session id) or
-  by `MuxSession` id for entries that have a pane but no known session
-  ("pane-only").
+- Keyed by `AgentSession` id (exact match on harness and native session id).
+  Entries that have a pane but no known session ("pane-only") go to a second
+  sparse table, `pane_live`, keyed by the tmux `MuxSession` id and the pane, so
+  two such agents in one mux each count (CSP-841).
 - Produced by a new discovery mutator, `live_state`, that runs after the
   harness providers and the hook sidecar, like the hook sidecar does today,
   and by the TUI overlay re-bind. Both call one pure function.

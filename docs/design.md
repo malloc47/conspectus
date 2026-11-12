@@ -670,9 +670,11 @@ extension from inside each Pi process, whose session starts still name the
 session for attribution.
 
 A discovery mutator binds entries to `AgentSession` nodes (by harness and
-native session id), or to the `MuxSession` for pane-only entries, into a
-sparse `node_live` snapshot table beside `node_presence` (ADR 0205). Each
-binding keeps whether the entry's process ran when it was bound. Unbound
+native session id) into a sparse `node_live` snapshot table beside
+`node_presence`, and pane-only entries (an agent no session matches yet) to
+their pane of the tmux `MuxSession` in a sparse `pane_live` table, one entry
+per pane (ADR 0205). Each binding keeps whether the entry's process ran when
+it was bound. Unbound
 entries show nowhere, and binding never creates a node. The TUI re-binds from
 the store about once a second between snapshots, with or without a daemon: it
 stats the file each tick, reads and binds it only after a rewrite, binds

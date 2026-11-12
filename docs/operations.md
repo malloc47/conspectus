@@ -193,7 +193,8 @@ Each event updates the session's entry in
 `$HOME/.local/state/conspectus/live-state.json`). Every discovery binds the
 entries to the sessions they describe, or to the tmux session an agent runs
 in when Conspectus has no session for it yet, so `conspectus graph --format
-json` lists them under `node_live`, each with whether its process was
+json` lists them under `node_live` (by session) or `pane_live` (by tmux
+session and pane, one entry per pane), each with whether its process was
 running (`liveness`). An entry that matches neither shows nowhere. The
 `live` columns of `conspectus table sessions` and `conspectus table mux`
 (see [Live state columns](#live-state-columns)) and the `live state` section of
@@ -807,8 +808,8 @@ than fifteen minutes; for those two the age counts from the last event.
 `—` is a session with no live state, which is no evidence, not idle.
 
 On `mux` the cell counts the agents the mux hosts in each state, most
-urgent first (`1 waiting, 1 working, 1 unknown, 1 exited`), including an
-agent in one of its panes that no session matches yet; `—` when none has
+urgent first (`1 waiting, 1 working, 1 unknown, 1 exited`), including
+each agent in its panes that no session matches yet; `—` when none has
 live state.
 
 ## Searching session contents
