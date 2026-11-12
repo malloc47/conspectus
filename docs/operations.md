@@ -153,7 +153,8 @@ Pi has no hook settings, so its hook is a TypeScript extension that
 `hook init pi` writes as one file (ADR 0121). Restart Pi or run
 `/reload` to load it; Pi asks you to trust a project before it loads
 project extensions. The extension reports each interactive session
-start, including `/new`, `/resume`, `/fork`, and `/clone`, through
+start, including `/new`, `/resume`, `/fork`, and `/clone`, and what the
+session is doing (see [Pi live state](#pi-live-state)) through
 `conspectus hook write pi`, and skips `--no-session` runs and Pi's
 print, JSON, and RPC modes. Besides `installed` and `not-installed`,
 `hook status pi` reports `outdated` (an older copy) and `foreign` (a
@@ -313,6 +314,49 @@ question, or an error text. Some gaps come with opencode's events:
 - `hook status` does not cover opencode yet; check with `conspectus table
   sessions --columns +live`.
 
+#### Pi live state
+
+The Pi extension (version 2, which `conspectus hook init pi` installs)
+reports what its session is doing: working (generating, running a tool,
+retrying, rate limited), waiting for you, ready (finished or
+interrupted), compacting, failed (rate limited, auth, overloaded, or
+otherwise), ended, and how many subagent tool calls run. An older copy
+reports only which session a pane runs; re-run `conspectus hook init pi`
+to upgrade it, then restart Pi or run `/reload`. `hook status pi` says
+when the installed copy is older, and that waiting needs Pi 0.84.4 or
+later (1.1.0 or later is recommended).
+
+The extension keeps the session's state inside Pi and sends all of it
+when what the session shows changes, and every minute while it is not
+ready; each report replaces the session's entry in `live-state.json`. A
+change between working sub-states waits half a second, so a burst of
+tool calls costs one report. The report carries Pi's own pid, which
+Conspectus uses instead of looking for a process named `pi`, for live
+state and for pane attribution. Only states, counts, ids, paths, and
+times are kept: never a prompt, a tool's input, output, or name, a dialog
+title, a message, or an error text (the extension sorts an error into
+rate limited, auth, overloaded, or failed itself). Some gaps come with
+Pi's events:
+
+- Pi asks for nothing on its own: it has no approval prompt, so
+  `waiting` means a dialog an extension opened (a permission gate, a
+  question tool, plan mode's approval). A `confirm` reads as a permission
+  and a `select`, `input`, or `editor` as a question, so a gate that asks
+  with a select, like Pi's example, reads as a question. Custom dialogs
+  never read as waiting, since Pi reports loaders and widgets the same
+  way.
+- A provider login and Pi's own pickers (`/model`, `/resume`, settings)
+  are invisible to extensions, and the project trust prompt comes before
+  the session starts, so none of them reads as waiting.
+- Before Pi 0.84.4 the dialog events don't exist and a session never
+  reads as waiting; before 1.1.0 an interrupted run is told only by its
+  last message's stop reason.
+- A killed Pi (SIGKILL, a crash) sends nothing; Conspectus finds its pid
+  gone and shows it `exited`. Quitting, `/new`, `/resume`, and `/fork`
+  end the session they leave at once.
+- After `/reload` the extension reports the session afresh, so a
+  finished turn reads `ready` without its detail.
+
 #### Live-state health
 
 The last line of `conspectus hook status <harness>` says whether the
@@ -329,8 +373,8 @@ against the running processes. It starts no process and asks no daemon.
 | `receiving` | The file has entries for the harness: `live state: 2 sessions, newest event 12s ago`. |
 | `silent` | The hooks are installed and one of the harness's agents runs, but no event has arrived: the hooks may be untrusted, disabled, or the agent was started before they were installed. Restart the agent after `hook init`, and accept the workspace trust prompt (for Codex, trust the entries in `/hooks`). |
 | `no-events` | The hooks are installed, nothing has arrived, and no running agent of the harness is known. Start one, or run a command that discovers, such as `conspectus table sessions`, so the saved graph lists it. |
-| `off` | The hooks are not installed in this scope; the message names the `conspectus hook init` command that installs them. |
-| `unsupported` | The harness's hook reports sessions but no live state (Pi, for now). |
+| `off` | The hooks are not installed in this scope, or for Pi the installed extension is too old to report live state; the message names the `conspectus hook init` command that installs them. |
+| `unsupported` | The harness's hook reports sessions but no live state. Claude Code, Codex, and Pi all report it now; the line stays for harnesses added later. |
 
 ## Configuration File
 

@@ -303,6 +303,92 @@ are in the research notes and become tests.
     reducer and the Rust tests replay the emitted payloads through the
     parser and the store.
 
+### Pi, as built
+
+25. **The extension keeps the session's state and sends snapshots.** The
+    state machine in `plugins/pi-hook/conspectus-hook.ts` keeps whether a
+    run is active and when it began, a compaction and its start, the open
+    dialog and its start, the top-level tool calls in flight (and which of
+    them call a subagent tool), how the last assistant message ended, the
+    error class, a retry in progress, and a 429 answer. A session shows,
+    first match wins, as Pi's own status reporter orders it: `waiting`
+    while a dialog is open; `compacting`; while a run is active `working`
+    (`rate_limited` for a retry a rate limit holds back or after a 429,
+    else `retrying`, `tool`, `generating`); otherwise how the last run
+    ended: `error` with its class, `ready/interrupted`, `ready/finished`,
+    or `ready` with no detail before any run. `subagents` counts the calls
+    of the subagent tools in flight (`subagent`, the reference extension's
+    name); a call another tool makes (`parentToolCallId`) is that tool's
+    work. A wait shows its own start, a run its start, and a resting state
+    its own, so a compaction while idle does not make a finished turn look
+    new. Pi loads one file, so the machine shares the module with the
+    handlers: the module imports only Node built-ins and Pi's types
+    (`import type`), does nothing on import, and exposes the machine to its
+    tests through one export documented as test-only, since no source
+    confirmed what Pi does with exports besides the default.
+26. **The payload and when it is sent.** `{session_id, cwd,
+    transcript_path, hook_event_name, live: {instance, seq, observed_ms,
+    heartbeat_s, pid, pid_start, state, detail, subagents, since_ms}}`,
+    read against the whitelist the opencode payload uses
+    (`src/discovery/harness/plugin_live.rs`). A change to or from
+    `waiting`, `ready`, `error`, `exited`, or `compacting` is sent at once
+    and drops a held one; a change between two working sub-states is held
+    for 500 ms from the first such change, not restarted by later ones,
+    and the latest is sent. The heartbeat resends the snapshot 60 s after
+    the last one while the session is not ready. Both timers are unref'd,
+    cleared at shutdown, and never touch a captured context. Each writer
+    is spawned detached and unref'd with its payload already written to
+    its stdin, never awaited, and every error is swallowed. Beside
+    decision 4's events the extension reads `after_provider_response`,
+    for its status alone; a Pi that never fires it loses only the 429
+    detail. Nothing is subscribed that streams or that can change what Pi
+    does.
+27. **Attribution and the process.** A payload named
+    `session_start:<reason>` (a reason outside Pi's five reads `other`)
+    takes the attribution path, as before, and so does one without
+    `live`, as the first extension version sent; a `live:<event>` payload
+    never does. The extension's `process.pid` and its start time replace
+    the process the writer's parent walk finds, for the snapshot and for
+    the attribution record (amending ADR 0121). `instance` is fresh per
+    extension load and `seq` counts within it.
+28. **The mapping where the research left a choice.**
+    - `ctx.ui.custom()` dialogs are no wait. Pi fires `ui_prompt_start`
+      for every one, loaders and widgets included, and does not say which
+      block, so marking them would raise false alarms; a dialog kind Pi
+      adds later is no wait either. A `confirm` is a permission; a
+      `select`, `input`, or `editor` a question, which is how a plan
+      approval and the permission-gate example's select read.
+    - An error is classified inside the extension from the status of the
+      request's latest error answer (429 rate limited, 401 and 403 auth,
+      503 and 529 overloaded, another 5xx a provider error) and else from
+      the message's words. Rate limits, auth, and overload keep their
+      detail; a context overflow, a network or provider error, and an
+      unknown one read `failed`. Neither the words nor the class leave the
+      extension.
+    - Quitting, `/new`, `/resume`, and `/fork` end the session left,
+      `exited/ended`: the vocabulary has no detached state, and a snapshot
+      source ends its own sessions (ADR 0204 decision 5). A session start
+      that no shutdown preceded ends the session it replaces. `/reload`
+      sends nothing from the old load, and the new load reports the
+      session afresh: `ready` with no detail, or `working` when Pi is not
+      idle. An `exited` from the old load could, with an equal clock
+      reading, replace the new load's report.
+    - A compaction ends in the state under it. One neither cancelled nor
+      retried is `error/failed`, at once when idle and when its run settles
+      otherwise; a compaction with `willRetry` keeps or starts the run.
+    - A settle without a run is ignored. A run is interrupted by the
+      settle's `aborted` flag or, before Pi 1.1.0, by the last stop
+      reason; the stop reasons `length` and `deferred` read finished, as
+      Pi's reporter reads them.
+    - Pi's version is not reported, since no exported version was
+      confirmed; `hook status pi` states the floor instead.
+
+    The event scripts that encode these
+    (`tests/fixtures/hooks/pi-live/`) are synthetic until a recording
+    confirms them. The extension's tests replay them through the state
+    machine and the Rust tests replay the emitted payloads through the
+    parser and the store.
+
 ## Consequences
 
 - Claude Code pays two small spawns per tool call (`PostToolUse` and its
@@ -360,4 +446,8 @@ are in the research notes and become tests.
   ever explained, never written or read.
 - *Which OpenCode and Pi versions?* OpenCode 1.x and 2.x both get a
   reducer. Pi's waiting state needs 0.84.4 or later; older versions
-  report the other states.
+  report the other states, and `hook status pi` says so. 1.1.0 or later
+  is recommended.
+- *Pi's custom dialogs: waiting, a state of their own, or nothing?*
+  Nothing (decision 28): the event cannot tell a dialog that waits from a
+  loader.

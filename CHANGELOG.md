@@ -106,8 +106,9 @@ forms, lists, readers, and keys look and behave alike.
   line: `receiving` (how many sessions, and how long ago the newest
   event), `silent` (installed and an agent runs, but no events: the hooks
   may be untrusted or disabled, or the agent started before the install),
-  `no-events`, `off` (with the command that installs the hooks), or
-  `unsupported` (Pi's hook reports no live state yet).
+  `no-events`, `off` (with the command that installs the hooks, or for
+  an older Pi extension that reports no live state), or `unsupported`
+  (a hook that reports sessions but no live state).
 - **opencode reports what each session is doing.** The opencode plugin
   (0.3.0) now sends each session's state (working, waiting for a
   permission, a question, or input, ready, compacting, failed, and its
@@ -118,6 +119,17 @@ forms, lists, readers, and keys look and behave alike.
   and restart opencode; on 2.x, list `dist/v2` in `opencode.jsonc`
   instead of `cli.json` and restart the opencode service too. Nothing
   shows it in the TUI yet.
+- **Pi reports what its session is doing.** The Pi extension (version 2)
+  now sends its session's state (working, waiting on an extension's
+  dialog, ready, compacting, failed, ended, and its subagent tool calls)
+  to `live-state.json` when it changes and every minute while it is not
+  ready, without ever waiting on a writer. Error text stays inside Pi;
+  only its class is sent. Its reports carry Pi's pid, which pane
+  attribution now uses instead of looking for a process named `pi`. Run
+  `conspectus hook init pi` again to upgrade,
+  then restart Pi or run `/reload`; `hook status pi` says when the
+  installed copy is older and that waiting needs Pi 0.84.4 or later.
+  Nothing shows it in the TUI yet.
 
 ### Changed
 

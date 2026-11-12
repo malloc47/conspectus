@@ -662,7 +662,9 @@ and carry the tmux pane, so split panes do not collide. Plugin sources keep
 each session's state themselves and send it whole, ordered by their instance
 and a sequence number: the OpenCode plugin from each 1.x TUI and, for 2.x,
 from a server entrypoint in the shared service, which sees every session
-(ADR 0206; its records never take the attribution path).
+(ADR 0206; its records never take the attribution path), and the Pi
+extension from inside each Pi process, whose session starts still name the
+session for attribution.
 
 A discovery mutator binds entries to `AgentSession` nodes (by harness and
 native session id), or to the `MuxSession` for pane-only entries, into a
