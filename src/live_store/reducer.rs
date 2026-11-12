@@ -223,6 +223,11 @@ impl ReducerBlock {
                 self.start_wait(agent.as_ref(), *kind, at_ms);
             }
             LiveEventKind::WaitEnded { agent } => self.end_wait(agent.as_deref()),
+            LiveEventKind::WaitConfirmed { kind } => {
+                if self.waits.is_empty() {
+                    self.start_wait(None, *kind, at_ms);
+                }
+            }
             LiveEventKind::ToolFinished { agent: None } => {
                 self.end_wait(None);
                 // A tool finishing means a turn is open, unless the turn

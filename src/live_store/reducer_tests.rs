@@ -140,6 +140,45 @@ fn the_main_agents_own_wait_shows_before_a_childs() {
 }
 
 #[test]
+fn a_confirmed_wait_is_the_pending_one_whoever_it_belongs_to() {
+    // A harness confirms an open dialog seconds later without naming
+    // the agent; here the dialog is a child's, so the confirmation must
+    // not leave a wait of the main agent behind once the child's tool
+    // finishes.
+    let confirm = |kind| K::WaitConfirmed { kind };
+    let seen = run(vec![
+        (100, K::TurnStarted),
+        (200, K::SubagentStarted { id: CHILD.into() }),
+        (300, wait(Some(CHILD.into()), WaitKind::Permission)),
+        (6_300, confirm(WaitKind::Permission)),
+        (7_000, tool(Some(CHILD.into()))),
+    ]);
+    assert_eq!(shown(&seen[3]), (S::Waiting, Some(D::Permission), 300));
+    assert!(seen[3].observation.via_subagent);
+    assert_eq!(seen[3].observation.observed_ms, 6_300);
+    assert_eq!(shown(&seen[4]), (S::Working, Some(D::Generating), 100));
+
+    // The main agent's pending wait keeps its kind and its start.
+    let seen = run(vec![
+        (100, K::TurnStarted),
+        (200, wait(None, WaitKind::Question)),
+        (6_200, confirm(WaitKind::Permission)),
+    ]);
+    assert_eq!(shown(&seen[2]), (S::Waiting, Some(D::Question), 200));
+
+    // With nothing pending, the dialog is the main agent's: a prompt the
+    // harness announces no other way.
+    let seen = run(vec![
+        (100, K::TurnStarted),
+        (6_100, confirm(WaitKind::Permission)),
+        (9_000, tool(None)),
+    ]);
+    assert_eq!(shown(&seen[1]), (S::Waiting, Some(D::Permission), 6_100));
+    assert!(!seen[1].observation.via_subagent);
+    assert_eq!(shown(&seen[2]), (S::Working, Some(D::Generating), 100));
+}
+
+#[test]
 fn an_interrupt_without_a_stop_is_repaired_by_an_idle_prompt_or_the_next_turn() {
     // An interrupt fires nothing in one harness: the turn reads working
     // until the idle prompt is confirmed or the next prompt arrives.
@@ -540,6 +579,9 @@ fn every_kind() -> Vec<K> {
         K::WaitEnded { agent: None },
         K::WaitEnded {
             agent: Some(CHILD.into()),
+        },
+        K::WaitConfirmed {
+            kind: WaitKind::Permission,
         },
         tool(None),
         tool(Some(CHILD.into())),

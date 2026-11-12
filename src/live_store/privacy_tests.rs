@@ -107,6 +107,7 @@ fn every_kind(agent: &str) -> Vec<LiveEventKind> {
         agent: agent.clone(),
         kind,
     }));
+    kinds.extend(WAIT_KINDS.map(|kind| LiveEventKind::WaitConfirmed { kind }));
     kinds.extend(FAILURE_CLASSES.map(|class| LiveEventKind::TurnFailed { class }));
     kinds
 }

@@ -19,7 +19,10 @@
 //!   [`LiveEventKind::WaitEnded`]): a child agent can ask the operator
 //!   while the main agent works. Approval itself sends nothing in the
 //!   harnesses surveyed, so a finished tool
-//!   ([`LiveEventKind::ToolFinished`]) is what ends a wait.
+//!   ([`LiveEventKind::ToolFinished`]) is what ends a wait. A harness
+//!   that reports an open dialog only after a delay, and without saying
+//!   whose it is, confirms a wait ([`LiveEventKind::WaitConfirmed`]):
+//!   the wait already pending, or else one of the main agent.
 //! - Child agents are tracked by id, so a repeated start counts once and
 //!   a stop for an id never started is ignored;
 //!   [`LiveEventKind::BackgroundWork`] replaces the set with the
@@ -114,6 +117,11 @@ pub enum LiveEventKind {
     /// The agent's wait ended without a tool finishing (a denial the
     /// harness reports, or a dialog it closed).
     WaitEnded { agent: Option<String> },
+    /// A dialog for `kind` is open, and the harness does not say whose.
+    /// A wait already pending, of any agent, is the dialog it confirms
+    /// and is left as it is; with none pending, the main agent waits for
+    /// `kind`.
+    WaitConfirmed { kind: WaitKind },
     /// One of the agent's tools finished, successfully or not, which ends
     /// any wait the agent had.
     ToolFinished { agent: Option<String> },
@@ -288,6 +296,7 @@ impl LiveEventKind {
             LiveEventKind::SessionStarted { .. }
             | LiveEventKind::TurnStarted
             | LiveEventKind::Retrying { .. }
+            | LiveEventKind::WaitConfirmed { .. }
             | LiveEventKind::CompactionStarted
             | LiveEventKind::CompactionEnded
             | LiveEventKind::TurnEnded { .. }
