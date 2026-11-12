@@ -37,6 +37,15 @@ forms, lists, readers, and keys look and behave alike.
 - **Pinned and History views** (`4`, `5`), ghost muxes in the Mux view,
   a `.` row menu with Pin / Unpin (`p`), a `◉` pin marker, a `pinned
   only` filter, and `N` for mux launch with a worktree toggle.
+- **The TUI reopens each view where you left it.** `tui-state.json`
+  now keeps each view's expanded groups and selected row (every view
+  but Search), so the next `conspectus tui` opens with the same groups
+  open and the same row selected and scrolled into view. A row that is
+  gone gives way to the deepest group above it that is still listed,
+  then the first row; groups that are gone are ignored and leave the
+  file on the next write. `--no-resume-view` opens every view on its
+  default folds instead. The file is also written before the TUI hands
+  the terminal to tmux or a viewer, and when the TUI stops on an error.
 
 ### Changed
 

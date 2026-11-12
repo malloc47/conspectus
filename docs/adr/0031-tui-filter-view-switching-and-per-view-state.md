@@ -24,7 +24,11 @@ step back to it. Amended by
 [ADR 0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md):
 the per-view expanded set, selection, and left-panel scroll are one
 framework `TreeState`, saved and restored whole with the position the
-selection showed at.
+selection showed at. Amended by
+[ADR 0202](0202-tui-each-view-reopens-with-the-rows-it-had-expanded-and-selected.md):
+the expanded set and the selection of every view but Search also outlive
+the process in `tui-state.json`, beside the filter and grouping, and each
+view reopens with them the first time it lists rows.
 
 ## Context
 

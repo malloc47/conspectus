@@ -882,7 +882,12 @@ predicate on `RowFilter` and composes with the other filters.
 
 In the TUI, filter / grouping / selection / expanded-set / left-scroll
 state is **per view**. Sort order is **global**. Switching views and
-back returns each view to its prior state. Each view has its own
+back returns each view to its prior state. Across restarts,
+`tui-state.json` keeps the last view and each view's filter, grouping,
+expanded rows, and selected row (the Search view's rows excepted), the
+rows named by stable keys; each view reopens with them the first time it
+lists rows, a gone row falling back to the deepest row above it still
+listed, then the first row (ADR 0202). Each view has its own
 grouping enum (`SessionsGrouping`, `MuxGrouping`, `PrsGrouping`,
 `PinnedGrouping`, `HistoryGrouping`, `SearchGrouping`) and the same
 `Grouping` dispatch type backs config, CLI flags, and TUI controls.

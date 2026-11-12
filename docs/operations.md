@@ -252,6 +252,12 @@ teardown_grace = "3s"
 - **View precedence at startup:** `--view`, then the view you last used
   (unless `--no-resume-view`), then `[tui] default_view`, then
   `sessions`.
+- **Each view reopens where you left it:** the groups you had expanded,
+  and the row you had selected, scrolled into view with the groups above
+  it open. A row that is gone gives way to the nearest group above it
+  that is still listed, then the first row. The Search view starts
+  fresh; `--no-resume-view` opens every view on its default folds. See
+  [TUI state](#tui-state).
 - **Preview wrap (ADR 0106):** `smart` wraps content but truncates
   rules, box borders, and padding that would spill onto extra rows;
   `plain` wraps every line; `none` keeps tmux's layout at the pane's
@@ -1841,45 +1847,115 @@ A new toast replaces the one showing.
 
 ## TUI state
 
-The TUI persists the operator's last-active view at
+The TUI remembers where the operator left it at
 `$XDG_STATE_HOME/conspectus/tui-state.json` (sibling to the hook
-state-root under `$XDG_STATE_HOME/conspectus/hooks/`). The file
-is rebuildable cache, not authoritative state — losing it costs
-nothing more than starting the next `conspectus tui` in the
-configured default view instead of the one the operator last
-switched to.
+state-root under `$XDG_STATE_HOME/conspectus/hooks/`): the last view,
+the sort and preview settings, and for each view its filter, grouping,
+expanded rows, and selected row. The file is rebuildable cache, not
+authoritative state: losing it costs nothing more than the next
+`conspectus tui` starting in the configured default view, with each
+view on its default filter, grouping, and folds.
 
-Schema v1:
+What the file holds:
 
 ```json
 {
   "schema_version": 1,
-  "last_view": "sessions"
+  "last_view": "sessions",
+  "sort": "recency",
+  "mux_recency": "last_attached",
+  "preview_wrap": "smart",
+  "session_preview": "transcript",
+  "row_keys": 1,
+  "view_states": {
+    "sessions": {
+      "filter": { "harness": { "any": ["claude-code"] } },
+      "grouping": { "Sessions": "workspace" },
+      "expanded": [
+        "group:workspace:/home/me/src",
+        "group:repo:/home/me/src/app/.git"
+      ],
+      "selected": {
+        "row": "session:agent_session:claude-code:/home/me/.claude:4f1c…",
+        "path": ["group:workspace:/home/me/src", "group:repo:/home/me/src/app/.git"]
+      }
+    },
+    "mux": { "grouping": { "Mux": "host" } }
+  }
 }
 ```
 
-`last_view` is one of `sessions`, `mux`, `prs`, `pinned`, or `history`.
-Unknown values (including the removed `union` and `forks`), malformed
-JSON, or a missing file all collapse to "no persisted view" without
-surfacing an error; unknown fields round-trip through writes so future
-schema bumps do not strand old payloads.
+- `last_view` is one of `sessions`, `mux`, `prs`, `pinned`, or `history`
+  (never `search`, whose rows answer a query that is not remembered).
+- `sort`, `mux_recency`, `preview_wrap`, and `session_preview` are the
+  last sort, mux recency basis, preview wrap, and session preview chosen
+  in the TUI; each takes precedence over its config value on the next
+  run (`--sort` overrides the sort).
+- `view_states` has an entry for each view the operator has used:
+  `filter` and `grouping` as last set (a `--grouping`, `--harness`,
+  `--max-age`, `--mux-state`, or PR filter flag overrides them for the
+  starting view), `expanded` (the rows whose children were showing),
+  and `selected` (the row under the cursor and the rows above it, the
+  top-level one first). The Search view keeps neither `expanded` nor
+  `selected`; nothing keeps the right pane's drill or the preview's
+  scroll.
+- Rows are named by keys: the row's kind (`group`, `session`, `mux`,
+  `pr`, `history`, `pin`, `nested`, `bucket`, `remote`, `synthetic`), a
+  colon, and the node id, record id, pin id, label, or slug that names
+  it. `row_keys` is the version of that encoding.
+
+**How a view reopens.** Each view is put back the first time it lists
+rows: the first refresh for the starting view, the first switch to each
+of the others. The groups in `expanded` that are still listed open and
+every other group stays collapsed; a group that is gone is ignored. The
+cursor goes to the `selected` row; if that row is gone, to the deepest
+row of its `path` that is still listed (a session whose group is still
+there lands on the group); if none is, to the first row. Any collapsed
+group above the cursor is opened, and the pane scrolls to it. None of
+this is an error or a warning. It happens once per view: a later
+refresh, the operator's own moves, a jump into the view, or a regroup
+before the rows arrive all win over it.
+
+**Reading the file.** A missing file, malformed JSON, or a `last_view`
+this build doesn't know (including the removed `union` and `forks`)
+collapse to "nothing remembered" without an error. A value of the wrong
+shape costs only that setting: a non-list `expanded` or a `selected`
+without a text `row` is dropped for that view, and an entry in a list
+that is not text is skipped. A file from an earlier build, with no
+`expanded` or `selected`, opens every view on its default folds and its
+first row (or the launch directory's group). A file whose `row_keys`
+is missing or another version keeps everything but the expanded and
+selected rows. Fields this build doesn't know, at the top level or in a
+view, round-trip through writes.
+
+**When it is written.** On every view switch (a jump to another view
+and `Backspace` back included) and settings change (sort, grouping,
+filter, mux recency, preview wrap, session preview), before the TUI hands the
+terminal to another program (attaching a mux, a viewer, a launch), and
+when the TUI exits, however it exits short of a crash. Moving the
+cursor or folding a group writes nothing by itself; the next of those
+writes keeps it. Each view's `expanded` keeps only the rows the view
+lists at the time, so the groups that went away leave the file and it
+does not grow. A view the run never showed is written back as it was.
+Writes are atomic (tempfile + rename) and skip-on-unchanged, so quiet
+TUI sessions produce no mtime churn.
 
 **Startup precedence:** explicit `--view <name>` flag wins →
 persisted `last_view` wins → config `[tui].default_view` →
 built-in `View::Sessions`.
 
-**Opt-outs:** pass `--no-resume-view` to ignore the persisted
-value for a single run (useful for scripts and tests that need a
-deterministic starting view). The `--snapshot` dev path implies
-`--no-resume-view` so snapshot regeneration never depends on
-whatever view the operator last touched outside the fixture.
+**Opt-outs:** pass `--no-resume-view` to ignore the persisted view for a
+single run and open every view on its default folds and first row
+(useful for scripts and tests that need a deterministic start); the
+run's own changes are still written when it ends, and the views it never
+showed keep what they had. The `--snapshot` dev path implies
+`--no-resume-view` and never writes the file, so snapshot regeneration
+never depends on what the operator last touched outside the fixture.
 
 **Read-only invariant:** only `conspectus tui` reads or writes
 the file. The `graph`, `table`, `node show`, and `pin *`
-surfaces all leave it byte-identical, enforced by
-`tests/cli_tui_state_invariants.rs`. Writes are atomic
-(tempfile + rename) and skip-on-unchanged so quiet TUI sessions
-produce no mtime churn.
+surfaces, and `tui --snapshot`, all leave it byte-identical, enforced
+by `tests/cli_tui_state_invariants.rs`.
 
 ## What changed in the TUI
 

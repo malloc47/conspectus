@@ -149,7 +149,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0024](0024-tui-runtime-and-architecture.md) | TUI Runtime, App Architecture, And Dependency Policy | Accepted (narrowed by 0150, 0152); framework-owned in part |
 | [0025](0025-tui-preview-ansi-rendering-dependency.md) | TUI Preview ANSI Rendering Dependency | Accepted (amended by 0181); framework-owned in part |
 | [0030](0030-tui-text-input-primitive.md) | TUI Text-Input Primitive | Accepted (narrowed by 0165, 0166); framework-owned in part |
-| [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149, 0151, 0173, 0176, 0182) |
+| [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149, 0151, 0173, 0176, 0182, 0202) |
 | [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted (amended by 0153, 0159); framework-owned in part |
 | [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Superseded by 0074 |
 | [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
@@ -236,6 +236,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0198](0198-tui-quick-select-and-reveal-promise-only-a-view-that-lists-the-entity.md) | Quick Select And Reveal Promise Only A View That Lists The Entity | Accepted |
 | [0199](0199-tui-framework-separation-is-rehearsed-in-ci.md) | The Framework's Separation Is Rehearsed In CI | Accepted; framework-owned in part |
 | [0200](0200-tui-the-application-runtime-stays-in-conspectus-until-a-second-program-needs-it.md) | The Application Runtime Stays In Conspectus Until A Second Program Needs It | Accepted; framework-owned in part |
+| [0202](0202-tui-each-view-reopens-with-the-rows-it-had-expanded-and-selected.md) | Each View Reopens With The Rows It Had Expanded And Selected | Accepted |
 
 ## Transcript viewer
 
