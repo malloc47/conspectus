@@ -29,7 +29,10 @@ pub(super) struct HookArgs {
 impl HookArgs {
     pub(super) fn run(self) -> Result<()> {
         match self.command {
-            HookCommand::Write(args) => args.run(),
+            HookCommand::Write(args) => {
+                args.run();
+                Ok(())
+            }
             HookCommand::Init(args) => args.run(),
             HookCommand::Status(args) => args.run(),
             HookCommand::Remove(args) => args.run(),

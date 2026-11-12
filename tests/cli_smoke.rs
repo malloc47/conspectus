@@ -590,10 +590,12 @@ fn hook_write_pi_writes_latest_observation() {
 }
 
 #[test]
-fn hook_write_opencode_rejects_empty_payload() {
+fn hook_write_opencode_drops_an_empty_payload_silently() {
     let home = tempfile::TempDir::new().expect("home temp");
     let state = tempfile::TempDir::new().expect("state temp");
 
+    // The harness waits on its hook, so a bad payload is dropped
+    // without a word or a failing exit status.
     isolated_cmd(home.path())
         .arg("hook")
         .arg("write")
@@ -602,8 +604,10 @@ fn hook_write_opencode_rejects_empty_payload() {
         .arg(state.path())
         .write_stdin("")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("opencode hook payload was empty"));
+        .success()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::is_empty());
+    assert!(!state.path().join("hooks-latest.json").exists());
 }
 
 #[test]
