@@ -674,8 +674,12 @@ stay as they are and are flagged quiet; `waiting`, `ready`, and `error` do not
 age while the process lives; with no liveness evidence everything but
 `exited` becomes `unknown` after fifteen minutes. A session with no events has
 no live state. Hook-free sources (pane title, `claude agents --json`,
-transcript tails) need their own decisions (ADR 0207). Which glyphs, columns,
-rollups, and orderings show it in the TUI is open (the plan's parked list).
+transcript tails) need their own decisions (ADR 0207). The CLI shows it as
+`node_live` in `graph --format json`, in opt-in `live` columns of
+`conspectus table` (a session's effective state, a mux's counts), in `node
+show`, and as a per-harness health line in `hook status` (events arriving, or
+an agent running with none). Which glyphs, columns, rollups, and orderings
+show it in the TUI is open (the plan's parked list).
 
 ## Pin Slots
 

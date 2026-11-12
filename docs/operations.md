@@ -93,8 +93,9 @@ conspectus hook init pi            # <agent-dir>/extensions/conspectus-hook.ts
 
 `--scope project` installs into the current project instead
 (`.claude/`, `.codex/`, `.pi/extensions/`). The commands are idempotent.
-`conspectus hook status <harness>` reports whether the hook is present,
-and `conspectus hook remove <harness>` removes only what Conspectus
+`conspectus hook status <harness>` reports whether the hook is present
+and ends with a [live-state health line](#live-state-health), and
+`conspectus hook remove <harness>` removes only what Conspectus
 installed. The opencode hook is a plugin; see
 [`plugins/opencode-hook/README.md`](../plugins/opencode-hook/README.md).
 
@@ -183,8 +184,11 @@ Each event updates the session's entry in
 entries to the sessions they describe, or to the tmux session an agent runs
 in when Conspectus has no session for it yet, so `conspectus graph --format
 json` lists them under `node_live`, each with whether its process was
-running (`liveness`). An entry that matches neither shows nowhere. Nothing
-else shows live state yet.
+running (`liveness`). An entry that matches neither shows nowhere. The
+`live` columns of `conspectus table sessions` and `conspectus table mux`
+(see [Live state columns](#live-state-columns)) and the `live state` section of
+`conspectus node show` show the state as it reads now; the TUI does not
+show it yet.
 Only states, counts, ids, paths, and times are kept: never a prompt, a
 tool's input or output, a message, or an error text, and never a tool
 name. Some gaps come with the hooks:
@@ -202,6 +206,25 @@ name. Some gaps come with the hooks:
   trust dialog, nor with `disableAllHooks`, `--bare`, or managed hooks
   only. Such a session has no live state, which is not the same as
   idle.
+
+#### Live-state health
+
+The last line of `conspectus hook status <harness>` says whether the
+harness's hooks feed live state:
+`<health>\t<harness>\t<live-state file>\t<message>`. It goes by what
+Conspectus already has: the entries in `live-state.json`, whether the
+hooks are installed in the scope you asked about, and the harness's agent
+processes in the graph the last discovery saved (`graph.bin`, which a
+running `conspectus serve` rewrites every few seconds), each checked
+against the running processes. It starts no process and asks no daemon.
+
+| Health | Meaning |
+|---|---|
+| `receiving` | The file has entries for the harness: `live state: 2 sessions, newest event 12s ago`. |
+| `silent` | The hooks are installed and one of the harness's agents runs, but no event has arrived: the hooks may be untrusted, disabled, or the agent was started before they were installed. Restart the agent after `hook init`, and accept the workspace trust prompt. |
+| `no-events` | The hooks are installed, nothing has arrived, and no running agent of the harness is known. Start one, or run a command that discovers, such as `conspectus table sessions`, so the saved graph lists it. |
+| `off` | The hooks are not installed in this scope; the message names the `conspectus hook init` command that installs them. |
+| `unsupported` | The harness's hook reports sessions but no live state (Codex and Pi, for now). |
 
 ## Configuration File
 
@@ -598,6 +621,40 @@ which keeps the cell scannable when several agents share a mux. On
 the `union` row-type the preview shows for agent rows only; mux
 rows render `—`.
 
+### Live state columns
+
+The `live` column (registered on `sessions` and `mux`, opt-in like
+`activity`) shows what each agent is doing now, from the live state its
+hooks report (see [Claude Code live state](#claude-code-live-state)).
+Opt in with `--columns +live` or `[table.<rows>].columns = [..., "live"]`.
+The state is read when the command runs, so a long silence and a gone
+process show as they would in the TUI.
+
+On `sessions` the cell is the state and its detail, `+N` for running
+subagents, `quiet` when a working agent has said nothing for longer than
+its quiet window (ten minutes for hooks), and how long ago the state
+began:
+
+```text
+AGENT                LIVE
+-------------------  ----------------------------
+claude-code:builder  working:generating quiet 12m
+claude-code:gone     exited:killed 4m
+claude-code:lost     unknown:stale 20m
+claude-code:unheard  —
+claude-code:waiter   waiting:permission +1 3m
+```
+
+`exited:killed` is a session whose process is gone, and `unknown:stale`
+one whose process can't be checked and that has been silent for more
+than fifteen minutes; for those two the age counts from the last event.
+`—` is a session with no live state, which is no evidence, not idle.
+
+On `mux` the cell counts the agents the mux hosts in each state, most
+urgent first (`1 waiting, 1 working, 1 unknown, 1 exited`), including an
+agent in one of its panes that no session matches yet; `—` when none has
+live state.
+
 ## Searching session contents
 
 `conspectus search <QUERY>` finds sessions by what was said in them. It
@@ -966,7 +1023,16 @@ default flags), so paged output retains color.
 
 The command prints the node itself plus every candidate link (outgoing
 and incoming), resolved relationship, source metadata, and diagnostic
-that touches the resolved node. Resolved relationships include the
+that touches the resolved node. An agent session with live state gets a
+`live state` section: the state and detail, `via: a subagent` when a
+child agent raised it, the recorded state when the read-time rules
+replaced it (`recorded: working:tool` under `state: exited`), when it
+began (`since`, UTC) and how long ago (`age`), the last event, the
+confidence (`fresh`, `quiet`, or `stale`), running subagents, the source,
+and the process with whether it ran when last checked. A mux gets the
+per-state counts over the agents it hosts and, for an agent in one of its
+panes that no session matches yet, that agent's fields. A node without
+live state has no such section. Resolved relationships include the
 same resolver score breakdown exposed by `conspectus graph --explain`:
 the selected link's score axes, competing links' score axes, and the
 first axis that decided the winner when there is a competitor.

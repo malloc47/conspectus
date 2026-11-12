@@ -84,6 +84,21 @@ forms, lists, readers, and keys look and behave alike.
   graph --format json` lists them under `node_live`; an entry that
   matches nothing shows nowhere, and live state never adds a session.
   The TUI shows none of it yet.
+- **Live state in `conspectus table`, `node show`, and `hook status`.**
+  An opt-in `live` column on `table sessions` shows what each session is
+  doing as the command runs (`waiting:permission +1 3m`,
+  `working:generating quiet 12m`, `exited:killed 4m`, `—` without live
+  state), and on `table mux` how many of its agents are in each state
+  (`1 waiting, 2 working`). `conspectus columns` lists both; turn them on
+  with `--columns +live` or `[table.<rows>].columns`. `node show` adds a
+  `live state` section to a session (state, detail, since, age, last
+  event, confidence, subagents, source, process) and to a mux (its
+  counts). `hook status <harness>` ends with one more line, a health
+  line: `receiving` (how many sessions, and how long ago the newest
+  event), `silent` (installed and an agent runs, but no events: the hooks
+  may be untrusted or disabled, or the agent started before the install),
+  `no-events`, `off` (with the command that installs the hooks), or
+  `unsupported` (Codex and Pi hooks report no live state yet).
 
 ### Changed
 

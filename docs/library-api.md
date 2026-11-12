@@ -40,7 +40,7 @@ inputs.
 | `model::live` | pure data model | `LiveState`, `LiveDetail`, `LiveSource`, `LiveObservation` (its `effective` read rule), `Liveness`, `LiveBinding` (an observation with the liveness found when it was bound), `LiveConfidence`, `EffectiveLive`, `LiveCounts`; a snapshot's `node_live` table of `LiveBinding`s is read through `GraphSnapshot::live_state_of` and `GraphSnapshot::live_counts_of_mux`, which apply the bound liveness |
 | `resolve` | pure resolver | `resolve_snapshot`, `resolve_links`, `explain_resolved_relationships` |
 | `output` | pure renderer | `render_graph_json` |
-| `output::table` | pure renderer | `render`, `render_with`, `Projection` re-export |
+| `output::table` | pure renderer | `render`, `render_with`, `Projection` re-export; the opt-in `live` columns read live state at `RenderOptions::now_epoch`, or at the current time when it is `None` (as the `activity` columns always do) |
 | `discovery::cross_link` | pure graph enrichment | `infer` |
 | `discovery::declared` | pure graph enrichment when loader is injected | `apply_declared_links` |
 | `discovery::forge::github` | pure parser/fragment builder except tests | `GhPullRequestParser`, `RepoContext`, `fragment_for_repo`, `parse_github_remote` |
