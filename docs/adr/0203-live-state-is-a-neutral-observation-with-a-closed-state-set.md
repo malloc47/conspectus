@@ -67,9 +67,9 @@ being idle.
    1. `Dead`, or a changed start time: `exited/killed`.
    2. `working`, `compacting`, and `starting` older than the quiet window
       (10 minutes for event-only sources, three heartbeats for sources
-      that send them) with a live process remain that state and are
-      marked **quiet**. A long build is still work. They never decay to
-      `ready`.
+      that send them) with a live process, or one that cannot be checked
+      until rule 4 applies, remain that state and are marked **quiet**. A
+      long build is still work. They never decay to `ready`.
    3. `waiting`, `ready`, and `error` do not age while the process
       lives. An operator can leave a prompt for hours.
    4. With liveness `Unknown`, past 15 minutes every state except

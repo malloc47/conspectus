@@ -175,8 +175,9 @@ five representations:
 
 - *Does the daemon snapshot need to be fresher than 5 s?* Not for the
   interactive case, where the overlay is fresher. Scripts that want the
-  freshest value can read the store through the CLI (a story adds a
-  `--fresh` read that skips the snapshot).
+  freshest value pass `--refresh` to `graph`, `table`, or `node show`,
+  which skips the daemon's snapshot and binds the store as it is; no
+  separate flag was built.
 - *Where is a split pane's state?* Each pane's agent has its own entry. The
   mux shows counts over all of them. A session's own row shows its own
   state. Until a pane's agent has a session node, its entry binds to its

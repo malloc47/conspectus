@@ -100,8 +100,9 @@ Pi run a plugin inside the harness, which can hold it itself.
    it afresh.
 
 6. **The writer is best-effort, bounded, and silent.**
-   - The live-state write never waits on a daemon. For every event except
-     a session start, `hook write` opens no socket. A session start
+   - The live-state write never waits on a daemon. For every event that
+     does not take the attribution path (for Claude Code, every event
+     but a session start), `hook write` opens no socket. A session start
      still takes the existing attribution path (ADR 0146), after the
      live-state write, and that path gains a socket timeout: 2 s on
      each read and write of the `hook_ingest` call, after which the
