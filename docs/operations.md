@@ -222,14 +222,30 @@ teardown_grace = "3s"
   renames a mux, and the refresh after you detach from or kill a mux all
   ask the mux server again first, and a running daemon does not reply until
   the re-probe is published, so the next read of its snapshot has the new
-  state. After a detach the TUI re-probes up to twice more, 150ms apart, if
-  the set of running muxes came back exactly as it was before. Timer
-  refreshes still reuse the cached listing. Forges are never re-fetched by
-  these refreshes, and their data is kept. Inside tmux, attaching switches
-  your tmux client to the mux and returns at once, so the TUI also watches
-  whether its own pane is on screen and refreshes the moment you switch
-  back; a mux you exited while away is already a stopped mux when you
-  return.
+  state. After a detach the TUI re-probes up to twice more, 150ms apart,
+  while the listing still shows a mux you returned from that it could not
+  confirm is still running (see below); after you switch back to the TUI's
+  pane inside tmux, it re-probes while the set of running muxes is exactly
+  as it was. Timer refreshes still reuse the cached listing. Forges are
+  never re-fetched by these refreshes, and their data is kept. Inside
+  tmux, attaching switches your tmux client to the mux and returns at
+  once, so the TUI also watches whether its own pane is on screen and
+  refreshes the moment you switch back; a mux you exited while away is
+  already a stopped mux when you return.
+- **Rows after a detach.** When you come back from a mux, its row and the
+  rows of the agent sessions in it dim, show a spinner in the attach
+  column, and refuse attach, resume, rename, and the other actions on
+  them (`refreshing after tmux · wait for the row to update`), since the
+  mux may have ended while you were in it. Moving, filtering, previews,
+  and every other row stay live. The spinner clears, and the rows act
+  again, as soon as tmux answers that the mux is still the same session
+  (its session id and creation time), which is almost at once after a
+  plain detach; the refresh behind it then updates their values. If the
+  mux ended, was replaced by a new session with its name, or tmux can't
+  say, the rows wait for the refresh, which shows what became of it.
+  A mux a rebuild ran in, or one recorded without a session id, also waits
+  for the refresh. Each mux clears on its own: attaching another mux right
+  away never keeps the first one spinning.
 - **Forge concurrency:** `[forge] concurrency` (default 4) sets how many
   `gh` calls run at once. Higher fetches faster but can trip a forge's
   rate limits.

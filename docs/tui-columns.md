@@ -84,7 +84,10 @@ record a pin points at, shown only when History lists pinned records.
   mark their cursor rows the same way.
 - Right after an action in tmux (attach, kill, rebuild), the affected
   rows keep their old values, dimmed, with a spinner where their state
-  glyph or word goes, until the refresh lands.
+  glyph or word goes, until the refresh lands. After a detach, the rows
+  of a mux that tmux says is still the same session, and of its
+  sessions, clear at once and take new values when the refresh lands;
+  each mux clears on its own.
 - A row for something stopped, removed, missing, planned, or unknown is
   drawn as a ghost. A group header for such an entity is too.
 

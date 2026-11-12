@@ -1708,6 +1708,10 @@ classes, so it never shows the daemon's pre-hand-off tick (ADR 0104).
 After an attach returns, that refresh runs in the background: the TUI
 redraws right away, with the returned mux's rows and its linked
 sessions' rows dimmed and spinning until the refresh lands (ADR 0108).
+Each mux is released on its own: at once when its server still answers
+for the same session (id and creation time) the screen showed, otherwise
+by the first refresh started after its return, so a later hand-off never
+holds an earlier one (ADR 0201).
 A launch (rebuild, `mux new`, `mux launch`) keeps the TUI drawn
 with a spinner chip through its subprocess (ADR 0127), then attaches
 without refreshing first; the attach's return refreshes (ADR 0133). Every

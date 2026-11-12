@@ -619,6 +619,17 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A mux's rows stop spinning right after a detach.** Coming back from a
+  mux froze its row and its sessions' rows (dimmed, with a spinner, and
+  refusing actions) until a refresh that ran three full discoveries
+  whenever the mux was still running, which is the usual case. The TUI
+  now asks tmux once whether the mux is still the same session and
+  releases the rows at once when it is; a mux that ended, or one replaced
+  by a new session with its name, stays frozen until the refresh shows
+  what became of it. Each mux also clears on its own: attaching a second mux no longer
+  keeps the first one spinning until the second one's refresh, however
+  long you stayed in it. A mux whose session survives with a dead pane
+  (`remain-on-exit`) is released before the refresh shows its new state.
 - **A new mux's name starts as the next one in the series again.** The
   pin create form filled in `worker-2` when opened from `worker-1`, and
   the pins that replaced it lost that: the new tmux session form (`n`)
