@@ -156,6 +156,11 @@ forms, lists, readers, and keys look and behave alike.
   the view lists or the filter hides, and goes when none does. It is the
   group headers' chip and changes as they do. On a narrow screen it
   outlasts `▲ N` and the stopped count, which now leave sooner.
+- **Session rows show running subagents.** A dim `+N` follows a
+  session's label while its agent runs subagents (`+9+` for ten or more),
+  in every view that lists sessions; mux rows show none. It hides once a
+  session has exited or can't be told, as `conspectus table` does. Rows
+  with it drop their preview a few cells sooner.
 
 ### Changed
 

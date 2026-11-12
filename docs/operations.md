@@ -296,6 +296,11 @@ state has its own shape, so it reads without color:
   or the filter hides, so one glance says whether anything needs you. It
   sits before `▲ N`, and on a narrow screen it outlasts `▲ N` and the
   stopped count.
+- **Subagents** show as a dim `+N` right after a session's label while
+  its agent runs any (`+9+` for ten or more), on every session row,
+  nested ones included, but not on mux rows. A session that has exited
+  or can't be told shows none, as in `conspectus table`. A wait raised by
+  a subagent reads `!` on its root session.
 - **Pinned** spells it as a word: a pinned session (or one listed under a
   pinned mux) whose agent is waiting, working, ready, or failed reads
   `waiting`, `working`, `ready`, or `error` instead of `in mux` or

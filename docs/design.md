@@ -708,7 +708,9 @@ of its link word. The cell never gives way on a narrow row. A group
 header counts the agents beneath it that wait, each once, as `! N` after
 its `(N)` (ADR 0210): its session rows, or in the Mux view every agent of
 its muxes. The header line counts every waiting agent anywhere, whatever
-the view shows, in the same chip before `▲ N` (ADR 0211). Ordering,
+the view shows, in the same chip before `▲ N` (ADR 0211). A session row
+shows the subagents its agent runs as a dim `+N` after its label, capped
+at `+9+`, never on a mux row (ADR 0212). Ordering,
 grouping, filtering, the jump key, seen and unseen, and the detail pane's
 fields are later stories (the plan's section 7.1).
 
