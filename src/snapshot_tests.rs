@@ -100,6 +100,29 @@ fn header_rejects_past_format_version() {
 }
 
 #[test]
+fn a_file_from_the_previous_format_version_is_refused() {
+    // A `graph.bin` left by the binary before the latest format bump
+    // must come back as `IncompatibleVersion`, the error every reader
+    // turns into a cold rebuild, rather than reach the archive check.
+    let (_temp, path) = fresh_path("graph.bin");
+    let mut bytes = serialize_to_bytes(&sample_snapshot()).expect("serialize");
+    bytes[8..12].copy_from_slice(&(FORMAT_VERSION - 1).to_le_bytes());
+    std::fs::write(&path, &bytes).expect("write old file");
+
+    let err = open_mmap(&path).expect_err("an older version must error");
+    assert!(
+        matches!(
+            err,
+            SnapshotError::IncompatibleVersion { expected, found }
+                if expected == FORMAT_VERSION && found == FORMAT_VERSION - 1
+        ),
+        "expected IncompatibleVersion, got {err:?}"
+    );
+    let err = from_bytes(&bytes).expect_err("an older version must error");
+    assert!(matches!(err, SnapshotError::IncompatibleVersion { .. }));
+}
+
+#[test]
 fn write_atomic_then_open_mmap_round_trips() {
     let (_temp, path) = fresh_path("graph.bin");
     let snap = sample_snapshot();

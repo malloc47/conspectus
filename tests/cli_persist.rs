@@ -208,3 +208,53 @@ fn legacy_graph_sqlite_artifacts_do_not_block_a_fresh_run() {
         conspectus::snapshot::FORMAT_VERSION
     );
 }
+
+#[test]
+fn a_graph_bin_from_an_older_format_is_rebuilt_cold() {
+    // ADR 0083: a `graph.bin` written before the latest format bump is
+    // refused by its header, so the in-process class refresh that reads
+    // it as its prior warns once, rebuilds from an empty prior, and
+    // replaces the file in the current format.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    let dir = data.path().join("conspectus");
+    std::fs::create_dir_all(&dir).expect("create dir");
+    let bin = dir.join("graph.bin");
+    let old_version = conspectus::snapshot::FORMAT_VERSION - 1;
+    let mut bytes =
+        conspectus::snapshot::serialize_to_bytes(&conspectus::model::GraphSnapshot::empty())
+            .expect("serialize");
+    bytes[8..12].copy_from_slice(&old_version.to_le_bytes());
+    std::fs::write(&bin, &bytes).expect("write old graph.bin");
+
+    let output = isolated_cmd(home.path(), data.path())
+        .current_dir(cwd.path())
+        .args(["refresh", "--class", "git"])
+        .output()
+        .expect("run refresh --class git");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr=\n{stderr}");
+    assert!(
+        stdout.contains("refreshed git via in-process per-class refresh"),
+        "stdout=\n{stdout}"
+    );
+    let warnings: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("warning"))
+        .collect();
+    assert_eq!(warnings.len(), 1, "stderr=\n{stderr}");
+    assert!(
+        warnings[0].contains(&format!("format version {old_version} is incompatible")),
+        "stderr=\n{stderr}"
+    );
+
+    let handle = conspectus::snapshot::open_mmap(&bin).expect("rewritten graph.bin validates");
+    assert_eq!(
+        handle.header().format_version,
+        conspectus::snapshot::FORMAT_VERSION
+    );
+}
