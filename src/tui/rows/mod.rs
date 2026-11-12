@@ -26,6 +26,7 @@ use crate::tui::View;
 
 pub(crate) mod content;
 pub mod history;
+pub(crate) mod live;
 pub mod mux;
 pub mod pinned;
 mod pr_status;
@@ -33,6 +34,7 @@ pub mod prs;
 pub mod search;
 pub mod sessions;
 
+pub use live::{LiveCell, MixedLive};
 pub use pr_status::PrStatus;
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
@@ -325,6 +327,9 @@ pub struct MixedRow {
     pub pr_status: Option<PrStatus>,
     /// The pin marker cell after the kind glyph.
     pub marker: PinMarker,
+    /// The live state of the session or mux the row stands for (a pin's
+    /// row: the entity it points at). Not drawn.
+    pub live: MixedLive,
 }
 
 /// An agent or program name drawn as a chip.
@@ -548,6 +553,8 @@ pub struct AgentSessionRow {
     pub pin_id: Option<String>,
     /// What the active content search found in this session.
     pub content_hit: Option<ContentHitCell>,
+    /// The session's live state, `None` without evidence. Not drawn.
+    pub live: Option<LiveCell>,
 }
 
 /// A session's result in the active content search: how many turns
@@ -669,6 +676,9 @@ pub struct MuxSessionRow {
     /// What the active content search found in the mux's one attached
     /// session; unset for muxes with none or several.
     pub content_hit: Option<ContentHitCell>,
+    /// How many of the agents the mux hosts are in each live state;
+    /// empty without evidence. Not drawn.
+    pub live: crate::model::live::LiveCounts,
 }
 
 /// A PR row in the prs view.
@@ -1257,6 +1267,7 @@ pub(crate) fn agent_row(
             mux_host: None,
             primary_node: node_id,
             content_hit: None,
+            live: None,
         }),
     }
 }
@@ -1302,6 +1313,9 @@ pub(crate) fn session_matches_filter(
 /// see the initial config values through the same read path.
 pub(crate) struct TreeInputs<'a> {
     pub snapshot: &'a crate::model::GraphSnapshot,
+    /// The live table the rows read, bound to `snapshot`: its own
+    /// `node_live`, or the one the TUI bound from the store since.
+    pub live: &'a std::collections::BTreeMap<NodeId, crate::model::live::LiveBinding>,
     pub view: View,
     pub grouping: crate::tui::Grouping,
     pub filter: crate::filter::RowFilter,
@@ -1318,6 +1332,7 @@ impl<'a> TreeInputs<'a> {
     pub fn from_app(snapshot: &'a crate::model::GraphSnapshot, app: &'a crate::tui::App) -> Self {
         Self {
             snapshot,
+            live: &snapshot.node_live,
             view: app.active_view(),
             grouping: app.grouping(),
             filter: {
@@ -1344,12 +1359,16 @@ impl<'a> TreeInputs<'a> {
 /// projection tuple; discovery-triggering paths pull it from
 /// [`crate::tui::RunConfig`] at startup, and post-first-load
 /// projection changes pull it from `App` state.
+///
+/// Every view's rows then take their entities' live state, read now
+/// ([`live::annotate`]).
 pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
     let pinned_only =
         inputs.filter.pinned_only && matches!(inputs.view, View::Sessions | View::Mux | View::Prs);
     let pinned = pinned_only.then(|| pinned_node_set(inputs.snapshot));
     let content = inputs.filter.content.clone();
     let snapshot = inputs.snapshot;
+    let live = live::LiveValues::at(snapshot, inputs.live, tree_current_unix_ms());
     let mut tree = build_tree_for_view_unfiltered(inputs);
     if let Some(content) = &content {
         content::annotate(&mut tree, snapshot, content);
@@ -1357,6 +1376,7 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
     if let Some(pinned) = pinned {
         retain_pinned_rows(&mut tree, &pinned);
     }
+    live::annotate(&mut tree, snapshot, &live);
     tree
 }
 
@@ -1365,6 +1385,7 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
     let now = Some(tree_current_unix_epoch());
     let TreeInputs {
         snapshot,
+        live: _,
         view,
         grouping,
         filter,
@@ -1469,6 +1490,16 @@ pub(crate) fn tree_current_unix_epoch() -> i64 {
         .get()
         .copied()
         .unwrap_or_else(crate::discovery::current_epoch)
+}
+
+/// [`tree_current_unix_epoch`] in milliseconds, the unit live state is
+/// read in.
+pub(crate) fn tree_current_unix_ms() -> i64 {
+    FROZEN_NOW
+        .get()
+        .map_or_else(crate::live_store::now_ms, |epoch| {
+            epoch.saturating_mul(1000)
+        })
 }
 
 #[cfg(test)]

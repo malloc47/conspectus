@@ -26,6 +26,7 @@ fn agent_row(harness: &str, key: &str, alias: Option<&str>, preview: &str) -> Ro
             primary_node: primary,
             pin_id: None,
             content_hit: None,
+            live: None,
         }),
     }
 }

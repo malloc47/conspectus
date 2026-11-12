@@ -441,13 +441,41 @@ impl GraphSnapshot {
     pub fn live_counts_of_mux(&self, mux: &MuxSessionId, now_ms: i64) -> LiveCounts {
         self.node_live
             .iter()
-            .filter(|(id, _)| match id {
-                NodeId::AgentSession(_) => self.preferred_mux_for(id).as_ref() == Some(mux),
-                NodeId::MuxSession(pane_mux) => pane_mux == mux,
-                _ => false,
-            })
+            .filter(|(id, _)| self.live_counts_host(id).as_ref() == Some(mux))
             .map(|(_, binding)| binding.effective(now_ms).state)
             .collect()
+    }
+
+    /// [`Self::live_counts_of_mux`] for every mux at once, over `table`
+    /// in place of `node_live`: a table bound to this snapshot later
+    /// than the snapshot was, as the TUI binds one between snapshots.
+    /// A mux nothing counts toward has no entry.
+    pub(crate) fn live_counts_by_mux(
+        &self,
+        table: &BTreeMap<NodeId, LiveBinding>,
+        now_ms: i64,
+    ) -> BTreeMap<MuxSessionId, LiveCounts> {
+        let mut counts: BTreeMap<MuxSessionId, LiveCounts> = BTreeMap::new();
+        for (id, binding) in table {
+            if let Some(mux) = self.live_counts_host(id) {
+                counts
+                    .entry(mux)
+                    .or_default()
+                    .add(binding.effective(now_ms).state);
+            }
+        }
+        counts
+    }
+
+    /// The mux whose counts the live entry keyed on `id` joins: a
+    /// session's preferred mux, or the mux itself for an agent seen in
+    /// one of its panes.
+    fn live_counts_host(&self, id: &NodeId) -> Option<MuxSessionId> {
+        match id {
+            NodeId::AgentSession(_) => self.preferred_mux_for(id),
+            NodeId::MuxSession(mux) => Some(mux.clone()),
+            _ => None,
+        }
     }
 
     /// The resolver-preferred live mux for `session`: the strongest

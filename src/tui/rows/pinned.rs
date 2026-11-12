@@ -17,8 +17,8 @@ use crate::model::{
 use crate::tui::{PinnedGrouping, Sort};
 
 use super::{
-    GroupRow, MixedChip, MixedRow, MixedTone, PinMarker, PrStatus, Row, RowId, RowKind, RowTree,
-    ViewLabel, harness_label, pin_nodes, repo_display_path, shorten_home,
+    GroupRow, MixedChip, MixedLive, MixedRow, MixedTone, PinMarker, PrStatus, Row, RowId, RowKind,
+    RowTree, ViewLabel, harness_label, pin_nodes, repo_display_path, shorten_home,
 };
 
 pub struct PinnedBuildInputs<'a> {
@@ -379,6 +379,7 @@ fn push_slot(
             } else {
                 PinMarker::Stopped
             },
+            live: MixedLive::None,
         }),
     });
     for (offset, child) in children {
@@ -479,6 +480,7 @@ fn session_row(
         primary_node: id.clone(),
         pr_status: None,
         marker: PinMarker::None,
+        live: MixedLive::None,
     })
 }
 
@@ -510,6 +512,7 @@ fn mux_row(
         primary_node: id.clone(),
         pr_status: None,
         marker: PinMarker::None,
+        live: MixedLive::None,
     })
 }
 

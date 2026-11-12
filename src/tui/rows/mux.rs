@@ -20,9 +20,9 @@ use crate::model::{
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedRow, MixedTone, MuxSessionRow,
-    PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, harness_label, mux_process_harnesses,
-    mux_program, mux_program_harness, shorten_home,
+    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedLive, MixedRow, MixedTone,
+    MuxSessionRow, PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, harness_label,
+    mux_process_harnesses, mux_program, mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -171,6 +171,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             pin_id: pin_by_mux.get(&node_id).map(|pin| pin.id.id.clone()),
             primary_node: node_id.clone(),
             content_hit: None,
+            live: Default::default(),
         };
 
         let children: Vec<AttachedAgent> = if attached_count > 1 {
@@ -736,6 +737,7 @@ fn collect_ghosts(
                 primary_node: id.clone(),
                 pr_status: None,
                 marker: PinMarker::None,
+                live: MixedLive::None,
             };
             Some(MuxGroup {
                 parent_row: MuxSessionRow {
@@ -756,6 +758,7 @@ fn collect_ghosts(
                     pin_id: None,
                     primary_node: id.clone(),
                     content_hit: None,
+                    live: Default::default(),
                 },
                 parent_node_id: id,
                 children: Vec::new(),
@@ -882,6 +885,7 @@ fn agent_row(
             mux_host: None,
             primary_node: node_id,
             content_hit: None,
+            live: None,
         }),
     }
 }

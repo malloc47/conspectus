@@ -942,6 +942,7 @@ fn emit_session_row(
             primary_node: entry.id.clone(),
             pin_id: ctx.data.pin_id_by_bound_session.get(&entry.id).cloned(),
             content_hit: None,
+            live: None,
         }),
     });
 

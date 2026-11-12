@@ -55,6 +55,7 @@ fn agent_row(key: &str, alias: Option<&str>) -> Row {
             primary_node: primary,
             pin_id: None,
             content_hit: None,
+            live: None,
         }),
     }
 }

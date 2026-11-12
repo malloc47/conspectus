@@ -19,8 +19,8 @@ use crate::tui::HistoryGrouping;
 
 use super::pinned::{join_dot, project_for_path};
 use super::{
-    GroupRow, MixedChip, MixedRow, MixedTone, PinMarker, PrStatus, Row, RowId, RowKind, RowTree,
-    ViewLabel, harness_label, shorten_home,
+    GroupRow, MixedChip, MixedLive, MixedRow, MixedTone, PinMarker, PrStatus, Row, RowId, RowKind,
+    RowTree, ViewLabel, harness_label, shorten_home,
 };
 
 pub struct HistoryBuildInputs<'a> {
@@ -292,6 +292,7 @@ fn describe(
             // A record is an entity that stopped or was removed.
             PinMarker::Stopped
         },
+        live: MixedLive::None,
     })
 }
 

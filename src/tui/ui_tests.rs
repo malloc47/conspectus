@@ -1087,6 +1087,7 @@ fn session_under_group_with(key: &str, mux_state: MuxIndicator) -> crate::tui::r
             primary_node: NodeId::AgentSession(id),
             pin_id: None,
             content_hit: None,
+            live: None,
         }),
     }
 }
@@ -2106,6 +2107,7 @@ fn session_harness_span_renders_as_filled_badge() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
     let spans = session_spans(&row, &theme, now);
     let badge = spans
@@ -2159,6 +2161,7 @@ fn a_pinned_pr_draws_its_kind_glyph_and_word_in_one_style() {
         )),
         pr_status: status,
         marker: PinMarker::None,
+        live: crate::tui::rows::MixedLive::None,
     };
     let mut wrong = Vec::new();
     for (state, draft, _, word, style) in pr_state_cases(&theme) {
@@ -2282,6 +2285,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     });
     assert!(
         row_kind_glyph_span(&agent, &theme).is_some(),
@@ -2307,6 +2311,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("project")),
         content_hit: None,
+        live: Default::default(),
     });
     assert_eq!(
         row_kind_glyph_span(&mux, &theme)
@@ -2338,6 +2343,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let spans = session_spans(&row, &theme, now);
@@ -2380,6 +2386,7 @@ fn a_session_last_hosted_by_a_gone_mux_carries_a_was_in_chip() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
     let text = |row: &AgentSessionRow| -> String {
         session_spans(row, &theme, now)
@@ -2442,6 +2449,7 @@ fn session_id_is_strictly_truncated_in_left_row() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id)),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let spans = session_spans(&row, &theme, now);
@@ -2481,6 +2489,7 @@ fn session_display_label_is_truncated_in_left_row() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let spans = session_spans(&row, &theme, now);
@@ -2522,6 +2531,7 @@ fn mux_session_row_mirrors_session_column_order() {
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
         content_hit: None,
+        live: Default::default(),
     };
 
     let spans = mux_spans_in(&row, &theme, now, 100, None);
@@ -2594,6 +2604,7 @@ fn session_project_column_renders_before_inline_preview() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let spans = session_spans_at(&row, &theme, now, 120);
@@ -2646,6 +2657,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let fresh = make_row(Some("1m"), Some(now - 60));
@@ -4296,6 +4308,7 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:build")),
         content_hit: None,
+        live: Default::default(),
     }
 }
 
@@ -4413,6 +4426,7 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
         content_hit: None,
+        live: Default::default(),
     };
     let settled: String = mux_spans_in(&row, &theme, 0, 100, None)
         .iter()
@@ -5859,6 +5873,7 @@ fn mixed_row_for_layout(
             primary_node: NodeId::MuxSession(MuxSessionId::new(format!("tmux:{label}"))),
             pr_status: None,
             marker: PinMarker::None,
+            live: crate::tui::rows::MixedLive::None,
         }),
     }
 }
@@ -6510,6 +6525,7 @@ fn native_app(view: View, filter: RowFilter) -> App {
     let mut app = App::new(config);
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
         snapshot: &snapshot,
+        live: &snapshot.node_live,
         view,
         grouping: crate::tui::Grouping::default_for(view),
         filter,
@@ -7157,6 +7173,7 @@ fn every_value_of_a_state_has_its_own_glyph() {
         primary_node: NodeId::MuxSession(MuxSessionId::new("m")),
         pr_status: None,
         marker: PinMarker::None,
+        live: crate::tui::rows::MixedLive::None,
     };
     let mut drawn = Vec::new();
     for entity in [
@@ -7310,6 +7327,7 @@ fn a_chip_keeps_its_look_on_the_selected_row() {
                 primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:main")),
                 pr_status: None,
                 marker: PinMarker::None,
+                live: crate::tui::rows::MixedLive::None,
             }),
         };
         let draw = |selected: bool| {

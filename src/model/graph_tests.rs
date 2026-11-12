@@ -518,3 +518,59 @@ fn mux_counts_read_each_observation_with_its_own_liveness() {
         }
     );
 }
+
+#[test]
+fn counts_for_every_mux_at_once_agree_with_each_muxs_own() {
+    let mut snapshot = hosted(&[
+        ("a", "main", Provenance::StrongDiscovered),
+        ("b", "main", Provenance::Convention),
+        ("drifted", "other", Provenance::StrongDiscovered),
+        ("drifted", "main", Provenance::Cached),
+        ("idle", "quiet", Provenance::StrongDiscovered),
+    ]);
+    for (key, state) in [
+        ("a", LiveState::Waiting),
+        ("b", LiveState::Working),
+        ("drifted", LiveState::Compacting),
+    ] {
+        snapshot
+            .node_live
+            .insert(session(key), alive(observed(state, 0)));
+    }
+    snapshot.node_live.insert(
+        NodeId::MuxSession(mux("main")),
+        alive(observed(LiveState::Ready, 0)),
+    );
+    // A session no mux hosts counts nowhere.
+    snapshot
+        .node_live
+        .insert(session("loose"), alive(observed(LiveState::Error, 0)));
+
+    let by_mux = snapshot.live_counts_by_mux(&snapshot.node_live, NOW_MS);
+    for name in ["main", "other", "quiet"] {
+        assert_eq!(
+            by_mux.get(&mux(name)).copied().unwrap_or_default(),
+            snapshot.live_counts_of_mux(&mux(name), NOW_MS),
+            "{name}"
+        );
+    }
+    assert!(
+        !by_mux.contains_key(&mux("quiet")),
+        "a mux nothing counts toward has no entry"
+    );
+
+    // Another table over the same snapshot reads the same way.
+    let mut later = BTreeMap::new();
+    later.insert(session("b"), alive(observed(LiveState::Ready, 0)));
+    let by_mux = snapshot.live_counts_by_mux(&later, NOW_MS);
+    assert_eq!(
+        by_mux,
+        BTreeMap::from([(
+            mux("main"),
+            LiveCounts {
+                ready: 1,
+                ..LiveCounts::default()
+            }
+        )])
+    );
+}
