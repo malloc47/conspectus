@@ -4,7 +4,7 @@ title: 'OpenCode live state: plugin reducers for 1.x and 2.x'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 04:52'
+updated_date: '2026-11-12 10:26'
 labels:
   - live-state
   - ls-emit
@@ -54,4 +54,6 @@ Blockers: The fast writer.
 Planning note (after CSP-809): plugin sources do not use the shared reducer. They send a `LiveSnapshot` (`src/live_store/`), which the store applies by `(instance, seq)`. Read `LiveStore::apply_snapshot` and the `LiveSnapshot` type first.
 
 Planning note (after CSP-810): the writer seam is on `HarnessAdapter` (`src/discovery/harness/mod.rs`): `live_events_from_payload(payload, context, observed_ms)` for event sources, `live_snapshot_from_payload` for plugin snapshots, `live_reducer` for a harness reducer, and `is_attribution_event`, which defaults to `true`. Override `is_attribution_event` so only the events that name the session (session start) take the spool and daemon path; every other event then reaches only the live-state store. `hook write` (`src/cli/hook_write.rs`) fills pid, pid start, and tmux pane/socket/session into the context; the adapter adds cwd and transcript path from its payload view. Claude Code's `LiveHook` view in `claude_code.rs` is the pattern (borrowed serde struct of whitelisted fields).
+
+Verification approach (replaces the Rust mirror in the scope): write the reducer as a pure TypeScript module (for example `src/live.ts`) with no imports from the harness package and no side effects on import, and test it with `node --test` (Node 24 strips types; the machine has `node` in the user profile, the dev shell does not). Shared event-script fixtures (JSONL: one OpenCode event per line, with the snapshot the reducer must emit after it) are consumed by the TypeScript tests and by the Rust tests that feed the expected snapshots through the payload parser and the store. Add a `just` recipe for the plugin tests that reports "node not found" cleanly. ADR 0206 describes this.
 <!-- SECTION:NOTES:END -->

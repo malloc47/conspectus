@@ -4,7 +4,7 @@ title: 'Pi live state: extension state machine'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 08:07'
+updated_date: '2026-11-12 10:26'
 labels:
   - live-state
   - ls-emit
@@ -56,4 +56,6 @@ Planning note (after CSP-809): the extension is a snapshot source. It sends a `L
 Planning note (after CSP-810): the writer seam is on `HarnessAdapter` (`src/discovery/harness/mod.rs`): `live_events_from_payload(payload, context, observed_ms)` for event sources, `live_snapshot_from_payload` for plugin snapshots, `live_reducer` for a harness reducer, and `is_attribution_event`, which defaults to `true`. Override `is_attribution_event` so only the events that name the session (session start) take the spool and daemon path; every other event then reaches only the live-state store. `hook write` (`src/cli/hook_write.rs`) fills pid, pid start, and tmux pane/socket/session into the context; the adapter adds cwd and transcript path from its payload view. Claude Code's `LiveHook` view in `claude_code.rs` is the pattern (borrowed serde struct of whitelisted fields).
 
 From CSP-813: `hook status` reports this harness's live-state health as `unsupported` until its adapter's `HarnessAdapter::reports_live_state` returns true; flip it when the hooks report live state, and update the `unsupported` row of the health table in `docs/operations.md`.
+
+Verification approach (replaces the Rust mirror in the scope): keep the state machine a pure, exported function in `conspectus-hook.ts` with no side effects on import (the `ExtensionAPI` import is `import type`, so Node strips it) and test it with `node --test` (Node 24 strips types; `node` is in the user profile, not the dev shell). Shared event-script fixtures (JSONL: one Pi event per line, with the snapshot expected after it) are consumed by the TypeScript tests and by the Rust tests that feed the expected snapshots through the payload parser and the store. Add a `just` recipe for the plugin tests that reports "node not found" cleanly. ADR 0206 describes this.
 <!-- SECTION:NOTES:END -->

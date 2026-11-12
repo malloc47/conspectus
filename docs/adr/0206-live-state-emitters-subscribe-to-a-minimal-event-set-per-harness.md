@@ -228,9 +228,17 @@ are in the research notes and become tests.
   installer replaces an operator's array-of-tables hooks and sets no
   timeout. These are fixed as part of the harness stories.
 - The plugin reducers are TypeScript. The repository has no Node in its
-  dev shell, so plugin logic is verified by fixtures replayed through a
-  Rust mirror used only in tests, plus manual runs, until a plugin test
-  runner is justified in its own ADR.
+  dev shell, and a Rust mirror of a TypeScript reducer would test the
+  mirror, not the plugin. So each reducer is a pure module (no imports
+  from the harness package, no side effects on import, only syntax Node
+  can strip) with its own `node --test` tests, run by hand on a machine
+  with Node 22.6 or later (a `just` recipe wraps it and says so when Node
+  is missing). The scripted event fixtures are shared data: the TypeScript
+  tests replay each script through the reducer and compare the snapshots
+  it emits, and the Rust tests feed the same expected snapshots through
+  the payload parser and the store. Neither CI nor the dev shell gains
+  Node here; that, and a CI run of the plugin tests, is a separate
+  decision (a plugin test runner in its own ADR).
 - Gaps remain by nature: an Esc interrupt in Claude fires no `Stop`; an
   approval granted fires no event until the tool ends (so `waiting` can
   linger through a long approved tool); a killed process says nothing.
