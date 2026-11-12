@@ -91,8 +91,16 @@ five representations:
    `stat` on Linux), at bind time, and the answer is stored in the
    binding. Where the platform offers no cheap check, liveness is
    `Unknown` and the 15-minute rule applies (ADR 0203). A daemon
-   snapshot's answer is at most one class cycle old; the TUI re-binds,
-   so its answers are as fresh as its binds.
+   snapshot's answer is at most one class cycle old. The TUI's answers
+   are at most a second old: an agent killed without a goodbye writes
+   nothing to the store, so between binds the overlay checks the
+   processes of its bound entries again, at most once a second counting
+   the check each bind makes. That costs one read of
+   `/proc/<pid>/stat` per bound entry whose process may still run, reads
+   no store, starts no process, and reads nothing when no entry is
+   bound; an entry that recorded its exit, or whose process was already
+   found gone, is not checked again. A process found gone or reused
+   updates the rows in place, like a store rewrite.
 
 5. **Effective state is read through an accessor**, never from the raw
    table: `snapshot.live_state_of(id, now)` returns the ADR 0203

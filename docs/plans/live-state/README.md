@@ -108,7 +108,9 @@ The store is the integration point, not the daemon.
   changes (at most once a second) re-reads it and re-binds against the
   snapshot it already holds. An event is visible in about a second, and the
   daemon stays optional (design requirement: the one-shot CLI and the
-  daemonless TUI must work).
+  daemonless TUI must work). Between binds it also checks the bound
+  agents' processes once a second, so an agent killed without a goodbye
+  reads `exited/killed` within a second rather than at the next snapshot.
 - Reducers for stateless hooks (Claude Code, Codex) run in Rust inside
   `hook write`, folding each event into the stored per-session entry. Plugins
   with in-process state (OpenCode, Pi) send a complete snapshot of their own
@@ -231,6 +233,7 @@ A snapshot side table, `node_live: BTreeMap<NodeId, LiveObservation>`, next to
 |---|---|---|
 | Hook to store | under 15 ms, never blocks the harness | no daemon call, no tmux spawn after first sight, lock timeout 200 ms then drop the event |
 | Store to TUI | about 1 s | mtime stat per tick, re-read at most 1 per second, re-bind in memory |
+| Killed agent to TUI | about 1 s | between binds, at most once a second: one read of `/proc/<pid>/stat` per bound entry whose process may still run (not a recorded exit, not already found gone); no store read, no process started, nothing when no entry is bound; ticks in between (100 ms) check nothing (CSP-843) |
 | Store to daemon snapshot | at most 5 s | class-cycle mutator |
 | Idle cost | none | no timer in the daemon; plugin heartbeat 60 s only while not idle |
 

@@ -675,8 +675,10 @@ sparse `node_live` snapshot table beside `node_presence` (ADR 0205). Each
 binding keeps whether the entry's process ran when it was bound. Unbound
 entries show nowhere, and binding never creates a node. The TUI re-binds from
 the store about once a second between snapshots, with or without a daemon: it
-stats the file each tick, reads and binds it only after a rewrite, and binds
-every new snapshot before its rows are built. A mux has no state of its own:
+stats the file each tick, reads and binds it only after a rewrite, binds
+every new snapshot before its rows are built, and between binds checks the
+bound agents' processes once a second, so a killed agent reads `exited`
+within a second. A mux has no state of its own:
 it has counts over what it hosts.
 
 The effective state is computed at read time from `now` and process liveness:
