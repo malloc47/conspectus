@@ -206,6 +206,26 @@ impl LiveValues {
         self.waiting
     }
 
+    /// The agents [`Self::waiting`] counts, each with when its wait
+    /// began, the longest wait first and ties by agent (ADR 0216).
+    pub(crate) fn waiting_agents(&self) -> Vec<(Agent, i64)> {
+        let waits = |cell: &LiveCell| LiveSign::of_session(Some(*cell)).mark == LiveMark::Waiting;
+        let mut agents: Vec<(Agent, i64)> = self
+            .cells
+            .iter()
+            .filter(|(_, cell)| waits(cell))
+            .map(|(node, cell)| (Agent::Session(node.clone()), cell.since_ms))
+            .chain(
+                self.panes
+                    .iter()
+                    .filter(|(_, cell)| waits(cell))
+                    .map(|(pane, cell)| (Agent::Pane(pane.clone()), cell.since_ms)),
+            )
+            .collect();
+        agents.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+        agents
+    }
+
     /// The cell of a session, or `None` without evidence.
     pub(crate) fn session(&self, id: &NodeId) -> Option<LiveCell> {
         self.cells.get(id).copied()

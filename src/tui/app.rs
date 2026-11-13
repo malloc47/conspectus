@@ -36,6 +36,7 @@ mod search_open;
 mod seen;
 mod tree;
 mod viewport;
+mod waiting;
 
 #[cfg(test)]
 pub(crate) use content::MAX_DETAIL_SESSIONS;
@@ -1683,6 +1684,7 @@ impl App {
                     }
                 }
             }
+            Msg::NextWaiting => effects.extend(self.jump_to_next_waiting()),
             Msg::RevealSelected => {
                 let subject = crate::tui::actions::action_subject(self);
                 let result = match (&subject.pin, &subject.node) {

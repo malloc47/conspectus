@@ -52,6 +52,8 @@ fn every_key_the_program_takes_is_a_binding() {
         (Focus::Right, press(KeyCode::Tab), "focus.cycle"),
         (Focus::Left, typed('J'), "preview.down"),
         (Focus::Right, typed('K'), "preview.up"),
+        (Focus::Left, typed('W'), "waiting.next"),
+        (Focus::Right, typed('W'), "waiting.next"),
     ] {
         assert_eq!(reached(focus, event), Some(id), "{focus:?} {event:?}");
     }
@@ -264,9 +266,28 @@ fn a_message_names_the_key_its_binding_takes() {
         ("row.menu", "."),
         ("refresh.hard", "Ctrl-R"),
         ("quit", "q"),
+        // The jump's messages and the help legend.
+        ("waiting.next", "W"),
     ] {
         assert_eq!(key_name(id), label, "{id}");
     }
+}
+
+/// The jump to what waits is the word's letter, since the waiting mark
+/// `!` opens the Messages log; the worktree menu keeps `w`, and the
+/// status bar names the jump only while an agent waits.
+#[test]
+fn w_jumps_to_what_waits_and_names_itself_only_while_something_does() {
+    assert_eq!(reached(Focus::Left, typed('!')), Some("messages"));
+    assert_eq!(reached(Focus::Left, typed('w')), Some("worktree.menu"));
+    let binding = keymap().get("waiting.next").expect("the jump's binding");
+    assert_eq!(binding.scope(), Scope::Global, "from either pane");
+    assert_eq!(
+        binding.action().action(),
+        Action::Msg(Box::new(Msg::NextWaiting))
+    );
+    let app = App::new(crate::tui::RunConfig::defaults());
+    assert!(!binding.can_act(&app), "nothing waits in an empty app");
 }
 
 /// A message that offers a binding's other keys names them in the order

@@ -589,7 +589,7 @@ pub(crate) fn status_hints(app: &App) -> KeyHintBar {
         })
     };
     let program = |command: &Command| match command {
-        Command::Refresh | Command::Quit => Some(Annotation::new()),
+        Command::Refresh | Command::Quit | Command::NextWaiting => Some(Annotation::new()),
         // A hard refresh asks the forges again, which only the PRs view
         // shows.
         Command::HardRefresh => (app.active_view() == View::Prs).then(Annotation::new),

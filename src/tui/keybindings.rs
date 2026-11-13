@@ -155,6 +155,8 @@ pub enum Command {
     First,
     Last,
     Reveal,
+    /// `W`: the next agent waiting on the operator.
+    NextWaiting,
     /// `Backspace` on the left pane: return from a reveal.
     Back,
     /// `Tab`: the other pane.
@@ -212,6 +214,7 @@ impl Command {
             Command::First => msg(Msg::Home),
             Command::Last => msg(Msg::End),
             Command::Reveal => msg(Msg::RevealSelected),
+            Command::NextWaiting => msg(Msg::NextWaiting),
             Command::Back => msg(Msg::NavBack),
             Command::Focus => msg(Msg::CycleFocus),
             Command::PreviewDown => msg(Msg::ScrollPreviewBy(1)),
@@ -468,6 +471,16 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
         heading::NAVIGATION,
         "Reveal the row's entity in its own view (Sessions, Mux, PRs, History); Backspace on the left tree returns. Shift-Enter needs a terminal that reports it",
     ),
+    // `!`, the waiting mark, opens the Messages log, so the jump takes
+    // the word's letter; `w` is the worktree menu.
+    bind("waiting.next", GLOBAL, &[ch('W')], Command::NextWaiting)
+        .verb("next waiting")
+        .rank(status_rank::DEFAULT_ACTION)
+        .available_when(App::has_waiting)
+        .help(
+            heading::NAVIGATION,
+            "Jump to the next agent waiting on you, the longest wait first, wrapping: to its row in this view (in Mux, its mux's row), else in Sessions (Mux for an agent no session matches yet), with the groups above it opened; Backspace returns from a switch",
+        ),
     bind("reveal.back", LEFT_PANE, &[key(KeyCode::Backspace)], Command::Back)
         .verb("back")
         .rank(status_rank::BACK)

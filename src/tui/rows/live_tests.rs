@@ -352,3 +352,51 @@ fn a_cell_shows_its_subagents_until_the_session_exits_or_cannot_be_told() {
     assert_eq!(stale.subagents, 2, "the cell keeps what was recorded");
     assert_eq!(stale.running_subagents(), 0, "but shows none");
 }
+
+#[test]
+fn the_waiting_agents_are_the_ones_counted_the_longest_wait_first() {
+    use crate::tui::rows::seen::Agent;
+    let mut snapshot = world();
+    let waited = |state, since_minutes| {
+        let mut binding = running(state, 1);
+        binding.observation = binding
+            .observation
+            .with_since_ms(NOW_MS - since_minutes * MINUTE_MS);
+        binding
+    };
+    let older = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "older"));
+    let tied = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "aaa-tied"));
+    snapshot
+        .node_live
+        .insert(older.clone(), waited(LiveState::Waiting, 50));
+    snapshot
+        .node_live
+        .insert(tied.clone(), waited(LiveState::Waiting, 5));
+    snapshot.node_live.insert(
+        NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "ready")),
+        waited(LiveState::Ready, 90),
+    );
+    let pane = crate::model::LivePane::new(main_mux(), Some("%7".into()));
+    snapshot
+        .pane_live
+        .insert(pane.clone(), waited(LiveState::Waiting, 20));
+    let values = LiveValues::at(
+        &snapshot,
+        snapshot.live_tables(),
+        NOW_MS,
+        crate::tui::rows::seen::SeenContext::nothing(),
+    );
+    let order: Vec<(Agent, i64)> = values.waiting_agents();
+    assert_eq!(order.len(), values.waiting(), "the set the header counts");
+    assert_eq!(
+        order,
+        vec![
+            (Agent::Session(older), NOW_MS - 50 * MINUTE_MS),
+            (Agent::Pane(pane), NOW_MS - 20 * MINUTE_MS),
+            // The hosted session's wait and the tied one began together;
+            // the entity breaks the tie.
+            (Agent::Session(tied), NOW_MS - 5 * MINUTE_MS),
+            (Agent::Session(hosted()), NOW_MS - 5 * MINUTE_MS),
+        ]
+    );
+}

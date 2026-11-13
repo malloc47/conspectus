@@ -39,6 +39,9 @@
 //! - **Rows keep still between operator actions**: the order and the
 //!   rows a list shows by live state are read when its tree is built, so
 //!   a store change refills the marks and moves nothing (`live_order`).
+//! - **One key reaches what waits, from every view**: `W` lands on the
+//!   row standing for the agent waiting longest, in this view or the one a
+//!   reveal lands in, and says where it went (`jump`).
 //!
 //! # Diagnosis of the reported defects
 //!
@@ -103,6 +106,7 @@ mod forms;
 mod freshness;
 mod glyphs;
 mod help;
+mod jump;
 mod keys;
 mod layout;
 mod lifecycle;

@@ -108,8 +108,11 @@ fn live_state_legend(theme: &Theme) -> HelpSection {
             let (name, blurb): (&str, std::borrow::Cow<'static, str>) = match mark {
                 LiveMark::Waiting => (
                     "Waiting on you",
-                    "a permission prompt, a question, a plan, or other input; attach to answer it. Controls can float these to the top, or list only the sessions in one state (agent state)"
-                        .into(),
+                    format!(
+                        "a permission prompt, a question, a plan, or other input; attach to answer it. {} goes to the one waiting longest; Controls can float these to the top, or list only the sessions in one state (agent state)",
+                        crate::tui::keybindings::key_name("waiting.next")
+                    )
+                    .into(),
                 ),
                 LiveMark::Working => (
                     "Working",

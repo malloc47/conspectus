@@ -304,6 +304,9 @@ pub enum Msg {
     /// `Shift+Enter` / `Alt+Enter` → switch to the selected row's entity
     /// in its native view and select it; Backspace returns.
     RevealSelected,
+    /// `W` → move to the next agent waiting on the operator, the longest
+    /// wait first (ADR 0216).
+    NextWaiting,
     /// Pane viewer → attach to the mux the pane belongs to. A stopped or
     /// gone mux is refused with a note in the viewer.
     AttachPane,
