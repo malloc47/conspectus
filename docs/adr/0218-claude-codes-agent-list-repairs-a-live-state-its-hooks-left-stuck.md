@@ -112,7 +112,7 @@ second per call it is a repair, not a per-refresh read.
    poller keeps the last poll that succeeded.
 
 4. **What it asserts.** Per listed session, from `status`, or from
-   `state` when `status` is absent:
+   `state` when `status` is absent or holds none of the values below:
 
    | Field | Value | Live state |
    |---|---|---|
@@ -188,11 +188,11 @@ second per call it is a repair, not a per-refresh read.
    typed whitelist, a Tier 1 state reader whose result is Tier 3 (ADR
    0086): unknown keys are skipped by the parser without being kept,
    and every field read is reduced at once.
-   - Kept, per listed session with a state: the pid (above 1), the
-     session id when it is a plain id token (letters, digits, `-`, `_`,
-     `.`, `:`, at most 128 characters), the mapped
-     state and detail, when its run began, and the start time read for
-     its pid; for the poll, when it ran.
+   - Kept, per listed session with a state and a pid or session id to
+     match it by: the pid (above 1), the session id when it is a plain id
+     token (ASCII letters, digits, `-`, `_`, `.`, `:`, at most 128
+     characters), the mapped state and detail, when its run began, and
+     the start time read for its pid; for the poll, when it ran.
    - Dropped at the parse: `cwd`, `name`, `kind`, `startedAt`, `id`,
      every other field, and the text of `status`, `state`, and
      `waitingFor` (only the mapped enum is kept). At most 256 sessions

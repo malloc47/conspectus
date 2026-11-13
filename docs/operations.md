@@ -184,7 +184,10 @@ harness reports nothing until you turn it on, and a session without live
 state is one Conspectus has no evidence about, not an idle one. One
 source needs no hook: the title Codex sets on its tmux pane, which shows
 when it waits on you and when it works
-([Codex's pane title](#codexs-pane-title)).
+([Codex's pane title](#codexs-pane-title)). Another repairs what Claude
+Code's hooks miss: when they go quiet on a session that works or waits,
+Conspectus asks Claude Code's own list of its sessions
+([Claude Code's agent list](#claude-codes-agent-list)).
 Conspectus only watches. It never answers a prompt or types into an
 agent's pane; to act on a waiting agent, attach to its mux as usual.
 
@@ -436,8 +439,9 @@ session.
   A field at its default is left out: no `detail`, no `subagents`, no
   `pid`, `via_subagent` false, `heartbeat_s` (seconds between a plugin's
   repeated reports) 0. Each list is left out when it is empty. `source`
-  is `hook`, or `pane_title` for a state read from
-  [Codex's pane title](#codexs-pane-title).
+  is `hook`, `pane_title` for a state read from
+  [Codex's pane title](#codexs-pane-title), or `harness_poll` for one
+  read from [Claude Code's agent list](#claude-codes-agent-list).
 - **`conspectus hook status <harness>`** ends with the
   [health line](#live-state-health).
 - **`--state STATE`** on `conspectus table`, `conspectus tui`, and
@@ -460,8 +464,8 @@ Hooks report what the harness tells them, and every harness leaves gaps:
 
 | Gap | Where | What you see | What repairs it |
 | --- | --- | --- | --- |
-| An Esc interrupt fires no stop event | Claude Code | `working`, then quiet after ten minutes | The next turn event: your next prompt, or Claude Code's idle notification |
-| Approving a prompt fires nothing until the approved tool ends | Claude Code, Codex | `waiting` through the whole of a long approved tool | The next tool event, when that tool ends; for Codex, its pane title within two probes |
+| An Esc interrupt fires no stop event | Claude Code | `working`, then quiet after ten minutes | The next turn event: your next prompt, or Claude Code's idle notification; with `conspectus serve` or a TUI running, [Claude Code's agent list](#claude-codes-agent-list) within about a minute |
+| Approving a prompt fires nothing until the approved tool ends | Claude Code, Codex | `waiting` through the whole of a long approved tool | The next tool event, when that tool ends; for Claude Code, its agent list within about a minute; for Codex, its pane title within two probes |
 | A killed process says nothing | Every harness | The last state, until the next process check | The process check: `exited:killed` at the next discovery (every few seconds with `conspectus serve`) |
 | Hooks do nothing until trusted | Claude Code (the workspace trust dialog; also `disableAllHooks`, `--bare`, managed hooks only), Codex (`/hooks`) | No live state; `hook status` says `silent` while the agent runs (Codex still shows waiting and working from its pane title) | Trust the hooks (or turn them back on), then restart the agent |
 | Waiting covers only extension dialogs | Pi | Pi's own pickers, a provider login, and the project trust prompt never read `waiting` | Nothing: Pi tells extensions nothing about them |
@@ -505,6 +509,65 @@ parent's session. Beyond the [known gaps](#known-gaps):
 - Denying a permission prompt reads `waiting` until the next prompt.
 - A `Stop` that another hook blocks reads `ready` while the continuation
   that hook forces runs.
+- An interrupted turn and an answered approval, which fire no hook, are
+  read from [Claude Code's agent list](#claude-codes-agent-list) once the
+  hooks have been quiet for ten seconds, while `conspectus serve` or a TUI
+  runs.
+
+### Claude Code's agent list
+
+Claude Code's hooks miss two moments: an Esc interrupt fires no event, so
+the turn reads `working` until your next prompt, and approving a
+permission prompt fires none until the approved tool ends, so the session
+reads `waiting` meanwhile. Claude Code also lists its own sessions with
+their status, `claude agents --json`, and Conspectus asks it, only to
+repair those two:
+
+- **When.** A Claude Code session's hooks last said `working` or
+  `waiting`, ten seconds have passed with no event, and no earlier call
+  has already answered it; at most one call every 30 s. Only
+  `conspectus serve` and a TUI with no daemon (at its refresh, in the
+  background) make the call. A one-shot command such as `conspectus
+  table` never does, but shows a running daemon's answer. Nothing runs
+  while every Claude Code session is ready or keeps reporting.
+- **What it reads.** Each session's status: busy reads `working`, waiting
+  reads `waiting` (detail `permission` for a permission prompt or a
+  sandbox request, `input` for anything else), idle reads `ready` with no
+  detail, since the list cannot say whether the turn finished or was
+  interrupted. A background session's state reads `working`, `waiting`,
+  `ready` (`finished`), `error`, or `exited`. Anything else says nothing.
+- **How it combines with the hooks.** A session reads what the list says,
+  with `source` `harness_poll`, when the list says something other than
+  the hooks did and the call came at least ten seconds after their last
+  event. The next hook event, such as your next prompt, takes over again
+  at once. A hook's `ready`, `error`, `compacting`, and `exited` never
+  change on the list's account, and a session with no hook entry gets
+  nothing from it: install the hooks for that.
+- **What it costs.** About half a second of one CPU per call. While an
+  agent works through a long tool or waits on you, that is one call every
+  30 s; an interrupted session left idle costs one call.
+- **What it keeps.** Each listed session's pid, session id, and status,
+  read in memory as the output arrives. Its name (which can be a title
+  made from your prompt), its directory, and every other field are
+  dropped there, and nothing it prints on stderr is read. Nothing is
+  written: the [store](#the-live-state-store) keeps what the hooks said.
+  Conspectus runs it with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
+  so the call reaches no network, and kills it after 3 s.
+- **Turning it off.** Set `CONSPECTUS_DISABLE_LIVE_POLL` where
+  `conspectus serve` or the TUI starts.
+
+What it cannot see:
+
+- **Anything without `claude`** on the `PATH` the daemon or the TUI
+  started with, or with `CLAUDE_CODE_DISABLE_AGENT_VIEW` set: the call
+  fails and nothing changes.
+- **A session whose hooks recorded another process** than the one Claude
+  Code lists (the pid each records), unless both name the same session
+  id.
+- **A session with no hooks**, as above.
+
+The fields come from Claude Code's documentation; a recording of a real
+session has not checked them yet.
 
 ### Codex live state
 
@@ -826,7 +889,12 @@ Start from the health label:
   corrects it. `unknown:stale` means Conspectus
   can't check the process and has heard nothing for fifteen minutes. An
   answer a few seconds old comes from `conspectus serve`'s snapshot; pass
-  `--refresh` to read the store as it is now.
+  `--refresh` to read the store as it is now. A Claude Code turn still
+  `working` a minute after an interrupt means
+  [Claude Code's agent list](#claude-codes-agent-list) was not asked:
+  no daemon or TUI runs, `claude` is not on its `PATH`, or
+  `CONSPECTUS_DISABLE_LIVE_POLL` is set. A `--refresh` command reads the
+  hooks only.
 - **`unsupported`**: the harness's hook reports no live state. No harness
   says this today. opencode has no health line yet; check it with
   `conspectus table sessions --columns +live`.

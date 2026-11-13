@@ -215,6 +215,22 @@ forms, lists, readers, and keys look and behave alike.
   titles show, and `CONSPECTUS_DISABLE_PANE_TITLES` turns the reading
   off. `graph.bin` moves to format version 13 and is rebuilt once after
   upgrading. Claude Code's titles are not read.
+- **Claude Code's own agent list repairs a stuck live state.** When a
+  Claude Code session's hooks last said `working` or `waiting` and have
+  been silent for ten seconds, `conspectus serve` (and a TUI with no
+  daemon, at its refresh) runs `claude agents --json`, at most once every
+  30 s, and reads that session's status from it. So an Esc-interrupted
+  turn, which fires no hook, reads `ready`, and an approved prompt, which
+  fires none until the tool ends, reads `working`, within about a minute,
+  with `source: harness_poll`. A newer hook event always wins, a hook's
+  `ready`, `error`, or `exited` is never changed, and a session with no
+  hook entry gets nothing from it. Each call costs about half a second;
+  nothing runs while every Claude Code session is ready or reporting, and
+  one-shot commands never run it. Only each session's pid, session id,
+  and status are kept, never its name or directory, and Claude Code's
+  nonessential network traffic is turned off for the call.
+  `CONSPECTUS_DISABLE_LIVE_POLL` turns it off. `graph.bin` moves to
+  format version 14 and is rebuilt once after upgrading.
 
 ### Changed
 

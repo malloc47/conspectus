@@ -475,8 +475,9 @@ Where the build differs from, or settles, the draft above:
   tmux mux and pane (`LivePane`), so two such agents in one mux each
   count (CSP-841). Readers use `GraphSnapshot::live_state_of`,
   `live_counts_of_mux`, `live_panes_of`, and `live_tables`. `graph.bin`
-  is at format version 13 (12 carried both tables; 13 adds the pane-title
-  marks on the mux probes and the `pane_title` source).
+  is at format version 14 (12 carried both tables; 13 adds the pane-title
+  marks on the mux probes and the `pane_title` source; 14 adds the repair
+  polls, `live_polls`, and the `harness_poll` source).
 - **The TUI keeps the data current.** It binds the store again within
   about a second of a change and re-checks bound agents' processes once a
   second (CSP-843); the row models carry `live` fields (CSP-814), which
@@ -488,7 +489,8 @@ Where the build differs from, or settles, the draft above:
   Controls floats and filters by when the tree is built (CSP-826,
   ADR 0215), and `W` jumps to the agent waiting longest (CSP-827, ADR
   0216); a Codex pane's title fills in where hooks are silent (CSP-831,
-  ADR 0217).
+  ADR 0217), and Claude Code's agent list repairs a state its hooks left
+  stuck (CSP-832, ADR 0218).
 - **CLI surfaces.** An opt-in `live` column on `table sessions` and
   `table mux`, a `live state` section in `node show`, the two lists in
   the graph JSON, and a health line at the end of `hook status`
@@ -522,4 +524,23 @@ Where the build differs from, or settles, the draft above:
   counts the agents titles show; `CONSPECTUS_DISABLE_PANE_TITLES` turns
   it off. The title strings come from Codex's source, not a recording,
   and Claude Code's titles are not read.
+- **A second: `claude agents --json`, as a repair only** (CSP-832, ADR
+  0218). The operator's check came first: in a scratch config it starts no
+  supervisor or other process, fires no hook, writes nothing once the
+  config is initialized, and costs 0.3 to 0.6 s, but opens a TLS
+  connection per call unless `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
+  which Conspectus sets on the child. A `LivePoller` per harness that
+  offers one (Claude Code only) lives as long as the daemon or a
+  daemonless TUI's refresh worker and runs at most every 30 s, only while
+  a bound Claude Code hook entry recorded `working` or `waiting`, has
+  been silent for 10 s, and no earlier poll answered it; one-shot commands
+  never poll. The parser keeps each listed session's pid, a plain session
+  id, and a mapped state; the snapshot carries the latest poll in
+  `live_polls`, and the binding folds it in after the pane titles: a hook
+  entry silent for the settle window before the poll reads the poll's
+  state for the same process (source `harness_poll`). A newer hook event
+  wins, hook `ready`, `error`, and `exited` never change, and a session
+  with no hook entry gets nothing (CSP-871).
+  `CONSPECTUS_DISABLE_LIVE_POLL` turns it off. The output shapes are from
+  the documentation, not a recording.
 - **Every fixture is synthetic** until CSP-822 records real payloads.
