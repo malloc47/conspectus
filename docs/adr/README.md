@@ -179,7 +179,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179); framework-owned in part |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181); framework-owned in part |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended by 0112) |
-| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144; see 0147) |
+| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144, 0213; see 0147) |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
 | [0114](0114-prs-view-grouped-by-checkout.md) | A PRs View Grouped By Checkout | Accepted (amended by 0129, 0130, 0151) |
 | [0115](0115-forge-discovery-over-discovered-repos.md) | Forge Discovery Over Every Discovered Repo | Accepted (amended by 0136) |
@@ -247,6 +247,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0210](0210-tui-group-headers-count-the-agents-waiting-beneath-them.md) | Group Headers Count The Agents Waiting Beneath Them | Accepted |
 | [0211](0211-tui-the-header-counts-every-agent-waiting-on-you.md) | The Header Counts Every Agent Waiting On You | Accepted |
 | [0212](0212-tui-a-session-row-shows-its-running-subagents-after-its-label.md) | A Session Row Shows Its Running Subagents After Its Label | Accepted |
+| [0213](0213-tui-the-detail-pane-says-what-a-nodes-agents-are-doing.md) | The Detail Pane Says What A Node's Agents Are Doing | Accepted |
 
 ## Transcript viewer
 
