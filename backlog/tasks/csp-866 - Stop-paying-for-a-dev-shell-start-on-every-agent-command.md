@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-13 03:55'
-updated_date: '2026-11-13 23:37'
+updated_date: '2026-11-13 23:45'
 labels:
   - h-devloop
 milestone: m-11
@@ -64,3 +64,13 @@ Checks: run-tests.sh 5,681 passed, 0 failed; checks.sh clean; `git diff --check`
 WAITS ON THE OPERATOR (AC #4 for AGENTS.md, DoD #2): AGENTS.md is the agent's own instruction file, not edited on another agent's request. Proposed: after "Use `nix develop` for local development. The shell provides Rust tooling and standard checks." add: "An agent, whose every command starts a fresh shell, runs tools through `scripts/dev-env.sh` instead (`scripts/dev-env.sh just check`, or `. scripts/dev-env.sh && ...` for a command line that runs several): it loads the dev shell's environment from a cache that follows `flake.nix`, `flake.lock`, and `rust-toolchain.toml`. Don't wrap commands in `nix develop --command`." The whole patch (CSP-864, 865, 866): /tmp/csp-fu/agents-md.patch, `git apply` from the worktree.
 OPTIONAL OPERATOR STEP (not needed for the ACs): start sessions inside the environment, once the script is on main: `nono run <your usual --allow flags> -- /home/jwaggoner/src/oss/conspectus/scripts/dev-env.sh claude`. Commands then need no prefix; the environment is fixed for the session, and the prefix still picks up a flake change mid-session. Untested here (agents may not start `claude`): check that `command -v cargo` in a new session prints the rust-default-1.99.0 store path.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+`scripts/dev-env.sh COMMAND` (or `. scripts/dev-env.sh`) runs commands in the dev shell's environment without starting the dev shell: it keeps `nix print-dev-env --profile` output under `target/dev-env/`, keyed by flake.nix, flake.lock, rust-toolchain.toml, the script, and the system, rebuilds it on the first call after any of them changes, and keeps its store paths alive through the profile link. It leaves out the per-call temp dir and the banner hook. ADR 0226 weighs the alternatives (agent started in the dev shell, nix-direnv with `.envrc`, a reused profile, a harness hook, host rustup) and records the choice; flake.nix notes beside the hook that the script skips it; the README tells how to use it.
+
+Measured: a command reaches cargo in 0.04 to 0.05 s (backlog 0.36 s) instead of 7.2 to 8.7 s for `nix develop --command`, with the same store paths for rustc 1.99.0, just, nextest, and backlog, a fresh cargo build across the switch, and no directory left in /tmp; a whole `scripts/dev-env.sh just check` passed. Verified the key change (a rust-toolchain.toml edit rebuilt the copy), nesting, sourced mode, and the full suite and checks.
+
+Open: the AGENTS.md instruction (AC #4) waits on the operator (/tmp/csp-fu/agents-md.patch). Optional operator step: start sessions with `nono run <flags> -- <repo>/scripts/dev-env.sh claude`.
+<!-- SECTION:FINAL_SUMMARY:END -->
