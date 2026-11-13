@@ -187,6 +187,15 @@ pub fn glossary_entry(field: &str, value: &str) -> Option<String> {
         ("state", "stale") => {
             "Its process can't be checked, and nothing has arrived from it for fifteen minutes."
         }
+        ("state", "unseen") => {
+            "You haven't looked at this finished turn: no tmux client has attached to its mux \
+             since it ended, or, for a session with no mux, the cursor hasn't rested on its row \
+             in this TUI. Its mark is bold until you do."
+        }
+        ("state", "seen") => {
+            "You have looked at this finished turn: a tmux client attached to its mux since it \
+             ended, or, for a session with no mux, the cursor rested on its row in this TUI."
+        }
         ("source", "hook") => "Reported by the harness's hooks or plugin.",
         ("source", "unknown") => "Reported by a source this version of Conspectus doesn't know.",
         ("evidence", "fresh") => {

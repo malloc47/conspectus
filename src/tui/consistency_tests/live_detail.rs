@@ -158,8 +158,8 @@ fn the_detail_pane_takes_a_store_change_in_place_and_keeps_its_cursor() {
     );
     let state = node_field(&app, "state").expect("the state field");
     assert_eq!(
-        state.value, "ready · finished",
-        "the field reads the turn's end"
+        state.value, "ready · finished · unseen",
+        "the field reads the turn's end, which nobody has looked at yet"
     );
     assert_eq!(
         state.live_mark.map(LiveSign::glyph),

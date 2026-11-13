@@ -1,13 +1,13 @@
 //! What an agent's live state reads as, in every view.
 
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use tuikit::chip::Tone;
 
 use crate::model::live::{LiveConfidence, LiveCounts, LiveState};
 use crate::tui::Theme;
 use crate::tui::icons::live;
 
-use super::{LiveCell, MixedLive, words};
+use super::{LiveCell, MixedLive, MuxLive, words};
 
 /// The shape a row draws its entity's live state in: one for each thing
 /// the operator acts on (waiting, ready, an error), one for work under
@@ -103,13 +103,18 @@ impl LiveMark {
     }
 }
 
-/// What a row shows of its entity's live state: the mark, and whether
-/// the evidence for it has gone quiet (work with no news for longer than
-/// the source's quiet window), which draws the same mark dimmed.
+/// What a row shows of its entity's live state: the mark, whether the
+/// evidence for it has gone quiet (work with no news for longer than the
+/// source's quiet window), which draws the same mark dimmed, and whether
+/// it is a finished turn the operator has not seen yet, which draws the
+/// same mark bold. Neither changes the shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LiveSign {
     pub mark: LiveMark,
     pub quiet: bool,
+    /// A ready mark whose turn the operator has not seen (ADR 0214);
+    /// always `false` for any other mark.
+    pub unseen: bool,
 }
 
 impl LiveSign {
@@ -117,13 +122,18 @@ impl LiveSign {
     pub const NONE: Self = Self {
         mark: LiveMark::None,
         quiet: false,
+        unseen: false,
     };
 
     /// A session's sign: its effective state, or none without evidence.
     pub fn of_session(cell: Option<LiveCell>) -> Self {
-        cell.map_or(Self::NONE, |cell| Self {
-            mark: LiveMark::of_state(cell.state),
-            quiet: cell.confidence == LiveConfidence::Quiet,
+        cell.map_or(Self::NONE, |cell| {
+            let mark = LiveMark::of_state(cell.state);
+            Self {
+                mark,
+                quiet: cell.confidence == LiveConfidence::Quiet,
+                unseen: mark == LiveMark::Ready && cell.unseen,
+            }
         })
     }
 
@@ -132,11 +142,16 @@ impl LiveSign {
     /// the rest), or none when no agent of it has live state. The counts
     /// say how many agents are in each state, not how fresh each one's
     /// evidence is, so a mux's mark is never drawn quiet; the agents'
-    /// own rows are.
-    pub fn of_mux(counts: LiveCounts) -> Self {
-        counts.dominant().map_or(Self::NONE, |state| Self {
-            mark: LiveMark::of_state(state),
-            quiet: false,
+    /// own rows are. A ready mark is unseen while any of the mux's ready
+    /// agents ended a turn the operator has not seen.
+    pub fn of_mux(live: MuxLive) -> Self {
+        live.counts.dominant().map_or(Self::NONE, |state| {
+            let mark = LiveMark::of_state(state);
+            Self {
+                mark,
+                quiet: false,
+                unseen: mark == LiveMark::Ready && live.unseen > 0,
+            }
         })
     }
 
@@ -159,14 +174,17 @@ impl LiveSign {
         self.mark.word()
     }
 
-    /// The mark's style, receding (the theme's muted look) when quiet.
+    /// The mark's style, receding (the theme's muted look) when quiet,
+    /// and bold when it is a turn the operator has not seen.
     pub fn style(self, theme: &Theme) -> Style {
-        let style = self.mark.style(theme);
+        let mut style = self.mark.style(theme);
         if self.quiet {
-            style.add_modifier(theme.muted)
-        } else {
-            style
+            style = style.add_modifier(theme.muted);
         }
+        if self.unseen {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        style
     }
 }
 

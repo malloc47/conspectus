@@ -38,8 +38,11 @@ impl App {
 
     /// One tick of the overlay at `now` (`now_ms` by the wall clock):
     /// pick up a rewritten store, an agent whose process ended, or a
-    /// state time alone moved, and fill the rows on screen with it.
+    /// state time alone moved, and fill the rows on screen with it; and of
+    /// the cursor's rest, which can see a finished turn
+    /// ([`App::note_cursor_rest`]).
     pub(crate) fn poll_live(&mut self, now: Instant, now_ms: i64) {
+        self.note_cursor_rest(now);
         let snapshot = self.handle.as_ref().map(SnapshotHandle::snapshot);
         let rebound = self.live.poll(now, snapshot);
         let rechecked = self.live.recheck(now);
@@ -51,15 +54,21 @@ impl App {
 
     /// Give the rows on screen their live values at `now_ms`, and the
     /// detail pane's node its live fields from them, in place: the
-    /// explorer keeps its cursor, fold, and frames.
-    fn refill_live(&mut self, now_ms: i64) {
+    /// explorer keeps its cursor, fold, and frames. The ready turns they
+    /// find seen are remembered.
+    pub(super) fn refill_live(&mut self, now_ms: i64) {
         let Some(handle) = &self.handle else {
             return;
         };
         let snapshot = handle.snapshot();
-        let values =
-            crate::tui::rows::live::LiveValues::at(snapshot, self.live.table(snapshot), now_ms);
+        let values = crate::tui::rows::live::LiveValues::at(
+            snapshot,
+            self.live.table(snapshot),
+            now_ms,
+            self.seen_context(),
+        );
         crate::tui::rows::live::annotate(&mut self.tree, snapshot, &values);
+        self.remember_seen_turns();
         self.with_explorer(|explorer, source| explorer.refresh(source));
     }
 }

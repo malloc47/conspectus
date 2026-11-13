@@ -33,9 +33,10 @@ pub mod pinned;
 mod pr_status;
 pub mod prs;
 pub mod search;
+pub(crate) mod seen;
 pub mod sessions;
 
-pub use live::{LiveCell, LiveValues, MixedLive};
+pub use live::{LiveCell, LiveValues, MixedLive, MuxLive};
 pub use live_mark::{LiveMark, LiveSign};
 pub use pr_status::PrStatus;
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
@@ -697,10 +698,11 @@ pub struct MuxSessionRow {
     /// What the active content search found in the mux's one attached
     /// session; unset for muxes with none or several.
     pub content_hit: Option<ContentHitCell>,
-    /// How many of the agents the mux hosts are in each live state;
+    /// How many of the agents the mux hosts are in each live state, and
+    /// how many of its ready ones ended a turn the operator has not seen;
     /// empty without evidence. The cell after the age shows the state
     /// that ranks first.
-    pub live: crate::model::live::LiveCounts,
+    pub live: MuxLive,
 }
 
 /// A PR row in the prs view.
@@ -1339,6 +1341,9 @@ pub(crate) struct TreeInputs<'a> {
     /// `node_live` and `pane_live`, or those the TUI bound from the store
     /// since.
     pub live: crate::model::LiveTables<'a>,
+    /// What says whether a ready turn was seen: the TUI's memory of the
+    /// turns it found seen, and when its snapshot loaded.
+    pub seen: seen::SeenContext<'a>,
     pub view: View,
     pub grouping: crate::tui::Grouping,
     pub filter: crate::filter::RowFilter,
@@ -1356,6 +1361,7 @@ impl<'a> TreeInputs<'a> {
         Self {
             snapshot,
             live: app.live_table(snapshot),
+            seen: app.seen_context(),
             view: app.active_view(),
             grouping: app.grouping(),
             filter: {
@@ -1391,7 +1397,7 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
     let pinned = pinned_only.then(|| pinned_node_set(inputs.snapshot));
     let content = inputs.filter.content.clone();
     let snapshot = inputs.snapshot;
-    let live = live::LiveValues::at(snapshot, inputs.live, tree_current_unix_ms());
+    let live = live::LiveValues::at(snapshot, inputs.live, tree_current_unix_ms(), inputs.seen);
     let mut tree = build_tree_for_view_unfiltered(inputs);
     if let Some(content) = &content {
         content::annotate(&mut tree, snapshot, content);
@@ -1409,6 +1415,7 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
     let TreeInputs {
         snapshot,
         live: _,
+        seen: _,
         view,
         grouping,
         filter,

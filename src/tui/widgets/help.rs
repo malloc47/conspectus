@@ -134,7 +134,21 @@ fn live_state_legend(theme: &Theme) -> HelpSection {
                     .into(),
                 ),
             };
-            section.legend(Span::styled(mark.glyph(), mark.style(theme)), name, blurb)
+            let section = section.legend(Span::styled(mark.glyph(), mark.style(theme)), name, blurb);
+            if mark == LiveMark::Ready {
+                let unseen = crate::tui::rows::LiveSign {
+                    mark,
+                    quiet: false,
+                    unseen: true,
+                };
+                section.legend(
+                    Span::styled(mark.glyph(), unseen.style(theme)),
+                    "Ready, unseen",
+                    "bold: a finished turn you haven't seen, until you attach to its mux or, for a session with no mux, rest the cursor on its row for a second",
+                )
+            } else {
+                section
+            }
         },
     )
     .legend(

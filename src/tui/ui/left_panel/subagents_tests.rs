@@ -39,6 +39,7 @@ fn session(alias: &str, state: Option<LiveState>, subagents: u16) -> AgentSessio
             since_ms: 0,
             subagents,
             source: crate::model::live::LiveSource::Hook,
+            unseen: false,
         }),
     }
 }

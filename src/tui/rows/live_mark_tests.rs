@@ -11,6 +11,7 @@ fn cell(state: LiveState, confidence: LiveConfidence) -> LiveCell {
         since_ms: 0,
         subagents: 0,
         source: crate::model::live::LiveSource::Hook,
+        unseen: false,
     }
 }
 
@@ -148,7 +149,7 @@ fn a_mux_shows_the_state_its_agents_rank_first() {
         ),
     ];
     for (states, mark) in cases {
-        let sign = LiveSign::of_mux(counts(&states));
+        let sign = LiveSign::of_mux(counts(&states).into());
         assert_eq!(sign.mark, mark, "{states:?}");
         assert!(!sign.quiet);
     }
@@ -170,7 +171,7 @@ fn a_mux_shows_the_operators_order_whatever_the_counts() {
             for _ in 0..9 {
                 counts.add(*later);
             }
-            let sign = LiveSign::of_mux(counts);
+            let sign = LiveSign::of_mux(counts.into());
             assert_eq!(
                 sign.mark,
                 LiveMark::of_state(*first),
@@ -184,7 +185,9 @@ fn a_mux_shows_the_operators_order_whatever_the_counts() {
 #[test]
 fn a_mux_with_one_two_or_mixed_agents_reads_its_agents() {
     use LiveState::{Error, Ready, Waiting, Working};
-    let mux = |states: &[LiveState]| LiveSign::of_mux(states.iter().copied().collect()).mark;
+    let mux = |states: &[LiveState]| {
+        LiveSign::of_mux(states.iter().copied().collect::<LiveCounts>().into()).mark
+    };
     // One agent: its own mark.
     assert_eq!(mux(&[Ready]), LiveMark::Ready);
     assert_eq!(mux(&[Working]), LiveMark::Working);
@@ -227,7 +230,7 @@ fn a_mixed_row_reads_the_sign_of_what_it_stands_for() {
     );
     let counts: LiveCounts = [LiveState::Waiting].into_iter().collect();
     assert_eq!(
-        LiveSign::of_mixed(MixedLive::Mux(counts)).mark,
+        LiveSign::of_mixed(MixedLive::Mux(counts.into())).mark,
         LiveMark::Waiting
     );
     assert_eq!(LiveSign::of_mixed(MixedLive::None), LiveSign::NONE);

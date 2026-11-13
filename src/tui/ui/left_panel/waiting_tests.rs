@@ -28,6 +28,7 @@ fn cell(state: LiveState) -> LiveCell {
         since_ms: 0,
         subagents: 0,
         source: crate::model::live::LiveSource::Hook,
+        unseen: false,
     }
 }
 
@@ -89,7 +90,7 @@ fn mux(name: &str, depth: u8, states: &[LiveState]) -> Row {
             pin_id: None,
             primary_node: NodeId::MuxSession(id),
             content_hit: None,
-            live: counts(states),
+            live: counts(states).into(),
         }),
     }
 }
@@ -114,7 +115,7 @@ fn stopped_mux(name: &str, depth: u8, states: &[LiveState]) -> Row {
             primary_node: id,
             pr_status: None,
             marker: PinMarker::None,
-            live: MixedLive::Mux(counts(states)),
+            live: MixedLive::Mux(counts(states).into()),
         }),
     }
 }

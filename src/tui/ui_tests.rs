@@ -4458,6 +4458,7 @@ fn a_pending_row_keeps_its_live_mark_and_spins_the_link_cell() {
             since_ms: 0,
             subagents: 0,
             source: crate::model::live::LiveSource::Hook,
+            unseen: false,
         });
     }
     let draw =
@@ -4472,7 +4473,10 @@ fn a_pending_row_keeps_its_live_mark_and_spins_the_link_cell() {
     );
 
     let mux = MuxSessionRow {
-        live: [LiveState::Ready, LiveState::Working].into_iter().collect(),
+        live: [LiveState::Ready, LiveState::Working]
+            .into_iter()
+            .collect::<crate::model::live::LiveCounts>()
+            .into(),
         ..agentless_mux_row(None)
     };
     let text = |spinner| -> String {
@@ -6579,6 +6583,7 @@ fn native_app(view: View, filter: RowFilter) -> App {
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
         snapshot: &snapshot,
         live: snapshot.live_tables(),
+        seen: crate::tui::rows::seen::SeenContext::nothing(),
         view,
         grouping: crate::tui::Grouping::default_for(view),
         filter,

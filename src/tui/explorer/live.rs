@@ -12,12 +12,20 @@ use crate::model::live::{LiveConfidence, LiveCounts, LiveDetail, LiveState};
 use crate::tui::rows::{LiveCell, LiveSign, LiveValues};
 
 /// The words of `cell`'s state: its name, then its detail's when it has
-/// one (`waiting`, `permission`).
+/// one (`waiting`, `permission`), then, for a finished turn, whether the
+/// operator has seen it (`ready`, `finished`, `unseen`).
 fn state_words(cell: LiveCell) -> Vec<&'static str> {
+    let seen = (cell.state == LiveState::Ready).then_some(if cell.unseen { UNSEEN } else { SEEN });
     std::iter::once(cell.state.name())
         .chain(cell.detail.map(LiveDetail::name))
+        .chain(seen)
         .collect()
 }
+
+/// The words a ready turn's state ends with: whether the operator has
+/// seen it.
+const UNSEEN: &str = "unseen";
+const SEEN: &str = "seen";
 
 /// What a session's agent is doing, from the cell its row's mark is drawn
 /// from: `state` (the mark, then the state and its detail in words),
@@ -59,28 +67,40 @@ fn counted_states(counts: LiveCounts) -> Vec<LiveState> {
 }
 
 /// What a mux's agents are doing: `agents`, its counts led by the mark
-/// its row shows (`1 waiting · 1 error`), and `pane_agents`, the agents in
+/// its row shows (`1 waiting · 1 error`, and `2 ready (1 unseen)` while
+/// some of its finished turns are unseen), and `pane_agents`, the agents in
 /// its panes that no session matches, each with its pane and state (they
 /// count in `agents` too but have no row or node of their own). None
 /// without evidence.
 pub(super) fn mux_fields(live: &LiveValues, mux: &MuxSessionId) -> Vec<CoreField> {
     let mut fields = Vec::new();
-    let counts = live.mux(mux);
+    let mux_live = live.mux(mux);
+    let counts = mux_live.counts;
     let states = counted_states(counts);
     if !states.is_empty() {
         let value = states
             .iter()
-            .map(|state| format!("{} {}", counts.get(*state), state.name()))
+            .map(|state| {
+                let count = format!("{} {}", counts.get(*state), state.name());
+                match *state {
+                    LiveState::Ready if mux_live.unseen > 0 => {
+                        format!("{count} ({} {UNSEEN})", mux_live.unseen)
+                    }
+                    _ => count,
+                }
+            })
             .collect::<Vec<_>>()
             .join(marks::SPACED_SEPARATOR);
         fields.push(
             CoreField::plain("agents", value)
-                .with_live_mark(LiveSign::of_mux(counts))
+                .with_live_mark(LiveSign::of_mux(mux_live))
                 .previewing(FieldValue::Glossary {
                     field: "state",
                     values: states
                         .iter()
-                        .map(|state| state.name().to_string())
+                        .map(|state| state.name())
+                        .chain((mux_live.unseen > 0).then_some(UNSEEN))
+                        .map(str::to_string)
                         .collect(),
                 }),
         );

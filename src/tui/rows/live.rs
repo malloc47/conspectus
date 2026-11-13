@@ -9,6 +9,10 @@
 //! TUI bound from the store since) at one moment: an effective state
 //! depends on the time it is read at.
 //!
+//! A ready turn's cell also says whether the operator has seen it
+//! ([`super::seen`]), which the pass judges from the snapshot and the
+//! TUI's memory of the turns it found seen.
+//!
 //! The rows carry the values, and the tree keeps the whole set it filled
 //! them from ([`RowTree::live`]), which the detail pane reads, so a
 //! session's fields there say what its row's mark says; the left pane
@@ -21,6 +25,7 @@ use crate::model::live::{
 };
 use crate::model::{GraphNode, GraphSnapshot, LivePane, LiveTables, MuxSessionId, NodeId};
 
+use super::seen::{self, Agent, SeenContext};
 use super::{LiveMark, LiveSign, RowKind, RowTree};
 
 /// What a session's row knows of its live state: the effective state at
@@ -39,6 +44,9 @@ pub struct LiveCell {
     pub subagents: u16,
     /// What reported the state.
     pub source: LiveSource,
+    /// A `ready` turn the operator has not seen yet (ADR 0214); always
+    /// `false` in any other state.
+    pub unseen: bool,
 }
 
 impl LiveCell {
@@ -55,6 +63,7 @@ impl LiveCell {
             since_ms: crate::output::live::shown_since_ms(binding, &effective),
             subagents,
             source,
+            unseen: false,
         }
     }
 
@@ -70,6 +79,29 @@ impl LiveCell {
     }
 }
 
+/// What a mux's row knows of its agents' live state: how many are in
+/// each state, and how many of its ready ones ended a turn the operator
+/// has not seen.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MuxLive {
+    pub counts: LiveCounts,
+    pub unseen: u32,
+}
+
+impl MuxLive {
+    /// Whether no agent of the mux has live state.
+    pub fn is_empty(&self) -> bool {
+        self.counts.is_empty()
+    }
+}
+
+impl From<LiveCounts> for MuxLive {
+    /// Counts with no unseen turn among them.
+    fn from(counts: LiveCounts) -> Self {
+        Self { counts, unseen: 0 }
+    }
+}
+
 /// The live state of a row that can stand for an entity of any kind (the
 /// Pinned and History rows, a stopped mux): a session's cell, a mux's
 /// counts, or nothing.
@@ -80,7 +112,7 @@ pub enum MixedLive {
     None,
     Session(LiveCell),
     /// Counts over the mux's agents; empty when it has no evidence.
-    Mux(LiveCounts),
+    Mux(MuxLive),
 }
 
 /// The live values of one snapshot's entities at one moment: a cell for
@@ -91,16 +123,42 @@ pub struct LiveValues {
     cells: BTreeMap<NodeId, LiveCell>,
     panes: BTreeMap<LivePane, LiveCell>,
     counts: BTreeMap<MuxSessionId, LiveCounts>,
+    /// For each mux, how many ready agents counted on it ended a turn the
+    /// operator has not seen.
+    unseen: BTreeMap<MuxSessionId, u32>,
     /// Every agent of the tables waiting on the operator.
     waiting: usize,
 }
 
 impl LiveValues {
-    /// `tables`, bound to `snapshot`, read at `now_ms`. A mux counts by
-    /// the rule of [`GraphSnapshot::live_counts_of_mux`].
-    pub(crate) fn at(snapshot: &GraphSnapshot, tables: LiveTables<'_>, now_ms: i64) -> Self {
-        let cells = cells_at(tables.nodes, now_ms);
-        let panes = cells_at(tables.panes, now_ms);
+    /// `tables`, bound to `snapshot`, read at `now_ms`, each ready turn
+    /// judged seen or not by `seen`. A mux counts by the rule of
+    /// [`GraphSnapshot::live_counts_of_mux`].
+    pub(crate) fn at(
+        snapshot: &GraphSnapshot,
+        tables: LiveTables<'_>,
+        now_ms: i64,
+        seen: SeenContext<'_>,
+    ) -> Self {
+        let mut cells = cells_at(tables.nodes, now_ms);
+        let mut panes = cells_at(tables.panes, now_ms);
+        let mut unseen: BTreeMap<MuxSessionId, u32> = BTreeMap::new();
+        let ready = cells
+            .iter_mut()
+            .map(|(node, cell)| (Agent::Session(node.clone()), cell))
+            .chain(
+                panes
+                    .iter_mut()
+                    .map(|(pane, cell)| (Agent::Pane(pane.clone()), cell)),
+            )
+            .filter(|(_, cell)| cell.state == LiveState::Ready);
+        for (agent, cell) in ready {
+            let mux = agent.mux(snapshot);
+            cell.unseen = seen::unseen(snapshot, &agent, mux.as_ref(), cell.since_ms, seen);
+            if let Some(mux) = mux.filter(|_| cell.unseen) {
+                *unseen.entry(mux).or_default() += 1;
+            }
+        }
         let waiting = cells
             .values()
             .chain(panes.values())
@@ -110,8 +168,35 @@ impl LiveValues {
             cells,
             panes,
             counts: snapshot.live_counts_by_mux(tables, now_ms),
+            unseen,
             waiting,
         }
+    }
+
+    /// Every ready turn these values found seen, with when it ended, for
+    /// the memory to keep ([`seen::SeenTurns::see`]).
+    pub(crate) fn seen_turns(&self) -> impl Iterator<Item = (Agent, i64)> + '_ {
+        let seen = |cell: &LiveCell| cell.state == LiveState::Ready && !cell.unseen;
+        let sessions = self
+            .cells
+            .iter()
+            .filter(move |(_, cell)| seen(cell))
+            .map(|(node, cell)| (Agent::Session(node.clone()), cell.since_ms));
+        let panes = self
+            .panes
+            .iter()
+            .filter(move |(_, cell)| seen(cell))
+            .map(|(pane, cell)| (Agent::Pane(pane.clone()), cell.since_ms));
+        sessions.chain(panes)
+    }
+
+    /// Whether any agent is ready, so judging its turn again could
+    /// change what the rows show.
+    pub(crate) fn any_ready(&self) -> bool {
+        self.cells
+            .values()
+            .chain(self.panes.values())
+            .any(|cell| cell.state == LiveState::Ready)
     }
 
     /// How many agents anywhere wait on the operator: every entry of the
@@ -126,9 +211,12 @@ impl LiveValues {
         self.cells.get(id).copied()
     }
 
-    /// A mux's counts; empty without evidence.
-    pub(crate) fn mux(&self, id: &MuxSessionId) -> LiveCounts {
-        self.counts.get(id).copied().unwrap_or_default()
+    /// A mux's counts and its unseen turns; empty without evidence.
+    pub(crate) fn mux(&self, id: &MuxSessionId) -> MuxLive {
+        MuxLive {
+            counts: self.counts.get(id).copied().unwrap_or_default(),
+            unseen: self.unseen.get(id).copied().unwrap_or_default(),
+        }
     }
 
     /// The agents seen in panes of `mux` that no session matches, each
@@ -197,7 +285,7 @@ pub(crate) fn annotate(tree: &mut RowTree, snapshot: &GraphSnapshot, values: &Li
 }
 
 /// The entity the pin node `pin` points at.
-fn pin_target<'a>(snapshot: &'a GraphSnapshot, pin: &NodeId) -> Option<&'a NodeId> {
+pub(crate) fn pin_target<'a>(snapshot: &'a GraphSnapshot, pin: &NodeId) -> Option<&'a NodeId> {
     match snapshot.find_node(pin)? {
         GraphNode::Pin(pin) => pin.target_node.as_ref(),
         _ => None,

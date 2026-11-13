@@ -511,9 +511,11 @@ pub(super) fn waiting_of(row: &Row, view: crate::tui::rows::ViewLabel) -> Option
     let waiting =
         |counts| usize::try_from(LiveMark::Waiting.count_in(counts)).unwrap_or(usize::MAX);
     match (&row.kind, view) {
-        (RowKind::MuxSession(mux), ViewLabel::Mux) => Some((&mux.primary_node, waiting(mux.live))),
+        (RowKind::MuxSession(mux), ViewLabel::Mux) => {
+            Some((&mux.primary_node, waiting(mux.live.counts)))
+        }
         (RowKind::Mixed(mixed), ViewLabel::Mux) => match mixed.live {
-            MixedLive::Mux(counts) => Some((&mixed.primary_node, waiting(counts))),
+            MixedLive::Mux(live) => Some((&mixed.primary_node, waiting(live.counts))),
             MixedLive::Session(_) | MixedLive::None => None,
         },
         (RowKind::AgentSession(_), ViewLabel::Mux) => None,

@@ -1040,6 +1040,7 @@ mod projection_zero_discovery {
         let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
             snapshot: &snapshot,
             live: snapshot.live_tables(),
+            seen: crate::tui::rows::seen::SeenContext::nothing(),
             view: View::Sessions,
             grouping: Grouping::Sessions(SessionsGrouping::Graph),
             filter: RowFilter::default(),
@@ -1515,6 +1516,7 @@ mod preview_loading {
         let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
             snapshot: &snapshot,
             live: snapshot.live_tables(),
+            seen: crate::tui::rows::seen::SeenContext::nothing(),
             view: View::Sessions,
             grouping: crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Graph),
             filter: crate::filter::RowFilter::default(),

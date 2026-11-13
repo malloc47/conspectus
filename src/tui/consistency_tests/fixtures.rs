@@ -166,6 +166,7 @@ pub(super) fn app_over_filtered(view: View, snapshot: &GraphSnapshot, filter: Ro
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
         snapshot,
         live: snapshot.live_tables(),
+        seen: crate::tui::rows::seen::SeenContext::nothing(),
         view,
         grouping: Grouping::default_for(view),
         filter,

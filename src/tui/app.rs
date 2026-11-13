@@ -33,6 +33,7 @@ mod msg;
 mod overlays;
 mod restore;
 mod search_open;
+mod seen;
 mod tree;
 mod viewport;
 
@@ -313,6 +314,13 @@ pub struct App {
     /// The live table the rows read, bound from the store between
     /// snapshots once the live runtime turns it on (see [`live`]).
     live: crate::tui::live_overlay::LiveOverlay,
+    /// The finished turns this TUI found the operator has seen. Memory
+    /// only: it is never written, and starts empty with each TUI.
+    seen: crate::tui::rows::seen::SeenTurns,
+    /// The session whose row the cursor rests on and since when, which
+    /// counts as seeing its finished turn once it has rested long enough
+    /// and the session has no mux.
+    resting: Option<(NodeId, Instant)>,
 }
 
 /// Saved-per-view UI state. Each entry holds everything that needs
@@ -487,6 +495,8 @@ impl App {
             tui_state_cache: None,
             saved_trees: BTreeMap::new(),
             live: crate::tui::live_overlay::LiveOverlay::off(),
+            seen: crate::tui::rows::seen::SeenTurns::default(),
+            resting: None,
         }
     }
 

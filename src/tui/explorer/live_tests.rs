@@ -100,7 +100,12 @@ fn live_world() -> GraphSnapshot {
 /// The view of `target` with the live values `snapshot`'s tables give at
 /// [`NOW_MS`].
 fn view(snapshot: &GraphSnapshot, target: &NodeId) -> NodeView {
-    let live = LiveValues::at(snapshot, snapshot.live_tables(), NOW_MS);
+    let live = LiveValues::at(
+        snapshot,
+        snapshot.live_tables(),
+        NOW_MS,
+        crate::tui::rows::seen::SeenContext::nothing(),
+    );
     build_node_view(ExplorerInputs {
         snapshot,
         target,
@@ -256,8 +261,8 @@ fn subagents_show_while_the_agent_runs_them_and_its_state_can_be_told() {
     let ready = view(&snapshot, &session("idle"));
     assert_eq!(
         field(&ready, "state").value,
-        "ready",
-        "a state without a detail is its name alone"
+        "ready · unseen",
+        "a state without a detail is its name, then whether its turn was seen"
     );
 }
 
@@ -306,7 +311,7 @@ fn a_mux_counts_its_agents_in_rollup_order_and_lists_its_pane_agents() {
     assert_eq!(
         agents.live_mark,
         Some(LiveSign::of_mux(
-            snapshot.live_counts_of_mux(&mux_id(), NOW_MS)
+            snapshot.live_counts_of_mux(&mux_id(), NOW_MS).into()
         )),
         "the field leads with the mux row's mark"
     );

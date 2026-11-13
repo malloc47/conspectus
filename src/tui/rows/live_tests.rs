@@ -46,6 +46,7 @@ fn built(snapshot: &GraphSnapshot, view: View, now_ms: i64) -> RowTree {
     let mut tree = build_tree_for_view(TreeInputs {
         snapshot,
         live: snapshot.live_tables(),
+        seen: crate::tui::rows::seen::SeenContext::nothing(),
         view,
         grouping: Grouping::default_for(view),
         filter: crate::filter::RowFilter::default(),
@@ -57,7 +58,12 @@ fn built(snapshot: &GraphSnapshot, view: View, now_ms: i64) -> RowTree {
     annotate(
         &mut tree,
         snapshot,
-        &LiveValues::at(snapshot, snapshot.live_tables(), now_ms),
+        &LiveValues::at(
+            snapshot,
+            snapshot.live_tables(),
+            now_ms,
+            crate::tui::rows::seen::SeenContext::nothing(),
+        ),
     );
     tree
 }
@@ -75,6 +81,7 @@ fn a_cell_is_the_effective_state_beside_the_observations_facts() {
             since_ms: NOW_MS - 5 * MINUTE_MS,
             subagents: 2,
             source: LiveSource::Hook,
+            unseen: false,
         }
     );
 }
@@ -141,7 +148,7 @@ fn a_mux_row_counts_the_agents_it_hosts_with_the_snapshots_rule() {
         .rows
         .iter()
         .find_map(|row| match &row.kind {
-            RowKind::MuxSession(mux) if mux.mux == main_mux() => Some(mux.live),
+            RowKind::MuxSession(mux) if mux.mux == main_mux() => Some(mux.live.counts),
             _ => None,
         })
         .expect("the mux has a row");
@@ -180,7 +187,12 @@ fn a_pins_row_carries_the_value_of_the_entity_it_points_at() {
     );
     assert_eq!(
         slot("conspectus-main"),
-        MixedLive::Mux(snapshot.live_counts_of_mux(&main_mux(), NOW_MS))
+        MixedLive::Mux(tree.live.mux(&main_mux())),
+        "the mux row's value"
+    );
+    assert_eq!(
+        tree.live.mux(&main_mux()).counts,
+        snapshot.live_counts_of_mux(&main_mux(), NOW_MS)
     );
     assert_eq!(slot("ledger-pr"), MixedLive::None, "a PR has no live state");
     assert_eq!(
@@ -192,11 +204,16 @@ fn a_pins_row_carries_the_value_of_the_entity_it_points_at() {
 
 #[test]
 fn a_mixed_row_for_a_mux_without_evidence_has_empty_counts() {
-    let values = LiveValues::at(&world(), GraphSnapshot::empty().live_tables(), NOW_MS);
+    let values = LiveValues::at(
+        &world(),
+        GraphSnapshot::empty().live_tables(),
+        NOW_MS,
+        crate::tui::rows::seen::SeenContext::nothing(),
+    );
 
     assert_eq!(
         values.of_node(&NodeId::MuxSession(main_mux())),
-        MixedLive::Mux(LiveCounts::default())
+        MixedLive::Mux(MuxLive::default())
     );
     assert_eq!(values.of_node(&hosted()), MixedLive::None);
     assert_eq!(
@@ -218,7 +235,12 @@ fn the_rows_read_the_table_they_are_given() {
     annotate(
         &mut tree,
         &snapshot,
-        &LiveValues::at(&snapshot, later.live_tables(), NOW_MS),
+        &LiveValues::at(
+            &snapshot,
+            later.live_tables(),
+            NOW_MS,
+            crate::tui::rows::seen::SeenContext::nothing(),
+        ),
     );
 
     let states: Vec<_> = tree
@@ -286,7 +308,12 @@ fn the_waiting_count_follows_the_table_the_rows_read() {
     annotate(
         &mut tree,
         &snapshot,
-        &LiveValues::at(&snapshot, GraphSnapshot::empty().live_tables(), NOW_MS),
+        &LiveValues::at(
+            &snapshot,
+            GraphSnapshot::empty().live_tables(),
+            NOW_MS,
+            crate::tui::rows::seen::SeenContext::nothing(),
+        ),
     );
     assert_eq!(tree.waiting_anywhere, 0, "nothing waits in an empty table");
 }

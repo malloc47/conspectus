@@ -101,7 +101,8 @@ fn every_live_state_word_has_an_entry() {
             LiveConfidence::ALL
                 .iter()
                 .map(|confidence| ("evidence", confidence.name())),
-        );
+        )
+        .chain([("state", "unseen"), ("state", "seen")]);
     for (field, value) in words {
         assert!(
             glossary_entry(field, value).is_some(),

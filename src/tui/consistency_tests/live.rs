@@ -179,7 +179,7 @@ fn assert_one_value_per_entity(snapshot: &GraphSnapshot, overlay: impl Fn() -> L
     }
     let now_ms = crate::tui::rows::tree_current_unix_ms();
     let expected = |node: &NodeId| match node {
-        NodeId::MuxSession(id) => MixedLive::Mux(snapshot.live_counts_of_mux(id, now_ms)),
+        NodeId::MuxSession(id) => MixedLive::Mux(snapshot.live_counts_of_mux(id, now_ms).into()),
         _ => snapshot
             .node_live
             .get(node)
@@ -187,12 +187,28 @@ fn assert_one_value_per_entity(snapshot: &GraphSnapshot, overlay: impl Fn() -> L
                 MixedLive::Session(LiveCell::of(binding, now_ms))
             }),
     };
+    // Whether a finished turn was seen is the TUI's judgment, not the
+    // model's: every listing must carry the same one, and the rest must
+    // be the model's.
+    let model_part = |live: MixedLive| match live {
+        MixedLive::Session(cell) => MixedLive::Session(LiveCell {
+            unseen: false,
+            ..cell
+        }),
+        MixedLive::Mux(mux) => MixedLive::Mux(mux.counts.into()),
+        MixedLive::None => MixedLive::None,
+    };
     for (node, values) in &seen {
         for (view, live) in values {
             assert_eq!(
-                *live,
+                model_part(*live),
                 expected(node),
                 "{view:?} lists {node} with another live value; every listing: {values:?}"
+            );
+            assert_eq!(
+                *live, values[0].1,
+                "{view:?} judges {node}'s turn unlike {:?}",
+                values[0].0
             );
         }
     }

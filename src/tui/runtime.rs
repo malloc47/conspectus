@@ -811,8 +811,10 @@ impl LoopMode for StaticMode {
     fn drain(&mut self, app: &mut App, _config: &RunConfig) -> Result<()> {
         // Scenario mode has no async event sources: no discovery
         // worker to poll and no refresh timer to arm. A requested
-        // content search runs to completion here.
+        // content search runs to completion here, and the cursor's rest
+        // can see a finished turn, as in the live loop.
         content::run_blocking(app, None);
+        app.note_cursor_rest(Instant::now());
         Ok(())
     }
 
