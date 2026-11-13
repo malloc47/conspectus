@@ -201,6 +201,20 @@ forms, lists, readers, and keys look and behave alike.
   anything waits, which on a narrow screen can push the sort or grouping
   setting off it. The showcase now has four waiting sessions in three
   groups.
+- **Codex's pane title shows its live state without hooks.** The tmux
+  probe now also asks for each session's active pane id and title, in the
+  same `list-sessions` call, and for a pane running `codex` reads
+  `[ ! ] Action Required` as `waiting` (detail `input`) and a spinner
+  frame as `working`; any other title says nothing. A Codex with no
+  trusted hooks shows `!` and `»` on its mux row, in the `! N` counts,
+  and for `W`, with `source: pane_title`. With hooks, a fresh report
+  wins and the title replaces a quiet or stale one, and a hook's wait
+  turns `working` once two probes after it show no marker, since Codex
+  sends no event when an approval is answered. Only the mark is kept,
+  never the title's text. `hook status codex` says how many agents pane
+  titles show, and `CONSPECTUS_DISABLE_PANE_TITLES` turns the reading
+  off. `graph.bin` moves to format version 13 and is rebuilt once after
+  upgrading. Claude Code's titles are not read.
 
 ### Changed
 

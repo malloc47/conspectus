@@ -19,6 +19,7 @@ never sets or modifies them.
 | `CONSPECTUS_DISABLE_TMUX`      | When set (any value), the tmux provider is skipped entirely. No `MuxSession` nodes appear.      |
 | `CONSPECTUS_DISABLE_FORGE`     | When set (any value), the GitHub forge provider is skipped. No `ForgePr` nodes appear.         |
 | `CONSPECTUS_DISABLE_PROCTREE`  | When set (any value), active-pane process-tree linking is skipped. Other tmux evidence still runs. |
+| `CONSPECTUS_DISABLE_PANE_TITLES` | When set (any value), the tmux probe leaves the panes' titles out of its listing, so Codex's title shows no live state (see [Codex's pane title](#codexs-pane-title)). |
 
 Use these in CI, automated tests, or shells where running `tmux
 list-sessions`, walking `/proc`, or running `gh pr list` is unwanted,
@@ -180,7 +181,10 @@ Live state says what each running agent is doing now, in three buckets:
 The same hooks and plugins that say which session runs in which pane
 ([Hook sidecar state](#hook-sidecar-state)) report it, so it is opt-in: a
 harness reports nothing until you turn it on, and a session without live
-state is one Conspectus has no evidence about, not an idle one.
+state is one Conspectus has no evidence about, not an idle one. One
+source needs no hook: the title Codex sets on its tmux pane, which shows
+when it waits on you and when it works
+([Codex's pane title](#codexs-pane-title)).
 Conspectus only watches. It never answers a prompt or types into an
 agent's pane; to act on a waiting agent, attach to its mux as usual.
 
@@ -323,7 +327,8 @@ state has its own shape, so it reads without color:
   after `status`: `state`, its row's mark and then the state and detail
   in words (`! waiting · permission`, `› ready · finished · unseen`, `?
   unknown · stale`); `since`, when that state began (`5m ago`); `source`, what
-  reported it (`hook`); `evidence`, `fresh`, `quiet`, or `stale`, the
+  reported it (`hook`, or `pane_title` for [Codex's pane
+  title](#codexs-pane-title)); `evidence`, `fresh`, `quiet`, or `stale`, the
   last two dimmed along with the state's words; and `subagents` (`2
   active`) while the row shows `+N`. A mux lists `agents`, its mark and
   its agents' counts, most urgent first (`! 1 waiting · 2 working`), and
@@ -430,7 +435,9 @@ session.
 
   A field at its default is left out: no `detail`, no `subagents`, no
   `pid`, `via_subagent` false, `heartbeat_s` (seconds between a plugin's
-  repeated reports) 0. Each list is left out when it is empty.
+  repeated reports) 0. Each list is left out when it is empty. `source`
+  is `hook`, or `pane_title` for a state read from
+  [Codex's pane title](#codexs-pane-title).
 - **`conspectus hook status <harness>`** ends with the
   [health line](#live-state-health).
 - **`--state STATE`** on `conspectus table`, `conspectus tui`, and
@@ -454,9 +461,9 @@ Hooks report what the harness tells them, and every harness leaves gaps:
 | Gap | Where | What you see | What repairs it |
 | --- | --- | --- | --- |
 | An Esc interrupt fires no stop event | Claude Code | `working`, then quiet after ten minutes | The next turn event: your next prompt, or Claude Code's idle notification |
-| Approving a prompt fires nothing until the approved tool ends | Claude Code, Codex | `waiting` through the whole of a long approved tool | The next tool event, when that tool ends |
+| Approving a prompt fires nothing until the approved tool ends | Claude Code, Codex | `waiting` through the whole of a long approved tool | The next tool event, when that tool ends; for Codex, its pane title within two probes |
 | A killed process says nothing | Every harness | The last state, until the next process check | The process check: `exited:killed` at the next discovery (every few seconds with `conspectus serve`) |
-| Hooks do nothing until trusted | Claude Code (the workspace trust dialog; also `disableAllHooks`, `--bare`, managed hooks only), Codex (`/hooks`) | No live state; `hook status` says `silent` while the agent runs | Trust the hooks (or turn them back on), then restart the agent |
+| Hooks do nothing until trusted | Claude Code (the workspace trust dialog; also `disableAllHooks`, `--bare`, managed hooks only), Codex (`/hooks`) | No live state; `hook status` says `silent` while the agent runs (Codex still shows waiting and working from its pane title) | Trust the hooks (or turn them back on), then restart the agent |
 | Waiting covers only extension dialogs | Pi | Pi's own pickers, a provider login, and the project trust prompt never read `waiting` | Nothing: Pi tells extensions nothing about them |
 | Older harness versions | opencode 1.x, Pi before 0.84.4 | An interrupted opencode 1.x turn reads `ready:finished`; a Pi session never reads `waiting` | Upgrading the harness |
 
@@ -545,11 +552,86 @@ events count on its parent's session. Beyond the
 - Declining a prompt reads `waiting` until a later tool, the end of the
   turn, or an interrupt.
 - MCP elicitations and sign-in prompts fire no hook, so a session waiting
-  on one reads `working` (quiet after ten minutes).
+  on one reads `working` until it goes quiet after ten minutes; then its
+  [pane title](#codexs-pane-title) says `waiting`, if the pane is a
+  session's active pane.
 - A turn that ends in plan mode reads `ready`, whether or not it proposed
   a plan you still have to accept.
 - With hooks turned off or managed hooks only, the hooks report nothing,
   as before you trust them.
+- A wait the hooks reported clears within two of the mux probe's rounds
+  (about ten seconds with `conspectus serve`) of your answering it, from
+  the pane title, instead of when the approved tool ends.
+
+### Codex's pane title
+
+Codex writes its own state into its terminal's title, which tmux keeps as
+the pane's title: a spinner frame (`⠋`, `⠙`, …) while it works, and
+`[ ! ] Action Required` (blinking with `[ . ] Action Required`) while it
+needs you. The tmux probe Conspectus already runs asks for the title of
+each session's active pane in the same call, and for a pane whose program
+is `codex`, reads it as live state:
+
+| Title begins with | Live state |
+| --- | --- |
+| `[ ! ] Action Required` or `[ . ] Action Required` | `waiting`, detail `input`: the title cannot say whether it is a permission, a question, or other input |
+| a spinner frame | `working` |
+| anything else | nothing: an idle title is also what Codex shows while it starts, and while it works with its animations off |
+
+A `● ` before either (Codex's microphone) counts too. So a Codex whose
+hooks are untrusted, not installed, or turned off still shows `!` while it
+waits on you and `»` while it works, with `source` `pane_title` in the
+detail pane, `node show`, and the graph JSON. A pane's title state has no
+session: it shows on the mux's row and counts in the mux's, the group
+headers', and the header line's `! N`, and `W` reaches it on the mux row.
+It has no process to check either, so it reads `unknown` after fifteen
+minutes without a probe. `hook status codex` adds `1 agent shown from its
+pane title` to its last line while the saved graph shows one.
+
+With hooks reporting, the title only fills in:
+
+- **A fresh hook report wins.** A recent event, or a wait, a finished
+  turn, or an error the agent is still in, is what the session shows,
+  whatever the title says.
+- **The title replaces a stale or quiet one**: work with no event for ten
+  minutes, or a process that can't be checked and has been silent for
+  fifteen, reads what the title says when it says `waiting` or `working`.
+- **An answered approval clears.** Codex sends no event when you answer an
+  approval, so a hook's `waiting` would last until the approved tool ends.
+  Once the title has shown no `Action Required` on two probes in a row,
+  both after the wait began, the session reads `working` instead.
+- A hook's `ready`, `error`, `compacting`, and `exited` never change on
+  the title's account, and the title never names a session the hooks did
+  not.
+
+It updates as often as the mux probe runs: every few seconds with
+`conspectus serve`, at each refresh of a TUI without one, once per
+one-shot command. A one-shot command sees one probe, so it never clears a
+hook's wait from the title. The TUI does not ask tmux any more often
+than that.
+
+Only Codex's titles are read, and only the start of each: the rest of
+the title is the thread's name and the project's, which can hold words
+you typed, and Conspectus keeps none of it. It reads the title, keeps
+which of the three it was, and drops the text; the title appears in no
+file, output, log, or error. Set `CONSPECTUS_DISABLE_PANE_TITLES` to stop
+reading titles at all.
+
+What the title cannot see:
+
+- **Another pane.** Only a session's active pane is read; a Codex in
+  another pane of a split window, or in a window that is not current,
+  shows only what its hooks report.
+- **A Codex the pane does not report as `codex`**, such as one started
+  through `node` from an npm install.
+- **A title Codex does not write**: a `tui.terminal_title` without the
+  activity item or set to `null`, or tmux's `allow-set-title off`. With
+  Codex's animations off, a working Codex shows no spinner, so its title
+  says nothing until it waits.
+- **A thread named like the marker**: a thread whose name starts with
+  `[ ! ] Action Required` or a spinner frame reads that way while idle.
+- **Claude Code**, which writes a status glyph into its title too, but in
+  a vocabulary Conspectus has not recorded yet; its titles are not read.
 
 ### OpenCode live state
 
@@ -686,6 +768,10 @@ against the running processes. It starts no process and asks no daemon.
 | `no-events` | The hooks are installed, nothing has arrived, and no running agent of the harness is known. Start one, or run a command that discovers, such as `conspectus table sessions`, so the saved graph lists it. |
 | `off` | The hooks are not installed in this scope, or for Pi the installed extension is too old to report live state; the message names the `conspectus hook init` command that installs them. |
 | `unsupported` | The harness's hook reports sessions but no live state. Claude Code, Codex, and Pi all report it now; the line stays for harnesses added later. |
+
+For Codex, any of them may end with `; 1 agent shown from its pane title`
+(or `2 agents ... their pane titles`): agents the saved graph shows from
+[Codex's pane title](#codexs-pane-title), with or without hooks.
 
 ### Troubleshooting live state
 

@@ -689,8 +689,16 @@ stay as they are and are flagged quiet; `waiting`, `ready`, and `error` do not
 age while the process lives; with no liveness evidence everything but
 `exited` becomes `unknown` after fifteen minutes. A session with no events has
 no live state. Hook-free sources (pane title, `claude agents --json`,
-transcript tails) need their own decisions (ADR 0207). The CLI shows it as
-`node_live` in `graph --format json`, in opt-in `live` columns of
+transcript tails) need their own decisions (ADR 0207). The first is a
+Codex pane's title (ADR 0217): the mux probe's existing `list-sessions`
+call also returns each session's active pane title, which a Codex pane's
+adapter reduces at once to a mark (`waiting`, `working`, or neither,
+never kept as text), and the binding folds the marks in after the
+store's entries. With no hook entry for the pane a mark binds pane-only
+as `waiting/input` or `working` with source `pane_title` and no pid; a
+fresh hook entry wins, a quiet or stale one gives way, and a hook's wait
+turns `working` after two probes past it without the marker. The CLI shows
+it as `node_live` in `graph --format json`, in opt-in `live` columns of
 `conspectus table` (a session's effective state, a mux's counts), in `node
 show`, and as a per-harness health line in `hook status` (events arriving, or
 an agent running with none). In the TUI the row models carry it: session rows

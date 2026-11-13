@@ -475,7 +475,8 @@ Where the build differs from, or settles, the draft above:
   tmux mux and pane (`LivePane`), so two such agents in one mux each
   count (CSP-841). Readers use `GraphSnapshot::live_state_of`,
   `live_counts_of_mux`, `live_panes_of`, and `live_tables`. `graph.bin`
-  is at format version 12.
+  is at format version 13 (12 carried both tables; 13 adds the pane-title
+  marks on the mux probes and the `pane_title` source).
 - **The TUI keeps the data current.** It binds the store again within
   about a second of a change and re-checks bound agents' processes once a
   second (CSP-843); the row models carry `live` fields (CSP-814), which
@@ -486,7 +487,8 @@ Where the build differs from, or settles, the draft above:
   ADR 0213), an unseen finished turn draws bold (CSP-828, ADR 0214),
   Controls floats and filters by when the tree is built (CSP-826,
   ADR 0215), and `W` jumps to the agent waiting longest (CSP-827, ADR
-  0216).
+  0216); a Codex pane's title fills in where hooks are silent (CSP-831,
+  ADR 0217).
 - **CLI surfaces.** An opt-in `live` column on `table sessions` and
   `table mux`, a `live state` section in `node show`, the two lists in
   the graph JSON, and a health line at the end of `hook status`
@@ -509,4 +511,15 @@ Where the build differs from, or settles, the draft above:
 - **Attribution fixes.** The hook spool keeps one record per pane
   (CSP-818), `hook write` asks tmux about its own pane (CSP-845), and Pi's
   idle cache warming no longer dates a session (CSP-820).
+- **One hook-free source: the Codex pane title** (CSP-831, ADR 0217).
+  The mux probe's `list-sessions` call also returns each session's active
+  pane id and title; a pane whose program is `codex` has its title reduced
+  at once to `waiting`, `working`, or neither, and the text is dropped.
+  The binding folds the marks in after the store: pane-only state for a
+  Codex with no hook entry, a fresh hook entry wins, a quiet or stale one
+  gives way, and a hook's `waiting` turns `working` once two probes after
+  it lose the marker (the answered-approval gap). `hook status codex`
+  counts the agents titles show; `CONSPECTUS_DISABLE_PANE_TITLES` turns
+  it off. The title strings come from Codex's source, not a recording,
+  and Claude Code's titles are not read.
 - **Every fixture is synthetic** until CSP-822 records real payloads.
