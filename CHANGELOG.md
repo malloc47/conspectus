@@ -102,8 +102,10 @@ forms, lists, readers, and keys look and behave alike.
   `live state` section to a session (state, detail, since, age, last
   event, confidence, subagents, source, process) and to a mux (its
   counts). `hook status <harness>` ends with one more line, a health
-  line: `receiving` (how many sessions, and how long ago the newest
-  event), `silent` (installed and an agent runs, but no events: the hooks
+  line: `receiving` (how many sessions, how long ago the newest event,
+  and how many running agents no entry describes, so a silent agent
+  beside one that reports is named), `silent` (installed and an agent
+  runs, but no events: the hooks
   may be untrusted or disabled, or the agent started before the install),
   `no-events`, `off` (with the command that installs the hooks, or for
   an older Pi extension that reports no live state), or `unsupported`

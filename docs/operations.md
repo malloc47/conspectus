@@ -826,7 +826,7 @@ against the running processes. It starts no process and asks no daemon.
 
 | Health | Meaning |
 |---|---|
-| `receiving` | The file has entries for the harness: `live state: 2 sessions, newest event 12s ago`. |
+| `receiving` | The file has entries for the harness: `live state: 2 sessions, newest event 12s ago`. When some of its running agents have none, the message ends with how many: `; 1 running agent has no live state` (see below). |
 | `silent` | The hooks are installed and one of the harness's agents runs, but no event has arrived: the hooks may be untrusted, disabled, or the agent was started before they were installed. Restart the agent after `hook init`, and accept the workspace trust prompt (for Codex, trust the entries in `/hooks`). |
 | `no-events` | The hooks are installed, nothing has arrived, and no running agent of the harness is known. Start one, or run a command that discovers, such as `conspectus table sessions`, so the saved graph lists it. |
 | `off` | The hooks are not installed in this scope, or for Pi the installed extension is too old to report live state; the message names the `conspectus hook init` command that installs them. |
@@ -872,6 +872,14 @@ Start from the health label:
     `conspectus` from the `PATH` the harness started with.
   - To test the writer itself, pipe it a payload with `--state-root`, as
     [Hook sidecar state](#hook-sidecar-state) shows.
+- **`receiving`, but `1 running agent has no live state`**: one agent's
+  hooks report and another's are silent, for the reasons `silent` lists:
+  its workspace's trust prompt was never accepted, or it was started
+  before `hook init`. An agent counts as reporting when an entry records
+  its process, or names a session the saved graph ties that process to,
+  so an agent behind a wrapper process still counts once its session is
+  discovered. The count goes by the graph the last discovery saved, so
+  an agent started since then is not counted until the next one.
 - **`receiving`, but a session shows `—`**: the file has entries, but
   none is bound to that session. The entry may be on the session's tmux
   mux instead, when Conspectus has no session for it yet (look at
