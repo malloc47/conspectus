@@ -90,6 +90,14 @@ impl RefreshArgs {
             crate::server::ClientOutcome::DaemonError { code, message } => {
                 bail!("daemon refused refresh ({code}): {message}");
             }
+            crate::server::ClientOutcome::TimedOut(bound) => {
+                // A refresh of our own would race the daemon's, which
+                // may still finish, for the same graph.bin.
+                bail!(
+                    "the daemon did not answer the refresh within {}; it may still be refreshing",
+                    crate::server::describe_bound(bound)
+                );
+            }
             crate::server::ClientOutcome::Transport(err) => {
                 eprintln!(
                     "conspectus: warning: daemon socket error, falling back to local refresh: {err:#}"
@@ -239,6 +247,10 @@ impl StatusArgs {
             crate::server::ClientOutcome::DaemonError { code, message } => {
                 bail!("daemon refused status ({code}): {message}");
             }
+            crate::server::ClientOutcome::TimedOut(bound) => bail!(
+                "the daemon did not answer within {}; it may be stuck",
+                crate::server::describe_bound(bound)
+            ),
             crate::server::ClientOutcome::Transport(err) => Err(err),
             crate::server::ClientOutcome::NoDaemon => {
                 println!("no daemon running");

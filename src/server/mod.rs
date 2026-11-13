@@ -374,35 +374,92 @@ pub enum ClientOutcome<T> {
     /// No daemon is listening on the socket. Callers fall back
     /// to local execution.
     NoDaemon,
+    /// The daemon took the connection but did not answer within the
+    /// call's bound, which this carries: it is stuck, or still busy
+    /// with a long request it may yet finish.
+    TimedOut(Duration),
     /// The connection or framing layer hit an unrecoverable
     /// error (e.g. partial read, malformed frame). Callers
     /// typically surface this as a CLI error.
     Transport(anyhow::Error),
 }
 
+impl<T> ClientOutcome<T> {
+    /// Every outcome other than `Ok`, carried over to another payload
+    /// type; `Ok` goes through `ok`.
+    fn and_then<U>(self, ok: impl FnOnce(T) -> ClientOutcome<U>) -> ClientOutcome<U> {
+        match self {
+            ClientOutcome::Ok(value) => ok(value),
+            ClientOutcome::DaemonError { code, message } => {
+                ClientOutcome::DaemonError { code, message }
+            }
+            ClientOutcome::NoDaemon => ClientOutcome::NoDaemon,
+            ClientOutcome::TimedOut(bound) => ClientOutcome::TimedOut(bound),
+            ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
+        }
+    }
+}
+
+/// How long a `status` or `snapshot` call waits on each read and write
+/// before it gives up on the daemon (ADR 0219). The daemon answers both
+/// from memory, so one that takes this long is stuck, and the caller
+/// carries on without it.
+pub const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a refresh of the mux or harness class waits on each read
+/// and write. Both rescan only local processes and harness directories,
+/// but the daemon runs them under its writer lock, so they can wait
+/// behind another class's cycle first.
+pub const LIVE_REFRESH_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long any other refresh waits on each read and write: a full or a
+/// forge refresh asks the forges first, and a git refresh scans every
+/// repository.
+pub const REFRESH_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The bound of a refresh of `class`, or of the whole graph for `None`.
+pub fn refresh_timeout(class: Option<ProviderClass>) -> Duration {
+    match class {
+        Some(ProviderClass::Mux | ProviderClass::Harness) => LIVE_REFRESH_TIMEOUT,
+        Some(ProviderClass::Git | ProviderClass::Forge) | None => REFRESH_TIMEOUT,
+    }
+}
+
+/// A call's bound as a reader says it: `5 seconds`, `2 minutes`.
+pub fn describe_bound(bound: Duration) -> String {
+    let seconds = bound.as_secs();
+    let (count, unit) = if seconds >= 60 && seconds.is_multiple_of(60) {
+        (seconds / 60, "minute")
+    } else {
+        (seconds, "second")
+    };
+    let plural = if count == 1 { "" } else { "s" };
+    format!("{count} {unit}{plural}")
+}
+
 /// Send a `status` request to the daemon. Returns the per-class
 /// state map on success. The map keys are the
 /// [`ProviderClass::name`] values (`"git"`, `"mux"`,
 /// `"harness"`, `"forge"`); a class that has not yet completed
-/// its first tick may be absent from the map.
+/// its first tick may be absent from the map. A daemon that does not
+/// answer within [`QUERY_TIMEOUT`] is `TimedOut`.
 pub fn client_status() -> ClientOutcome<BTreeMap<String, ClassState>> {
-    match call_command("status", serde_json::Value::Null, "cli-status") {
-        ClientOutcome::Ok(value) => {
-            let classes = value
-                .get("classes")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-            match serde_json::from_value::<BTreeMap<String, ClassState>>(classes) {
-                Ok(map) => ClientOutcome::Ok(map),
-                Err(err) => ClientOutcome::Transport(anyhow!(err).context("parse status payload")),
-            }
+    call_command(
+        "status",
+        serde_json::Value::Null,
+        "cli-status",
+        QUERY_TIMEOUT,
+    )
+    .and_then(|value| {
+        let classes = value
+            .get("classes")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        match serde_json::from_value::<BTreeMap<String, ClassState>>(classes) {
+            Ok(map) => ClientOutcome::Ok(map),
+            Err(err) => ClientOutcome::Transport(anyhow!(err).context("parse status payload")),
         }
-        ClientOutcome::DaemonError { code, message } => {
-            ClientOutcome::DaemonError { code, message }
-        }
-        ClientOutcome::NoDaemon => ClientOutcome::NoDaemon,
-        ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
-    }
+    })
 }
 
 /// Send a `refresh` request to the daemon. When `class` is
@@ -410,14 +467,16 @@ pub fn client_status() -> ClientOutcome<BTreeMap<String, ClassState>> {
 /// daemon performs a full cold rebuild. Returns the
 /// `refreshed_epoch` field on success — the wall-clock second
 /// at which the daemon took the writer lock to begin the
-/// rebuild.
+/// rebuild. A daemon that does not answer within the class's
+/// [`refresh_timeout`] is `TimedOut`; it may still finish the refresh.
 pub fn client_refresh(class: Option<&str>) -> ClientOutcome<u64> {
     let args = match class {
         Some(c) => serde_json::json!({"class": c}),
         None => serde_json::Value::Null,
     };
-    match call_command("refresh", args, "cli-refresh") {
-        ClientOutcome::Ok(value) => match value
+    let bound = refresh_timeout(class.and_then(ProviderClass::parse));
+    call_command("refresh", args, "cli-refresh", bound).and_then(|value| {
+        match value
             .get("refreshed_epoch")
             .and_then(serde_json::Value::as_u64)
         {
@@ -425,16 +484,8 @@ pub fn client_refresh(class: Option<&str>) -> ClientOutcome<u64> {
             None => ClientOutcome::Transport(anyhow!(
                 "refresh response missing refreshed_epoch: {value}"
             )),
-        },
-        other => match other {
-            ClientOutcome::DaemonError { code, message } => {
-                ClientOutcome::DaemonError { code, message }
-            }
-            ClientOutcome::NoDaemon => ClientOutcome::NoDaemon,
-            ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
-            ClientOutcome::Ok(_) => unreachable!(),
-        },
-    }
+        }
+    })
 }
 
 /// How long a hook writer waits on each read and write of a
@@ -449,26 +500,14 @@ pub const HOOK_INGEST_TIMEOUT: Duration = Duration::from_secs(2);
 /// If the daemon has not completed its first snapshot cycle, it
 /// returns `snapshot_unavailable`; callers should fall back to
 /// the daemonless latest-hook spool. A daemon that does not answer
-/// within [`HOOK_INGEST_TIMEOUT`] is a `Transport` error.
+/// within [`HOOK_INGEST_TIMEOUT`] is `TimedOut`.
 pub fn client_hook_ingest(record: &HookRecord) -> ClientOutcome<()> {
     let args = match serde_json::to_value(record) {
         Ok(record) => serde_json::json!({ "record": record }),
         Err(err) => return ClientOutcome::Transport(anyhow!(err).context("serialize hook record")),
     };
-    match call_socket(
-        &socket_path(),
-        "hook_ingest",
-        args,
-        "hook-ingest",
-        Some(HOOK_INGEST_TIMEOUT),
-    ) {
-        ClientOutcome::Ok(_) => ClientOutcome::Ok(()),
-        ClientOutcome::DaemonError { code, message } => {
-            ClientOutcome::DaemonError { code, message }
-        }
-        ClientOutcome::NoDaemon => ClientOutcome::NoDaemon,
-        ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
-    }
+    call_command("hook_ingest", args, "hook-ingest", HOOK_INGEST_TIMEOUT)
+        .and_then(|_| ClientOutcome::Ok(()))
 }
 
 /// Send a `snapshot` request to the daemon and return the
@@ -484,53 +523,55 @@ pub fn client_hook_ingest(record: &HookRecord) -> ClientOutcome<()> {
 /// that skips the mmap detour). Validation is skipped because
 /// the bytes come from the daemon's own
 /// `dual_write_artifact` cycle — already structurally sound.
+///
+/// A daemon that does not answer within [`QUERY_TIMEOUT`] is
+/// `TimedOut`, and callers fall back as they do with no daemon.
 pub fn client_snapshot() -> ClientOutcome<Vec<u8>> {
     use base64::Engine;
 
-    match call_command("snapshot", serde_json::Value::Null, "cli-snapshot") {
-        ClientOutcome::Ok(value) => {
-            let Some(encoded) = value.get("bytes").and_then(|v| v.as_str()) else {
-                return ClientOutcome::Transport(anyhow!(
-                    "snapshot response missing data.bytes string: {value}"
-                ));
-            };
-            match base64::engine::general_purpose::STANDARD.decode(encoded) {
-                Ok(bytes) => ClientOutcome::Ok(bytes),
-                Err(err) => ClientOutcome::Transport(
-                    anyhow!(err).context("decode snapshot response bytes (base64)"),
-                ),
-            }
+    call_command(
+        "snapshot",
+        serde_json::Value::Null,
+        "cli-snapshot",
+        QUERY_TIMEOUT,
+    )
+    .and_then(|value| {
+        let Some(encoded) = value.get("bytes").and_then(|v| v.as_str()) else {
+            return ClientOutcome::Transport(anyhow!(
+                "snapshot response missing data.bytes string: {value}"
+            ));
+        };
+        match base64::engine::general_purpose::STANDARD.decode(encoded) {
+            Ok(bytes) => ClientOutcome::Ok(bytes),
+            Err(err) => ClientOutcome::Transport(
+                anyhow!(err).context("decode snapshot response bytes (base64)"),
+            ),
         }
-        ClientOutcome::DaemonError { code, message } => {
-            ClientOutcome::DaemonError { code, message }
-        }
-        ClientOutcome::NoDaemon => ClientOutcome::NoDaemon,
-        ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
-    }
+    })
 }
 
 /// Common framing for client-side calls. Connects to the
 /// canonical socket path, sends the framed request, reads the
-/// framed response, parses the JSON envelope. Waits as long as the
-/// daemon takes: a refresh can rebuild the whole graph.
+/// framed response, parses the JSON envelope, waiting at most
+/// `timeout` on each read and write.
 fn call_command(
     command: &str,
     args: serde_json::Value,
     id: &str,
+    timeout: Duration,
 ) -> ClientOutcome<serde_json::Value> {
-    call_socket(&socket_path(), command, args, id, None)
+    call_socket(&socket_path(), command, args, id, timeout)
 }
 
 /// [`call_command`] against the socket at `path`. `timeout` bounds
 /// each read and write on the connection, so a daemon that accepts and
-/// never answers ends the call with a `Transport` error; `None` waits
-/// indefinitely.
+/// never answers ends the call as `TimedOut`.
 fn call_socket(
     path: &Path,
     command: &str,
     args: serde_json::Value,
     id: &str,
-    timeout: Option<Duration>,
+    timeout: Duration,
 ) -> ClientOutcome<serde_json::Value> {
     let mut stream = match UnixStream::connect(path) {
         Ok(stream) => stream,
@@ -547,8 +588,8 @@ fn call_socket(
         }
     };
     if let Err(err) = stream
-        .set_read_timeout(timeout)
-        .and_then(|()| stream.set_write_timeout(timeout))
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
     {
         return ClientOutcome::Transport(anyhow!(err).context("set socket timeout"));
     }
@@ -561,12 +602,19 @@ fn call_socket(
         Ok(v) => v,
         Err(err) => return ClientOutcome::Transport(anyhow!(err)),
     };
+    let failed = |err: anyhow::Error| {
+        if is_timeout(&err) {
+            ClientOutcome::TimedOut(timeout)
+        } else {
+            ClientOutcome::Transport(err)
+        }
+    };
     if let Err(err) = write_frame(&mut stream, &payload) {
-        return ClientOutcome::Transport(err);
+        return failed(err);
     }
     let frame = match read_frame(&mut stream) {
         Ok(v) => v,
-        Err(err) => return ClientOutcome::Transport(err),
+        Err(err) => return failed(err),
     };
     let envelope: serde_json::Value = match serde_json::from_slice(&frame) {
         Ok(v) => v,
@@ -596,6 +644,19 @@ fn call_socket(
         }
         _ => ClientOutcome::Transport(anyhow!("response envelope missing result: {envelope}")),
     }
+}
+
+/// Whether a framing error is a socket timeout running out. Unix
+/// reports one as `WouldBlock`, other platforms as `TimedOut`.
+fn is_timeout(err: &anyhow::Error) -> bool {
+    err.chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|io| {
+            matches!(
+                io.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            )
+        })
 }
 
 /// Per-connection handler. Reads one request frame, dispatches

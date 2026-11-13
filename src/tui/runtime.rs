@@ -1275,6 +1275,12 @@ fn nudge_daemon(classes: &[&str]) -> Result<(), String> {
                     "daemon {class} refresh failed ({code}): {message}; showing a local rebuild"
                 ));
             }
+            ClientOutcome::TimedOut(bound) => {
+                return Err(format!(
+                    "daemon {class} refresh did not answer within {}; showing a local rebuild",
+                    crate::server::describe_bound(bound)
+                ));
+            }
             ClientOutcome::Transport(err) => {
                 return Err(format!(
                     "daemon {class} refresh failed: {err:#}; showing a local rebuild"

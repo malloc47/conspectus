@@ -1207,3 +1207,162 @@ fn one_mux_refresh_sees_a_started_and_a_killed_tmux_session() {
         serde_json::to_string_pretty(&after["node_presence"]).unwrap()
     );
 }
+
+/// A daemon that takes every connection, reads its request, and never
+/// answers, as one stuck on its writer lock or wedged would. It records
+/// the commands it was sent and lets the connections go when dropped.
+struct SilentDaemon {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    commands: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl SilentDaemon {
+    fn listen(runtime_dir: &Path) -> Self {
+        use std::sync::atomic::Ordering;
+        let path = socket_path_under(runtime_dir);
+        std::fs::create_dir_all(path.parent().expect("socket dir")).expect("socket dir");
+        let listener = std::os::unix::net::UnixListener::bind(&path).expect("bind");
+        listener.set_nonblocking(true).expect("non-blocking");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let commands = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let thread = {
+            let stop = std::sync::Arc::clone(&stop);
+            let commands = std::sync::Arc::clone(&commands);
+            std::thread::spawn(move || {
+                let mut held = Vec::new();
+                while !stop.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            stream.set_nonblocking(false).expect("blocking");
+                            let request = read_response(&mut stream);
+                            let command = request["command"].as_str().unwrap_or("").to_string();
+                            commands.lock().expect("commands").push(command);
+                            held.push(stream);
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(20)),
+                    }
+                }
+            })
+        };
+        Self {
+            stop,
+            commands,
+            thread: Some(thread),
+        }
+    }
+
+    fn commands(&self) -> Vec<String> {
+        self.commands.lock().expect("commands").clone()
+    }
+}
+
+impl Drop for SilentDaemon {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// What a command did against a [`SilentDaemon`].
+struct SilentRun {
+    output: std::process::Output,
+    took: Duration,
+    /// The commands the daemon was sent.
+    commands: Vec<String>,
+    /// Whether the command wrote `graph.bin` itself.
+    wrote_graph: bool,
+}
+
+/// Runs `args` against a [`SilentDaemon`] in scratch directories.
+fn run_against_a_silent_daemon(args: &[&str]) -> SilentRun {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+    let daemon = SilentDaemon::listen(runtime.path());
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.env("XDG_STATE_HOME", home.path().join("state"))
+        .env("XDG_CONFIG_HOME", home.path().join("config"))
+        .env("XDG_CACHE_HOME", home.path().join("cache"))
+        .current_dir(cwd.path())
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let started = Instant::now();
+    let output = cmd.output().expect("run conspectus");
+    SilentRun {
+        output,
+        took: started.elapsed(),
+        commands: daemon.commands(),
+        wrote_graph: data.path().join("conspectus").join("graph.bin").exists(),
+    }
+}
+
+#[test]
+fn a_one_shot_command_rebuilds_locally_when_the_daemon_never_answers() {
+    let run = run_against_a_silent_daemon(&["graph", "--format", "json"]);
+    let stderr = String::from_utf8_lossy(&run.output.stderr);
+    assert!(run.output.status.success(), "stderr:\n{stderr}");
+    let graph: serde_json::Value =
+        serde_json::from_slice(&run.output.stdout).expect("a graph from the local rebuild");
+    assert!(graph["nodes"].is_array(), "{graph}");
+    assert_eq!(run.commands, ["snapshot"]);
+    // It waited out the snapshot bound, then went on as with no daemon.
+    assert!(run.took >= Duration::from_secs(5), "{:?}", run.took);
+    assert!(run.took < Duration::from_secs(60), "{:?}", run.took);
+    assert!(run.wrote_graph);
+    assert!(stderr.is_empty(), "the fallback is silent: {stderr}");
+}
+
+#[test]
+fn status_reports_a_timeout_when_the_daemon_never_answers() {
+    let run = run_against_a_silent_daemon(&["status"]);
+    let stderr = String::from_utf8_lossy(&run.output.stderr);
+    assert!(!run.output.status.success(), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("the daemon did not answer within 5 seconds"),
+        "stderr:\n{stderr}"
+    );
+    assert_eq!(run.commands, ["status"]);
+    assert!(run.took >= Duration::from_secs(5), "{:?}", run.took);
+    assert!(run.took < Duration::from_secs(30), "{:?}", run.took);
+}
+
+#[test]
+fn a_mux_refresh_reports_a_timeout_when_the_daemon_never_answers() {
+    let run = run_against_a_silent_daemon(&["refresh", "--class", "mux"]);
+    let stderr = String::from_utf8_lossy(&run.output.stderr);
+    assert!(!run.output.status.success(), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("the daemon did not answer the refresh within 15 seconds"),
+        "stderr:\n{stderr}"
+    );
+    assert_eq!(run.commands, ["refresh"]);
+    assert!(run.took >= Duration::from_secs(15), "{:?}", run.took);
+    assert!(run.took < Duration::from_secs(45), "{:?}", run.took);
+    // The daemon may still finish the refresh; a local one would race it.
+    assert!(!run.wrote_graph);
+}
+
+#[cfg(feature = "snapshot")]
+#[test]
+fn the_tui_draws_a_local_rebuild_when_the_daemon_never_answers() {
+    let run = run_against_a_silent_daemon(&[
+        "tui",
+        "--snapshot",
+        "--snapshot-width",
+        "100",
+        "--snapshot-height",
+        "20",
+    ]);
+    let stderr = String::from_utf8_lossy(&run.output.stderr);
+    assert!(run.output.status.success(), "stderr:\n{stderr}");
+    assert!(!run.output.stdout.is_empty());
+    assert_eq!(run.commands, ["snapshot"]);
+    assert!(run.took >= Duration::from_secs(5), "{:?}", run.took);
+    assert!(run.took < Duration::from_secs(60), "{:?}", run.took);
+}

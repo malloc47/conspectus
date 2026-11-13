@@ -830,8 +830,8 @@ fn client_socket() -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
-fn times_out(outcome: &ClientOutcome<serde_json::Value>) -> bool {
-    matches!(outcome, ClientOutcome::Transport(_))
+fn times_out(outcome: &ClientOutcome<serde_json::Value>, bound: Duration) -> bool {
+    matches!(outcome, ClientOutcome::TimedOut(after) if *after == bound)
 }
 
 #[test]
@@ -846,10 +846,13 @@ fn a_daemon_that_never_accepts_times_the_call_out() {
         "hook_ingest",
         serde_json::Value::Null,
         "t",
-        Some(Duration::from_millis(150)),
+        Duration::from_millis(150),
     );
     let waited = started.elapsed();
-    assert!(times_out(&outcome), "{outcome:?}");
+    assert!(
+        times_out(&outcome, Duration::from_millis(150)),
+        "{outcome:?}"
+    );
     assert!(waited >= Duration::from_millis(150), "{waited:?}");
     assert!(waited < Duration::from_secs(5), "{waited:?}");
 }
@@ -871,12 +874,15 @@ fn a_daemon_that_reads_the_request_and_never_answers_times_the_call_out() {
         "hook_ingest",
         serde_json::json!({"record": {}}),
         "t",
-        Some(Duration::from_millis(150)),
+        Duration::from_millis(150),
     );
     let waited = started.elapsed();
     let _ = done.send(());
     server.join().expect("server thread");
-    assert!(times_out(&outcome), "{outcome:?}");
+    assert!(
+        times_out(&outcome, Duration::from_millis(150)),
+        "{outcome:?}"
+    );
     assert!(waited < Duration::from_secs(5), "{waited:?}");
 }
 
@@ -898,7 +904,7 @@ fn a_bounded_call_still_reads_a_prompt_answer() {
         "hook_ingest",
         serde_json::Value::Null,
         "t",
-        Some(Duration::from_secs(2)),
+        Duration::from_secs(2),
     );
     server.join().expect("server thread");
     assert!(
@@ -915,7 +921,7 @@ fn no_socket_is_no_daemon_for_a_bounded_call() {
         "hook_ingest",
         serde_json::Value::Null,
         "t",
-        Some(HOOK_INGEST_TIMEOUT),
+        HOOK_INGEST_TIMEOUT,
     );
     assert!(matches!(outcome, ClientOutcome::NoDaemon), "{outcome:?}");
 }
@@ -926,4 +932,56 @@ fn the_hook_ingest_bound_leaves_room_inside_a_hook_entry_timeout() {
     // store lock wait, a tmux query, the spool write) needs the rest.
     assert!(HOOK_INGEST_TIMEOUT >= Duration::from_millis(500));
     assert!(HOOK_INGEST_TIMEOUT <= Duration::from_secs(3));
+}
+
+#[test]
+fn a_daemon_that_hangs_up_without_answering_is_not_a_timeout() {
+    let (_dir, path) = client_socket();
+    let listener = UnixListener::bind(&path).expect("bind");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let _request = read_frame(&mut stream).expect("request");
+    });
+    let outcome = call_socket(
+        &path,
+        "status",
+        serde_json::Value::Null,
+        "t",
+        Duration::from_secs(5),
+    );
+    server.join().expect("server thread");
+    assert!(
+        matches!(outcome, ClientOutcome::Transport(_)),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn each_call_waits_as_long_as_its_command_can_take() {
+    // The memory-only answers are quick; a live-class refresh may queue
+    // behind another class's cycle; the rest may ask the forges.
+    assert!(QUERY_TIMEOUT >= Duration::from_secs(1));
+    assert!(QUERY_TIMEOUT < LIVE_REFRESH_TIMEOUT);
+    assert!(LIVE_REFRESH_TIMEOUT < REFRESH_TIMEOUT);
+    assert_eq!(
+        refresh_timeout(Some(ProviderClass::Mux)),
+        LIVE_REFRESH_TIMEOUT
+    );
+    assert_eq!(
+        refresh_timeout(Some(ProviderClass::Harness)),
+        LIVE_REFRESH_TIMEOUT
+    );
+    assert_eq!(refresh_timeout(Some(ProviderClass::Git)), REFRESH_TIMEOUT);
+    assert_eq!(refresh_timeout(Some(ProviderClass::Forge)), REFRESH_TIMEOUT);
+    assert_eq!(refresh_timeout(None), REFRESH_TIMEOUT);
+}
+
+#[test]
+fn a_bound_reads_in_whole_seconds_or_minutes() {
+    assert_eq!(describe_bound(Duration::from_secs(1)), "1 second");
+    assert_eq!(describe_bound(QUERY_TIMEOUT), "5 seconds");
+    assert_eq!(describe_bound(LIVE_REFRESH_TIMEOUT), "15 seconds");
+    assert_eq!(describe_bound(REFRESH_TIMEOUT), "2 minutes");
+    assert_eq!(describe_bound(Duration::from_secs(90)), "90 seconds");
+    assert_eq!(describe_bound(Duration::from_secs(60)), "1 minute");
 }
