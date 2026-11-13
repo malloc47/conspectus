@@ -14,7 +14,9 @@ age that never gives way. Reads the data of
 [ADR 0203](0203-live-state-is-a-neutral-observation-with-a-closed-state-set.md)
 and [ADR 0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md)
 as the row models already carry it; adds no theme role (ADR 0153) and one
-vetted glyph (ADR 0154).
+vetted glyph (ADR 0154). Amended by
+[ADR 0214](0214-tui-a-finished-turn-reads-unseen-until-you-look-at-it.md):
+a ready mark is bold while its finished turn is unseen.
 
 ## Context
 

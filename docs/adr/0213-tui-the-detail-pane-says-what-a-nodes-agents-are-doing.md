@@ -11,7 +11,10 @@ of `tui-options.md` there: the explorer's Node gets `State`, `Since`,
 [ADR 0112](0112-node-specific-previews.md) decision 2 (the new fields
 preview by their value types). Draws the marks of
 [ADR 0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md);
-adds no theme role (ADR 0153), no glyph (ADR 0154), and no key.
+adds no theme role (ADR 0153), no glyph (ADR 0154), and no key. Amended
+by [ADR 0214](0214-tui-a-finished-turn-reads-unseen-until-you-look-at-it.md):
+a ready session's `state` ends with `unseen` or `seen`, and a mux's
+`agents` counts its unseen turns.
 
 ## Context
 
