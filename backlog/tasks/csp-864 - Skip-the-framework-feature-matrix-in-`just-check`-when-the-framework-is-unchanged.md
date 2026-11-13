@@ -3,11 +3,11 @@ id: CSP-864
 title: >-
   Skip the framework feature matrix in `just check` when the framework is
   unchanged
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-13 03:55'
-updated_date: '2026-11-13 23:34'
+updated_date: '2026-11-13 23:48'
 labels:
   - h-devloop
 milestone: m-11
@@ -36,14 +36,14 @@ CI keeps running the full matrix on every push and pull request, so a skip only 
 - [x] #1 `just check` skips the matrix, and prints that it did, when neither the working tree nor the commits since the merge base with `main` touch `crates/tuikit`, the root `Cargo.toml`, `Cargo.lock`, or `rust-toolchain.toml`
 - [x] #2 When that comparison cannot be made (no `main`, a shallow clone, a detached checkout without a merge base), `just check` runs the matrix
 - [x] #3 `just tuikit-features` run directly always runs the full matrix, and CI runs it on every push and pull request
-- [ ] #4 AGENTS.md, the dev-shell banner, and `crates/tuikit/docs/contributing.md` describe when `just check` runs the matrix
+- [x] #4 AGENTS.md, the dev-shell banner, and `crates/tuikit/docs/contributing.md` describe when `just check` runs the matrix
 - [x] #5 An ADR records the condition; it is also recorded in the framework decision log and marked framework-owned in `docs/adr/README.md` if it changes what the framework docs ask contributors to run
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -67,6 +67,8 @@ Checks: run-tests.sh 5,681 passed, 0 failed; checks.sh clean; `just tuikit-featu
 WAITS ON THE OPERATOR (AC #4 for AGENTS.md, DoD #2): AGENTS.md is the agent's own instruction file, not edited on another agent's request. Proposed: append to the pre-main bullet that ends "`just tuikit-features` (CI runs the same commands)." the sentence: "`just check` runs it only when the working tree or a commit since the merge base with `main` touches `crates/tuikit` or a root file its build reads, and says so when it skips it."
 
 On a7750217: the whole `just check` in this worktree passed (123 s without an edit; the matrix ran, 43 s, since Cargo.toml differs from main), and `just separation-rehearsal --self-test` passed (4 min 39 s, both leaks caught).
+
+AGENTS.md edit landed in 22d78318 (applied by the coordinator from the patch the implementer prepared); the banner and contributing.md already described the skip (a7750217).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

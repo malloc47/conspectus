@@ -1,11 +1,11 @@
 ---
 id: CSP-866
 title: Stop paying for a dev-shell start on every agent command
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-13 03:55'
-updated_date: '2026-11-13 23:45'
+updated_date: '2026-11-13 23:48'
 labels:
   - h-devloop
 milestone: m-11
@@ -34,13 +34,13 @@ Approaches to weigh include starting the agent from inside the dev shell, nix-di
 - [x] #1 In an agent session started the documented way, cargo, just, nextest, and backlog run from a worktree without a per-command dev-shell start, and a command reaches cargo in under 1 s
 - [x] #2 The toolchain those commands use is the one the flake pins, and a change to `flake.lock` or `rust-toolchain.toml` reaches the next session by the documented steps
 - [x] #3 An ADR records the chosen approach and the alternatives weighed, before any new tool or checked-in file lands
-- [ ] #4 AGENTS.md, and the README development section if it describes entering the dev shell, tell an agent how to run the checks under the chosen approach
+- [x] #4 AGENTS.md, and the README development section if it describes entering the dev shell, tell an agent how to run the checks under the chosen approach
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -63,6 +63,8 @@ Verified: `scripts/dev-env.sh cargo --version` 0.04 to 0.05 s warm (just 0.03 s,
 Checks: run-tests.sh 5,681 passed, 0 failed; checks.sh clean; `git diff --check` clean.
 WAITS ON THE OPERATOR (AC #4 for AGENTS.md, DoD #2): AGENTS.md is the agent's own instruction file, not edited on another agent's request. Proposed: after "Use `nix develop` for local development. The shell provides Rust tooling and standard checks." add: "An agent, whose every command starts a fresh shell, runs tools through `scripts/dev-env.sh` instead (`scripts/dev-env.sh just check`, or `. scripts/dev-env.sh && ...` for a command line that runs several): it loads the dev shell's environment from a cache that follows `flake.nix`, `flake.lock`, and `rust-toolchain.toml`. Don't wrap commands in `nix develop --command`." The whole patch (CSP-864, 865, 866): /tmp/csp-fu/agents-md.patch, `git apply` from the worktree.
 OPTIONAL OPERATOR STEP (not needed for the ACs): start sessions inside the environment, once the script is on main: `nono run <your usual --allow flags> -- /home/jwaggoner/src/oss/conspectus/scripts/dev-env.sh claude`. Commands then need no prefix; the environment is fixed for the session, and the prefix still picks up a flake change mid-session. Untested here (agents may not start `claude`): check that `command -v cargo` in a new session prints the rust-default-1.99.0 store path.
+
+AGENTS.md now tells agents to run tools through scripts/dev-env.sh (22d78318); the README development section was updated in 9431f16e. Verified 2026-11-13: scripts/dev-env.sh cargo --version took 0.035 s; cargo, cargo-nextest 0.9.133, just, and backlog resolve to the flake's store paths.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

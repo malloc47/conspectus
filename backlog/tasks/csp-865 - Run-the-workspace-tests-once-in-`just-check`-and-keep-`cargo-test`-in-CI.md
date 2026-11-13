@@ -1,11 +1,11 @@
 ---
 id: CSP-865
 title: Run the workspace tests once in `just check` and keep `cargo test` in CI
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-13 03:55'
-updated_date: '2026-11-13 23:34'
+updated_date: '2026-11-13 23:48'
 labels:
   - h-devloop
 milestone: m-11
@@ -34,14 +34,14 @@ The operator accepted the trade-off on 2026-11-12: a test that fails only when i
 <!-- AC:BEGIN -->
 - [x] #1 `just check` runs the workspace tests once, through nextest, and `just test` remains available as its own recipe
 - [x] #2 CI still runs both `cargo test` and nextest on every push and pull request
-- [ ] #3 The pre-main invariants in AGENTS.md, the dev-shell banner, and any README or docs page that lists the local checks name nextest as the local run and `cargo test` as a CI run
+- [x] #3 The pre-main invariants in AGENTS.md, the dev-shell banner, and any README or docs page that lists the local checks name nextest as the local run and `cargo test` as a CI run
 - [x] #4 An ADR records the change and names the part of ADR 0007 it supersedes
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -67,6 +67,8 @@ WAITS ON THE OPERATOR (AC #3, DoD #2): AGENTS.md is the agent's own instruction 
   `cargo test --workspace --all-targets --all-features`, which catches a
   test that fails only when it shares a process with others; `just test`
   runs it locally.
+
+AGENTS.md pre-main invariants now name nextest as the local run and cargo test as a CI run (22d78318); the banner and README were updated in 75fcb500.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
