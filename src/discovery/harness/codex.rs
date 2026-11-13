@@ -172,6 +172,10 @@ impl HarnessAdapter for CodexAdapter {
         true
     }
 
+    fn pane_title_mark(&self, title: &str) -> Option<crate::model::live::TitleMark> {
+        Some(title::mark(title))
+    }
+
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         vec![std::ffi::OsString::from("codex")]
     }
@@ -194,6 +198,9 @@ impl HarnessAdapter for CodexAdapter {
 
 #[path = "codex_live.rs"]
 mod live;
+
+#[path = "codex_title.rs"]
+mod title;
 
 pub(crate) use live::HOOK_EVENTS;
 

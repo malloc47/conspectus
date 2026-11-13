@@ -110,7 +110,7 @@ fn details_serialize_by_stable_lowercase_names() {
 #[test]
 fn sources_and_confidences_serialize_by_stable_lowercase_names() {
     let sources: Vec<&str> = LiveSource::ALL.iter().map(|source| source.name()).collect();
-    assert_eq!(sources, ["hook", "unknown"]);
+    assert_eq!(sources, ["hook", "pane_title", "unknown"]);
     for source in LiveSource::ALL {
         assert_eq!(
             serde_json::to_value(source).expect("serialize source"),
@@ -815,4 +815,64 @@ fn the_module_names_no_harness() {
             "src/model/live.rs names the harness `{name}`"
         );
     }
+}
+
+#[test]
+fn a_title_mark_asserts_waiting_for_input_working_or_nothing() {
+    assert_eq!(
+        TitleMark::Waiting.asserts(),
+        Some((LiveState::Waiting, Some(LiveDetail::Input)))
+    );
+    assert_eq!(
+        TitleMark::Working.asserts(),
+        Some((LiveState::Working, None))
+    );
+    assert_eq!(TitleMark::Neither.asserts(), None);
+    for (mark, name) in [
+        (TitleMark::Waiting, "waiting"),
+        (TitleMark::Working, "working"),
+        (TitleMark::Neither, "neither"),
+    ] {
+        assert_eq!(
+            serde_json::to_value(mark).expect("serialize mark"),
+            serde_json::Value::String(name.to_string())
+        );
+    }
+}
+
+#[test]
+fn a_pane_titles_run_goes_on_only_for_the_same_mark_in_the_same_pane() {
+    let pane = |id: &str| Some(id.to_string());
+    let first = PaneTitle::new(pane("%0"), TitleMark::Working, 1_000);
+    assert_eq!((first.since_ms, first.previous_ms), (1_000, None));
+
+    let second = PaneTitle::new(pane("%0"), TitleMark::Working, 6_000).after(Some(&first));
+    assert_eq!((second.since_ms, second.previous_ms), (1_000, Some(1_000)));
+    let third = PaneTitle::new(pane("%0"), TitleMark::Working, 11_000).after(Some(&second));
+    assert_eq!((third.since_ms, third.previous_ms), (1_000, Some(6_000)));
+    assert!(third.held_twice_after(5_999));
+    assert!(!third.held_twice_after(6_000));
+    assert!(!first.held_twice_after(0), "one probe is not two");
+
+    // The same probe read again is the reading it already was.
+    assert_eq!(
+        PaneTitle::new(pane("%0"), TitleMark::Waiting, 6_000).after(Some(&second)),
+        second
+    );
+    // Another mark, another pane, or an older reading starts over.
+    for (next, previous) in [
+        (
+            PaneTitle::new(pane("%0"), TitleMark::Waiting, 11_000),
+            &second,
+        ),
+        (
+            PaneTitle::new(pane("%1"), TitleMark::Working, 11_000),
+            &second,
+        ),
+        (PaneTitle::new(pane("%0"), TitleMark::Working, 500), &first),
+    ] {
+        let after = next.clone().after(Some(previous));
+        assert_eq!(after, next);
+    }
+    assert_eq!(first.clone().after(None), first);
 }

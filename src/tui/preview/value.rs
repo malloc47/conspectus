@@ -197,6 +197,10 @@ pub fn glossary_entry(field: &str, value: &str) -> Option<String> {
              ended, or, for a session with no mux, the cursor rested on its row in this TUI."
         }
         ("source", "hook") => "Reported by the harness's hooks or plugin.",
+        ("source", "pane_title") => {
+            "Read from the title the agent sets on its tmux pane, which says whether it waits on \
+             you or works, but not what it waits for."
+        }
         ("source", "unknown") => "Reported by a source this version of Conspectus doesn't know.",
         ("evidence", "fresh") => {
             "Recent enough to trust, or a state that doesn't age while the agent runs."

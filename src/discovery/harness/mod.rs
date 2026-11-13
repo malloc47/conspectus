@@ -412,6 +412,17 @@ pub trait HarnessAdapter: Send + Sync {
         false
     }
 
+    /// What `title`, the terminal title of a pane this harness runs in,
+    /// says about the agent (ADR 0217), or `None` for a harness whose
+    /// titles are not read. The mux probe calls it on each pane's title
+    /// as it splits its listing and keeps only the mark, so an override
+    /// must not copy or keep any part of `title`: it may carry words the
+    /// operator typed. Defaults to `None`.
+    fn pane_title_mark(&self, title: &str) -> Option<crate::model::live::TitleMark> {
+        let _ = title;
+        None
+    }
+
     /// The reducer that folds this harness's live events into a
     /// session's entry. Defaults to the shared one; a harness whose
     /// events need a transition of their own returns a reducer that
@@ -574,6 +585,12 @@ pub fn adapters_for_program(program: &str) -> impl Iterator<Item = &'static dyn 
                 .iter()
                 .any(|basename| basename.eq_ignore_ascii_case(&name))
     })
+}
+
+/// Whether the mux probe reads the titles of `adapter`'s panes (ADR
+/// 0217): whether its title classifier answers at all.
+pub fn reads_pane_titles(adapter: &dyn HarnessAdapter) -> bool {
+    adapter.pane_title_mark("").is_some()
 }
 
 /// The first registered adapter whose harness binary appears among a

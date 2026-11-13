@@ -306,18 +306,22 @@ impl LiveDetail {
 pub enum LiveSource {
     /// Events from a hook or plugin running inside the agent's harness.
     Hook,
+    /// The title the agent set on its terminal pane, as the mux probe
+    /// read and classified it ([`TitleMark`]).
+    PaneTitle,
     /// A source this version does not know, written by a newer one.
     Unknown,
 }
 
 impl LiveSource {
     /// Every source.
-    pub const ALL: [LiveSource; 2] = [LiveSource::Hook, LiveSource::Unknown];
+    pub const ALL: [LiveSource; 3] = [LiveSource::Hook, LiveSource::PaneTitle, LiveSource::Unknown];
 
     /// The stable name the source serializes as.
     pub fn name(self) -> &'static str {
         match self {
             LiveSource::Hook => "hook",
+            LiveSource::PaneTitle => "pane_title",
             LiveSource::Unknown => "unknown",
         }
     }
@@ -717,6 +721,121 @@ impl EffectiveLive {
         detail: Some(LiveDetail::Stale),
         confidence: LiveConfidence::Stale,
     };
+}
+
+/// What an agent's pane title said about it at one probe (ADR 0217), as
+/// the agent's harness classified the title. The title itself is never
+/// kept: the mark is all that leaves the reader.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleMark {
+    /// The title says the agent waits on the operator.
+    Waiting,
+    /// The title says the agent is at work.
+    Working,
+    /// The title says neither. That is no evidence either way: the same
+    /// title can show while the agent is idle, starting, or working.
+    Neither,
+}
+
+impl TitleMark {
+    /// The state this mark asserts, with its detail: `waiting` for
+    /// input (a title cannot say what the agent waits for), `working`,
+    /// or nothing for [`Self::Neither`].
+    pub fn asserts(self) -> Option<(LiveState, Option<LiveDetail>)> {
+        match self {
+            TitleMark::Waiting => Some((LiveState::Waiting, Some(LiveDetail::Input))),
+            TitleMark::Working => Some((LiveState::Working, None)),
+            TitleMark::Neither => None,
+        }
+    }
+}
+
+/// The mark a mux probe read from one session's active pane title, and
+/// how long the pane's title has read it (ADR 0217). Times are Unix
+/// epoch milliseconds.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct PaneTitle {
+    /// The pane's id (`%3`), when the probe reported one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    pub mark: TitleMark,
+    /// When the probe that read the mark ran.
+    pub observed_ms: i64,
+    /// When the first of the consecutive probes that read this mark in
+    /// this pane ran.
+    pub since_ms: i64,
+    /// When the probe before this one ran, if it read the same mark in
+    /// the same pane; `None` for the first probe of a run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_ms: Option<i64>,
+}
+
+impl PaneTitle {
+    /// The first probe to read `mark` in `pane`, at `observed_ms`.
+    pub fn new(pane: Option<String>, mark: TitleMark, observed_ms: i64) -> Self {
+        Self {
+            pane,
+            mark,
+            observed_ms,
+            since_ms: observed_ms,
+            previous_ms: None,
+        }
+    }
+
+    /// This probe's reading after `previous`, the last probe's reading of
+    /// the same session: the run goes on when the pane and the mark are
+    /// the same and `previous` is from an earlier probe, and starts again
+    /// otherwise. A reading from the same probe (a cached listing) is
+    /// `previous` itself.
+    pub fn after(self, previous: Option<&PaneTitle>) -> Self {
+        match previous {
+            Some(previous) if previous.observed_ms == self.observed_ms => previous.clone(),
+            Some(previous)
+                if previous.observed_ms < self.observed_ms
+                    && previous.pane == self.pane
+                    && previous.mark == self.mark =>
+            {
+                Self {
+                    since_ms: previous.since_ms,
+                    previous_ms: Some(previous.observed_ms),
+                    ..self
+                }
+            }
+            _ => self,
+        }
+    }
+
+    /// Whether this probe and the one before it both read this mark, and
+    /// both ran after `after_ms`.
+    pub fn held_twice_after(&self, after_ms: i64) -> bool {
+        self.previous_ms.is_some_and(|previous| previous > after_ms)
+    }
 }
 
 /// How many sessions are in each state, for a mux or any other group.
