@@ -748,6 +748,7 @@ fn editor_panes(panes: &[(&str, &str)]) -> BTreeMap<String, crate::model::MuxPro
                 crate::model::ProbedPane {
                     session: "editor".to_string(),
                     command: Some(command.to_string()),
+                    active: *pane == "%1",
                 },
             )
         })

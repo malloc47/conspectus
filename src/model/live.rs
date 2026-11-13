@@ -774,9 +774,9 @@ impl TitleMark {
     }
 }
 
-/// The mark a mux probe read from one session's active pane title, and
-/// how long the pane's title has read it (ADR 0217). Times are Unix
-/// epoch milliseconds.
+/// The mark a mux probe read from one pane's title, and how long the
+/// pane's title has read it (ADRs 0217, 0221). Times are Unix epoch
+/// milliseconds.
 #[derive(
     Clone,
     Debug,
@@ -818,7 +818,7 @@ impl PaneTitle {
     }
 
     /// This probe's reading after `previous`, the last probe's reading of
-    /// the same session: the run goes on when the pane and the mark are
+    /// the same pane: the run goes on when the pane and the mark are
     /// the same and `previous` is from an earlier probe, and starts again
     /// otherwise. A reading from the same probe (a cached listing) is
     /// `previous` itself.

@@ -218,10 +218,10 @@ fn sessions_of(snapshot: &GraphSnapshot, process: &NodeId) -> BTreeSet<String> {
 
 /// How many of `harness`'s agents the graph `snapshot` shows from their
 /// pane titles: its live bindings whose source is the pane title, on a
-/// session of the harness or on a pane of a mux whose active pane runs
-/// it.
+/// session of the harness or on a pane whose program shows the harness's
+/// titles (by the probe's pane listing, else the mux's active pane).
 pub(super) fn title_agents(snapshot: &GraphSnapshot, harness: &str) -> usize {
-    use crate::discovery::harness::adapters_for_program;
+    use crate::discovery::harness::pane_title_reader;
     let from_title = |binding: &crate::model::live::LiveBinding| {
         binding.observation.source == LiveSource::PaneTitle
     };
@@ -233,20 +233,30 @@ pub(super) fn title_agents(snapshot: &GraphSnapshot, harness: &str) -> usize {
                 && matches!(id, NodeId::AgentSession(session) if session.harness_key == harness)
         })
         .count();
-    let runs_harness = |mux: &crate::model::MuxSessionId| {
+    let shows_harness = |pane: &crate::model::LivePane| {
         snapshot.nodes.iter().any(|node| match node {
-            GraphNode::MuxSession(node) if node.id == *mux => node
-                .active_pane_command
-                .as_deref()
-                .and_then(|command| adapters_for_program(command).next())
-                .is_some_and(|adapter| adapter.harness_key() == harness),
+            GraphNode::MuxSession(mux) if mux.id == pane.mux => {
+                let listed = pane.pane.as_deref().and_then(|id| {
+                    snapshot
+                        .mux_probes
+                        .get(&crate::model::probe_key(
+                            &mux.backend,
+                            mux.socket.as_deref(),
+                        ))?
+                        .pane_command(mux.session_name(), id)
+                });
+                listed
+                    .unwrap_or(mux.active_pane_command.as_deref())
+                    .and_then(pane_title_reader)
+                    .is_some_and(|reader| reader.adapter().harness_key() == harness)
+            }
             _ => false,
         })
     };
     let panes = snapshot
         .pane_live
         .iter()
-        .filter(|(pane, binding)| from_title(binding) && runs_harness(&pane.mux))
+        .filter(|(pane, binding)| from_title(binding) && shows_harness(pane))
         .count();
     sessions + panes
 }

@@ -1316,16 +1316,29 @@ impl LiveWorld {
 
     /// The config with the tmux server listing `listing`.
     fn config_listing(&self, listing: &str) -> LocalDiscoveryConfig {
+        self.config_with(crate::discovery::tmux::FakeTmux::with_sessions(listing))
+    }
+
+    /// The config with the tmux server listing the sessions and panes of
+    /// `listing`, a session listing and a pane listing.
+    fn config_panes(&self, listing: &(String, String)) -> LocalDiscoveryConfig {
+        use crate::discovery::tmux::{FakeTmux, TmuxOutcome};
+        self.config_with(
+            FakeTmux::with_sessions(listing.0.clone())
+                .with_panes(None, TmuxOutcome::Sessions(listing.1.clone())),
+        )
+    }
+
+    fn config_with(&self, tmux: crate::discovery::tmux::FakeTmux) -> LocalDiscoveryConfig {
         use crate::discovery::harness::codex::HARNESS_KEY as CODEX_KEY;
         use crate::discovery::harness::fixtures::HarnessFixture;
-        use crate::discovery::tmux::FakeTmux;
 
         LocalDiscoveryConfig::empty()
             .with_harness_state_root(
                 CODEX_KEY,
                 HarnessFixture::at(self.temp.path().join("state")).codex_state_root(),
             )
-            .with_tmux_runner(FakeTmux::with_sessions(listing))
+            .with_tmux_runner(tmux)
             .with_live_state_root(self.live_root())
             .with_caches(Arc::clone(&self.caches))
     }
@@ -1529,11 +1542,24 @@ fn discovery_without_a_live_state_root_binds_nothing() {
     assert!(snapshot.node_live.is_empty());
 }
 
-/// A listing of tmux session `alpha` whose active pane `%0` runs Codex
-/// under the title `title`.
-fn codex_in_alpha(title: &str) -> String {
-    format!(
-        "alpha\t/work/x\t1700000500\t1700000000\tcodex\t42\t/work/x\tcodex\t0\t\t\t$1\t%0\t\t{title}\n"
+/// The session and pane listings of tmux session `alpha`, whose active
+/// pane `%0` runs Codex under the title `title`.
+fn codex_in_alpha(title: &str) -> (String, String) {
+    (
+        "alpha\t/work/x\t1700000500\t1700000000\tcodex\t42\t/work/x\tcodex\t0\t\t\t$1\t%0\n"
+            .to_string(),
+        format!("%0\talpha\tcodex\t{title}\n"),
+    )
+}
+
+/// The listings of tmux session `alpha`, whose active pane `%0` runs a
+/// shell and whose pane `%1` beside it runs `command` under the title
+/// `title`.
+fn beside_a_shell_in_alpha(command: &str, title: &str) -> (String, String) {
+    (
+        "alpha\t/work/x\t1700000500\t1700000000\tzsh\t42\t/work/x\tzsh\t0\t\t\t$1\t%0\n"
+            .to_string(),
+        format!("%0\talpha\tzsh\t\n%1\talpha\t{command}\t{title}\n"),
     )
 }
 
@@ -1545,7 +1571,7 @@ fn discovery_shows_a_codex_pane_waiting_from_its_title_without_hooks() {
     let listing = codex_in_alpha("[ ! ] Action Required fix-auth | conspectus");
     let snapshot = discover_local_with(
         [world.temp.path().join("scan")],
-        world.config_listing(&listing),
+        world.config_panes(&listing),
     )
     .expect("discover");
     let pane = crate::model::LivePane::new(
@@ -1574,11 +1600,89 @@ fn discovery_shows_a_codex_pane_waiting_from_its_title_without_hooks() {
     let world = LiveWorld::new();
     let snapshot = discover_local_with(
         [world.temp.path().join("scan")],
-        world.config_listing(&listing).without_pane_titles(),
+        world.config_panes(&listing).without_pane_titles(),
     )
     .expect("discover");
     assert!(snapshot.pane_live.is_empty());
     assert!(snapshot.mux_probes["tmux"].titles.is_empty());
+}
+
+#[test]
+fn discovery_shows_a_codex_in_a_pane_that_is_not_active_from_its_title() {
+    use crate::model::live::{LiveSource, LiveState};
+
+    let world = LiveWorld::new();
+    let listing = beside_a_shell_in_alpha("codex", "⠋ fix-auth | conspectus");
+    let snapshot = discover_local_with(
+        [world.temp.path().join("scan")],
+        world.config_panes(&listing),
+    )
+    .expect("discover");
+    let pane = |id: &str| {
+        crate::model::LivePane::new(
+            crate::model::MuxSessionId::new("tmux:alpha"),
+            Some(id.to_string()),
+        )
+    };
+    let binding = snapshot.pane_live.get(&pane("%1")).expect("bound");
+    assert_eq!(
+        (binding.observation.state, binding.observation.source),
+        (LiveState::Working, LiveSource::PaneTitle)
+    );
+    assert_eq!(snapshot.pane_live.len(), 1);
+}
+
+#[test]
+fn discovery_reads_a_launched_codexs_title_only_where_its_hook_names_the_pane() {
+    use crate::live_store::{LiveEventKind, WaitKind};
+    use crate::model::live::{LiveSource, LiveState};
+
+    // A Codex started by its npm package shows as `node` in pane %1.
+    let listing = beside_a_shell_in_alpha("node", "⠋ fix-auth | conspectus");
+    let world = LiveWorld::new();
+    let snapshot = discover_local_with(
+        [world.temp.path().join("scan")],
+        world.config_panes(&listing),
+    )
+    .expect("discover");
+    assert!(
+        snapshot.pane_live.is_empty(),
+        "no hook entry, no Codex: {:?}",
+        snapshot.pane_live
+    );
+
+    // Its hook entry names the pane, so the title reads as Codex's: two
+    // probes without the marker clear the wait the hook reported.
+    let mut context = this_process();
+    context.tmux = in_alpha("%1").tmux;
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::WaitStarted {
+            agent: None,
+            kind: WaitKind::Permission,
+        },
+        context,
+    );
+    let cycle = || {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        world.caches.clear_mux();
+        discover_local_warm_with(
+            [world.temp.path().join("scan")],
+            world.config_panes(&listing),
+            GraphSnapshot::empty(),
+            &crate::config::ServerIntervals::default(),
+        )
+        .expect("discover")
+    };
+    let read = |snapshot: &GraphSnapshot| {
+        let binding = snapshot.node_live[&codex_session(snapshot)];
+        (binding.observation.state, binding.observation.source)
+    };
+    assert_eq!(read(&cycle()), (LiveState::Waiting, LiveSource::Hook));
+    let second = cycle();
+    assert_eq!(read(&second), (LiveState::Working, LiveSource::PaneTitle));
+    assert!(second.pane_live.is_empty(), "the agent counts once");
 }
 
 #[test]
@@ -1604,7 +1708,7 @@ fn two_probes_without_the_marker_clear_a_codex_wait_its_hooks_reported() {
         world.caches.clear_mux();
         discover_local_warm_with(
             [world.temp.path().join("scan")],
-            world.config_listing(&listing),
+            world.config_panes(&listing),
             GraphSnapshot::empty(),
             &crate::config::ServerIntervals::default(),
         )

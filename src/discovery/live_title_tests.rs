@@ -248,15 +248,55 @@ fn session(key: &str) -> NodeId {
     NodeId::AgentSession(session_id(key))
 }
 
-/// A graph of `nodes` whose default-server probe read `titles`.
+/// A graph of `nodes` whose default-server probe read `titles`, each
+/// from the active pane of the session it names, which runs what that
+/// mux node's active pane does.
 fn graph(nodes: Vec<GraphNode>, titles: &[(&str, PaneTitle)]) -> GraphSnapshot {
-    let probe = MuxProbe {
-        titles: titles
-            .iter()
-            .map(|(name, title)| (name.to_string(), title.clone()))
-            .collect(),
-        ..MuxProbe::new(MuxProbeStatus::Listed, NOW_MS / 1000)
-    };
+    let panes: Vec<Listed> = titles
+        .iter()
+        .map(|(name, title)| {
+            let command = nodes.iter().find_map(|node| match node {
+                GraphNode::MuxSession(mux) if mux.native_id == *name => {
+                    mux.active_pane_command.clone()
+                }
+                _ => None,
+            });
+            Listed {
+                session: name.to_string(),
+                command,
+                active: true,
+                title: title.clone(),
+            }
+        })
+        .collect();
+    graph_of_panes(nodes, &panes)
+}
+
+/// One pane a probe listed: its session, its program, whether it is its
+/// session's active pane, and what its title read (whose `pane` is its
+/// id).
+struct Listed {
+    session: String,
+    command: Option<String>,
+    active: bool,
+    title: PaneTitle,
+}
+
+/// A graph of `nodes` whose default-server probe listed `panes`.
+fn graph_of_panes(nodes: Vec<GraphNode>, panes: &[Listed]) -> GraphSnapshot {
+    let mut probe = MuxProbe::new(MuxProbeStatus::Listed, NOW_MS / 1000);
+    for listed in panes {
+        let pane = listed.title.pane.clone().expect("a pane id");
+        probe.panes.insert(
+            pane.clone(),
+            crate::model::ProbedPane {
+                session: listed.session.clone(),
+                command: listed.command.clone(),
+                active: listed.active,
+            },
+        );
+        probe.titles.insert(pane, listed.title.clone());
+    }
     GraphSnapshot {
         nodes,
         mux_probes: BTreeMap::from([("tmux".to_string(), probe)]),
@@ -545,6 +585,185 @@ fn an_entry_from_a_server_with_the_same_name_is_not_the_panes_agent() {
     assert_eq!(
         state_and_source(bound.nodes.get(&session("s-1"))),
         Some((LiveState::Working, LiveSource::PaneTitle))
+    );
+    assert!(bound.panes.is_empty());
+}
+
+// --- every pane, and launchers -----------------------------------------
+
+/// A pane of `session` listed with `command`, whose title read `title`.
+fn listed(session: &str, command: &str, active: bool, title: PaneTitle) -> Listed {
+    Listed {
+        session: session.to_string(),
+        command: Some(command.to_string()),
+        active,
+        title,
+    }
+}
+
+/// `title` read in pane `pane`.
+fn in_pane_titled(pane: &str, title: PaneTitle) -> PaneTitle {
+    PaneTitle {
+        pane: Some(pane.to_string()),
+        ..title
+    }
+}
+
+#[test]
+fn a_codex_in_a_pane_that_is_not_active_shows_on_its_own_pane() {
+    // The session's active pane %0 runs a shell; Codex waits in %1 and
+    // works in %2.
+    let snapshot = graph_of_panes(
+        vec![mux_node("cx", "zsh")],
+        &[
+            listed("cx", "zsh", true, first(TitleMark::Neither)),
+            listed(
+                "cx",
+                "codex",
+                false,
+                in_pane_titled("%1", first(TitleMark::Waiting)),
+            ),
+            listed(
+                "cx",
+                "codex",
+                false,
+                in_pane_titled("%2", first(TitleMark::Working)),
+            ),
+        ],
+    );
+    let bound = bind_live(&snapshot, &LiveFile::default(), &alive());
+    assert_eq!(
+        state_and_source(bound.panes.get(&pane("cx", "%1"))),
+        Some((LiveState::Waiting, LiveSource::PaneTitle))
+    );
+    assert_eq!(
+        state_and_source(bound.panes.get(&pane("cx", "%2"))),
+        Some((LiveState::Working, LiveSource::PaneTitle))
+    );
+    assert_eq!(bound.panes.len(), 2, "the shell's pane takes nothing");
+    let counts = snapshot.live_counts_by_mux(bound.tables(), NOW_MS);
+    assert_eq!(
+        counts.get(&mux_id("cx")).copied(),
+        Some(LiveCounts {
+            waiting: 1,
+            working: 1,
+            ..LiveCounts::default()
+        })
+    );
+}
+
+#[test]
+fn a_hook_wait_in_a_pane_that_is_not_active_is_cleared_in_its_own_slot() {
+    let snapshot = graph_of_panes(
+        vec![
+            mux_node("cx", "zsh"),
+            GraphNode::AgentSession(AgentSessionNode::new(session_id("s-1"), "codex")),
+        ],
+        &[
+            listed("cx", "zsh", true, first(TitleMark::Neither)),
+            listed(
+                "cx",
+                "codex",
+                false,
+                in_pane_titled("%3", twice(TitleMark::Working)),
+            ),
+        ],
+    );
+    let store = file([entry("s-1", LiveState::Waiting, MINUTE, "cx", "%3")]);
+    let bound = bind_live(&snapshot, &store, &alive());
+    assert_eq!(
+        state_and_source(bound.nodes.get(&session("s-1"))),
+        Some((LiveState::Working, LiveSource::PaneTitle))
+    );
+    assert!(bound.panes.is_empty(), "one agent, counted once");
+}
+
+#[test]
+fn an_entry_with_no_pane_is_not_the_agent_of_a_pane_that_is_not_active() {
+    // The entry came from a hook tmux answered for the active pane; the
+    // Codex in %1 beside it is another agent.
+    let snapshot = graph_of_panes(
+        vec![mux_node("cx", "zsh")],
+        &[
+            listed("cx", "zsh", true, first(TitleMark::Neither)),
+            listed(
+                "cx",
+                "codex",
+                false,
+                in_pane_titled("%1", twice(TitleMark::Working)),
+            ),
+        ],
+    );
+    let mut wait = entry("s-1", LiveState::Waiting, MINUTE, "cx", "%0");
+    wait.tmux.as_mut().expect("tmux").pane = None;
+    let bound = bind_live(&snapshot, &file([wait]), &alive());
+    assert_eq!(
+        state_and_source(bound.panes.get(&LivePane::new(mux_id("cx"), None))),
+        Some((LiveState::Waiting, LiveSource::Hook))
+    );
+    assert_eq!(
+        state_and_source(bound.panes.get(&pane("cx", "%1"))),
+        Some((LiveState::Working, LiveSource::PaneTitle))
+    );
+}
+
+#[test]
+fn a_launchers_title_binds_nothing_without_the_harnesss_hook_entry() {
+    let snapshot = graph_of_panes(
+        vec![mux_node("np", "node")],
+        &[listed("np", "node", true, first(TitleMark::Waiting))],
+    );
+    assert!(bind_live(&snapshot, &LiveFile::default(), &alive()).is_empty());
+
+    // Another harness's entry naming the pane is no evidence either.
+    let mut claude = entry("c-1", LiveState::Working, 20 * MINUTE, "np", "%0");
+    claude.harness = "claude-code".to_string();
+    let bound = bind_live(&snapshot, &file([claude]), &alive());
+    assert_eq!(
+        state_and_source(bound.panes.get(&pane("np", "%0"))),
+        Some((LiveState::Working, LiveSource::Hook))
+    );
+    assert_eq!(bound.panes.len(), 1);
+}
+
+#[test]
+fn a_launchers_title_counts_where_a_codex_hook_entry_names_its_pane() {
+    let nodes = || {
+        vec![
+            mux_node("np", "node"),
+            GraphNode::AgentSession(AgentSessionNode::new(session_id("s-1"), "codex")),
+        ]
+    };
+    // An approval answered under an npm-installed Codex clears its wait.
+    let snapshot = graph_of_panes(
+        nodes(),
+        &[listed("np", "node", true, twice(TitleMark::Working))],
+    );
+    let store = file([entry("s-1", LiveState::Waiting, MINUTE, "np", "%0")]);
+    let bound = bind_live(&snapshot, &store, &alive());
+    assert_eq!(
+        state_and_source(bound.nodes.get(&session("s-1"))),
+        Some((LiveState::Working, LiveSource::PaneTitle))
+    );
+    assert!(bound.panes.is_empty());
+
+    // A quiet hook entry gives way to the title's wait.
+    let snapshot = graph_of_panes(
+        nodes(),
+        &[listed("np", "node", true, first(TitleMark::Waiting))],
+    );
+    let store = file([entry("s-1", LiveState::Working, 20 * MINUTE, "np", "%0")]);
+    let bound = bind_live(&snapshot, &store, &alive());
+    assert_eq!(
+        state_and_source(bound.nodes.get(&session("s-1"))),
+        Some((LiveState::Waiting, LiveSource::PaneTitle))
+    );
+
+    // Once that agent is gone, the launcher's pane is nobody's.
+    let bound = bind_live(&snapshot, &store, &FakePids::running(&[]));
+    assert_eq!(
+        state_and_source(bound.nodes.get(&session("s-1"))),
+        Some((LiveState::Working, LiveSource::Hook))
     );
     assert!(bound.panes.is_empty());
 }

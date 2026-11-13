@@ -237,6 +237,45 @@ fn title_agents_counts_the_harnesss_bindings_read_from_pane_titles() {
 }
 
 #[test]
+fn title_agents_reads_each_panes_own_program_from_the_pane_listing() {
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    use crate::model::{
+        LivePane, MuxProbe, MuxProbeStatus, MuxSessionId, MuxSessionNode, ProbedPane,
+    };
+
+    // The session's active pane runs a shell; Codex runs in %1 and an
+    // npm-installed Codex (`node`) in %2.
+    let mut node = MuxSessionNode::new(MuxSessionId::new("tmux:cx"), "tmux", "cx");
+    node.active_pane_command = Some("zsh".to_string());
+    let mut probe = MuxProbe::new(MuxProbeStatus::Listed, NOW_MS / 1000);
+    for (pane, command) in [("%0", "zsh"), ("%1", "codex"), ("%2", "node")] {
+        probe.panes.insert(
+            pane.to_string(),
+            ProbedPane {
+                session: "cx".to_string(),
+                command: Some(command.to_string()),
+                active: pane == "%0",
+            },
+        );
+    }
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![GraphNode::MuxSession(node)],
+        ..GraphSnapshot::empty()
+    };
+    snapshot.mux_probes.insert("tmux".to_string(), probe);
+    for pane in ["%1", "%2"] {
+        snapshot.pane_live.insert(
+            LivePane::new(MuxSessionId::new("tmux:cx"), Some(pane.to_string())),
+            LiveBinding::new(
+                LiveObservation::new(LiveState::Working, LiveSource::PaneTitle, NOW_MS),
+                Liveness::Unknown,
+            ),
+        );
+    }
+    assert_eq!(title_agents(&snapshot, "codex"), 2);
+}
+
+#[test]
 fn the_line_says_how_many_agents_their_pane_titles_show() {
     assert_eq!(title_note(0), None);
     assert_eq!(

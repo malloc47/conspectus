@@ -106,7 +106,6 @@ fn parser_extracts_name_path_activity_and_created_epoch() {
             session_id: None,
             active_pane_id: None,
             socket_path: None,
-            active_pane_title: None,
         }]
     );
 }
@@ -894,16 +893,19 @@ fn the_pane_parser_keeps_each_panes_session_and_program_and_skips_junk() {
                 pane_id: "%1".into(),
                 session: "editor".into(),
                 command: Some("codex".into()),
+                title: None,
             },
             TmuxPaneRow {
                 pane_id: "%2".into(),
                 session: "editor".into(),
                 command: Some("claude".into()),
+                title: None,
             },
             TmuxPaneRow {
                 pane_id: "%3".into(),
                 session: "other".into(),
                 command: None,
+                title: None,
             },
         ]
     );

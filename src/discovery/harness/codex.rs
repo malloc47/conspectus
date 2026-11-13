@@ -181,6 +181,12 @@ impl HarnessAdapter for CodexAdapter {
         Some(title::mark(title))
     }
 
+    /// The npm package starts Codex through a Node script, which stays in
+    /// the pane's foreground, so tmux reports `node`.
+    fn pane_title_launchers(&self) -> &'static [&'static str] {
+        &["node"]
+    }
+
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         vec![std::ffi::OsString::from("codex")]
     }

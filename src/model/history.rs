@@ -723,10 +723,11 @@ pub struct MuxProbe {
     /// but resurrectable (zellij's `EXITED`). They are gone, not live.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exited: Vec<String>,
-    /// What the active pane title of each listed session said about its
-    /// agent, by session name, for the sessions whose pane runs a harness
-    /// that classifies its titles (ADR 0217). Only the mark is kept,
-    /// never the title.
+    /// What the title of each listed pane said about its agent, by pane
+    /// id, for the panes that run a harness that classifies its titles or
+    /// one of its launchers (ADRs 0217, 0221); the pane's session and
+    /// program are in [`Self::panes`]. Only the mark is kept, never the
+    /// title.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub titles: BTreeMap<String, crate::model::live::PaneTitle>,
     /// Every pane of the server's sessions, by the backend's pane id
@@ -790,6 +791,9 @@ pub struct ProbedPane {
     /// `#{pane_current_command}`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// The session's active pane, the one its mux node describes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub active: bool,
 }
 
 /// Access to a record's envelope, whatever its kind.

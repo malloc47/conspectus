@@ -437,6 +437,16 @@ pub trait HarnessAdapter: Send + Sync {
         None
     }
 
+    /// Programs a pane can report in place of this harness when an
+    /// installer starts it through them (`node` for a package that runs a
+    /// script first), whose titles the mux probe then classifies as this
+    /// harness's (ADR 0221). Never evidence on its own: such a pane's mark
+    /// counts only where this harness's hook entry names the pane. Only
+    /// read for a harness that classifies its titles. Defaults to none.
+    fn pane_title_launchers(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// A poll of the harness's own list of its sessions that repairs a
     /// hook state its hooks left stuck (ADR 0218), or `None` for a
     /// harness without one. A process that discovers in the background
@@ -614,6 +624,52 @@ pub fn adapters_for_program(program: &str) -> impl Iterator<Item = &'static dyn 
 /// 0217): whether its title classifier answers at all.
 pub fn reads_pane_titles(adapter: &dyn HarnessAdapter) -> bool {
     adapter.pane_title_mark("").is_some()
+}
+
+/// Whose titles a pane running `program` shows, for the mux probe and
+/// the live-state binding (ADRs 0217, 0221).
+#[derive(Clone, Copy)]
+pub enum PaneTitleReader {
+    /// The program is the harness's own, by the exact process names the
+    /// hook sidecar uses to tell which harness a pane runs.
+    Direct(&'static dyn HarnessAdapter),
+    /// The program names no harness but is one this harness may run
+    /// under ([`HarnessAdapter::pane_title_launchers`]): its mark counts
+    /// only where the harness's hook entry names the pane.
+    Launched(&'static dyn HarnessAdapter),
+}
+
+impl PaneTitleReader {
+    /// The harness whose titles these are.
+    pub fn adapter(self) -> &'static dyn HarnessAdapter {
+        match self {
+            Self::Direct(adapter) | Self::Launched(adapter) => adapter,
+        }
+    }
+}
+
+/// The harness whose titles a pane running `program` shows, when one
+/// classifies its titles: the harness the program names, else the first
+/// that lists the program as a launcher. A program that names a harness
+/// whose titles are not read gives none, whatever launches it.
+pub fn pane_title_reader(program: &str) -> Option<PaneTitleReader> {
+    if let Some(adapter) = adapters_for_program(program).next() {
+        return reads_pane_titles(adapter).then_some(PaneTitleReader::Direct(adapter));
+    }
+    let first = program.split_whitespace().next().unwrap_or_default();
+    let name = first.rsplit('/').next().unwrap_or(first);
+    if name.is_empty() {
+        return None;
+    }
+    registered_adapters()
+        .find(|adapter| {
+            reads_pane_titles(*adapter)
+                && adapter
+                    .pane_title_launchers()
+                    .iter()
+                    .any(|launcher| launcher.eq_ignore_ascii_case(name))
+        })
+        .map(PaneTitleReader::Launched)
 }
 
 /// The first registered adapter whose harness binary appears among a

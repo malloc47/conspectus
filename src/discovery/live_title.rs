@@ -1,10 +1,13 @@
-//! Pane titles in the live tables (ADR 0217): what a mux probe read from
-//! the title of each session's active pane, folded into the bindings of
-//! the store's entries.
+//! Pane titles in the live tables (ADRs 0217, 0221): what a mux probe
+//! read from the title of each pane of its server, folded into the
+//! bindings of the store's entries.
 //!
 //! The probe keeps, for a pane whose harness reads its own titles, only
 //! a mark ([`TitleMark`]) and the run of probes that read it
-//! ([`PaneTitle`]). Here each mark meets the pane's *hook entry*: the
+//! ([`PaneTitle`]). A pane that runs one of that harness's launchers
+//! (`node` for an npm-installed Codex) has its mark kept too, and it
+//! counts only where the harness's hook entry names the pane: rule 1
+//! does not apply to it. Here each mark meets the pane's *hook entry*: the
 //! bound store entry of the pane's harness whose tmux names the mux's
 //! server and session and the pane (or no pane), that has not recorded
 //! `exited` and whose process was not found dead. Read at the probe's
@@ -48,6 +51,8 @@ pub(super) fn fold_titles(
         let hook = hook_entry(&read, sessions, panes, bound);
         let (slot, binding) = match hook {
             Some((slot, binding)) => (slot, Some(binding)),
+            // A launcher's pane is the harness's only on its hook's word.
+            None if read.launched => continue,
             None => (
                 Slot::Pane(LivePane::new(read.mux.clone(), read.title.pane.clone())),
                 None,
@@ -140,54 +145,74 @@ struct Reading<'a> {
     /// The full path of the server's socket, when its probe read one.
     socket_path: Option<&'a str>,
     session: &'a str,
-    /// The harness the mux's active pane runs.
+    /// The harness whose titles the pane shows, by the program the same
+    /// listing reported for it.
     harness: &'static str,
+    /// The pane runs a launcher of that harness, not the harness itself.
+    launched: bool,
+    /// The pane is its session's active pane.
+    active: bool,
     title: &'a PaneTitle,
 }
 
-/// Every pane title the snapshot's probes recorded for its live tmux
-/// muxes whose active pane still runs a harness.
+/// Every pane title the snapshot's probes recorded for a pane of one of
+/// its live tmux muxes whose program shows a harness's titles.
 fn readings(snapshot: &GraphSnapshot) -> Vec<Reading<'_>> {
-    use crate::discovery::harness::adapters_for_program;
-    snapshot
-        .live_nodes()
-        .filter_map(|node| match node {
-            GraphNode::MuxSession(mux) if mux.backend == crate::discovery::tmux::TMUX_BACKEND => {
-                let probe = snapshot
-                    .mux_probes
-                    .get(&probe_key(&mux.backend, mux.socket.as_deref()))?;
-                let title = probe.titles.get(mux.session_name())?;
-                let harness = adapters_for_program(mux.active_pane_command.as_deref()?)
-                    .next()?
-                    .harness_key();
-                Some(Reading {
-                    mux: mux.id.clone(),
-                    server: effective_socket(mux.socket.as_deref()),
-                    socket_path: probed_socket(snapshot, mux),
-                    session: mux.session_name(),
-                    harness,
-                    title,
-                })
-            }
-            _ => None,
-        })
-        .collect()
+    use crate::discovery::harness::{PaneTitleReader, pane_title_reader};
+    let mut readings = Vec::new();
+    for node in snapshot.live_nodes() {
+        let GraphNode::MuxSession(mux) = node else {
+            continue;
+        };
+        if mux.backend != crate::discovery::tmux::TMUX_BACKEND {
+            continue;
+        }
+        let Some(probe) = snapshot
+            .mux_probes
+            .get(&probe_key(&mux.backend, mux.socket.as_deref()))
+        else {
+            continue;
+        };
+        for (pane, title) in &probe.titles {
+            let Some(listed) = probe
+                .panes
+                .get(pane)
+                .filter(|listed| listed.session == mux.session_name())
+            else {
+                continue;
+            };
+            let Some(reader) = listed.command.as_deref().and_then(pane_title_reader) else {
+                continue;
+            };
+            readings.push(Reading {
+                mux: mux.id.clone(),
+                server: effective_socket(mux.socket.as_deref()),
+                socket_path: probed_socket(snapshot, mux),
+                session: mux.session_name(),
+                harness: reader.adapter().harness_key(),
+                launched: matches!(reader, PaneTitleReader::Launched(_)),
+                active: listed.active,
+                title,
+            });
+        }
+    }
+    readings
 }
 
 /// The pane's hook entry, with its slot and its binding as `bound` holds
-/// it: of the entries bound to a session or to the pane (or to the mux
-/// with no pane) that belong to the pane's agent, the one the store wrote
-/// last.
+/// it: of the entries bound to a session or to the pane (or, for the
+/// session's active pane, to the mux with no pane) that belong to the
+/// pane's agent, the one the store wrote last.
 fn hook_entry(
     read: &Reading<'_>,
     sessions: &BTreeMap<NodeId, &LiveEntry>,
     panes: &BTreeMap<LivePane, &LiveEntry>,
     bound: &BoundLive,
 ) -> Option<(Slot, LiveBinding)> {
-    let in_pane = [
-        LivePane::new(read.mux.clone(), read.title.pane.clone()),
-        LivePane::new(read.mux.clone(), None),
-    ];
+    let mut in_pane = vec![LivePane::new(read.mux.clone(), read.title.pane.clone())];
+    if read.active {
+        in_pane.push(LivePane::new(read.mux.clone(), None));
+    }
     let pane_entries = in_pane.into_iter().filter_map(|pane| {
         let entry = panes.get(&pane)?;
         let binding = bound.panes.get(&pane)?;
@@ -211,8 +236,10 @@ fn hook_entry(
         .map(|(slot, _, binding)| (slot, binding))
 }
 
-/// Whether `entry`'s tmux names the reading's mux and its pane, or the
-/// mux and no pane. The server is matched as the binding matches it.
+/// Whether `entry`'s tmux names the reading's mux and its pane, or, for
+/// the session's active pane, the mux and no pane: an entry that names no
+/// pane came from a hook tmux answered for the session's active pane.
+/// The server is matched as the binding matches it.
 fn names_pane(entry: &LiveEntry, read: &Reading<'_>) -> bool {
     let Some(tmux) = &entry.tmux else {
         return false;
@@ -227,7 +254,10 @@ fn names_pane(entry: &LiveEntry, read: &Reading<'_>) -> bool {
     server == read.server
         && names_server(socket, read.socket_path)
         && tmux.session.as_deref() == Some(read.session)
-        && (pane.is_none() || pane == read.title.pane.as_deref())
+        && match pane {
+            None => read.active,
+            Some(pane) => Some(pane) == read.title.pane.as_deref(),
+        }
 }
 
 #[cfg(test)]

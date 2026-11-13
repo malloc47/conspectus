@@ -39,7 +39,7 @@ pub struct DiscoveryCaches {
     /// process-tree walk when that slice hasn't changed.
     pub(crate) process_tree_fingerprint: Mutex<Option<u64>>,
     /// The pane-title marks the last probe of each mux server read, by
-    /// probe key and session name (ADR 0217), so the next probe can tell
+    /// probe key and pane id (ADRs 0217, 0221), so the next probe can tell
     /// how long a pane's title has read the same mark. Marks only, never
     /// a title.
     pub(crate) pane_titles: Mutex<BTreeMap<String, BTreeMap<String, PaneTitle>>>,
@@ -96,11 +96,10 @@ impl DiscoveryCaches {
         previous
     }
 
-    /// `titles`, what this probe of the mux server `key` read, each
-    /// carried on from the last probe's reading of the same session
-    /// ([`PaneTitle::after`]). They replace the last probe's, so a
-    /// session the probe did not list starts a new run when it is listed
-    /// again.
+    /// `titles`, what this probe of the mux server `key` read by pane id,
+    /// each carried on from the last probe's reading of the same pane
+    /// ([`PaneTitle::after`]). They replace the last probe's, so a pane
+    /// the probe did not list starts a new run when it is listed again.
     pub(crate) fn carry_pane_titles(
         &self,
         key: &str,
@@ -110,9 +109,9 @@ impl DiscoveryCaches {
         let previous = last.remove(key).unwrap_or_default();
         let carried: BTreeMap<String, PaneTitle> = titles
             .into_iter()
-            .map(|(session, title)| {
-                let carried = title.after(previous.get(&session));
-                (session, carried)
+            .map(|(pane, title)| {
+                let carried = title.after(previous.get(&pane));
+                (pane, carried)
             })
             .collect();
         last.insert(key.to_string(), carried.clone());
