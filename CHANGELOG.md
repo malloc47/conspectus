@@ -236,6 +236,15 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Changed
 
+- **Every pane's Codex title is read, not only the active pane's.** The
+  pane listing the tmux probe runs each cycle now carries each pane's
+  title, so a Codex in another pane of a split window, or in a window
+  that is not current, shows `!` and `»` on its mux like one in the
+  active pane; the session listing no longer asks for a title, so this
+  costs no extra tmux call. A Codex started from its npm package (which
+  tmux reports as `node`) has its title read too, only where Codex's
+  own hooks have reported from that pane. `CONSPECTUS_DISABLE_PANE_TITLES`
+  still turns all of it off.
 - **Breaking: pins moved and the pin verbs changed.** Pins live in
   `$XDG_DATA_HOME/conspectus/pins.toml`, not as `[[pins.entries]]` in
   config files. `pin create`, `launch`, `attach`, `bind`, `rebind`, and

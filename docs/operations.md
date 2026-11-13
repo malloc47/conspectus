@@ -618,8 +618,7 @@ events count on its parent's session. Beyond the
   turn, or an interrupt.
 - MCP elicitations and sign-in prompts fire no hook, so a session waiting
   on one reads `working` until it goes quiet after ten minutes; then its
-  [pane title](#codexs-pane-title) says `waiting`, if the pane is a
-  session's active pane.
+  [pane title](#codexs-pane-title) says `waiting`.
 - A turn that ends in plan mode reads `ready`, whether or not it proposed
   a plan you still have to accept.
 - With hooks turned off or managed hooks only, the hooks report nothing,
@@ -633,9 +632,9 @@ events count on its parent's session. Beyond the
 Codex writes its own state into its terminal's title, which tmux keeps as
 the pane's title: a spinner frame (`⠋`, `⠙`, …) while it works, and
 `[ ! ] Action Required` (blinking with `[ . ] Action Required`) while it
-needs you. The tmux probe Conspectus already runs asks for the title of
-each session's active pane in the same call, and for a pane whose program
-is `codex`, reads it as live state:
+needs you. The tmux probe Conspectus already runs lists every pane of
+each server with its title, and for a pane whose program is `codex`,
+reads the title as live state, whether or not the pane is active:
 
 | Title begins with | Live state |
 | --- | --- |
@@ -682,13 +681,17 @@ which of the three it was, and drops the text; the title appears in no
 file, output, log, or error. Set `CONSPECTUS_DISABLE_PANE_TITLES` to stop
 reading titles at all.
 
+A Codex started from its npm package runs under `node`, and tmux reports
+the pane as `node`. Conspectus reads such a pane's title as Codex's only
+where Codex's own hooks have reported from that pane (so with hooks, its
+approvals clear and a quiet hook state gives way to the title); with no
+hook report for the pane it reads nothing from it, since most `node`
+panes are not Codex.
+
 What the title cannot see:
 
-- **Another pane.** Only a session's active pane is read; a Codex in
-  another pane of a split window, or in a window that is not current,
-  shows only what its hooks report.
-- **A Codex the pane does not report as `codex`**, such as one started
-  through `node` from an npm install.
+- **A Codex the pane reports as anything else**, or one under `node`
+  whose hooks have not reported from that pane.
 - **A title Codex does not write**: a `tui.terminal_title` without the
   activity item or set to `null`, or tmux's `allow-set-title off`. With
   Codex's animations off, a working Codex shows no spinner, so its title

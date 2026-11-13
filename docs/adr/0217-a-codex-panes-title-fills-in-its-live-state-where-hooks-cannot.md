@@ -14,7 +14,12 @@ adds a source to the vocabulary of
 and a step to the binding of
 [ADR 0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md);
 bumps the snapshot format to 13 (ADR 0083). Adds no program, subcommand,
-socket, signal, or write path (ADR 0117, ADR 0143).
+socket, signal, or write path (ADR 0117, ADR 0143). Amended by
+[ADR 0221](0221-every-panes-title-is-read-from-the-pane-listing.md):
+every pane's title is read from the pane listing of ADR 0220, and a
+pane running one of a harness's launchers (`node` for Codex) is read as
+that harness's where its hook entry names the pane (decisions 1, 2, 6,
+7, and 9).
 
 ## Context
 
