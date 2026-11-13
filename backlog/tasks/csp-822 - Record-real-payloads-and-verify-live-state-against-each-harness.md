@@ -4,7 +4,7 @@ title: Record real payloads and verify live state against each harness
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-13 04:56'
+updated_date: '2026-11-13 06:06'
 labels:
   - live-state
   - ls-docs
@@ -68,6 +68,8 @@ From CSP-815: claims the Codex slice encodes that a recording should confirm. Ea
 From CSP-816 (OpenCode): the event scripts in `tests/fixtures/hooks/opencode-live/` are synthetic; their README lists the shapes to confirm. Also check in the sandbox: that 1.x `permission.asked` and `question.*` reach the plugin's `event` hook; that `dispose` runs when a 1.x TUI quits; that 2.x `ctx.event.subscribe` yields `{type, data, location: {directory}}` and whether a server plugin instance gets other locations' events (the reducer drops them); that the 2.x step and compaction events carry `data.sessionID`; the 2.x `execution.failed` error `type` words; and that a `dist/v2` entry in `opencode.jsonc` loads both entrypoints. The plugin's TypeScript was not compiled when it landed: run `npm install && npm run typecheck` in `plugins/opencode-hook` first.
 
 From CSP-817 (Pi): the event scripts in `tests/fixtures/hooks/pi-live/` are synthetic; their README lists the event shapes to confirm. Also check in the sandbox: that Pi loads the extension (it was run under Node with a stand-in API, never compiled against Pi's types) and ignores its one extra export (`testOnly`); the field names of every handled event, including `after_provider_response.status` and `agent_settled.aborted`; whether a gate's dialog opens inside the tool's `tool_execution_start`/`_end` or before it; that `/reload` keeps the session id and calls the factory again; `ctx.isIdle()` at `session_start`; that a quit's and a `kill-pane`'s `session_shutdown` report lands; that the attribution record now carries Pi's own pid; and whether Pi exposes its version to an extension (CSP-851).
+
+Added by CSP-832: the `claude agents --json` fixtures under `tests/fixtures/claude-agents/` are synthetic and unverified except the empty list `[]` (seen from a scratch run with no session). Record real output for an interactive busy, waiting (permission prompt, input needed), and idle session and a background blocked, done, failed, and stopped one, with every non-enum string redacted, and replace the fixtures. Check against ADR 0218: the field names (`pid`, `sessionId`, `status`, `state`, `waitingFor`) and values; that `pid` is the same process `CLAUDE_PID` names to the hooks (the poll matches hook entries by it); that an Esc-interrupted turn lists `idle` and an approved prompt lists `busy` while its tool runs; and whether `claude agents --json` still opens no connection with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and writes nothing to an initialized config on the version recorded.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
