@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use tuikit::age::Age;
+
 use crate::model::{
     GraphNode, GraphSnapshot, LinkState, NodeId, NodeKind, PinId, PinKind, PinNode, RelationKind,
     SlotStatus, path_is_ancestor_of,
@@ -15,8 +17,8 @@ use crate::model::{
 use crate::tui::{PinnedGrouping, Sort};
 
 use super::{
-    GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone, PinMarker, Row, RowId, RowKind, RowTree,
-    ViewLabel, format_recency, harness_label, pin_nodes, repo_display_path, shorten_home,
+    GroupRow, MixedChip, MixedRow, MixedTone, PinMarker, PrStatus, Row, RowId, RowKind, RowTree,
+    ViewLabel, harness_label, pin_nodes, repo_display_path, shorten_home,
 };
 
 pub struct PinnedBuildInputs<'a> {
@@ -93,11 +95,7 @@ pub fn build_pinned_tree(inputs: PinnedBuildInputs<'_>) -> RowTree {
                     id: RowId::Bucket(label.clone()),
                     depth: 0,
                     expandable: true,
-                    kind: RowKind::Group(GroupRow {
-                        display_path: label,
-                        primary_node: None,
-                        is_launch_context: false,
-                    }),
+                    kind: RowKind::Group(GroupRow::at_path(&label, None)),
                 });
                 for entry in members {
                     push_slot(&mut tree, snapshot, entry.pin, 1, home, now);
@@ -141,7 +139,7 @@ struct Described {
     epoch: Option<i64>,
     chip: Option<MixedChip>,
     content: String,
-    pr_state: Option<String>,
+    pr_status: Option<PrStatus>,
 }
 
 /// Status, age source, and content for one slot (ADR 0141's kind
@@ -151,7 +149,7 @@ fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Des
         .target_node
         .as_ref()
         .and_then(|id| snapshot.find_node(id));
-    let mut pr_state = None;
+    let mut pr_status = None;
     let status = match pin.status {
         SlotStatus::Planned => super::words::PLANNED.to_string(),
         SlotStatus::Missing => super::words::MISSING.to_string(),
@@ -172,20 +170,9 @@ fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Des
                 }
             }
             (PinKind::Pr, Some(GraphNode::ForgePr(pr))) => {
-                let state = pr.state.clone().unwrap_or_default().to_ascii_lowercase();
-                let draft = pr.is_draft && (state.is_empty() || state == "open");
-                pr_state = Some(if draft {
-                    super::words::PR_DRAFT.to_string()
-                } else {
-                    state.clone()
-                });
-                if draft {
-                    super::words::PR_DRAFT.to_string()
-                } else if state.is_empty() {
-                    super::words::PR_OPEN.to_string()
-                } else {
-                    state
-                }
+                let status = PrStatus::of(pr.state.as_deref(), pr.is_draft);
+                pr_status = Some(status);
+                status.word().to_string()
             }
             _ => super::words::LIVE.to_string(),
         },
@@ -233,7 +220,7 @@ fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Des
         epoch,
         chip,
         content,
-        pr_state,
+        pr_status,
     }
 }
 
@@ -380,19 +367,18 @@ fn push_slot(
             label: pin.id.id.clone(),
             status: described.status,
             tone: described.tone,
-            age: format_recency(now, described.epoch),
+            age: Age::of(described.epoch, now).map(Age::label),
             age_epoch: described.epoch,
             state: None,
             chip: described.chip,
             content: described.content,
             primary_node: pin_node,
-            pr_state: described.pr_state,
+            pr_status: described.pr_status,
             marker: if pin.status == SlotStatus::Live {
                 PinMarker::Running
             } else {
                 PinMarker::Stopped
             },
-            grid: MixedGrid::Columns,
         }),
     });
     for (offset, child) in children {
@@ -479,7 +465,7 @@ fn session_row(
         }
         .to_string(),
         tone: MixedTone::Normal,
-        age: format_recency(now, session.last_active_epoch),
+        age: Age::of(session.last_active_epoch, now).map(Age::label),
         age_epoch: session.last_active_epoch,
         state: None,
         chip: Some(MixedChip::agent(harness_label(&session.harness_key))),
@@ -491,9 +477,8 @@ fn session_row(
             .map(|cwd| shorten_home(cwd, home))
             .unwrap_or_default(),
         primary_node: id.clone(),
-        pr_state: None,
+        pr_status: None,
         marker: PinMarker::None,
-        grid: MixedGrid::Columns,
     })
 }
 
@@ -511,7 +496,7 @@ fn mux_row(
         label: mux.session_name().to_string(),
         status: super::words::LIVE.to_string(),
         tone: MixedTone::Normal,
-        age: format_recency(now, mux.activity_epoch),
+        age: Age::of(mux.activity_epoch, now).map(Age::label),
         age_epoch: mux.activity_epoch,
         state: None,
         chip: super::mux_program_harness(mux, None, None)
@@ -523,9 +508,8 @@ fn mux_row(
             .map(|cwd| shorten_home(cwd, home))
             .unwrap_or_default(),
         primary_node: id.clone(),
-        pr_state: None,
+        pr_status: None,
         marker: PinMarker::None,
-        grid: MixedGrid::Columns,
     })
 }
 

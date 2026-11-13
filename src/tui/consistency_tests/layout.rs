@@ -1,26 +1,27 @@
-//! Modals and forms keep a stable layout: nothing they draw escapes the
-//! frame, and moving the selection inside one changes which row is
-//! highlighted, not where any text sits.
+//! The modals the layout checks build, and the layout rules that are
+//! Conspectus's own.
 //!
-//! Every [`Modal`] variant is either built here and checked at a range of
-//! sizes, or listed with the reason it can't be. A new variant fails the
-//! coverage test until it is added to one list or the other.
+//! [`builders`] opens every framed modal over the shared world; the
+//! framework's conformance suite (`conventions.rs`) checks each at a range
+//! of sizes: nothing it draws escapes the frame, the frame and title take
+//! the one look, moving the selection moves no text, and no word is cut
+//! at the edge. What stays here is particular to Conspectus's modals: the
+//! search modal's sizing rule and title, and how a prompt draws over
+//! another modal.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
+use tuikit::testkit::conformance::{HEIGHTS, WIDTHS};
+use tuikit::testkit::keys;
 
 use super::*;
 use crate::tui::Modal;
-use crate::tui::modal::Overlay;
-
-const WIDTHS: [u16; 5] = [60, 80, 120, 160, 220];
-const HEIGHTS: [u16; 2] = [20, 40];
 
 pub(super) type Open = fn(&mut App);
 
-/// One key into the open search overlay, through the runtime's handler.
+/// One key into the open search overlay, through the modal stack.
 pub(super) fn search_key(app: &mut App, code: KeyCode) {
-    crate::tui::runtime::handle_search_overlay_key(app, KeyEvent::new(code, KeyModifiers::NONE));
+    crate::tui::runtime::modal_key_pure(app, keys::press(code));
 }
 
 pub(super) fn type_into_search(app: &mut App, text: &str) {
@@ -29,51 +30,73 @@ pub(super) fn type_into_search(app: &mut App, text: &str) {
     }
 }
 
-/// The name of a modal, from an exhaustive match: a new variant does not
-/// compile until it is named here.
+/// The name of a modal, as its registration spells it.
 pub(super) fn name_of(modal: &Modal) -> &'static str {
-    match modal {
-        Modal::Help(_) => "Help",
-        Modal::Controls(_) => "Controls",
-        Modal::Rename(_) => "Rename",
-        Modal::Search(_) => "Search",
-        Modal::ValueModal(_) => "ValueModal",
-        Modal::Messages(_) => "Messages",
-        Modal::Viewer(_) => "Viewer",
-        Modal::PaneViewer(_) => "PaneViewer",
-        Modal::WorktreeMenu(_) => "WorktreeMenu",
-        Modal::NewMux(_) => "NewMux",
-        Modal::MuxMenu(_) => "MuxMenu",
-        Modal::MuxLaunch(_) => "MuxLaunch",
-        Modal::PinEdit(_) => "PinEdit",
-        Modal::RowMenu(_) => "RowMenu",
-        Modal::CleanUp(_) => "CleanUp",
-        Modal::Picker(_) => "Picker",
-    }
+    modal.name()
 }
-
-/// Modals the layout checks can't build here, and why.
-const SKIPPED: &[(&str, &str)] = &[
-    (
-        "Viewer",
-        "the full-screen transcript viewer needs a session transcript on disk; its own tests cover its layout",
-    ),
-    (
-        "PaneViewer",
-        "the full-screen pane viewer fills the screen rather than framing a modal; its own tests cover its layout",
-    ),
-];
 
 fn open_pinned(app: &mut App, message: Msg) {
     select(app, "conspectus-main");
     app.update(message);
 }
 
+/// The facts of a linked worktree with a live session in it.
+pub(super) fn worktree_context() -> crate::tui::widgets::worktree_menu::WorktreeMenuContext {
+    crate::tui::widgets::worktree_menu::WorktreeMenuContext {
+        context: crate::tui::worktree_actions::WorktreeContext::Worktree,
+        repo_root: Some("/wt/feature".into()),
+        branch: Some("feature".into()),
+        guard_sessions: vec!["session-one".into()],
+        can_mutate: true,
+        reveal_target: None,
+    }
+}
+
+/// The worktree menu for [`worktree_context`]: New worktree, Merge back,
+/// Remove, Close down.
+pub(super) fn open_worktree_menu(app: &mut App) {
+    let menu = crate::tui::widgets::worktree_menu::worktree_menu(&worktree_context())
+        .expect("a worktree menu");
+    app.open_worktree_menu(menu);
+}
+
+/// The worktree menu with the step of its entry `downs` rows down open
+/// over it, picked through the stack as the loops route keys.
+pub(super) fn open_worktree_step(app: &mut App, downs: usize) {
+    open_worktree_menu(app);
+    for _ in 0..downs {
+        crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Down));
+    }
+    crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Enter));
+}
+
+/// The Controls panel opened on `row`, with that row's editor open over
+/// it as a step, picked through the stack as the loops route keys.
+pub(super) fn open_controls_editor(
+    app: &mut App,
+    row: crate::tui::widgets::controls::ControlsCursor,
+) {
+    app.open_controls_at(row);
+    crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Enter));
+}
+
 /// Every modal that can be built, by name.
 pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
+    use crate::tui::widgets::controls::ControlsCursor;
     vec![
         ("Help", View::Pinned, |app| app.open_help_overlay()),
         ("Controls", View::Pinned, |app| app.open_controls_overlay()),
+        // The Controls editors, each open over the panel: the harness
+        // checklist, and the max-age prompt with an age typed.
+        ("Checklist", View::Pinned, |app| {
+            open_controls_editor(app, ControlsCursor::FilterHarness);
+        }),
+        ("Prompt", View::Pinned, |app| {
+            open_controls_editor(app, ControlsCursor::FilterMaxAge);
+            for c in "14d".chars() {
+                crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Char(c)));
+            }
+        }),
         ("Rename", View::Pinned, |app| {
             open_pinned(app, Msg::OpenSlotRename("conspectus-main".into()));
         }),
@@ -93,33 +116,39 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
             search_key(app, KeyCode::Tab);
         }),
         ("ValueModal", View::Pinned, |app| {
-            app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
+            app.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
                 "cwd",
                 "/home/operator/src/a/very/long/path/that/keeps/going/past/any/modal/width/to/see/what/happens",
             ));
         }),
         ("Messages", View::Pinned, |app| app.open_messages_overlay()),
-        ("WorktreeMenu", View::Pinned, |app| {
-            let ctx = crate::tui::widgets::worktree_menu::WorktreeMenuContext {
-                context: crate::tui::worktree_actions::WorktreeContext::Worktree,
-                repo_root: Some("/wt/feature".into()),
-                branch: Some("feature".into()),
-                guard_sessions: vec!["session-one".into()],
-                can_mutate: true,
-                reveal_target: None,
-            };
-            let state = crate::tui::widgets::worktree_menu::WorktreeMenuState::new(ctx)
-                .expect("a worktree menu");
-            app.open_worktree_menu(state);
+        ("WorktreeMenu", View::Pinned, open_worktree_menu),
+        // The worktree menu's steps, each open over the menu: the branch
+        // prompt with a name typed, the remove confirmation with its
+        // live-session list, and the close-down choice.
+        ("Prompt", View::Pinned, |app| {
+            open_worktree_step(app, 0);
+            for c in "feature/x".chars() {
+                crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Char(c)));
+            }
+        }),
+        ("Dialog", View::Pinned, |app| open_worktree_step(app, 2)),
+        ("Dialog", View::Pinned, |app| open_worktree_step(app, 3)),
+        // Clean up with nothing to clean up is a notice. (The History
+        // world has records past their age, so Clean up lists them.)
+        ("Dialog", View::History, |app| {
+            let notice = crate::tui::widgets::clean_up::empty_notice();
+            app.open_modal(Modal::Dialog(Box::new(notice)));
         }),
         ("NewMux", View::Pinned, |app| {
-            app.open_new_mux_form(crate::tui::widgets::new_mux::NewMuxFormState::new(
+            app.open_new_mux_form(crate::tui::widgets::new_mux::form(
                 "scratch",
                 "/home/operator/src/conspectus",
+                Vec::new(),
             ));
         }),
         ("MuxMenu", View::Pinned, |app| {
-            app.open_mux_menu(crate::tui::widgets::mux_menu::MuxMenuState::new());
+            app.open_mux_menu(crate::tui::actions::mux_menu());
         }),
         ("MuxLaunch", View::Pinned, |app| {
             open_pinned(app, Msg::OpenMuxLaunchForm);
@@ -130,8 +159,30 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
         ("RowMenu", View::Pinned, |app| {
             open_pinned(app, Msg::OpenRowMenu);
         }),
+        // Clean up over several records, so its cursor moves and wraps.
+        // It is built from candidates rather than by `Msg::OpenCleanUp`:
+        // the History world pins every gone record but one, which would
+        // give the cursor nowhere to go (the reducer's path is the ui
+        // tests').
         ("CleanUp", View::History, |app| {
-            app.update(Msg::OpenCleanUp);
+            use crate::history::reap::Candidate;
+            use crate::model::HistoryKind;
+            let record = |kind, id: &str, label: &str, days: i64| Candidate {
+                kind,
+                id: id.into(),
+                label: label.into(),
+                last_seen: 1_790_000_000 - days * 86_400,
+            };
+            let candidates = [
+                record(HistoryKind::Checkout, "h_a", "spike/cache", 12),
+                record(HistoryKind::Mux, "h_b", "docs-sweep", 9),
+                record(HistoryKind::Checkout, "h_c", "hotfix/login", 5),
+                record(HistoryKind::Mux, "h_d", "release-prep", 4),
+            ];
+            app.open_clean_up(crate::tui::widgets::clean_up::checklist(
+                &candidates,
+                1_790_000_000,
+            ));
         }),
         ("Picker", View::Pinned, |app| {
             open_pinned(app, Msg::OpenSlotRetarget("conspectus-main".into()));
@@ -139,66 +190,22 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
     ]
 }
 
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
-/// One key into the top modal's own handler. `false` when the modal
-/// needs live app context to handle keys (its layout is checked without
-/// moving).
-fn press(modal: &mut Modal, code: KeyCode) -> bool {
-    let key = key(code);
-    match modal {
-        Modal::Help(state) => {
-            state.handle((), key);
-        }
-        Modal::Rename(state) => {
-            state.handle((), key);
-        }
-        Modal::ValueModal(state) => {
-            state.handle((), key);
-        }
-        Modal::WorktreeMenu(state) => {
-            state.handle((), key);
-        }
-        Modal::NewMux(state) => {
-            state.handle((), key);
-        }
-        Modal::MuxMenu(state) => {
-            state.handle((), key);
-        }
-        Modal::MuxLaunch(state) => {
-            state.handle((), key);
-        }
-        Modal::PinEdit(state) => {
-            state.handle((), key);
-        }
-        Modal::RowMenu(state) => {
-            state.handle((), key);
-        }
-        Modal::CleanUp(state) => {
-            state.handle((), key);
-        }
-        Modal::Picker(state) => {
-            state.handle((), key);
-        }
-        Modal::Controls(_)
-        | Modal::Search(_)
-        | Modal::Messages(_)
-        | Modal::Viewer(_)
-        | Modal::PaneViewer(_) => {
-            return false;
-        }
+/// One key into the top modal, through the stack, its outcome left
+/// unsettled. `false` when the modal reads live App context that moves
+/// with the key (its layout is checked without moving).
+pub(super) fn press(app: &mut App, code: KeyCode) -> bool {
+    let fixed = matches!(
+        app.top_modal_name(),
+        None | Some("Controls" | "Search" | "Messages" | "Viewer" | "PaneViewer")
+    );
+    if !fixed {
+        let _ = app.with_modals(|stack, app| stack.route(keys::press(code), app));
     }
-    true
+    !fixed
 }
-
-/// Modals whose whole body scrolls with Up and Down, so their text
-/// legitimately moves.
-const SCROLLS: &[&str] = &["Help", "ValueModal"];
 
 /// The frame with the modal open, and the same app state without it.
-fn framed_and_bare(view: View, open: Open, width: u16, height: u16) -> (Buffer, Buffer) {
+pub(super) fn framed_and_bare(view: View, open: Open, width: u16, height: u16) -> (Buffer, Buffer) {
     let mut app = app_with(view, open);
     let with = buffer_of(&mut app, width, height);
     app.pop_top_modal();
@@ -212,39 +219,12 @@ pub(super) fn app_with(view: View, open: Open) -> App {
     app
 }
 
-fn symbol(buf: &Buffer, x: u16, y: u16) -> &str {
-    buf[(x, y)].symbol()
-}
-
-fn corner(symbol: &str) -> bool {
-    matches!(
-        symbol,
-        "┌" | "┐" | "└" | "┘" | "╭" | "╮" | "╰" | "╯" | "╔" | "╗" | "╚" | "╝"
-    )
-}
-
-fn vertical(symbol: &str) -> bool {
-    matches!(symbol, "│" | "┃" | "║")
-}
-
-/// The rectangle of the frame the modal drew, from its corner glyphs
-/// among the cells that differ from the frame without it.
-fn modal_rect(with: &Buffer, without: &Buffer) -> Option<(u16, u16, u16, u16)> {
-    let area = with.area;
-    let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0, 0);
-    let mut found = false;
-    for y in 0..area.height {
-        for x in 0..area.width {
-            if with[(x, y)] != without[(x, y)] && corner(symbol(with, x, y)) {
-                found = true;
-                x0 = x0.min(x);
-                y0 = y0.min(y);
-                x1 = x1.max(x);
-                y1 = y1.max(y);
-            }
-        }
-    }
-    found.then_some((x0, y0, x1, y1))
+/// The corners `(x0, y0, x1, y1)` of the frame the modal drew: the kit's
+/// [`frame_rect`](tuikit::testkit::buffer::frame_rect), from its corner
+/// glyphs among the cells that differ from the frame without it.
+pub(super) fn modal_rect(with: &Buffer, without: &Buffer) -> Option<(u16, u16, u16, u16)> {
+    tuikit::testkit::buffer::frame_rect(with, without)
+        .map(|rect| (rect.x, rect.y, rect.right() - 1, rect.bottom() - 1))
 }
 
 fn describe_size(name: &str, width: u16, height: u16) -> String {
@@ -252,228 +232,12 @@ fn describe_size(name: &str, width: u16, height: u16) -> String {
 }
 
 #[test]
-fn every_modal_is_checked_or_has_a_reason() {
-    let source = include_str!("../modal.rs");
-    let body = source
-        .split("pub enum Modal {")
-        .nth(1)
-        .and_then(|rest| rest.split("\n}\n").next())
-        .expect("the Modal enum");
-    let variants: Vec<&str> = body
-        .lines()
-        .filter(|line| line.starts_with("    ") && !line.starts_with("     "))
-        .filter_map(|line| {
-            let name = line.trim().split('(').next()?;
-            (name.chars().next()?.is_ascii_uppercase() && line.contains('(')).then_some(name)
-        })
-        .collect();
-    assert!(variants.len() >= 10, "found the variants: {variants:?}");
-    let built: Vec<&str> = builders().iter().map(|(name, _, _)| *name).collect();
-    for variant in variants {
-        assert!(
-            built.contains(&variant) || SKIPPED.iter().any(|(name, _)| *name == variant),
-            "Modal::{variant} is neither built in layout.rs nor listed with a reason"
-        );
-    }
-}
-
-#[test]
-fn each_builder_opens_the_modal_it_names() {
-    for (name, view, open) in builders() {
-        let app = app_with(view, open);
-        let top = app
-            .modal_stack()
-            .last()
-            .unwrap_or_else(|| panic!("{name}: nothing opened"));
-        assert_eq!(name_of(top), name);
-    }
-}
-
-#[test]
-fn nothing_a_modal_draws_escapes_its_frame() {
-    for (name, view, open) in builders() {
-        for width in WIDTHS {
-            for height in HEIGHTS {
-                let (with, without) = framed_and_bare(view, open, width, height);
-                let label = describe_size(name, width, height);
-                let Some((x0, y0, x1, y1)) = modal_rect(&with, &without) else {
-                    continue;
-                };
-                for y in 0..with.area.height {
-                    for x in 0..with.area.width {
-                        let inside = (x0..=x1).contains(&x) && (y0..=y1).contains(&y);
-                        assert!(
-                            inside || with[(x, y)] == without[(x, y)],
-                            "{label}: cell ({x},{y}) outside the frame ({x0},{y0})-({x1},{y1}) changed to {:?}",
-                            symbol(&with, x, y)
-                        );
-                    }
-                }
-                for y in (y0 + 1)..y1 {
-                    for edge in [x0, x1] {
-                        assert!(
-                            vertical(symbol(&with, edge, y)),
-                            "{label}: text runs into the frame at ({edge},{y}): {:?}\n{}",
-                            symbol(&with, edge, y),
-                            buffer_to_string(&with)
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// The rows whose styling changed between two frames: the rows that
-/// move with the selection.
-fn restyled_rows(a: &Buffer, b: &Buffer) -> Vec<u16> {
-    (0..a.area.height)
-        .filter(|&y| (0..a.area.width).any(|x| a[(x, y)].style() != b[(x, y)].style()))
-        .collect()
-}
-
-#[test]
-fn moving_the_selection_in_a_modal_moves_no_text() {
-    let mut compared: Vec<&str> = Vec::new();
-    for (name, view, open) in builders() {
-        for width in [80_u16, 120] {
-            let height = 40_u16;
-            if SCROLLS.contains(&name) {
-                continue;
-            }
-            let (first, without) = framed_and_bare(view, open, width, height);
-            let mut app = app_with(view, open);
-            let mut frames = vec![first];
-            let mut steps = 0;
-            for code in [
-                KeyCode::Down,
-                KeyCode::Down,
-                KeyCode::Down,
-                KeyCode::Down,
-                KeyCode::Up,
-            ] {
-                let moved = app.top_modal_mut().is_some_and(|modal| press(modal, code));
-                if !moved {
-                    break;
-                }
-                steps += 1;
-                frames.push(buffer_of(&mut app, width, height));
-            }
-            if steps == 0 {
-                continue;
-            }
-            let label = describe_size(name, width, height);
-            let rect = modal_rect(&frames[0], &without);
-            for pair in frames.windows(2) {
-                if let Some(rect) = rect {
-                    assert_eq!(
-                        modal_rect(&pair[1], &without),
-                        Some(rect),
-                        "{label}: the frame moved or resized with the selection"
-                    );
-                }
-            }
-            // Rows that restyle as the selection moves hold the choices;
-            // anything above and including the last of them keeps its
-            // text in place except the two-cell selection gutter. Rows
-            // below carry explanations that follow the selection.
-            let mut selectable = Vec::new();
-            for pair in frames.windows(2) {
-                selectable.extend(restyled_rows(&pair[0], &pair[1]));
-            }
-            let Some(&last) = selectable.iter().max() else {
-                continue;
-            };
-            compared.push(name);
-            let (x0, x1) = rect.map_or((0, frames[0].area.width - 1), |r| (r.0, r.2));
-            for pair in frames.windows(2) {
-                for y in 0..=last {
-                    for x in (x0 + 3)..x1 {
-                        assert_eq!(
-                            symbol(&pair[0], x, y),
-                            symbol(&pair[1], x, y),
-                            "{label}: text at ({x},{y}) changed when only the selection moved\nbefore:\n{}\nafter:\n{}",
-                            buffer_to_string(&pair[0]),
-                            buffer_to_string(&pair[1])
-                        );
-                    }
-                }
-            }
-        }
-    }
-    // The check has to bite: these forms and menus all have a moving
-    // selection, so a pass that compared nothing would be a false one.
-    for name in ["PinEdit", "RowMenu", "Picker", "MuxLaunch", "NewMux"] {
-        assert!(
-            compared.contains(&name),
-            "{name}: no selection movement was compared"
-        );
-    }
-}
-
-/// The text of each row inside the modal's frame, frame excluded.
-fn inner_rows(buf: &Buffer, rect: (u16, u16, u16, u16)) -> Vec<String> {
-    let (x0, y0, x1, y1) = rect;
-    ((y0 + 1)..y1)
-        .map(|y| ((x0 + 1)..x1).map(|x| symbol(buf, x, y)).collect())
-        .collect()
-}
-
-fn tokens_of(rows: &[String]) -> std::collections::BTreeSet<String> {
-    rows.iter()
-        .flat_map(|row| row.split_whitespace().map(str::to_string))
-        .collect()
-}
-
-#[test]
-fn no_word_in_a_modal_is_cut_off_at_its_edge() {
-    // The same modal drawn on a very wide screen shows every word whole.
-    // A word that touches the narrow modal's right edge and is only the
-    // start of a longer word there was clipped; a deliberate cut ends in
-    // an ellipsis.
-    for (name, view, open) in builders() {
-        let (wide, wide_bare) = framed_and_bare(view, open, 240, 40);
-        let Some(wide_rect) = modal_rect(&wide, &wide_bare) else {
-            continue;
-        };
-        let wide_tokens = tokens_of(&inner_rows(&wide, wide_rect));
-        for width in WIDTHS {
-            for height in HEIGHTS {
-                let (with, without) = framed_and_bare(view, open, width, height);
-                let Some(rect) = modal_rect(&with, &without) else {
-                    continue;
-                };
-                for (index, row) in inner_rows(&with, rect).iter().enumerate() {
-                    // The last text column: the inner column before the
-                    // right frame, or before a scrollbar column.
-                    let Some(last) = row.split_whitespace().last() else {
-                        continue;
-                    };
-                    let touches_edge = row.chars().count() <= row.trim_end().chars().count() + 1;
-                    if !touches_edge || last.ends_with('…') || wide_tokens.contains(last) {
-                        continue;
-                    }
-                    // A word longer than the modal has to be broken
-                    // somewhere; that is wrapping, not clipping.
-                    let inner = usize::from(rect.2 - rect.0 - 1);
-                    let clipped = wide_tokens.iter().any(|full| {
-                        full.len() > last.len() && full.len() <= inner && full.starts_with(last)
-                    });
-                    assert!(
-                        !clipped,
-                        "{}: row {index} ends in {last:?}, the start of a longer word, at the modal's edge\n{}",
-                        describe_size(name, width, height),
-                        buffer_to_string(&with)
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[test]
 fn the_search_modal_is_wide_and_follows_the_sizing_rule_at_every_size() {
-    use crate::tui::widgets::search::modal_size;
+    use crate::tui::widgets::search::SEARCH_SIZE;
+    let modal_size = |width, height| {
+        let rect = SEARCH_SIZE.rect(ratatui::layout::Rect::new(0, 0, width, height), 0);
+        (rect.width, rect.height)
+    };
     let mut checked = 0;
     for (name, view, open) in builders() {
         if name != "Search" {
@@ -530,5 +294,48 @@ fn the_quick_select_title_shows_both_reaches_and_does_not_shift_when_toggled() {
             "{width}: the frame changed width with the reach"
         );
         search_key(&mut app, KeyCode::Tab);
+    }
+}
+
+/// A stacked pair draws as its two halves: over any modal, a prompt
+/// draws exactly as it does alone (it clears its own frame), and outside
+/// the prompt the modal under it draws exactly as it does alone, but for
+/// the status bar, which names the keys of the entry on top: the
+/// prompt's, as with the prompt alone.
+#[test]
+fn a_modal_over_another_draws_over_it_and_leaves_the_rest_alone() {
+    let prompt = || {
+        tuikit::text_prompt::TextPrompt::new("Above", "typed", |_: &str| {
+            tuikit::text_prompt::PromptResult::Stay
+        })
+    };
+    for (name, view, open) in builders() {
+        for (width, height) in [(80_u16, 24_u16), (120, 40)] {
+            let label = describe_size(name, width, height);
+            let mut app = app_with(view, open);
+            let lower = buffer_of(&mut app, width, height);
+            app.open_rename_overlay(prompt());
+            let both = buffer_of(&mut app, width, height);
+            let mut app = app_with(view, open);
+            app.pop_top_modal();
+            let bare = buffer_of(&mut app, width, height);
+            app.open_rename_overlay(prompt());
+            let top = buffer_of(&mut app, width, height);
+            let (x0, y0, x1, y1) =
+                modal_rect(&top, &bare).unwrap_or_else(|| panic!("{label}: no prompt frame"));
+            let status = status_row(both.area);
+            for y in 0..both.area.height {
+                for x in 0..both.area.width {
+                    let inside = (x0..=x1).contains(&x) && (y0..=y1).contains(&y);
+                    let expected = if inside || y == status { &top } else { &lower };
+                    assert_eq!(
+                        both[(x, y)],
+                        expected[(x, y)],
+                        "{label}: cell ({x},{y}) of the pair is neither the prompt's nor the modal's\n{}",
+                        buffer_to_string(&both)
+                    );
+                }
+            }
+        }
     }
 }

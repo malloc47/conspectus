@@ -47,38 +47,10 @@ pub enum Msg {
     /// Left panel: move selection down/up one visible row.
     NavDown,
     NavUp,
-    /// Left panel: page through visible rows. The runtime passes
-    /// the rendered viewport height so the reducer can decide how
-    /// many rows constitute one page. Pass 1 if unknown.
-    PageDown(u16),
-    PageUp(u16),
-    /// Left panel: post-layout viewport dimensions.
-    /// The draw path dispatches this before
-    /// building the left panel's line list so the reducer can
-    /// reconcile `left_scroll` from the current selection and
-    /// viewport height instead of the renderer poking a `Cell`
-    /// mid-frame. Carries the tree pane's inner height (rows).
-    /// The reducer computes the selected row's line index from
-    /// the visible-row projection — each visible row contributes
-    /// exactly one primary line, so the visible-row position is
-    /// the line index.
-    LeftViewportChanged {
-        viewport_height: u16,
-    },
-    /// Explorer (right panel): post-layout cursor row span and
-    /// viewport dimensions. The draw path
-    /// dispatches this after computing the post-wrap row span of
-    /// the explorer cursor so the reducer can reconcile
-    /// `explorer_scroll`. Unlike the left panel, cursor row
-    /// positions depend on `Paragraph::wrap` output for the
-    /// widget-rendered lines, so the draw path measures and the
-    /// reducer records; the split keeps scroll reconciliation
-    /// itself out of the render pipeline.
-    ExplorerViewportChanged {
-        cursor_first_row: usize,
-        cursor_last_row: usize,
-        viewport_height: u16,
-    },
+    /// Left panel: page through visible rows, by the rows the tree
+    /// showed in the last frame (one row before the first frame).
+    PageDown,
+    PageUp,
     /// Left panel: first/last visible row.
     Home,
     End,
@@ -92,51 +64,24 @@ pub enum Msg {
     /// Left panel: collapse the selected row when it is expanded.
     /// No-op on already-collapsed or leaf rows. Bound to `←` / `h`.
     CollapseRow,
-    /// Right panel: expand/collapse linked entity details under the
-    /// selected node's compact link rows.
-    ToggleLinkedDetails,
-    /// Right panel (graph explorer): move the cursor down one row
-    /// in the flat row list.
-    ExplorerNavDown,
-    /// Right panel (graph explorer): move the cursor up one row.
-    ExplorerNavUp,
-    /// Right panel (graph explorer): snap the cursor to the first
-    /// row in the flat list. Bound to `g` / `Home` on right-pane
-    /// focus, matching the left tree.
-    ExplorerHome,
-    /// Right panel (graph explorer): snap the cursor to the last
-    /// row in the flat list. Bound to `G` / `End` on right-pane
-    /// focus.
-    ExplorerEnd,
-    /// Right panel (graph explorer): activate the highlighted row.
-    /// On a group header this toggles the group's expansion; on a
-    /// link row it drills into the neighbor and pushes a breadcrumb
-    /// hop. No-op on unresolved-evidence rows in v1.
-    ExplorerActivate,
-    /// Right panel (graph explorer): toggle expansion of the
-    /// highlighted multi-link group. No-op when the cursor isn't
-    /// on a header.
-    ExplorerToggleGroup,
+    /// Right panel (graph explorer): a key for the explorer, which does
+    /// its part (moves, folds, drills, goes back) and answers with an
+    /// outcome the reducer carries out: a copy, the value modal, the
+    /// left pane's mirror or restore, a focus shift, or a status hint.
+    /// With no explorer, `Inspect` says there is nothing to open and
+    /// every other key does nothing.
+    Explorer(tuikit::explorer::ExplorerKey),
     /// Right panel (graph explorer): toggle the visibility of the
     /// link rows' trailing `provenance · confidence · state` meta
     /// line. The default is hidden; the `★` resolver-winner
     /// marker and `▲` group-level conflict aggregate stay visible
     /// regardless.
     ToggleEdgeMeta,
-    /// Right panel (graph explorer): toggle the Expanded Node Detail
-    /// view. Swaps the Node zone's top-5 render for the
-    /// full per-kind field set. Per-focused-node: resets when
-    /// drilling into a neighbor and is restored along with the
-    /// prior focus on Backspace. No-op for node kinds whose
-    /// `all_fields` matches `core_fields`.
-    ExplorerToggleFullDetail,
-    /// Right panel (graph explorer): back out of the most recent
-    /// drilldown hop, restoring the previous focused node and the
-    /// cursor / expansion state saved with it. When the breadcrumb
-    /// stack is empty and the right pane has focus, shifts focus to
-    /// the left pane so Backspace reads as a general "go back"
-    /// gesture. No-op on left focus with an empty stack.
-    ExplorerBack,
+    /// Left panel: `Backspace`. Returns to where the last reveal
+    /// started, or says there is no reveal to return from. It leaves the
+    /// right pane's drill alone: that is the right pane's `Backspace`
+    /// (`Msg::Explorer(ExplorerKey::Back)`).
+    NavBack,
     /// Move keyboard focus to the next panel.
     CycleFocus,
     /// Right panel: scroll preview by `delta` rows. Positive
@@ -144,9 +89,16 @@ pub enum Msg {
     /// scrolls up. The reducer clamps the offset at zero; a
     /// transcript counts its offset up from its newest line.
     ScrollPreviewBy(i32),
-    /// Set or clear the transient status-bar message. `None`
-    /// clears any prior message.
-    SetStatus(Option<String>),
+    /// Set or clear the transient status-bar message, drawn in its
+    /// severity's color. `None` clears any prior message.
+    SetStatus(Option<tuikit::feedback::Feedback>),
+    /// Copy `text` to the clipboard and, when it worked, say `done` in a
+    /// toast. Overlays that copy (the value modal, Messages) send this:
+    /// the clipboard write is the executor's.
+    Copy {
+        text: String,
+        done: String,
+    },
     /// Log an operation outcome (ADR 0105) and show its summary as
     /// the status message, with a pointer to the Messages overlay
     /// for warnings and errors.
@@ -188,18 +140,25 @@ pub enum Msg {
     /// The operator returned from a tmux attach to `mux` (ADR 0108).
     /// Marks the mux and its linked sessions as awaiting a refresh,
     /// marks their cached previews for reload, and asks the runtime
-    /// for a background refresh. Repeats before that refresh lands add to
-    /// the same pending set.
+    /// for a background refresh, with the mux's incarnation from before
+    /// the attach for its existence check (ADR 0201). Repeats before
+    /// that refresh lands add to the same pending set.
     HandoffReturned(MuxSessionId),
     /// The TUI's tmux pane came back into view after the operator was
     /// in another session. Asks for the same background refresh as a
     /// returned attach, without marking any row as awaiting it.
     ViewRegained,
+    /// `mux`'s rows (and its linked sessions' rows) stop awaiting the
+    /// hand-off: the existence check found it still running as the same
+    /// incarnation, or the refresh started after its return landed
+    /// (ADR 0201). Other muxes stay frozen, and the hand-off itself
+    /// lasts until [`Msg::HandoffSettled`].
+    HandoffReleased(MuxSessionId),
     /// After the next refresh that settles the pending action, move to
     /// the view where `node` now lives and select its row.
     FollowEntity(crate::model::NodeId),
-    /// A refresh spawned after the last hand-off landed (or failed);
-    /// the pending rows show current values again.
+    /// The newest refresh spawned after a hand-off landed (or failed);
+    /// every pending row shows current values again.
     HandoffSettled,
     /// A launch is starting `mux` (ADR 0127). Marks the mux row
     /// and its linked sessions with the hand-off's dim-and-spinner
@@ -210,16 +169,6 @@ pub enum Msg {
     /// The launch of `mux` ended without an attach. Drops its mark; an
     /// attach that did run sends [`Msg::HandoffReturned`] instead.
     LaunchAborted(MuxSessionId),
-    /// Nested-reducer entry point for the transcript viewer
-    /// (ADR 0085 contract 3). The reducer arm
-    /// pops the top viewer state, runs it through
-    /// `crate::viewer::input::reduce`, and pushes the new state
-    /// back on `ViewerEffect::None` or leaves the stack popped
-    /// on `ViewerEffect::Close`. No-op when the top of the modal
-    /// stack isn't the viewer.
-    Viewer(crate::viewer::input::ViewerMsg),
-    /// A key of the viewer's find prompt.
-    ViewerFind(crate::viewer::find::ViewerFindMsg),
     /// Attach to the currently selected row's mux session
     /// (ADR 0085 contract 2). The reducer resolves the target via
     /// `resolve_attach_target(&self)` and emits either
@@ -240,12 +189,26 @@ pub enum Msg {
     /// (and the accompanying filesystem read) happens in the
     /// executor, not here.
     ViewSelected,
-    /// Confirm the rename overlay's typed value (ADR 0029).
-    /// Reducer resolves the selected row and emits either a mux
-    /// rename, an agent-session alias rename, or a "lost selection"
-    /// toast. The alias-rename branch also chains an optional
-    /// native mux rename inside the executor per lockstep.
+    /// Confirm the session or mux rename prompt's typed value (ADR
+    /// 0029). Reducer resolves the entity the prompt opened for (or the
+    /// selected row) and emits either a mux rename, an agent-session
+    /// alias rename, or a "lost selection" toast. The alias-rename
+    /// branch also chains an optional native mux rename inside the
+    /// executor per lockstep. A pin's rename prompt commits
+    /// [`Msg::CommitSlotRename`] instead.
     CommitRename(String),
+    /// Open a Controls editor as a step over the panel: the checklist or
+    /// prompt `editor` names, seeded from the live settings. Its answer
+    /// steps back to the panel with the message that sets what it edited.
+    OpenControlsEditor(crate::tui::widgets::controls::ControlsEditor),
+    /// Open the worktree menu's next step for `action` over the menu: the
+    /// branch prompt, a confirmation, or the close-down choice, built
+    /// from the worktree facts the menu captured when it opened. The
+    /// step's own commit is one of the `CommitWorktree*` messages.
+    OpenWorktreeStep {
+        action: crate::tui::worktree_actions::WorktreeAction,
+        context: Box<crate::tui::widgets::worktree_menu::WorktreeMenuContext>,
+    },
     /// Commit the worktree menu's "New worktree" branch input.
     /// Reducer emits
     /// `Effect::WriteStore(StoreOp::WorktreeCreate)`.
@@ -320,6 +283,12 @@ pub enum Msg {
     CommitPinEdit(crate::tui::widgets::pin_edit::PinEditRequest),
     /// Slot menu → open the rename prompt.
     OpenSlotRename(String),
+    /// The pin rename prompt confirmed a name: rename the slot (and a
+    /// live mux with it). The prompt refuses a blank name itself.
+    CommitSlotRename {
+        slot: String,
+        new_name: String,
+    },
     /// Slot menu → open the retarget prompt.
     OpenSlotRetarget(String),
     /// Retarget picker → point the pin at the chosen entity (a node id
@@ -493,7 +462,7 @@ pub enum Msg {
     SetMuxRecency(crate::tui::MuxRecency),
     /// Change how the preview pane fits a captured mux pane
     /// (ADR 0106). Render-only: the tree is untouched.
-    SetPreviewWrap(crate::tui::PreviewWrap),
+    SetPreviewWrap(crate::tui::WrapMode),
     /// Choose what the Preview shows for agent sessions in tmux
     /// (ADR 0112). Render-only: the tree is untouched.
     SetSessionPreview(crate::tui::SessionPreview),

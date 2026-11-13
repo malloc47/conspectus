@@ -1,7 +1,7 @@
 //! Executors for worktree mutations (ADR 0092, ADR 0093).
 
 use super::*;
-use crate::tui::messages::LogEntry;
+use crate::tui::messages::{LogEntry, LogEntryExt};
 
 /// Resolve the worktree mutation backend for a TUI-triggered create /
 /// remove, or a human-readable reason it's unavailable.
@@ -37,7 +37,7 @@ pub(super) fn execute_worktree_create(app: &mut App, repo_root: String, branch: 
     });
     let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
-            LogEntry::info(format!("created worktree for branch `{branch}`"))
+            LogEntry::success(format!("created worktree for branch `{branch}`"))
         }
         Ok(WorktreeMutationOutcome::Unsupported) => {
             LogEntry::warning("worktree: backend cannot create")
@@ -71,7 +71,7 @@ pub(super) fn execute_worktree_remove(
     });
     let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
-            LogEntry::info(format!("removed worktree for branch `{branch}`"))
+            LogEntry::success(format!("removed worktree for branch `{branch}`"))
         }
         Ok(WorktreeMutationOutcome::Unsupported) => {
             LogEntry::warning("worktree: backend cannot remove")
@@ -99,7 +99,7 @@ pub(super) fn execute_worktree_merge(app: &mut App, worktree_root: String, targe
     });
     let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
-            LogEntry::info("merged worktree back and removed it")
+            LogEntry::success("merged worktree back and removed it")
         }
         Ok(WorktreeMutationOutcome::Unsupported) => {
             LogEntry::warning("worktree: backend cannot merge")
@@ -126,7 +126,9 @@ pub(super) fn execute_worktree_prune(app: &mut App, repo_root: String) {
         dry_run: false,
     });
     let entry = match result {
-        Ok(WorktreeMutationOutcome::Succeeded { .. }) => LogEntry::info("pruned merged worktrees"),
+        Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
+            LogEntry::success("pruned merged worktrees")
+        }
         Ok(WorktreeMutationOutcome::Unsupported) => {
             LogEntry::warning("worktree: backend cannot prune")
         }
@@ -154,15 +156,15 @@ pub(super) fn execute_worktree_close_down(
     let plan = if let Some(db) = app.snapshot_handle() {
         plan_close_down(db.snapshot(), std::path::PathBuf::from(&repo_root), &branch)
     } else {
-        app.update(Msg::SetStatus(Some(
-            "worktree: no graph loaded".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "worktree: no graph loaded",
+        ))));
         return;
     };
     let Some(plan) = plan else {
-        app.update(Msg::SetStatus(Some(format!(
+        app.update(Msg::SetStatus(Some(Feedback::warning(format!(
             "worktree: no worktree for `{branch}` to close down"
-        ))));
+        )))));
         return;
     };
 
@@ -198,7 +200,7 @@ pub(super) fn execute_worktree_close_down(
                 } else {
                     "closed"
                 };
-                LogEntry::info(format!(
+                LogEntry::success(format!(
                     "{verb} `{branch}` — ended {} session(s), forgot {} history record(s)",
                     report.teardowns.len(),
                     report.forgotten_records,

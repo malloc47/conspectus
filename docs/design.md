@@ -585,9 +585,9 @@ the gone one that last hosted it; ADR 0029 as amended). The harness-native title
 alias-only model works uniformly across every harness, including those with
 no writeable title field. Renaming a muxed agent session also renames the
 tmux session in lockstep by default. ADR 0029 captures the schema, mux
-node-id stability rule, and lockstep contract. ADR 0030 settles the shared
-TUI text-input primitive used by the rename overlay (and reused by the
-search overlay and inline mux-picker).
+node-id stability rule, and lockstep contract. ADR 0030 settled the shared
+TUI text-input primitive used by the rename overlay; it is now the
+framework's line editor (ADR 0165) and text prompt (ADR 0166).
 
 ## History And Presence
 
@@ -755,7 +755,7 @@ three creation paths plus rename, attach, and teardown:
   No argv is injected (ADR 0028).
 - **Mux launch** (ADR 0096) — a harness in a fresh mux. `conspectus mux
   launch <harness> --name <mux-name> [--cwd <path>]` on the CLI; the `m`
-  Mux menu in the TUI opens a launch-spec form (ADR 0097), and `N` opens
+  Mux menu in the TUI opens the launch form (ADR 0169), and `N` opens
   it too (worktree toggle off by default). The default argv comes from launch
   profiles (ADR 0142).
 - **Rebuild** (ADR 0142) — a gone mux, a planned slot, or a mux whose
@@ -882,19 +882,28 @@ predicate on `RowFilter` and composes with the other filters.
 
 In the TUI, filter / grouping / selection / expanded-set / left-scroll
 state is **per view**. Sort order is **global**. Switching views and
-back returns each view to its prior state. Each view has its own
-grouping enum (`SessionsGrouping`, `MuxGrouping`, `UnionGrouping`,
-`PrsGrouping`, `ForksGrouping`) and the same `Grouping` dispatch type
-backs config, CLI flags, and TUI controls.
+back returns each view to its prior state. Across restarts,
+`tui-state.json` keeps the last view and each view's filter, grouping,
+expanded rows, and selected row (the Search view's rows excepted), the
+rows named by stable keys; each view reopens with them the first time it
+lists rows, a gone row falling back to the deepest row above it still
+listed, then the first row (ADR 0202). Each view has its own
+grouping enum (`SessionsGrouping`, `MuxGrouping`, `PrsGrouping`,
+`PinnedGrouping`, `HistoryGrouping`, `SearchGrouping`) and the same
+`Grouping` dispatch type backs config, CLI flags, and TUI controls.
 
 The TUI's view switcher offers sessions, mux, PRs, pinned, history, and
-search (`1`–`6`); union and forks remain CLI table projections. Search comes in two levels (ADR 0149). `/` is quick select over
-the current context, the rows of the active view after its filters, where
+search (`1`–`6`), and `--view` accepts exactly those; union and forks
+exist only as CLI table projections. Search comes in two levels (ADR
+0149). `/` is quick select over the current context, the rows of the
+active view after its filters, where
 Enter selects the item in the left pane; `Tab` widens it to every entity,
 and Enter then selects the entity where it is listed, highlights it in the
 right pane along the shortest relationship path when it is related to the
 selection, or switches to the view where it lives, with an outcome word on
-each result saying which. `Ctrl+/` (also `Ctrl+_`, `Ctrl+7`, and plain `s`
+each result saying which; a result no view lists as its view is set up (a
+fork, a repo with no sessions) says `not listed`, and a pin's menu offers
+to reveal its entity only where a view lists it. `Ctrl+/` (also `Ctrl+_`, `Ctrl+7`, and plain `s`
 where the terminal cannot send it) searches the content of sessions and
 mux scrollback, with `Tab` switching the current view's entities and all
 entities, deduplicating pane text that a session transcript already shows.
@@ -1008,38 +1017,67 @@ default; the controls overlay switches them to the live pane, and
 load off the UI thread, and are cached in memory; `--no-live-preview`
 hides transcripts and pane captures.
 
-A transcript is bottom-anchored on its newest turns, and `J` / `K`
-scroll back through it. The pane capture (ADR 0025) is bottom-anchored
+A transcript is bottom-anchored on its newest turns, or anchored at the
+search match it opens on, and `J` / `K` scroll from there; a step past
+either end is taken back at once (ADR 0181). The pane capture (ADR 0025) is bottom-anchored
 on its last non-blank output. A wrap mode fits it to the pane's width: `smart` (the default)
 wraps content but truncates rules, borders, and padding; `plain` wraps
 everything; `none` keeps tmux's layout and clips. It's set by
 `[tui] preview_wrap` and the controls overlay (ADR 0106).
 
 Traversal through N levels of the graph is explicit rather than
-inline. With the right pane focused:
+inline. The right pane's keys are one table (`RIGHT_PANE_KEYS`, the
+framework explorer's), resolved before the program-wide keymap while
+the pane has focus and no modal is open; the program-wide keys that
+drive the left tree do nothing there. Every character binds as typed,
+alone or with Shift, on the main screen as in every overlay (ADR 0197),
+so a chord no binding spells out (`Alt-j`, `Ctrl-j`) moves nothing. With
+the right pane focused:
 
-- `j` / `k` walk the cursor through Node fields, validated rows, the
-  `Other` header, then its children when expanded.
+- `j` / `k` and the arrows walk the cursor through Node fields,
+  validated rows, the `Other` header, then its children when expanded;
+  `PgUp` / `PgDn` page by the rows the zone shows; `g` / `Home` and
+  `G` / `End` go to the ends.
 - `Enter` is the universal "do the obvious thing" key: on the `Other`
   header it toggles expansion; on a neighbor row it drills into the
-  neighbor and pushes a breadcrumb hop.
+  neighbor and pushes a breadcrumb hop; on a field row it copies the
+  field's whole value (nothing for a placeholder such as `—`). It takes
+  no modifier, so `Shift-Enter` and `Alt-Enter` still reveal.
 - `e` is the explicit expand/collapse accelerator for the `Other`
-  header.
-- `Backspace` reads as a general "go back" gesture: it pops the
-  breadcrumb stack and restores the prior focused node along with the
-  cursor and expansion state saved with it. Once the stack is empty,
-  the first `Backspace` surfaces a status hint ("press Backspace again
-  to return to the left pane") and a second consecutive `Backspace`
-  shifts focus from the right pane back to the left tree. Any
-  intervening action (navigation, focus cycle, …) cancels the arming
-  so the next `Backspace` re-prompts instead of jumping straight to
-  the focus shift.
+  header; `l` / `→` open the zone on its header and `h` / `←` close it
+  from the header or a row inside it, the tree's fold gesture.
+- `Backspace` (and `Esc`, which steps back one level) reads as a
+  general "go back" gesture: it pops the breadcrumb stack and restores
+  the prior focused node along with the cursor and expansion state
+  saved with it. Once the stack is empty, the first `Backspace`
+  surfaces a status hint ("press Backspace again to return to the left
+  pane") and a second consecutive `Backspace` shifts focus from the
+  right pane back to the left tree. Any intervening action
+  (navigation, focus cycle, …) cancels the arming so the next
+  `Backspace` re-prompts instead of jumping straight to the focus
+  shift. The left pane's `Backspace` returns from a reveal only; it
+  leaves the right pane's drill alone.
+- A drill lasts while the left selection stays on the row the pane
+  reflects (the row it opened for, the row the left pane followed a
+  drill to, or the row `Backspace` put back): the periodic refresh,
+  `r`, and a filter or sort change reload the node the pane shows and
+  keep the breadcrumb, the `Other` fold, Expanded Node Detail, and the
+  cursor. When that node is gone the pane opens on the selected row's
+  node. Moving the selection, or jumping to a row (a pick, quick
+  select's `here`, a regroup), opens the pane on that row's node with
+  an empty breadcrumb. Older hops are rebuilt only when `Backspace`
+  reaches them; one whose node is gone is skipped in the same press,
+  and when every hop is gone the press says so and the pane stays.
 - `o` opens the full untruncated value of the cursor row in a centered
   modal — used for `cwd`, `command`, `url`, `last_message_preview`,
   and other rows that carry `(truncated · o)` hints.
 
-Unresolved-evidence stubs render as placeholder rows whose `Enter` is
-inert in v1 (see follow-up `CSP-318`).
+Unresolved-evidence stubs render as one-line inert rows (their evidence
+cut in the middle, their provenance shown with `E` as every related
+row's is) whose `Enter` is inert in v1 (see follow-up `CSP-318`). The
+fields, related rows, and the `Other` header are the framework's
+property grid rows (ADR 0187): each row says what `Enter` and `o` ask
+for, and the pane does it.
 
 This supersedes the recursive inline linked-detail expansion (`e` =
 expand-in-place) the pane used to carry. Inline expansion made
@@ -1048,6 +1086,420 @@ processes, sessions, repos, forks, and PRs repeated nested sections.
 The new layout preserves orientation, keeps the focused node's own
 facts visually distinct, and uses explicit navigation for graph
 depth.
+
+### TUI Framework
+
+The TUI's widgets, design tokens, and interaction conventions live in a
+workspace member crate, `tuikit` at `crates/tuikit/` (ADR 0150), that
+`conspectus` depends on by path and that depends on nothing from
+`conspectus`. It is for internal reuse and can move to its own repository
+at any time; it is not published and promises no stable API.
+
+The first cut covers components and design tokens (layer 1) and interaction
+conventions (layer 2): key tables that generate footers and help, the overlay
+and modal-stack contract, focus rules, a feedback model, and a test kit. The
+application runtime (the MVU loop, effects, undo, and terminal hand-off) stays
+in `conspectus`: about a ninth of it is generic and no second program uses the
+framework, so it moves only when one does, then as an opt-in layer that no
+control depends on, terminal guard first (ADR 0200). The control set and the house rules that make the controls
+behave alike are ADR 0151; who owns the third-party crates is ADR 0152. The
+planning record, with the inventory, control set, and gap analysis, is
+`docs/plans/tui-framework/`.
+
+The framework keeps its own decision log, `crates/tuikit/docs/decisions/`,
+which restates each framework decision without Conspectus vocabulary and names
+the ADRs it came from; the ADR index marks those ADRs framework-owned. Until
+the framework leaves the repository the ADRs are canonical for those decisions;
+after it leaves, its log is (ADR 0150).
+
+"Can move at any time" is checked, not assumed: on every change CI exports
+the crate with its history into a scratch repository of its own, makes its
+manifest stand alone, and runs its formatting, lint, test, and doc checks
+there with no Conspectus file reachable; a deliberate host-relative leak must
+fail that rehearsal (ADR 0199). The real move is
+`crates/tuikit/docs/separation.md`.
+
+Row builders, harness colors, state-word meanings, the transcript model, and
+preview sources stay in `conspectus` as adapters over the framework's
+controls. The framework starts no processes and writes no files, so it adds no
+entries to the capability manifest.
+
+The test kit sits behind a `testkit` feature that the host's tests, the preview
+example, and the dev-only `snapshot` feature turn on. Its conformance suite
+holds every registered modal to the shared conventions (contained in its frame
+at every size, a selection that moves no text, no word cut at the edge, keys by
+role, generated footers, the close keys), its goldens keep every color, and the
+snapshot driver built on it drives every overlay key (ADR 0164).
+
+The theme is the first piece in the framework (ADR 0153): typed role tokens
+(accent, `muted`, `inert`, selection, status colors, fields, and the rest) that
+every control reads, plus named styles `conspectus` registers for its own
+roles (harness, mux, PR, node-kind, and edge colors). `[tui.theme]` keeps its
+flat keys; the five older muted keys load as aliases of `muted` and `inert`.
+
+Glyphs are the second (ADR 0154): the framework's `glyphs` module defines the
+shared marks (list cursor, back, disclosure arrows, ok, fail, warning,
+ellipsis, no-value dash, rule, spinner), the table of glyphs measured to fit one
+terminal cell, and the source scanner that fails on an unmeasured glyph.
+`conspectus` registers its node-kind and state glyphs into that table from
+`tui::icons` and draws every shared mark through the constant.
+
+Text is the third (ADR 0155): the framework's `text` module measures, cuts,
+pads, and wraps strings in terminal cells, moving in whole graphemes, and fits
+snippets around a match, finds matches, and paints them. Every cut that loses
+text ends in `…` inside its budget, paths and identifiers are cut in the middle,
+key hints wrap only between hints, and a surface that needs its row count (a
+scrollbar, a zone's height) draws the rows it wrapped. The CLI's tables share
+the cell measure and the end cut; their column allocation stays their own.
+
+Scrolling is the fourth (ADR 0156): the framework's `scroll` module steps a
+cursor (short choice lists wrap, scrollable content clamps), follows it with
+minimal motion, keeps a window that never scrolls past its content, carves the
+scrollbar gutter only when rows overflow and the body is tall enough for the
+bar to draw (five rows), and counts wrapped rows from the rows drawn. A renderer works its window out from the App and the area it measured
+and returns it; `ui::draw` hands the frame's windows back in a
+`ViewportReport` that the App keeps, so no draw sends a message.
+
+Chips and ages are the fifth and sixth (ADR 0157). The framework's `chip`
+module draws the filled chip (its label `badge_width` cells, cut or padded,
+so every chip and every chip column has one footprint), switches that keep
+their width, the segmented title, the `[ n/m ]` position chip, and status
+chips in a tone; `conspectus` keeps what each chip means (harness and program
+colors, the `no agent`, `N hits`, and `was in` notes). The `age` module writes
+every age on one ladder (`s`, `m`, `h`, `d`; ` ago` in prose), tints it by
+recency with replaceable bounds, and draws the four-cell age cell every row
+uses. The CLI's tables share the formatter and its thresholds and go on to
+weeks.
+
+Frames are the seventh (ADR 0158). Every modal draws in the framework's
+`ModalFrame`: a cleared rect, an accent border, and one title form (plain,
+one space each side), sized by one of five named policies, each a share, a
+cap, a minimum, and a margin per direction: compact for prompts and
+checklists, menu for menus and Controls, form for the forms, wide for the
+help pages, the value modal, and Messages, and palette for the search
+overlay and the picker (ADR 0174). Every modal keeps two columns and a row clear on each side
+while the terminal allows, and its body is measured once at the width its
+size gives.
+
+Selection is the eighth (ADR 0159). Every list draws its rows through the
+framework's `selection` module: the `►` mark in a 2-cell gutter on the
+cursor row, and the row highlighted from the theme's selection pair,
+`selection_active` while the list takes keys and `selection_inactive` while
+it does not, so the unfocused pane still shows its cursor. Chips and field
+fills keep their look inside the highlight. Short choice lists (menus, the
+picker, checklists, Controls, the search lists, a form's fields) wrap at
+their ends; the tree, the explorer, and the Messages log stop. The left
+pane's tree draws the gutter before every row, so one row is marked and
+nothing after the gutter moves with the cursor; its column schemas count
+the gutter in each row's lead (ADR 0186).
+
+Keys are the first convention (ADR 0160). Every overlay resolves its keys
+through a table in the framework's `keys` module and generates its footer
+from it: the framework owns the matchers, the rows (which can include a
+standard table and carry whether an action is available now), the footer
+grammar (keys and a short verb, no "to"), one key notation, the roles the
+modal key convention is checked by, and the standard tables for menus,
+dialogs, pagers, prompts, checklists, and forms; `conspectus` keeps the
+tables of its own overlays (the searches, the forms' own keys, the help and
+value modal's openers, Messages' opener and copy, the pane and transcript
+contents) and the bindings of its scoped keymap. A letter in an overlay
+fires plain or shifted, never as a chord, and every list moves with
+`Ctrl-N`/`Ctrl-P`. Every modal draws its
+footer through one `ModalFooter` (ADR 0193): its keys recede in the theme's
+`muted`, as the status bar's do, on the frame's last rows under a blank row,
+the keys that leave last; a footer too tall for its frame gives up the
+blank row, keeps its last rows, and scrolls its first rows after the body.
+
+Help pages are one page (ADR 0162). The framework's `help` module draws
+every help page the same way (bold headings, keys in an accent column with
+the description wrapped beside them, legends for marks, a scrollbar, and a
+footer generated from the keys that scroll and close it) and generates a
+page from a key table and a description per action, so a viewer's page
+lists every key its table binds and a key with no description fails a test.
+The keymap help is generated from the program's scoped keymap, with its prose
+and legends as annotations (ADR 0192); every page pages by the rows it
+shows.
+
+Text entry starts with one line editor (ADR 0165). Every text field (the
+prompts, the forms' text rows, the search and picker queries, the viewers'
+find prompts) edits with the framework's `LineEdit`, which wraps `tui-input`
+and binds one table of readline keys with word motion on Alt and Control, and
+is drawn by its `TextField`, which windows the line in terminal cells around
+the cursor and draws the caret from `field_cursor`. An edit reports whether
+the text changed; what `Enter` and `Esc` mean stays with the prompt, form, or
+query around the field.
+
+Prompts are one overlay (ADR 0166). The rename, branch-name, max-age, and
+contents prompts are the framework's `TextPrompt`: `Enter` hands the text to
+a closure `conspectus` supplies, which commits a message, refuses with a
+reason, or keeps the prompt open; a refusal shows on one error line under the
+field until the next edit, and the prompt shows its keys on its bottom
+border, so it is three rows, four while an error shows. `Esc` and `Ctrl-C`
+close it silently; inside Controls, `Esc` steps back to the panel and
+`Ctrl-C` closes it, and the worktree menu's branch prompt is a step over the
+menu (ADR 0172), so `Esc` returns to the menu and `Ctrl-C` closes both. The
+parsers (`parse_max_age`) and the mapping to `Msg` stay in `conspectus`.
+
+Path fields are one field (ADR 0167). The new mux and launch forms' cwd, the
+launch form's worktree repo, and the pin edit form's path rows are the
+framework's `PathField`, asking for a directory: `Tab` adds the best
+completion (the known directories `conspectus` ranks from the graph first,
+then the directories the file system lists), and a hint shows what it would
+add only while the field is focused and has a completion. A mark beside the
+field says whether the path is an existing directory (advisory; a file or a
+missing path is still taken), and a leading `~` is expanded when the form
+commits. The field reads the file system only through a read-only source
+`conspectus` supplies, and only when its text changes, so drawing does no
+I/O. The pin store and the config loader expand `~` with the same rule.
+
+Forms are one control (ADR 0168). A form is the framework's `Form`: an
+ordered list of fields (text, path, a choice of chips with an optional custom
+value, toggles, check groups, one-of-N rows drawn `(•)`, and read-only notes
+and derived lines), some shown only while a condition over the others holds.
+`Tab`/`↓` and `S-Tab`/`↑` move over one ring of fields, `Enter` submits from
+any of them (each field's check first, then a closure `conspectus` supplies
+that commits a message or refuses with a reason), a refusal shows on one
+error line directly above the footer until the next edit, and the footer,
+generated from the form's key table, stays in view while only the rows
+scroll. Labels take the short forms (`name`, `socket`, `argv`, `branch`).
+The new mux and launch forms are `Form`s (ADR 0169): the launch form keeps
+the fields that follow others in step around it (the harness's launch
+options over the argv, the derived command row, and the default argv,
+decided when the harness or the cwd changes rather than while drawing). The
+pin edit form is a `Form` too (ADR 0170): its fields are override rows that
+follow the value a pin inherits (ADR 0141's layers) until the operator types
+one, show where the value in effect comes from in one column, and go back to
+following on `Ctrl-R`, a key only that form's table binds. `conspectus` keeps
+the fields by pin kind, their labels and layer words, the rename's checks,
+and the save to the pin store.
+
+Menus are one control (ADR 0171). The row menu (`.`), the mux menu (`m`),
+the worktree menu's list, and the menu `p` opens when several pins point at a
+row are the framework's `ActionMenu`, over entries that are data: a label, a
+detail, a shortcut shown in a key column, whether the entry can run now, an
+inline second-`Enter` confirmation, and the message it commits. `conspectus`
+builds the entries from the selection each time a menu opens, so an entity
+offers the same verbs in every view, and shows a shortcut only for a key that
+does the same thing on the list (`p` on Pin, `n` and `N` in the mux menu). The
+cursor wraps and steps over entries that cannot run, an armed entry says what
+`Enter` will do, the footer generated from the menu key table stays at the
+bottom while the entries scroll, and under a step of its own (a dialog or a
+prompt a pick opened) the menu's cursor row recedes.
+
+Dialogs are one control, and a menu's follow-up questions are steps on the
+modal stack (ADR 0172). A dialog is the framework's `Dialog`: a confirmation
+that commits a message, a choice of named verbs on their own keys, or a
+notice, with body lines and an optional list of what the action affects, on
+one key table (`Enter`/`y` confirm, `Esc`/`n` cancel, `Ctrl-C`/`q`
+dismiss). The worktree menu is an `ActionMenu` whose entries open their
+branch prompt, confirmation, or close-down choice as a step over the menu:
+`Esc` in a step pops it and the menu has its keys again, while a commit or
+`Ctrl-C` closes the step and the menu together. `conspectus` keeps the
+worktree facts captured when the menu opens, the action policy, every word,
+and the `Msg` each answer commits; the empty Clean up is a `Dialog` notice.
+
+Checklists are one control (ADR 0173). The Controls overlay's harness, mux
+state, and PR state editors and the History view's Clean up are the
+framework's `Checklist`: items that are data (a label, a detail, checked,
+and whether it can change), `Space` to check the cursor's item, `a` and `n`
+to check or uncheck every item that can change, a count of the checked items
+on the bottom border, page and ends keys, and the footer generated from the
+checklist key table kept in view while the items scroll. `Enter` hands the
+checked indices to the host's `on_confirm`; `conspectus` keeps the labels,
+the option values each index stands for, and the `Msg::ReapRecords` mapping.
+The `ratatui-cheese` shim and the dependency are gone.
+
+Palettes are one control (ADR 0174). The picker (where a pin points next,
+which remembered search to show) is the framework's `Palette`: a query line
+with its caret, a title with scope strips and a count, results the host
+ranks (a ranker over its candidates, or batches a provider sends) drawn
+through the shared cursor look and wrapping, page keys, an edit that puts the
+cursor on the best result, a status row, an options pane, a debounce a slow
+provider's host polls, and the footer generated from the palette key table
+kept in view while the results scroll, in the palette frame. `Enter` hands
+the row under the cursor to the host's `on_pick`; `conspectus` keeps the
+retarget candidates, the history items, the titles, and the `Msg` each pick
+commits. Quick select and content search are two palettes (ADR 0175): the
+adapter keeps the ranking, the outcome words, the content kinds, history
+paging, and the `Msg` mapping, and draws the rows itself; a content hit's
+columns are one declaration laid out by the framework's column schema
+(`hit_columns`, ADR 0185: the cells, their widths, and the order they give
+way in), which the Search view's hit, pane, and pane-hit rows lay out too,
+and an entity found in the wider reach is another (`entity_columns`, ADR
+0196: the label a share of what the glyph and the outcome word leave, the
+context a fill that hands the label its cells when it leaves).
+Quick select keeps its cursor's position across an edit while it is still a
+result.
+
+Settings panels are one control (ADR 0176). The Controls overlay is the
+framework's `SettingsPanel`: titled sections of rows that the host's row
+model builds from the App on every key and every frame, in five kinds (a
+choice, a checkbox, an editor, a cycle, a button), each carrying the `Msg`
+the panel reports as soon as the row is acted on, so every change applies
+as it is made and `Esc` keeps it; a cursor that skips the headings and
+keeps its row's id, page and ends keys, and the footer generated from the
+settings key table kept in view while the sections scroll. An editor row
+opens its checklist or prompt as a step over the panel, which answers with
+`Outcome::Back` (close one level, then the host handles the message), so
+the filter applies and the panel stays open; under its editor the panel's
+cursor row recedes (`Overlay::render_under_step`). `conspectus` keeps
+`ControlsContext`, which rows each view shows, the filter mappings, every
+`Msg`, and the editors.
+
+Readers are one pager (ADR 0177). The framework's `Pager<C>` scrolls a
+`PagerContent` the host lays out for a width (rows, the units a find
+matches, a header, chips, its own keys, and requests such as attach or
+copy) and owns what readers share: full-screen, framed, and embedded
+modes, one window clamped at every draw with viewport paging, half pages,
+and a sticky end, a find on the one line editor that always scrolls to its
+match, `Esc` stepping back and `q` leaving, a help page generated from the
+pager's and the content's tables, and a generated footer. The pane
+scrollback viewer is a pager over numbered lines that wrap (`w` cuts them).
+The value modal is a framed pager over the wrapped value, whose `y` is the
+copy hook, and every help page (the keymap's, the viewers', a pager's `?`
+level) is the framework's `HelpPage` read in a framed pager (ADR 0178); a
+framed footer too tall for its frame keeps its last rows and scrolls the
+rest with the body, as every modal footer does (ADR 0193). The Messages overlay is the framework's log list
+(ADR 0179): `LogList<R, M, Cx>` reads the host's `feedback::Log` from its
+context on every key and draw, lists its entries newest first (the
+severity's mark, the age, the summary with its repeat count) in a kept
+window, and shows the selected entry's record in an embedded pager;
+`conspectus` keeps the payload (target and command record), the record's
+text, the copy message, and the preview banner. The transcript viewer is a
+pager over the viewer's transcript content (ADR 0180): the turns laid out
+as rows behind their gutter chips, a find whose unit is a shown turn with
+the count of matches the toggles hide, the `t`, `T`, `I`, and `H` toggles
+as the content's keys, and opening at a search result by switching on what
+hides the hit. `src/viewer/` keeps that content, the model, and the
+parsers, imports nothing from the TUI, and draws from the framework's
+theme.
+
+Rich text is a framework feature (ADR 0181). `tuikit::richtext`, behind a
+`richtext` cargo feature `conspectus` turns on, owns the rich-text crates:
+it parses a pane capture's ANSI escapes, fits the capture in its wrap mode,
+and renders the viewer's Markdown with its tables and highlighted code;
+`conspectus` keeps the wrap setting's tokens and the turns' gutters and
+chips. The Preview zone scrolls in the framework's `ScrollRegion`, whose
+offset counts from the top, a transcript's newest turns, or the search
+match it opened on, rather than in an embedded pager, since it draws from
+the App every frame and counts from its end or a match.
+
+The tree is a framework control (ADR 0182), first with lines `conspectus`
+lays out. `tuikit::tree::TreeState` keeps the left pane's selection by row
+id (with the position it showed at, so the cursor stays on the copy it was
+on when a row is listed twice), the expanded rows, and the window the last
+frame drew; each view's slot saves it whole, page keys move by its window,
+and one rebuild routine keeps the selection when the rows are rebuilt (the
+same id, else the same position, else the launch context's row on the
+first load, else the first row). `TreeView` draws the pane (the tab strip
+title, the Search header, the Pinned banner, the placeholder, the
+scrollbar) and each row's pending, ghost, and selection looks and cursor
+gutter around the cells `conspectus` lays out; the App works out each row's ghost, pending,
+and pin-marker state before the frame, so laying a row out looks nothing
+up. `RowKind`, `RowId`, and the row builders stay in `conspectus`. Group
+headers, session rows, mux rows (running and stopped), PR rows, and
+Pinned and History rows are laid out from the framework's column schemas
+(ADR 0183, 0184): `conspectus` declares each kind of row's columns and
+gives its cells, and the framework measures every row of the tree once a
+frame and lays each out by one narrow-width policy, so the columns of a
+kind of row line up in every view and give way in one order when the pane
+is narrow. A header's label and a Pinned or History row's label end in one
+column at every depth, so nested rows line up with their parents. A group
+header carries its name and what follows it as two cells, not one string.
+The Search view's hit, pane, and pane-hit rows take the contents modal's
+hit columns and cells (ADR 0185), so a search hit reads the same in the
+modal and in the view and gives way in one order; its session rows stay
+the Sessions view's. When a list overflows the pane, its rows are laid
+out as though the scrollbar's column were still theirs and the preview or
+snippet gives the bar its cell (ADR 0195), so no stepped or shared column
+moves as the list grows past the pane.
+
+The right pane's explorer is a framework control (ADR 0188,
+`docs/plans/tui-framework/explorer-design.md`), landed over CSP-789,
+CSP-790, CSP-791, and CSP-756. `tuikit::explorer` keeps the cursor
+by each row's stable key, the open section and the all-fields switch,
+the drill frames, the armed `Backspace`, and the zone's window; it reads
+the graph only through a source `conspectus` builds for each call
+(`explorer::GraphSource`: load a node's view, its zones of rows, where a
+link leads, the breadcrumb tag, the left-pane selection a frame saves),
+and answers each key with an outcome whose effects (the copy as
+`Effect::Copy`, the value modal, the left-pane mirror, the focus change)
+and words stay in `conspectus`. A refresh keeps the drill while the left
+selection is unchanged. The right pane's keys are one table, the right
+pane's scope of the program's scoped keymap (ADR 0192); its help section
+and its status hint are generated from it, the hint's `Enter` verb following
+the cursor's row (`copy`, `follow`, `fold`). The breadcrumb, the tab
+strip, and the status bar share one rule for what gives way on a narrow
+line (`tuikit::text::elide`). The breadcrumb draws through it
+(`tuikit::breadcrumb`): the last
+hop always shows, the first outlasts the middle, the oldest middle hops
+give way first with one `…` for each run that went, and a last hop that
+cannot fit is cut with `…`; the title gives the chain the room its other
+parts leave. The tab strip, the header, and the status bar are on the
+rule too, with their own ranks (ADR 0190). The pane's layout is the framework's too
+(`tuikit::master_detail::StackedMasterDetail`): the explorer zone is as
+tall as its rows wrap to, at least three and at most what six Preview
+rows and the `Preview` rule leave (the Preview's six give way first on
+a short pane), laid out a column short of the pane so a rule never
+wraps when the zone's scrollbar appears; the `Related` and `Preview`
+rules are `tuikit::frame::SectionRule`s, their chips ending in one
+column, and their words are `conspectus`'s. A rule too narrow for its
+chip and summary cuts the summary with `…`, then the label, so it stays
+on one row.
+
+The screen is framed by the framework too (ADR 0189). `ui::draw` is
+`tuikit::app_frame::AppFrame`: a header row, the body, and the status
+row, skipped while a full-screen viewer is open, then every modal bottom
+to top, then the toast, with the measured windows handed back as before.
+The body splits through `tuikit::frame::SplitPane` (side by side at or
+above `[tui] narrow_layout_threshold`, stacked below), and `--snapshot-pane`
+and the tests find a pane through the same layout. Each pane draws in a
+`tuikit::frame::PaneFrame`, which carries the focus cue of house rule 9:
+the focused pane's border and the `►` before its title take
+`panel_focus_accent`, the other pane keeps the plain border and a blank
+where the marker goes, and the titles' own text keeps its look. The
+header's words, the titles, and which view fills the body stay
+`conspectus`'s.
+
+The chrome's lines give way by that one rule (ADR 0190). The left pane's
+tab strip is a `tuikit::tab_bar::TabBar`: every view while they fit,
+otherwise the inactive names go from the end of the strip, the active one
+stays, and the strip ends with `…`. The header and the status bar's
+settings and hints are `tuikit::priority_line::PriorityLine`s, whose
+segments drop lowest rank first and whose room is filled back with what
+still fits (`text::elide_filled`), ending with `…` when something went:
+the header keeps its session count always, then the freshness, the mux
+count, the `▲ N` triage chip, the stopped count, and the opt-in harness
+chips, from the last to go; the status bar keeps its old priority order.
+The status bar is a `tuikit::status_bar::StatusBar` (ADR 0191): a message
+in its severity's style, or the settings and the keys of the scope that has
+them, generated from key tables and never written by hand: the left pane's
+and the program's (the keymap's bindings, each worded for the selection by
+an annotation), the right pane's table, or the overlay on top's own keys
+(`Overlay::hints`). A consistency test presses every key it names through
+the loops' routing.
+Every key the main screen takes with no modal open is a binding of one
+scoped keymap (`tuikit::keys::Keymap`, ADR 0192): the program's, the left
+pane's row tree's, and the right pane's explorer table, each with a stable
+id, a verb, help text, and a status rank. A key is looked up in the
+focused pane's scope, then the program's, so a key that means one thing on
+each pane is two bindings of that one table, and the keymap refuses to
+build when two keys of one scope could match one key event. The `?` page
+is generated from it, with the prose a binding cannot carry (other
+overlays' keys, `/ then Tab`, the legends) as annotations.
+Every empty slot says so through `tuikit::empty_state::EmptyState` (a
+message and a hint, wrapped and receding): the left pane's placeholders,
+the right pane's, a Preview with nothing to show, and the framework's
+log list, palettes, and pagers (the Messages log, the pickers' and
+searches' notes, an empty scrollback), with their words `conspectus`'s; a
+Preview that failed says why in the body's look. There
+is no minimum-size screen yet (CSP-319, CSP-190).
+
+Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
+`src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
+argv someone types (the forms, `pin edit --set`) is refused when it ends
+inside a quote or on a lone backslash; text read back from tmux or the
+records is read as far as it goes.
 
 ### Graph-to-View Slicing
 
@@ -1061,7 +1513,7 @@ rebuild the same snapshot in process.
 The output renderers
 (`src/output/{agent,mux,union,prs,forks,node_show,table}.rs`)
 and the TUI row builders (`src/tui/rows/*.rs`,
-`src/tui/{detail,explorer}.rs`) consume `&GraphSnapshot`
+`src/tui/explorer.rs`) consume `&GraphSnapshot`
 directly and iterate the typed model. `src/query/` and the
 internal `materialize_snapshot` SQLite engine are gone
 (CSP-448.02/CSP-448.03/CSP-448.04, ADR 0082); `rusqlite` survives only for
@@ -1261,6 +1713,10 @@ classes, so it never shows the daemon's pre-hand-off tick (ADR 0104).
 After an attach returns, that refresh runs in the background: the TUI
 redraws right away, with the returned mux's rows and its linked
 sessions' rows dimmed and spinning until the refresh lands (ADR 0108).
+Each mux is released on its own: at once when its server still answers
+for the same session (id and creation time) the screen showed, otherwise
+by the first refresh started after its return, so a later hand-off never
+holds an earlier one (ADR 0201).
 A launch (rebuild, `mux new`, `mux launch`) keeps the TUI drawn
 with a spinner chip through its subprocess (ADR 0127), then attaches
 without refreshing first; the attach's return refreshes (ADR 0133). Every
@@ -1273,7 +1729,10 @@ rebuild commands discover without the forges, which they never read (ADR
 0135); a PR slot takes its state from history.
 Operation outcomes the TUI produces go to an in-memory message log
 (`!`) with full subprocess output; unseen failures stay flagged in the
-status bar and lead the affected row's Preview (ADR 0105).
+status bar and lead the affected row's Preview (ADR 0105). Every report
+on the status line, in a toast, or in the log has a severity (info,
+success, warning, error) that each channel draws from the theme, and an
+error's toast stays longest (ADR 0163).
 `--no-cache` suppresses the `graph.bin` write at the end of
 (2).
 
@@ -1375,6 +1834,12 @@ migration helper and harmless if it fails.
   `$XDG_STATE_HOME/conspectus/hooks` or
   `$HOME/.local/state/conspectus/hooks`, with
   `$CONSPECTUS_HOOK_SIDECAR_STATE` as an override.
+- The TUI's generic controls and conventions live in the `tuikit` workspace
+  crate, which depends on nothing from `conspectus` (ADR 0150). Its control set
+  and the house rules every control follows are ADR 0151, and it owns the TUI's
+  third-party widget crates, replacing three shims with in-tree code
+  (ADR 0152). CI rehearses moving it into a repository of its own on every
+  change (ADR 0199).
 
 ## Remaining Design Questions
 

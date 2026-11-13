@@ -1,30 +1,29 @@
 //! Preview pane: transcripts, pane captures, and pin diagnostics.
 
+use tuikit::empty_state::EmptyState;
+use tuikit::frame::SectionRule;
+
 use super::*;
-use crate::tui::preview::{PreviewSource, PreviewSubject, node_source, preview_subject};
-use crate::viewer::state::ViewerState;
+use crate::tui::keybindings::key_name;
+use crate::tui::preview::{
+    PreviewSource, PreviewSubject, TranscriptPreview, node_source, preview_subject,
+};
 
 /// A Preview body, and where its window sits when it scrolls itself.
 pub(super) struct PreviewView {
     pub text: Text<'static>,
     /// Set when the body is already cut to the zone, as a transcript
-    /// is: the rows it has in all and the first one shown, for the
-    /// scrollbar. `None` scrolls the text by the Preview's offset from
-    /// the top.
-    pub window: Option<PreviewWindow>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PreviewWindow {
-    pub total: usize,
-    pub top: usize,
+    /// is: the Preview's scroll region placed over all of its rows, for
+    /// the scrollbar. `None` scrolls the text by the Preview's offset
+    /// from the top.
+    pub region: Option<ScrollRegion>,
 }
 
 impl PreviewView {
     pub(super) fn text(text: impl Into<Text<'static>>) -> Self {
         Self {
             text: text.into(),
-            window: None,
+            region: None,
         }
     }
 
@@ -35,54 +34,36 @@ impl PreviewView {
         text.extend(self.text);
         Self {
             text,
-            window: self.window,
+            region: self.region,
         }
     }
 }
 
-pub(super) fn draw_detail_preview(
-    app: &App,
-    _detail: &NodeDetail,
-    frame: &mut Frame<'_>,
-    area: Rect,
-) {
+/// Draw the selected row's Preview and return its scroll region as the
+/// body drew it.
+pub(super) fn draw_detail_preview(app: &App, buf: &mut Buffer, area: Rect) -> ScrollRegion {
     let view = preview_view_for_selection(app, area.width, area.height as usize);
-    draw_preview_view(app, view, frame, area);
+    draw_preview_view(app, view, buf, area)
 }
 
-/// Draw a Preview body: scrolled from the top by the Preview's offset,
-/// or, for a view that cut its own window, as is with a scrollbar.
-pub(super) fn draw_preview_view(app: &App, view: PreviewView, frame: &mut Frame<'_>, area: Rect) {
-    match view.window {
-        None => {
-            let total_rows = wrapped_line_count(&view.text.lines, area.width);
-            let (content_area, scrollbar_area) = scrollbar_layout(area, total_rows);
-            let widget = Paragraph::new(view.text)
-                .wrap(Wrap { trim: false })
-                .scroll((app.preview_scroll(), 0));
-            frame.render_widget(widget, content_area);
-            if let Some(sb_area) = scrollbar_area {
-                render_vertical_scrollbar(
-                    frame,
-                    sb_area,
-                    total_rows,
-                    app.preview_scroll() as usize,
-                );
-            }
-        }
-        Some(window) => {
-            // The thumb tracks the transcript; a failure banner above
-            // it stays put.
-            let (content_area, scrollbar_area) =
-                scrollbar_layout(area, window.total.max(view.text.lines.len()));
-            frame.render_widget(
-                Paragraph::new(view.text).wrap(Wrap { trim: false }),
-                content_area,
-            );
-            if let Some(sb_area) = scrollbar_area {
-                render_vertical_scrollbar(frame, sb_area, window.total, window.top);
-            }
-        }
+/// Draw a Preview body through the Preview's scroll region (ADR 0181):
+/// wrapped and scrolled from the top by its offset, a leading banner
+/// with it, or, for a view that cut its own window, as is under a banner
+/// that stays put. Returns the region as drawn, over the rows its offset
+/// counts.
+pub(super) fn draw_preview_view(
+    app: &App,
+    view: PreviewView,
+    buf: &mut Buffer,
+    area: Rect,
+) -> ScrollRegion {
+    match view.region {
+        None => app
+            .preview_region()
+            .draw_lines(Anchor::Top, area, buf, view.text),
+        // The thumb tracks the transcript; a failure banner above it
+        // stays put.
+        Some(placed) => placed.draw_cut(area, buf, view.text),
     }
 }
 
@@ -102,8 +83,7 @@ pub(super) fn preview_view_for_selection(app: &App, width: u16, height: usize) -
             // The body gets the rows the banner leaves, so its newest
             // output stays on screen below the banner.
             let banner = failure_banner(entry, app.theme());
-            let banner_rows = wrapped_line_count(&banner.lines, width);
-            let body_height = height.saturating_sub(banner_rows).max(1);
+            let body_height = rows_under(&banner.lines, width, height);
             selection_preview_body(app, width, body_height).below(banner)
         }
         None => selection_preview_body(app, width, height),
@@ -132,16 +112,17 @@ fn latest_failure_for_selection(app: &App) -> Option<&crate::tui::messages::LogE
     if let Ok(target) = resolve_attach_target(app) {
         targets.push(LogTarget::Mux(target.mux));
     }
-    app.messages().latest_failure_for(&targets)
+    crate::tui::messages::latest_failure_for(app.messages(), &targets)
 }
 
 fn failure_banner(entry: &crate::tui::messages::LogEntry, theme: &Theme) -> Text<'static> {
-    let style = crate::tui::widgets::messages::level_style(entry.level, theme);
+    use crate::tui::messages::LogEntryExt;
+    let style = entry.severity.style(theme);
     let mut lines = vec![Line::from(Span::styled(
-        format!("{} {}", entry.level.glyph(), entry.summary),
+        format!("{} {}", entry.severity.mark(), entry.summary),
         style.add_modifier(Modifier::BOLD),
     ))];
-    if let Some(code) = entry.command.as_ref().and_then(|c| c.exit_code) {
+    if let Some(code) = entry.item.command.as_ref().and_then(|c| c.exit_code) {
         lines.push(Line::styled(format!("exit status {code}"), style));
     }
     for line in entry.output_tail(FAILURE_BANNER_LINES) {
@@ -149,14 +130,26 @@ fn failure_banner(entry: &crate::tui::messages::LogEntry, theme: &Theme) -> Text
     }
     lines.push(Line::styled(
         "! for the full output".to_string(),
-        Style::default().add_modifier(theme.placeholder),
+        Style::default().add_modifier(theme.muted),
     ));
     lines.push(Line::styled(
-        "─".repeat(40),
-        Style::default().add_modifier(theme.divider),
+        marks::RULE.repeat(40),
+        Style::default().add_modifier(theme.muted),
     ));
     Text::from(lines)
 }
+
+/// A Preview with nothing to show, for now or at all (not loaded yet,
+/// no source, switched off), as the framework's empty state: its message
+/// wrapped to the zone's `width`, receding. A Preview that failed to load
+/// says why in the body's own look instead; that is content.
+pub(super) fn placeholder(app: &App, message: &str, width: u16) -> Text<'static> {
+    Text::from(EmptyState::new(message).lines(usize::from(width), app.theme()))
+}
+
+/// What a Preview says when `--no-live-preview` hides the conversation
+/// and terminal content (ADR 0112 §6).
+const LIVE_PREVIEW_OFF: &str = "preview disabled (--no-live-preview)";
 
 fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
     let Some(selection) = app.selection() else {
@@ -169,13 +162,13 @@ fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
     match preview_subject(app) {
         PreviewSubject::Selection => match crate::tui::preview::preview_source(app) {
             Some(source) => source_view(app, &source, width, height),
-            None => PreviewView::text(sourceless_preview(app, row, selection, live_preview)),
+            None => PreviewView::text(sourceless_preview(app, row, selection, live_preview, width)),
         },
         PreviewSubject::Node(node) => match node_source(app, &node) {
             Some(source) => source_view(app, &source, width, height),
             None => PreviewView::text(
                 sourceless_node_text(app, &node)
-                    .unwrap_or_else(|| Text::raw("no preview for this node")),
+                    .unwrap_or_else(|| placeholder(app, "no preview for this node", width)),
             ),
         },
         PreviewSubject::Field(value) => field_view(app, &value, width, height),
@@ -191,9 +184,11 @@ fn field_view(
     height: usize,
 ) -> PreviewView {
     use crate::tui::explorer::FieldValue;
-    if let Some(lines) =
-        crate::tui::preview::value_lines(value, Some(crate::tui::rows::tree_current_unix_epoch()))
-    {
+    if let Some(lines) = crate::tui::preview::value_lines(
+        value,
+        Some(crate::tui::rows::tree_current_unix_epoch()),
+        app.theme().muted,
+    ) {
         return PreviewView::text(lines);
     }
     match crate::tui::preview::value_source(app, value) {
@@ -201,7 +196,7 @@ fn field_view(
         None => match value {
             FieldValue::Node(node) => PreviewView::text(
                 sourceless_node_text(app, node)
-                    .unwrap_or_else(|| Text::raw("no preview for this node")),
+                    .unwrap_or_else(|| placeholder(app, "no preview for this node", width)),
             ),
             _ => PreviewView::text(""),
         },
@@ -226,15 +221,13 @@ pub(super) fn source_view(
     height: usize,
 ) -> PreviewView {
     if source.is_live() && !app.config().live_preview_enabled {
-        // `--no-live-preview` hides conversation and terminal content
-        // (ADR 0112 §6).
-        return PreviewView::text("preview disabled (--no-live-preview)");
+        return PreviewView::text(placeholder(app, LIVE_PREVIEW_OFF, width));
     }
     match source {
         PreviewSource::Path(_)
         | PreviewSource::Git(_)
         | PreviewSource::Process(_)
-        | PreviewSource::PullRequest(_) => loaded_view(app, source),
+        | PreviewSource::PullRequest(_) => loaded_view(app, source, width),
         PreviewSource::Transcript(_) => transcript_view(app, source, width, height),
         PreviewSource::Pane(mux) => PreviewView::text(format_preview_for_mux(
             app,
@@ -253,21 +246,27 @@ fn sourceless_preview(
     row: &crate::tui::rows::Row,
     selection: &RowId,
     live_preview: bool,
+    width: u16,
 ) -> Text<'static> {
     let pin_summary = |pin_id: &str| {
         app.snapshot_handle()
             .and_then(|handle| render_pin_summary(handle.snapshot(), pin_id))
             .map_or_else(
-                || Text::raw("pin unavailable — try `r` to refresh"),
+                || {
+                    Text::raw(format!(
+                        "pin unavailable — try `{}` to refresh",
+                        key_name("refresh")
+                    ))
+                },
                 Text::raw,
             )
     };
     let disabled_or = |text: &'static str| {
-        Text::raw(if live_preview {
-            text
-        } else {
-            "preview disabled (--no-live-preview)"
-        })
+        placeholder(
+            app,
+            if live_preview { text } else { LIVE_PREVIEW_OFF },
+            width,
+        )
     };
     match (&row.kind, selection) {
         (_, RowId::Pin { pin_id }) => {
@@ -292,9 +291,9 @@ fn sourceless_preview(
 
 /// A loaded source composed as lines, scrolled from the top, or what
 /// stands in for it.
-fn loaded_view(app: &App, source: &PreviewSource) -> PreviewView {
+fn loaded_view(app: &App, source: &PreviewSource, width: u16) -> PreviewView {
     let Some(entry) = app.previews().get(source) else {
-        return PreviewView::text("loading…");
+        return PreviewView::text(placeholder(app, "loading…", width));
     };
     match &entry.content {
         PreviewContent::Lines(lines) => PreviewView::text(lines.clone()),
@@ -305,15 +304,15 @@ fn loaded_view(app: &App, source: &PreviewSource) -> PreviewView {
 }
 
 /// A transcript, rendered by the native viewer (ADR 0052) and
-/// bottom-anchored with its newest turns in view. The Preview's scroll
-/// offset counts rows up from there. One column stays free for the
-/// scrollbar.
+/// bottom-anchored with its newest turns in view, or anchored at the
+/// search match it opens on. The Preview's scroll region counts rows
+/// from that anchor (ADR 0181). One column stays free for the scrollbar.
 fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize) -> PreviewView {
     let Some(entry) = app.previews().get(source) else {
-        return PreviewView::text("loading transcript…");
+        return PreviewView::text(placeholder(app, "loading transcript…", width));
     };
-    let state = match &entry.content {
-        PreviewContent::Transcript(state) => state,
+    let preview = match &entry.content {
+        PreviewContent::Transcript(preview) => preview,
         PreviewContent::Unavailable(reason) => {
             return PreviewView::text(format!("transcript unavailable: {reason}"));
         }
@@ -327,48 +326,41 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
     // Draw warms the cache first (`App::prepare_preview`); callers
     // that skip it, like tests, compose a copy.
     let composed;
-    let state: &ViewerState =
-        if crate::viewer::widget::cached_body_lines(state, content_width).is_some() {
-            state
-        } else {
-            let mut copy = state.as_ref().clone();
-            crate::tui::preview::search::apply(&mut copy, search.as_ref());
-            crate::viewer::widget::body_lines(&mut copy, app.theme(), content_width);
-            composed = copy;
-            &composed
-        };
-    let Some(cache) = state.rendered.as_ref() else {
-        return PreviewView::text("no turns yet");
+    let preview: &TranscriptPreview = if preview.transcript.cached_lines(content_width).is_some() {
+        preview
+    } else {
+        let mut copy = preview.as_ref().clone();
+        crate::tui::preview::search::apply(&mut copy, search.as_ref());
+        copy.transcript.lines(app.theme(), content_width);
+        composed = copy;
+        &composed
+    };
+    let Some(cache) = preview.transcript.rendered.as_ref() else {
+        return PreviewView::text(placeholder(app, "no turns yet", width));
     };
     let lines = &cache.lines;
     if lines.is_empty() {
-        return PreviewView::text("no turns yet");
+        return PreviewView::text(placeholder(app, "no turns yet", width));
     }
     let total = lines.len();
     let height = height.max(1);
-    let bottom_top = total.saturating_sub(height);
-    let top = match crate::tui::preview::search::match_top(state) {
-        // Opened on a search match: the offset counts rows down from it.
-        Some(anchor) if search.as_ref().is_some_and(|s| s.turn.is_some()) => {
-            let moved = (anchor as i64).saturating_add(i64::from(app.preview_match_offset()));
-            usize::try_from(moved.max(0)).unwrap_or(0).min(bottom_top)
+    let region = app.preview_region();
+    let placed = match crate::tui::preview::search::match_top(preview) {
+        // Opened on a search match: the offset counts rows from it.
+        Some(row) if search.as_ref().is_some_and(|s| s.turn.is_some()) => {
+            region.marked(row).place(Anchor::Mark, height, total)
         }
-        _ => bottom_top.saturating_sub(app.preview_scroll() as usize),
+        _ => region.place(Anchor::Bottom, height, total),
     };
-    let end = (top + height).min(total);
-    let mut window = lines[top..end].to_vec();
+    let shown = placed.window().visible();
+    let top = shown.start;
+    let mut window = lines[shown].to_vec();
     if search.is_some() {
-        crate::viewer::highlight::highlight_matches(
-            &mut window,
-            top,
-            cache,
-            &state.find,
-            app.theme(),
-        );
+        preview.marks.paint(&mut window, top, cache, app.theme());
     }
     PreviewView {
         text: Text::from(window),
-        window: Some(PreviewWindow { total, top }),
+        region: Some(placed),
     }
 }
 
@@ -384,15 +376,18 @@ pub(super) fn format_preview_for_mux(
     match app.mux_preview(mux) {
         Some(entry) => match &entry.content {
             PreviewContent::Text(capture) => {
-                let parsed = render_captured_pane(&capture.text, color);
-                let rows = crate::tui::preview_wrap::layout_capture(
+                // ADR 0025 and ADR 0106, through the framework's rich
+                // text (ADR 0181): the escapes parsed (or dropped without
+                // color), then the capture fitted in the active wrap mode.
+                let parsed = tuikit::richtext::ansi_text(&capture.text, color);
+                let rows = tuikit::richtext::layout_capture(
                     &parsed.lines,
                     app.preview_wrap(),
                     capture.width,
                     width,
                 );
                 if rows.is_empty() {
-                    return Text::raw("(empty pane)");
+                    return placeholder(app, "(empty pane)", width);
                 }
                 if let Some(search) = crate::tui::preview::search::preview_search(app) {
                     crate::tui::preview::search::mark_rows(
@@ -406,7 +401,10 @@ pub(super) fn format_preview_for_mux(
                     Text::from(rows[start..].to_vec())
                 }
             }
-            PreviewContent::NoTarget => Text::raw("tmux target not found — try `r` to refresh"),
+            PreviewContent::NoTarget => Text::raw(format!(
+                "tmux target not found — try `{}` to refresh",
+                key_name("refresh")
+            )),
             PreviewContent::Unavailable(reason) => Text::raw(format!("tmux unavailable: {reason}")),
             PreviewContent::Failed(message) => Text::raw(message.clone()),
             PreviewContent::Unsupported => {
@@ -415,7 +413,7 @@ pub(super) fn format_preview_for_mux(
             // A pane source only ever holds a capture.
             PreviewContent::Transcript(_) | PreviewContent::Lines(_) => Text::raw(""),
         },
-        None => Text::raw("loading mux preview…"),
+        None => placeholder(app, "loading mux preview…", width),
     }
 }
 
@@ -440,31 +438,9 @@ pub(super) fn render_pin_summary(
     Some(text)
 }
 
-/// Translate a raw `tmux capture-pane -e` payload into styled
-/// `Text` for the preview pane. ADR 0025: `ansi-to-tui` does the
-/// CSI/SGR parsing; we keep ownership of the colour-disabled
-/// path and the malformed-input fallback.
-pub(super) fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
-    if !color {
-        // `Text::to_string` flattens spans back to plain bytes,
-        // which is the natural way to strip styling regardless of
-        // how the upstream parser would group the escape bytes.
-        // On a parse error there's nothing to strip — return as is.
-        return match text.into_text() {
-            Ok(parsed) => Text::raw(parsed.to_string()),
-            Err(_) => Text::raw(text.to_string()),
-        };
-    }
-    text.into_text()
-        .unwrap_or_else(|_| Text::raw(text.to_string()))
-}
-
-/// Build the chip-style divider above the preview body. Sits in
-/// the same right-anchored position as the section dividers
-/// (Session / Mux / PR / Lineage) so the `[ Preview ]` chip lines
-/// up below them. No inline suffix: the mux pane label and
-/// captured-time freshness already render in the Mux section
-/// above, and a second copy here pushed the chip far to the left.
-pub(super) fn preview_divider_line(_app: &App, width: usize, theme: &Theme) -> Line<'static> {
-    chip_divider_line("Preview", None, width, theme, ChipAnchor::Left)
+/// The `Preview` rule above the preview body. Its chip ends in the same
+/// column as the `Related` rule's, so the two labels line up. It carries
+/// no summary.
+pub(super) fn preview_divider_line(width: usize, theme: &Theme) -> Line<'static> {
+    SectionRule::new("Preview").line(width, theme)
 }

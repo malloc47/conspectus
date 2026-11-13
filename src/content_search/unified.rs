@@ -3,7 +3,7 @@
 //!
 //! [`search`] runs every source on its own thread and merges what they
 //! report: results as they are found and progress summed across sources.
-//! The sessions-only API ([`super::scan`]) is unchanged; this is the
+//! The sessions-only API ([`mod@super::scan`]) is unchanged; this is the
 //! entry point for callers that also search other sources, such as pane
 //! scrollback.
 

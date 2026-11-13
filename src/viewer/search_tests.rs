@@ -41,41 +41,6 @@ fn hit(turn_index: usize, kind: TurnKind, timestamp: Option<DateTime<Utc>>) -> H
 }
 
 #[test]
-fn matching_ignores_ascii_case_in_both_directions() {
-    assert_eq!(find_ci("The Quick Brown Fox", "quick"), Some(4));
-    assert_eq!(find_ci("the quick brown fox", "QUICK"), Some(4));
-    assert_eq!(find_ci("abc", "abcd"), None);
-    assert_eq!(find_ci("", "a"), None);
-    assert_eq!(find_ci("abc", ""), None);
-}
-
-#[test]
-fn non_ascii_text_matches_exactly() {
-    assert_eq!(
-        find_ci("Café au lait", "CAFÉ"),
-        None,
-        "É is not folded to é"
-    );
-    assert_eq!(
-        find_ci("Café au lait", "CAFé"),
-        Some(0),
-        "ASCII letters still fold"
-    );
-    assert_eq!(find_ci("naïve Straße", "Straße"), Some(7));
-    assert_eq!(find_ci("STRASSE", "straße"), None);
-}
-
-#[test]
-fn a_match_always_starts_and_ends_on_a_character_boundary() {
-    let text = "日本語のテキスト and 😀 emoji";
-    for needle in ["本語", "😀", "emoji", "テキスト"] {
-        let start = find_ci(text, needle).expect(needle);
-        assert!(text.is_char_boundary(start), "{needle}");
-        assert!(text.is_char_boundary(start + needle.len()), "{needle}");
-    }
-}
-
-#[test]
 fn an_empty_or_blank_query_matches_nothing() {
     let d = doc(vec![turn(TurnRole::User, TurnKind::Message, "hello")]);
     assert!(match_document(&d, &query("")).is_empty());
@@ -233,9 +198,9 @@ fn a_snippet_is_capped_and_keeps_the_match_with_markers_on_cut_sides() {
 
     let snippet = &hits[0].snippet;
     assert!(
-        snippet.chars().count() <= SNIPPET_MAX_CHARS + 2,
-        "{} chars",
-        snippet.chars().count()
+        text::width(snippet) <= SNIPPET_MAX_CELLS,
+        "{} cells",
+        text::width(snippet)
     );
     assert!(
         snippet.starts_with('…') && snippet.ends_with('…'),
@@ -266,7 +231,7 @@ fn a_match_deep_in_a_huge_body_is_still_cheap_and_correct() {
     let hits = match_document(&d, &ContentQuery::new("needle", kinds));
 
     assert_eq!(hits.len(), 1);
-    assert!(hits[0].snippet.chars().count() <= SNIPPET_MAX_CHARS + 2);
+    assert!(text::width(&hits[0].snippet) <= SNIPPET_MAX_CELLS);
     assert_eq!(&hits[0].snippet[hits[0].highlight.clone()], "needle");
 }
 
@@ -347,9 +312,9 @@ fn snippets_and_highlights_hold_their_invariants_over_generated_text() {
             "case {case}: {snippet:?} {range:?}"
         );
         assert!(
-            snippet.chars().count() <= SNIPPET_MAX_CHARS + 2,
-            "case {case}: {} chars",
-            snippet.chars().count()
+            text::width(snippet) <= SNIPPET_MAX_CELLS,
+            "case {case}: {} cells",
+            text::width(snippet)
         );
         assert!(
             !snippet.contains('\u{1b}') && !snippet.contains('['),
@@ -448,12 +413,12 @@ fn ranges_that_are_not_on_boundaries_or_outside_the_text_yield_no_highlight() {
     let text = "naïve 日本語";
     let inside_char = 3..4; // splits the two bytes of `ï`
     for range in [inside_char, 0..0, 5..500, 40..41] {
-        let snippet = snippet_around(text, range.clone(), 100);
+        let snippet = text::fit_snippet(text, range.clone(), 100, &[]);
         assert_eq!(snippet.highlight, None, "{range:?}");
-        let cut = snippet_around(&text.repeat(30), range.clone(), 20);
+        let cut = text::fit_snippet(&text.repeat(30), range.clone(), 20, &[]);
         assert_eq!(cut.highlight, None, "{range:?}");
     }
-    let ok = snippet_around(text, 0..1, 100);
+    let ok = text::fit_snippet(text, 0..1, 100, &[]);
     assert_eq!(ok.highlight, Some(0..1));
 }
 

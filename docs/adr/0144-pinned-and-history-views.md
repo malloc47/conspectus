@@ -6,7 +6,8 @@ Accepted. Amends ADR 0073 (the kind glyph is shown for every kind in
 views that mix kinds) and applies ADR 0131's alignment rule to rows of
 mixed kinds. Removes the Pins groups, placeholder rows, and Pins modal
 of ADR 0057's TUI surface. Part of the history, rebuild, and pin slots
-plan with ADRs 0140, 0141, 0142, and 0143.
+plan with ADRs 0140, 0141, 0142, and 0143. Amended by ADR 0198: a pin's
+menu offers to reveal its entity only where that entity's view lists it.
 
 Amended (2026-10): a pin with no target yet wears a hollow pin glyph
 (`◎`) in the ghost color, and `gone` describes only an entity that

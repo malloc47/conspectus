@@ -832,7 +832,7 @@ fn tui_theme_overrides_named_color_and_modifier() {
         ratatui::style::Color::LightRed
     );
     assert_eq!(
-        theme.mux_attached,
+        theme.mux_attached(),
         ratatui::style::Color::Rgb(0x00, 0xff, 0x88)
     );
     assert!(
@@ -874,7 +874,7 @@ fn tui_theme_unspecified_keys_keep_defaults() {
         theme.harness_color("claude-code"),
         defaults.harness_color("claude-code")
     );
-    assert_eq!(theme.mux_attached, defaults.mux_attached);
+    assert_eq!(theme.mux_attached(), defaults.mux_attached());
 }
 
 #[test]
@@ -930,7 +930,7 @@ fn tui_theme_malformed_value_warns_and_falls_back() {
     );
     // Sibling fields still parse.
     assert_eq!(
-        outcome.config.tui.theme.mux_attached,
+        outcome.config.tui.theme.mux_attached(),
         ratatui::style::Color::Green
     );
 }
@@ -955,7 +955,7 @@ fn tui_theme_non_string_value_emits_diagnostic() {
 #[test]
 fn tui_theme_harness_table_overrides_per_key_colors() {
     // `[tui.theme.harness].<key> = "color"` sets
-    // theme.harness_colors[<key>]. Adapter-registry-registered
+    // the theme's `harness.<key>` color. Adapter-registry-registered
     // keys are accepted; unknown keys emit a diagnostic
     // pointing at the registered set.
     let temp = TempDir::new().expect("temp dir");
@@ -1024,6 +1024,133 @@ fn tui_theme_flat_harness_alias_still_works() {
     assert_eq!(
         outcome.config.tui.theme.harness_color("codex"),
         ratatui::style::Color::Magenta
+    );
+}
+
+fn load_theme(body: &str) -> LoadOutcome {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(&project.join(PROJECT_CONFIG_FILENAME), body);
+    ConfigLoader::new()
+        .with_home(temp.path())
+        .load_from(&project)
+}
+
+#[test]
+fn tui_theme_new_token_keys_load() {
+    use ratatui::style::{Color, Modifier};
+
+    let outcome = load_theme(
+        "[tui.theme]\n\
+         accent = \"magenta\"\n\
+         muted = \"italic\"\n\
+         inert = \"blue\"\n\
+         link = \"bright_yellow\"\n\
+         info = \"bright_blue\"\n\
+         surface = \"black\"\n\
+         field = \"green\"\n\
+         field_active = \"black on yellow\"\n\
+         field_cursor = \"white on red,bold\"\n\
+         command_badge_text = \"yellow\"\n",
+    );
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    let theme = &outcome.config.tui.theme;
+    assert_eq!(theme.accent, Color::Magenta);
+    assert_eq!(theme.panel_focus_accent, Color::Magenta);
+    assert_eq!(theme.muted, Modifier::ITALIC);
+    assert_eq!(theme.inert, Color::Blue);
+    assert_eq!(theme.link, Color::LightYellow);
+    assert_eq!(theme.info, Color::LightBlue);
+    assert_eq!(theme.surface, Color::Black);
+    assert_eq!(theme.field.fg, Some(Color::Green));
+    assert_eq!(theme.field_active.bg, Some(Color::Yellow));
+    assert_eq!(theme.field_cursor.modifier, Modifier::BOLD);
+    assert_eq!(theme.command_badge_text(), Color::Yellow);
+}
+
+#[test]
+fn tui_theme_old_muted_keys_merge_and_say_which_one_won() {
+    let outcome =
+        load_theme("[tui.theme]\nplaceholder = \"italic\"\ndivider = \"bold\"\nghost = \"red\"\n");
+
+    let theme = &outcome.config.tui.theme;
+    assert_eq!(theme.muted, ratatui::style::Modifier::ITALIC);
+    assert_eq!(theme.inert, ratatui::style::Color::Red);
+    assert_eq!(outcome.diagnostics.len(), 1, "{:?}", outcome.diagnostics);
+    assert_eq!(
+        outcome.diagnostics[0].message,
+        "`[tui.theme].divider` is ignored: `[tui.theme].placeholder` in the same file also \
+         sets `muted`, and wins"
+    );
+}
+
+#[test]
+fn tui_theme_harness_table_beats_the_flat_alias() {
+    let outcome = load_theme(
+        "[tui.theme]\nharness_codex = \"red\"\n\n[tui.theme.harness]\ncodex = \"blue\"\n",
+    );
+
+    assert_eq!(
+        outcome.config.tui.theme.harness_color("codex"),
+        ratatui::style::Color::Blue
+    );
+    assert_eq!(outcome.diagnostics.len(), 1, "{:?}", outcome.diagnostics);
+    assert!(
+        outcome.diagnostics[0]
+            .message
+            .starts_with("`[tui.theme].harness_codex` is ignored: `[tui.theme.harness].codex`"),
+        "{}",
+        outcome.diagnostics[0].message
+    );
+}
+
+#[test]
+fn tui_theme_harness_table_reports_a_bad_value_where_it_was_written() {
+    let outcome = load_theme("[tui.theme.harness]\ncodex = \"not-a-color\"\npi = 3\n");
+
+    let messages: Vec<&str> = outcome
+        .diagnostics
+        .iter()
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(
+        messages[0].starts_with("`[tui.theme.harness].codex`: "),
+        "{messages:?}"
+    );
+    assert_eq!(
+        messages[1],
+        "`[tui.theme.harness].pi` must be a string (got `integer`)"
+    );
+}
+
+#[test]
+fn tui_theme_later_file_overrides_an_earlier_one_whatever_key_it_used() {
+    let temp = TempDir::new().expect("temp dir");
+    let xdg = temp.path().join("xdg");
+    fs::create_dir_all(xdg.join("conspectus")).expect("create xdg dir");
+    write_file(
+        &xdg.join("conspectus").join("config.toml"),
+        "[tui.theme]\nmuted = \"bold\"\n",
+    );
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[tui.theme]\nplaceholder = \"italic\"\n",
+    );
+
+    let outcome = ConfigLoader::new()
+        .with_home(temp.path())
+        .with_xdg_config_home(&xdg)
+        .load_from(&project);
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(
+        outcome.config.tui.theme.muted,
+        ratatui::style::Modifier::ITALIC
     );
 }
 
@@ -1260,6 +1387,14 @@ fn load_tui_config(body: &str) -> crate::config::LoadOutcome {
         .load_from(&project)
 }
 
+fn diagnostic_messages(outcome: &LoadOutcome) -> Vec<String> {
+    outcome
+        .diagnostics
+        .iter()
+        .map(|d| d.message.clone())
+        .collect()
+}
+
 #[test]
 fn tui_default_view_is_unset_by_default() {
     let outcome = load_tui_config("[tui]\n");
@@ -1289,26 +1424,71 @@ fn tui_default_view_unknown_value_diagnoses_and_stays_unset() {
 }
 
 #[test]
+fn tui_default_view_unknown_value_names_the_valid_views() {
+    let outcome = load_tui_config("[tui]\ndefault_view = \"graph\"\n");
+    assert_eq!(
+        diagnostic_messages(&outcome),
+        vec![
+            "invalid `[tui] default_view` value `graph`; \
+             expected one of sessions, mux, prs, pinned, history, search"
+        ]
+    );
+}
+
+#[test]
+fn tui_default_view_removed_views_diagnose_and_name_the_valid_views() {
+    for removed in ["union", "forks", "Union"] {
+        let outcome = load_tui_config(&format!("[tui]\ndefault_view = \"{removed}\"\n"));
+        assert_eq!(outcome.config.tui.default_view, None, "{removed}");
+        assert_eq!(
+            diagnostic_messages(&outcome),
+            vec![format!(
+                "invalid `[tui] default_view` value `{removed}` (that view was removed); \
+                 expected one of sessions, mux, prs, pinned, history, search"
+            )],
+            "{removed}"
+        );
+    }
+}
+
+#[test]
+fn tui_views_tables_for_removed_views_diagnose_and_name_the_valid_views() {
+    for removed in ["union", "forks"] {
+        let outcome = load_tui_config(&format!(
+            "[tui.views.{removed}]\ngrouping = \"kind\"\n\n[tui.views.mux]\ngrouping = \"repo\"\n"
+        ));
+        assert_eq!(
+            diagnostic_messages(&outcome),
+            vec![format!(
+                "`[tui.views.{removed}]` is ignored: the {removed} view was removed; \
+                 the views are sessions, mux, prs, pinned, history, search"
+            )],
+            "{removed}"
+        );
+        // The tables that remain still load.
+        assert_eq!(
+            outcome.config.tui.views.mux.grouping,
+            Some(Grouping::Mux(crate::tui::MuxGrouping::Repo)),
+            "{removed}"
+        );
+    }
+}
+
+#[test]
 fn tui_preview_wrap_defaults_to_smart_and_loads_from_config() {
     assert_eq!(
         load_tui_config("[tui]\n").config.tui.preview_wrap,
-        crate::tui::PreviewWrap::Smart
+        crate::tui::WrapMode::Smart
     );
     let outcome = load_tui_config("[tui]\npreview_wrap = \"none\"\n");
     assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
-    assert_eq!(
-        outcome.config.tui.preview_wrap,
-        crate::tui::PreviewWrap::None
-    );
+    assert_eq!(outcome.config.tui.preview_wrap, crate::tui::WrapMode::None);
 }
 
 #[test]
 fn tui_preview_wrap_unknown_value_diagnoses_and_keeps_the_default() {
     let outcome = load_tui_config("[tui]\npreview_wrap = \"fancy\"\n");
-    assert_eq!(
-        outcome.config.tui.preview_wrap,
-        crate::tui::PreviewWrap::Smart
-    );
+    assert_eq!(outcome.config.tui.preview_wrap, crate::tui::WrapMode::Smart);
     assert!(
         outcome
             .diagnostics

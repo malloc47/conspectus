@@ -1,6 +1,6 @@
 //! Ranking for the `/` in-view search overlay. Per ADR 0024 the
 //! matcher is hand-rolled: a case-insensitive (ASCII) substring match,
-//! shared with content search through [`crate::viewer::search`].
+//! shared with content search through `crate::viewer::search`.
 //!
 //! Per ADR 0031 the `/` overlay ranks within the **active filter
 //! set**, not the full snapshot. The runtime extracts
@@ -9,11 +9,12 @@
 
 use std::borrow::Cow;
 
+use tuikit::text::find_ci;
+
 use crate::tui::rows::{Row, RowId, RowKind};
 
 // The matching and snippet helpers are shared with content search so
 // `/` and the transcript search agree on what a match is.
-pub use crate::viewer::search::{MatchSnippet, find_ci, snippet_around};
 
 /// One searchable row's haystack plus the [`RowId`] the renderer
 /// needs to highlight or commit. `label` is the operator-facing
@@ -82,8 +83,8 @@ pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<Searc
             },
             RowKind::Group(group) => SearchItem {
                 id: row.id.clone(),
-                label: Cow::Owned(group.display_path.clone()),
-                haystack: Cow::Owned(group.display_path.clone()),
+                label: Cow::Owned(group.text()),
+                haystack: Cow::Owned(group.text()),
             },
             RowKind::MuxSession(mux) => SearchItem {
                 id: row.id.clone(),
@@ -94,11 +95,6 @@ pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<Searc
                 id: row.id.clone(),
                 label: Cow::Owned(pr.repo_display.clone()),
                 haystack: Cow::Owned(pr.repo_display.clone()),
-            },
-            RowKind::Fork(fork) => SearchItem {
-                id: row.id.clone(),
-                label: Cow::Owned(fork.fork_label.clone()),
-                haystack: Cow::Owned(fork.fork_label.clone()),
             },
             RowKind::Hit(hit) => SearchItem {
                 id: row.id.clone(),

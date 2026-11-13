@@ -1,0 +1,11 @@
+frame 12x3
+text  |Pick one    |
+style |aaaa bbb    |
+text  |> first     |
+style |ccccccc     |
+text  |  second    |
+style |            |
+legend
+  a  fg Yellow, bold
+  b  fg Yellow
+  c  fg Black, bg White

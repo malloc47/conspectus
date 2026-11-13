@@ -1,14 +1,10 @@
-use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::KeyCode;
+use ratatui::layout::Rect;
+use tuikit::testkit::keys::{ctrl, press};
 
 use super::*;
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
-fn ctrl(c: char) -> KeyEvent {
-    KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
-}
+use crate::tui::Theme;
 
 fn field(name: &str, value: FieldValue, source: FieldSource) -> RecipeField {
     RecipeField {
@@ -55,32 +51,32 @@ fn mux_init() -> PinEditInit {
     }
 }
 
-fn type_str(form: &mut PinEditFormState, s: &str) {
+fn type_str(form: &mut PinEditForm, s: &str) {
     for c in s.chars() {
-        form.handle((), key(KeyCode::Char(c)));
+        form.handle_key(press(KeyCode::Char(c)));
     }
 }
 
-fn clear_text(form: &mut PinEditFormState, chars: usize) {
+fn clear_text(form: &mut PinEditForm, chars: usize) {
     for _ in 0..chars {
-        form.handle((), key(KeyCode::Backspace));
+        form.handle_key(press(KeyCode::Backspace));
     }
 }
 
-fn focus_row(form: &mut PinEditFormState, label: &str) {
+fn focus_row(form: &mut PinEditForm, label: &str) {
     for _ in 0..20 {
         if form.focused_label() == Some(label) {
             return;
         }
-        form.handle((), key(KeyCode::Down));
+        form.handle_key(press(KeyCode::Down));
     }
     panic!("no row `{label}`: {:?}", form.row_labels());
 }
 
-fn render(form: &PinEditFormState) -> String {
+fn render(form: &PinEditForm) -> String {
     let area = Rect::new(0, 0, 110, 40);
     let mut buf = Buffer::empty(area);
-    PinEditFormWidget::new(form, &Theme::default()).render(area, &mut buf);
+    form.draw(area, &mut buf, &Theme::default());
     (0..area.height)
         .map(|y| {
             (0..area.width)
@@ -91,11 +87,25 @@ fn render(form: &PinEditFormState) -> String {
         .join("\n")
 }
 
+/// The rows are labelled in the forms' shared vocabulary, so the worktree
+/// branch reads `branch` as in the launch form (it read
+/// `worktree_branch`, the field's name in the pin store).
 #[test]
 fn it_lists_the_pin_name_the_label_and_every_overridable_field() {
-    let form = PinEditFormState::new(mux_init());
+    let form = PinEditForm::new(mux_init());
     let mut expected = vec!["pin name", "label"];
-    expected.extend(PinKind::Mux.overridable_fields());
+    expected.extend(
+        PinKind::Mux
+            .overridable_fields()
+            .iter()
+            .map(|f| label_for(f)),
+    );
+    assert_eq!(
+        form.row_labels(),
+        [
+            "pin name", "label", "name", "socket", "cwd", "harness", "argv", "branch"
+        ]
+    );
     assert_eq!(form.row_labels(), expected);
     let frame = render(&form);
     for label in expected {
@@ -105,11 +115,14 @@ fn it_lists_the_pin_name_the_label_and_every_overridable_field() {
 
 #[test]
 fn each_row_says_where_its_value_comes_from() {
-    let frame = render(&PinEditFormState::new(mux_init()));
+    let frame = render(&PinEditForm::new(mux_init()));
     let row = |label: &str| {
         frame
             .lines()
-            .find(|l| l.contains(&format!("│  {label} ")) || l.contains(&format!("│> {label} ")))
+            .find(|l| {
+                l.contains(&format!("│  {label} "))
+                    || l.contains(&format!("│{} {label} ", tuikit::glyphs::marks::POINTER))
+            })
             .unwrap_or_else(|| panic!("no row {label}:\n{frame}"))
             .to_string()
     };
@@ -123,34 +136,35 @@ fn each_row_says_where_its_value_comes_from() {
 
 #[test]
 fn up_and_down_move_between_rows_and_wrap() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     assert_eq!(form.focused_label(), Some("pin name"));
-    form.handle((), key(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
     assert_eq!(form.focused_label(), Some("label"));
-    form.handle((), key(KeyCode::Up));
-    form.handle((), key(KeyCode::Up));
+    form.handle_key(press(KeyCode::Up));
+    form.handle_key(press(KeyCode::Up));
     assert_eq!(
         form.focused_label(),
-        Some("worktree_branch"),
+        Some("branch"),
         "Up from the first row wraps to the last"
     );
+    assert_eq!(form.focus(), Some("worktree_branch"));
 }
 
 #[test]
 fn saving_without_a_change_just_closes() {
-    let mut form = PinEditFormState::new(mux_init());
-    assert_eq!(form.handle((), key(KeyCode::Enter)), OverlayOutcome::Close);
+    let mut form = PinEditForm::new(mux_init());
+    assert_eq!(form.handle_key(press(KeyCode::Enter)), Outcome::Close);
 }
 
 #[test]
 fn editing_a_field_sets_an_override_and_leaves_the_rest_alone() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "socket");
     type_str(&mut form, "work-sock");
-    let OverlayOutcome::Commit(msg) = form.handle((), key(KeyCode::Enter)) else {
+    let Outcome::Commit(msg) = form.handle_key(press(KeyCode::Enter)) else {
         panic!("expected a commit");
     };
-    let Msg::CommitPinEdit(request) = *msg else {
+    let Msg::CommitPinEdit(request) = msg else {
         panic!("wrong message");
     };
     assert_eq!(request.pin, "work");
@@ -161,7 +175,7 @@ fn editing_a_field_sets_an_override_and_leaves_the_rest_alone() {
 
 #[test]
 fn an_argv_edit_becomes_a_list_override() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "argv");
     type_str(&mut form, " --model 'opus 4'");
     let request = form.request().unwrap();
@@ -173,9 +187,9 @@ fn an_argv_edit_becomes_a_list_override() {
 
 #[test]
 fn inherit_drops_an_override_and_shows_the_inherited_value() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "cwd");
-    form.handle((), ctrl('r'));
+    form.handle_key(ctrl('r'));
     assert_eq!(form.field_text("cwd"), Some("/src/app"));
     let request = form.request().unwrap();
     assert_eq!(request.unset, vec!["cwd".to_string()]);
@@ -185,10 +199,10 @@ fn inherit_drops_an_override_and_shows_the_inherited_value() {
 
 #[test]
 fn inheriting_a_field_that_was_never_overridden_changes_nothing() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "socket");
     type_str(&mut form, "abc");
-    form.handle((), ctrl('r'));
+    form.handle_key(ctrl('r'));
     let request = form.request().unwrap();
     assert!(
         request.set.is_empty() && request.unset.is_empty(),
@@ -198,7 +212,7 @@ fn inheriting_a_field_that_was_never_overridden_changes_nothing() {
 
 #[test]
 fn emptying_an_overridden_field_clears_the_override() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "cwd");
     clear_text(&mut form, "/override".len());
     let request = form.request().unwrap();
@@ -207,9 +221,9 @@ fn emptying_an_overridden_field_clears_the_override() {
 
 #[test]
 fn typing_after_inherit_overrides_again() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "cwd");
-    form.handle((), ctrl('r'));
+    form.handle_key(ctrl('r'));
     type_str(&mut form, "/x");
     let request = form.request().unwrap();
     assert_eq!(request.set, vec![("cwd".to_string(), text("/src/app/x"))]);
@@ -218,7 +232,7 @@ fn typing_after_inherit_overrides_again() {
 
 #[test]
 fn the_name_row_renames_and_refuses_taken_or_blank_names() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     clear_text(&mut form, 4);
     type_str(&mut form, "main");
     assert_eq!(form.request().unwrap().rename.as_deref(), Some("main"));
@@ -228,8 +242,8 @@ fn the_name_row_renames_and_refuses_taken_or_blank_names() {
     let err = form.request().unwrap_err();
     assert!(err.contains("already exists"), "{err}");
     assert!(matches!(
-        form.handle((), key(KeyCode::Enter)),
-        OverlayOutcome::Consumed
+        form.handle_key(press(KeyCode::Enter)),
+        Outcome::Consumed
     ));
     assert!(form.error().is_some());
 
@@ -239,21 +253,24 @@ fn the_name_row_renames_and_refuses_taken_or_blank_names() {
 
 #[test]
 fn the_skip_permissions_option_toggles_the_flag_in_the_argv_row() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "harness");
-    form.handle((), key(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
+    // The options row is a field of the form like any other, labelled
+    // `options`; it takes no typing.
     assert_eq!(
-        form.focused_label(),
-        None,
+        form.focus(),
+        Some(OPTIONS),
         "the options row sits under the harness"
     );
+    assert!(!form.takes_text());
     assert!(
         render(&form).contains("[ ] skip permissions"),
         "{}",
         render(&form)
     );
 
-    form.handle((), key(KeyCode::Char(' ')));
+    form.handle_key(press(KeyCode::Char(' ')));
     assert_eq!(
         form.field_text("argv"),
         Some("claude --dangerously-skip-permissions")
@@ -267,7 +284,7 @@ fn the_skip_permissions_option_toggles_the_flag_in_the_argv_row() {
         )]
     );
 
-    form.handle((), key(KeyCode::Char(' ')));
+    form.handle_key(press(KeyCode::Char(' ')));
     assert_eq!(form.field_text("argv"), Some("claude"));
     assert!(
         form.request().unwrap().set.is_empty(),
@@ -280,15 +297,15 @@ fn a_harness_without_options_has_no_options_row() {
     let mut init = mux_init();
     init.effective[3] = field("harness", text("opencode"), FieldSource::Override);
     init.effective[4] = field("argv", argv(&["opencode"]), FieldSource::Default);
-    let form = PinEditFormState::new(init);
+    let form = PinEditForm::new(init);
     assert!(!render(&form).contains("skip permissions"));
 }
 
 #[test]
 fn cycling_the_harness_swaps_a_default_argv_and_keeps_a_custom_one() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "harness");
-    form.handle((), key(KeyCode::Right));
+    form.handle_key(press(KeyCode::Right));
     assert_eq!(form.field_text("harness"), Some("codex"));
     assert_eq!(
         form.field_text("argv"),
@@ -299,7 +316,7 @@ fn cycling_the_harness_swaps_a_default_argv_and_keeps_a_custom_one() {
     focus_row(&mut form, "argv");
     type_str(&mut form, " --model gpt");
     focus_row(&mut form, "harness");
-    form.handle((), key(KeyCode::Right));
+    form.handle_key(press(KeyCode::Right));
     assert_eq!(form.field_text("harness"), Some("opencode"));
     assert_eq!(
         form.field_text("argv"),
@@ -315,9 +332,9 @@ fn tab_completes_a_directory_in_a_path_row_and_moves_on_elsewhere() {
     let mut init = mux_init();
     let typed = format!("{}/alp", dir.path().display());
     init.effective[2] = field("cwd", text(&typed), FieldSource::Override);
-    let mut form = PinEditFormState::new(init);
+    let mut form = PinEditForm::new(init);
     focus_row(&mut form, "cwd");
-    form.handle((), key(KeyCode::Tab));
+    form.handle_key(press(KeyCode::Tab));
     assert_eq!(
         form.focused_label(),
         Some("cwd"),
@@ -329,7 +346,7 @@ fn tab_completes_a_directory_in_a_path_row_and_moves_on_elsewhere() {
     );
 
     focus_row(&mut form, "socket");
-    form.handle((), key(KeyCode::Tab));
+    form.handle_key(press(KeyCode::Tab));
     assert_eq!(
         form.focused_label(),
         Some("cwd"),
@@ -352,7 +369,7 @@ fn only_a_mux_pin_gets_the_mux_fields() {
         cwd_candidates: Vec::new(),
         defaults: None,
     };
-    let form = PinEditFormState::new(init);
+    let form = PinEditForm::new(init);
     assert_eq!(form.row_labels(), ["pin name", "label", "remote", "path"]);
     let frame = render(&form);
     assert!(
@@ -363,15 +380,15 @@ fn only_a_mux_pin_gets_the_mux_fields() {
 
 #[test]
 fn escape_closes_without_saving() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     type_str(&mut form, "x");
-    assert_eq!(form.handle((), key(KeyCode::Esc)), OverlayOutcome::Close);
+    assert_eq!(form.handle_key(press(KeyCode::Esc)), Outcome::Close);
 }
 
-fn render_at(form: &PinEditFormState, width: u16, height: u16) -> Vec<String> {
+fn render_at(form: &PinEditForm, width: u16, height: u16) -> Vec<String> {
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
-    PinEditFormWidget::new(form, &Theme::default()).render(area, &mut buf);
+    form.draw(area, &mut buf, &Theme::default());
     (0..height)
         .map(|y| {
             (0..width)
@@ -385,7 +402,10 @@ fn render_at(form: &PinEditFormState, width: u16, height: u16) -> Vec<String> {
 fn row_end(lines: &[String], label: &str) -> (usize, String) {
     let line = lines
         .iter()
-        .find(|l| l.contains(&format!("│  {label} ")) || l.contains(&format!("│> {label} ")))
+        .find(|l| {
+            l.contains(&format!("│  {label} "))
+                || l.contains(&format!("│{} {label} ", tuikit::glyphs::marks::POINTER))
+        })
         .unwrap_or_else(|| panic!("no row {label}"));
     let inner = line.trim_end().trim_end_matches('│').trim_end();
     (
@@ -396,7 +416,7 @@ fn row_end(lines: &[String], label: &str) -> (usize, String) {
 
 #[test]
 fn the_source_word_sits_in_the_same_column_on_every_row_whatever_is_selected() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     let mut seen = Vec::new();
     for _ in 0..8 {
         let lines = render_at(&form, 80, 40);
@@ -405,7 +425,7 @@ fn the_source_word_sits_in_the_same_column_on_every_row_whatever_is_selected() {
             .map(|label| row_end(&lines, label).0)
             .collect();
         seen.push(ends);
-        form.handle((), key(KeyCode::Down));
+        form.handle_key(press(KeyCode::Down));
     }
     assert!(
         seen.windows(2).all(|pair| pair[0] == pair[1]),
@@ -419,7 +439,7 @@ fn the_source_word_sits_in_the_same_column_on_every_row_whatever_is_selected() {
 
 #[test]
 fn editing_a_path_never_pushes_the_source_word_out_of_the_form() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "cwd");
     type_str(
         &mut form,
@@ -440,7 +460,7 @@ fn editing_a_path_never_pushes_the_source_word_out_of_the_form() {
 
 #[test]
 fn a_clean_row_shows_no_stray_marker_after_its_value() {
-    let form = PinEditFormState::new(mux_init());
+    let form = PinEditForm::new(mux_init());
     let lines = render_at(&form, 80, 40);
     let cwd = lines.iter().find(|l| l.contains(" cwd ")).unwrap();
     let after_value = cwd.split("/override").nth(1).unwrap();
@@ -457,7 +477,7 @@ fn a_clean_row_shows_no_stray_marker_after_its_value() {
 
 #[test]
 fn the_form_explains_what_following_means_without_jargon() {
-    let lines = render_at(&PinEditFormState::new(mux_init()), 80, 40).join("\n");
+    let lines = render_at(&PinEditForm::new(mux_init()), 80, 40).join("\n");
     assert!(
         lines.contains("A blank field follows the running mux"),
         "{lines}"
@@ -472,7 +492,7 @@ fn the_form_explains_what_following_means_without_jargon() {
 
 #[test]
 fn the_focused_row_says_what_it_follows() {
-    let mut form = PinEditFormState::new(mux_init());
+    let mut form = PinEditForm::new(mux_init());
     focus_row(&mut form, "name");
     let lines = render_at(&form, 100, 40).join("\n");
     assert!(lines.contains("following the running mux: work"), "{lines}");
@@ -482,5 +502,250 @@ fn the_focused_row_says_what_it_follows() {
     assert!(
         lines.contains("/src/app"),
         "what Ctrl-R goes back to: {lines}"
+    );
+}
+
+/// Drawing the form reads the default argv it decided when it opened; it
+/// is decided again only when the harness or the cwd changes.
+#[test]
+fn drawing_the_form_reads_the_default_argv_it_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().display().to_string();
+    let mut init = mux_init();
+    init.effective[2] = field("cwd", text(&cwd), FieldSource::Override);
+    init.effective[4] = field("argv", argv(&[]), FieldSource::Default);
+    init.defaults = Some(crate::launch_default::LaunchDefaults::default().with_atelier(true));
+    let mut form = PinEditForm::new(init);
+    assert_eq!(form.argv_now(), ["claude"]);
+
+    // The cwd becomes a workspace. Drawing (the options row reads the
+    // argv) does not look at the disk again, so the kept default stands.
+    std::fs::write(
+        dir.path()
+            .join(crate::discovery::atelier::ATELIER_CONFIG_FILENAME),
+        "[workspace]\nname = \"w\"\n",
+    )
+    .unwrap();
+    render(&form);
+    render(&form);
+    assert_eq!(
+        form.default.source(),
+        Some(crate::launch_default::DefaultSource::HarnessDefault)
+    );
+    assert_eq!(form.argv_now(), ["claude"]);
+
+    // Editing the cwd decides it again.
+    focus_row(&mut form, "cwd");
+    type_str(&mut form, "/");
+    assert_eq!(form.argv_now(), ["atelier", "exec", "claude"]);
+}
+
+#[test]
+fn an_unfinished_argv_is_read_as_far_as_it_goes_and_refused_on_save() {
+    let mut form = PinEditForm::new(mux_init());
+    focus_row(&mut form, "argv");
+    type_str(&mut form, " --append 'two words");
+    form.handle_key(press(KeyCode::Enter));
+    assert_eq!(form.error(), Some("`argv` has an unclosed `'` quote"));
+
+    // The option row works on what is typed so far and writes it back
+    // finished, so the save then goes through.
+    focus_row(&mut form, "harness");
+    form.handle_key(press(KeyCode::Down));
+    form.handle_key(press(KeyCode::Char(' ')));
+    assert_eq!(
+        form.field_text("argv"),
+        Some("claude --append 'two words' --dangerously-skip-permissions")
+    );
+    assert_eq!(
+        form.request().unwrap().set,
+        vec![(
+            "argv".to_string(),
+            argv(&[
+                "claude",
+                "--append",
+                "two words",
+                "--dangerously-skip-permissions"
+            ])
+        )]
+    );
+}
+
+// ---- on the framework's form ------------------------------------------------
+
+/// `Ctrl-R` is the form's binding for its override rows. On the pin name
+/// it does nothing (it used to put back the name the form opened with),
+/// and it never reaches a text field as a character.
+#[test]
+fn ctrl_r_acts_only_on_the_rows_that_follow_a_value() {
+    let mut form = PinEditForm::new(mux_init());
+    type_str(&mut form, "-x");
+    form.handle_key(ctrl('r'));
+    assert_eq!(form.name_text(), "work-x");
+
+    focus_row(&mut form, "harness");
+    form.handle_key(press(KeyCode::Down));
+    let argv = form.field_text("argv").map(str::to_string);
+    form.handle_key(ctrl('r'));
+    assert_eq!(form.focus(), Some(OPTIONS));
+    assert_eq!(form.field_text("argv").map(str::to_string), argv);
+}
+
+/// Resetting a field that had no override of its own leaves nothing to
+/// drop, so the row says where its value comes from again (it said `will
+/// follow`).
+#[test]
+fn resetting_a_field_without_an_override_names_its_source_again() {
+    let mut form = PinEditForm::new(mux_init());
+    focus_row(&mut form, "socket");
+    type_str(&mut form, "abc");
+    assert_eq!(row_end(&render_at(&form, 80, 40), "socket").1, "keep");
+    form.handle_key(ctrl('r'));
+    let (_, word) = row_end(&render_at(&form, 80, 40), "socket");
+    assert_eq!(word, "unset");
+}
+
+/// A field with no override follows the value it has now, wherever that
+/// comes from (here the default argv, which without the pin's overrides
+/// would be nothing): its row names that source, and `Ctrl-R` after an
+/// edit puts that value back.
+#[test]
+fn a_field_without_an_override_follows_the_value_it_has_now() {
+    let mut init = mux_init();
+    init.inherited.retain(|field| field.name != "argv");
+    let mut form = PinEditForm::new(init);
+    assert_eq!(row_end(&render_at(&form, 80, 40), "argv").1, "default");
+    focus_row(&mut form, "argv");
+    type_str(&mut form, " -x");
+    form.handle_key(ctrl('r'));
+    assert_eq!(form.field_text("argv"), Some("claude"));
+    assert_eq!(row_end(&render_at(&form, 80, 40), "argv").1, "default");
+    let request = form.request().unwrap();
+    assert!(request.set.is_empty() && request.unset.is_empty());
+}
+
+/// The one name check both rename UIs use: blank, not a pin id, or
+/// another pin's name is refused, each with its reason; the pin's own
+/// name and a free one pass.
+#[test]
+fn the_name_check_refuses_blank_invalid_and_taken_names() {
+    let known = ["work".to_string(), "other".to_string()];
+    assert_eq!(
+        check_name("work", &known, "   "),
+        Err("pin: nothing entered".to_string())
+    );
+    let invalid = check_name("work", &known, "two\rlines").unwrap_err();
+    assert!(invalid.contains("isn't a usable pin name"), "{invalid}");
+    assert_eq!(
+        check_name("work", &known, " other "),
+        Err("a pin named `other` already exists".to_string())
+    );
+    assert_eq!(check_name("work", &known, "work"), Ok(()));
+    assert_eq!(check_name("work", &known, "fresh"), Ok(()));
+
+    let mut form = PinEditForm::new(mux_init());
+    clear_text(&mut form, 4);
+    assert_eq!(
+        form.request().unwrap_err(),
+        "pin: nothing entered",
+        "the form's blank name says what the prompt says"
+    );
+}
+
+/// A refused save says why on the error line directly above the keys and
+/// moves the focus to the field it is about (it stayed where `Enter` was
+/// pressed).
+#[test]
+fn a_refused_save_takes_the_focus_to_the_field_it_is_about() {
+    let mut form = PinEditForm::new(mux_init());
+    clear_text(&mut form, 4);
+    type_str(&mut form, "other");
+    focus_row(&mut form, "argv");
+    assert_eq!(form.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
+    assert_eq!(form.error(), Some("a pin named `other` already exists"));
+    assert_eq!(form.focus(), Some(PIN));
+
+    let lines = render_at(&form, 80, 40);
+    let at = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("no {needle}:\n{}", lines.join("\n")))
+    };
+    assert_eq!(
+        at("already exists") + 1,
+        at("↑/↓ move"),
+        "the error line is the footer slot"
+    );
+    type_str(&mut form, "s");
+    assert_eq!(form.error(), None, "the next edit clears it");
+}
+
+/// A field that keeps a value with nothing under it to follow says what
+/// `Ctrl-R` does there.
+#[test]
+fn a_kept_value_with_nothing_to_follow_says_ctrl_r_drops_it() {
+    let mut init = mux_init();
+    init.effective
+        .push(field("socket", text("work"), FieldSource::Override));
+    init.overrides.insert("socket".into(), text("work"));
+    let mut form = PinEditForm::new(init);
+    focus_row(&mut form, "socket");
+    let lines = render_at(&form, 100, 40).join("\n");
+    assert!(lines.contains("kept with this pin: work"), "{lines}");
+    assert!(
+        lines.contains("Ctrl-R drops it; there is nothing to follow yet"),
+        "{lines}"
+    );
+    form.handle_key(ctrl('r'));
+    assert_eq!(form.request().unwrap().unset, ["socket"]);
+}
+
+#[test]
+fn a_session_pin_names_its_resume_field_in_plain_words() {
+    let init = PinEditInit {
+        pin: "parser".into(),
+        kind: PinKind::Session,
+        status: "live".into(),
+        live_mux: false,
+        effective: vec![field("label", text("parser"), FieldSource::Snapshot)],
+        overrides: SlotFields::new(),
+        inherited: vec![field("label", text("parser"), FieldSource::Snapshot)],
+        known_pin_names: vec!["parser".into()],
+        known_harness_keys: vec![],
+        cwd_candidates: Vec::new(),
+        defaults: None,
+    };
+    let mut form = PinEditForm::new(init);
+    assert_eq!(form.row_labels(), ["pin name", "label", "resume in"]);
+    focus_row(&mut form, "resume in");
+    type_str(&mut form, "work");
+    assert_eq!(
+        form.request().unwrap().set,
+        vec![("resume_into".to_string(), text("work"))]
+    );
+}
+
+/// Every text row ends in one column, the pin name's too (its source
+/// column is blank), so the values all end in one place.
+#[test]
+fn the_pin_name_row_ends_where_the_override_rows_do() {
+    let mut form = PinEditForm::new(mux_init());
+    type_str(&mut form, &"-long".repeat(20));
+    form.handle_key(press(KeyCode::Home));
+    let lines = render_at(&form, 80, 40);
+    let name = lines
+        .iter()
+        .find(|line| line.contains("pin name"))
+        .expect("the pin name row");
+    let mark = name
+        .chars()
+        .position(|c| c == '>')
+        .expect("the scroll mark");
+    let (end, _) = row_end(&lines, "label");
+    assert_eq!(
+        mark + 1 + 1 + "will follow".len(),
+        end,
+        "the value ends one gap and the source column before the edge"
     );
 }

@@ -3,7 +3,20 @@
 ## Status
 
 Accepted. Extends ADR 0085 contract 3 (modal stack and one `Overlay`
-contract).
+contract). Amended by
+[ADR 0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md):
+the model and the standard tables are the framework's `tuikit::keys`, a
+character binding no longer fires on its Control or Alt chords (this ADR
+kept each key's old modifier handling), every list moves with
+`Ctrl-N`/`Ctrl-P`, and footers take one grammar with no "to". Amended
+by [ADR 0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md):
+`Abort` (`Ctrl-C`) dismisses the whole overlay from any level rather
+than meaning what each handler decides, the worktree menu's screens
+included, and `q` binds to it wherever nothing is typed. Amended by
+[ADR 0191](0191-tui-the-status-bar-names-the-keys-of-the-scope-that-has-them.md): no overlay opener writes its footer into the status
+line; the status bar generates the overlay's hints from its table
+(`Overlay::hints`), and the hygiene guard scans the code that writes the
+status line.
 
 ## Context
 

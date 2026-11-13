@@ -2,21 +2,18 @@
 //!
 //! Boots [`tui_pantry`] with a hand-built ingredient list so the
 //! widget-iteration loop can be evaluated without going through
-//! `conspectus tui --snapshot`. The smoke-test ingredient is
-//! [`conspectus::tui::widgets::multi_select::MultiSelectWidget`] in
-//! three prop variants: empty list, mid-selection, large list with
-//! scroll.
+//! `conspectus tui --snapshot`. The smoke-test ingredient is the
+//! framework's [`tuikit::checklist::Checklist`] in three prop variants:
+//! empty list, mid-selection, large list with scroll.
 //!
 //! Run with: `cargo run --example pantry`.
 //!
-//! Implementation note: `Ingredient` requires `Send`, and our
-//! `MultiSelectState` carries the upstream `ratatui_cheese`
-//! `Option<Box<dyn Fn>>` validator which is `!Send`. The ingredients
-//! therefore hold only the **configuration data** (items + initial
-//! selections + cursor position) and build the state fresh inside
-//! `render()`. That's cheap for a preview surface, and it
-//! sidesteps the Send bound without polluting the in-tree
-//! `MultiSelectState` API for a spike.
+//! Implementation note: an ingredient renders through `&self`, and a
+//! checklist draws through `&mut self` (it keeps the scroll window it
+//! drew). The ingredients therefore hold only the **configuration data**
+//! (items + initial selections + cursor position) and build the
+//! checklist fresh inside `render()`, which is cheap for a preview
+//! surface.
 //!
 //! If the spike lands "go", the ingredient list grows beyond the
 //! single-file demo and migrates to the `pantry.toml` /
@@ -24,32 +21,32 @@
 //! file and the `tui-pantry` dev-dep both retire.
 
 use conspectus::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
-use conspectus::tui::widgets::controls::{
-    ControlsContext, ControlsOverlayState, ControlsOverlayWidget,
-};
+use conspectus::tui::Modal;
+use conspectus::tui::widgets::controls::{self, ControlsContext, ControlsCursor, ControlsEditor};
 use std::borrow::Cow;
 
 use conspectus::tui::rows::RowId;
 use conspectus::tui::search::SearchItem;
-use conspectus::tui::theme::StyleSpec;
-use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
-use conspectus::tui::widgets::input::{TextInputState, TextInputWidget};
-use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
+use conspectus::tui::theme::{KeyOrigin, TokenValue};
+use conspectus::tui::widgets::help;
 use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
-use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
+use conspectus::tui::widgets::value_modal::{self, ValueText};
 use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_pantry::Ingredient;
+use tuikit::checklist::{Checklist, Item};
+use tuikit::overlay::{Outcome, Overlay};
+use tuikit::testkit::keys::press;
+use tuikit::text_prompt::{PromptResult, TextPrompt};
 
-/// Configuration for one multi-select preview variant. The state is
-/// rebuilt per `render` so the ingredient struct stays `Send`-clean
-/// regardless of the upstream `ratatui_cheese` validator's bound.
-struct MultiSelectVariant {
+/// Configuration for one checklist preview variant. The checklist is
+/// rebuilt per `render`, since drawing it needs `&mut`.
+struct ChecklistVariant {
     title: &'static str,
     items: Vec<String>,
     initial_selected: Vec<usize>,
@@ -61,23 +58,26 @@ struct MultiSelectVariant {
     description_text: &'static str,
 }
 
-impl MultiSelectVariant {
-    fn build_state(&self) -> MultiSelectState {
-        let mut state = MultiSelectState::new(self.title, self.items.len(), &self.initial_selected);
-        let down = KeyEvent {
-            code: KeyCode::Down,
-            modifiers: KeyModifiers::NONE,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        };
+impl ChecklistVariant {
+    fn build_state(&self) -> Checklist<Vec<usize>> {
+        let items = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, label)| {
+                Item::new(label.as_str()).checked(self.initial_selected.contains(&index))
+            })
+            .collect();
+        let mut state = Checklist::new(self.title, items, Outcome::Commit);
+        let down = press(KeyCode::Down);
         for _ in 0..self.cursor_advance {
-            state.handle_key(down);
+            state.handle(down, &());
         }
         state
     }
 }
 
-impl Ingredient for MultiSelectVariant {
+impl Ingredient for ChecklistVariant {
     fn group(&self) -> &str {
         self.group_label
     }
@@ -87,7 +87,7 @@ impl Ingredient for MultiSelectVariant {
     }
 
     fn source(&self) -> &str {
-        "conspectus::tui::widgets::multi_select"
+        "tuikit::checklist"
     }
 
     fn description(&self) -> &str {
@@ -95,41 +95,33 @@ impl Ingredient for MultiSelectVariant {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let state = self.build_state();
-        // `MultiSelectItem` is impl'd for `String` directly, so we
-        // can hand the items slice through without converting to
-        // borrowed `&str` — that would lose the static lifetime
-        // the `&'static str` impl needs.
-        MultiSelectWidget::new(&state, self.items.as_slice()).render(area, buf);
+        let mut state = self.build_state();
+        let theme = Theme::default();
+        state.draw(area, buf, &theme);
     }
 }
 
-/// Pre-open shape for the controls overlay sub-editor. The
-/// `ControlsOverlayState` private fields force us to drive open
-/// states via `handle_key`, so each variant picks the row to
-/// land on, optionally navigates down before pressing Enter,
-/// and ends with the sub-editor (or nothing) open.
+/// Pre-open shape for the controls overlay: the panel alone, or one of
+/// its editors open over it as the reducer opens it, a step whose panel
+/// shows its cursor row in the inactive look.
 #[derive(Clone, Copy)]
 enum ControlsOpenState {
-    /// Default open: cursor at View > active, no sub-editor.
+    /// Default open: cursor at View > active, no editor.
     Closed,
-    /// Cursor parked on Filters > Harness; press Enter to open
-    /// the harness multi-select.
+    /// Cursor on Filters > Harness with the harness checklist open.
     HarnessOpen,
-    /// Cursor at Filters > Max Age; Enter opens the max-age
-    /// text input pre-seeded from `filter.max_age`.
+    /// Cursor on Filters > Max Age with the max-age prompt open,
+    /// seeded from `filter.max_age`.
     MaxAgeOpen,
-    /// Cursor at Filters > Mux State; Enter opens the mux-state
-    /// multi-select pre-seeded from `filter.mux_state`.
+    /// Cursor on Filters > Mux State with the mux-state checklist open,
+    /// seeded from `filter.mux_state`.
     MuxStateOpen,
 }
 
-/// Configuration for one controls-overlay preview variant. The
-/// state is rebuilt fresh per `render` so the ingredient struct
-/// stays `Send`-clean even when the sub-editor wraps `!Send`
-/// MultiSelectState payloads. The `RowFilter` lives on the
-/// variant; the `ControlsContext` borrows from it transiently
-/// each frame.
+/// Configuration for one controls-overlay preview variant, which is also
+/// the panel's context: [`ControlsVariant::context`] lends its settings
+/// out as the App does. The panel is rebuilt fresh per `render`, since
+/// drawing it needs `&mut` (it keeps its scroll window).
 struct ControlsVariant {
     view: View,
     grouping: Grouping,
@@ -141,16 +133,20 @@ struct ControlsVariant {
 }
 
 impl ControlsVariant {
-    fn handle_key(state: &mut ControlsOverlayState, ctx: &ControlsContext<'_>, code: KeyCode) {
-        let event = KeyEvent {
-            code,
-            modifiers: KeyModifiers::NONE,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        };
-        // Outcome is discarded — the preview is render-only, and
-        // outcomes describe what the reducer would apply.
-        let _ = state.handle_key(ctx, event);
+    fn context(&self) -> ControlsContext<'_> {
+        ControlsContext {
+            view: self.view,
+            grouping: self.grouping,
+            filter: &self.filter,
+            sort: self.sort,
+            mux_recency: conspectus::tui::MuxRecency::default(),
+            preview_wrap: conspectus::tui::WrapMode::default(),
+            session_preview: conspectus::tui::SessionPreview::default(),
+            content: None,
+            search_kinds: Default::default(),
+            content_group: Default::default(),
+            search_history: None,
+        }
     }
 }
 
@@ -173,48 +169,30 @@ impl Ingredient for ControlsVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let ctx = ControlsContext {
-            view: self.view,
-            grouping: self.grouping,
-            filter: &self.filter,
-            sort: self.sort,
-            mux_recency: conspectus::tui::MuxRecency::default(),
-            preview_wrap: conspectus::tui::PreviewWrap::default(),
-            session_preview: conspectus::tui::SessionPreview::default(),
-            content: None,
-            search_kinds: Default::default(),
-            content_group: Default::default(),
-            search_history: None,
-        };
-        let mut state = match self.open_state {
-            ControlsOpenState::Closed => ControlsOverlayState::new(&ctx),
-            ControlsOpenState::HarnessOpen
-            | ControlsOpenState::MaxAgeOpen
-            | ControlsOpenState::MuxStateOpen => {
-                // `new_at_filters` lands the cursor on Filters >
-                // Harness; we drive Down to reach Max Age / Mux
-                // State before pressing Enter to open.
-                ControlsOverlayState::new_at_filters(&ctx)
-            }
-        };
-
-        match self.open_state {
-            ControlsOpenState::Closed => {}
+        let open = |row, editor| (row, Some(editor));
+        let (row, editor) = match self.open_state {
+            ControlsOpenState::Closed => (controls::opening_row(&self.context()), None),
             ControlsOpenState::HarnessOpen => {
-                Self::handle_key(&mut state, &ctx, KeyCode::Enter);
+                open(ControlsCursor::FilterHarness, ControlsEditor::Harness)
             }
             ControlsOpenState::MaxAgeOpen => {
-                Self::handle_key(&mut state, &ctx, KeyCode::Down);
-                Self::handle_key(&mut state, &ctx, KeyCode::Enter);
+                open(ControlsCursor::FilterMaxAge, ControlsEditor::MaxAge)
             }
             ControlsOpenState::MuxStateOpen => {
-                Self::handle_key(&mut state, &ctx, KeyCode::Down);
-                Self::handle_key(&mut state, &ctx, KeyCode::Down);
-                Self::handle_key(&mut state, &ctx, KeyCode::Enter);
+                open(ControlsCursor::FilterMuxState, ControlsEditor::MuxState)
             }
+        };
+        let mut panel = controls::panel(Self::context).at(row);
+        let Some(which) = editor else {
+            panel.draw(area, buf, self, &theme);
+            return;
+        };
+        panel.draw_under_step(area, buf, self, &theme);
+        match controls::editor(which, &self.context()) {
+            Modal::Checklist(mut list) => list.draw(area, buf, &theme),
+            Modal::Prompt(prompt) => prompt.draw(area, buf, &theme),
+            _ => {}
         }
-
-        ControlsOverlayWidget::new(&state, ctx, &theme).render(area, buf);
     }
 }
 
@@ -248,9 +226,13 @@ impl Ingredient for ValueModalVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let mut state = ValueModalState::new(self.label, &self.value);
-        state.scroll = self.scroll;
-        ValueModalWidget::new(&state, &theme).render(area, buf);
+        let mut modal = value_modal::open(ValueText::new(self.label, self.value.as_str()));
+        if self.scroll == u16::MAX {
+            modal.to_end();
+        } else {
+            modal.scroll_by(i32::from(self.scroll));
+        }
+        modal.draw(area, buf, &theme);
     }
 }
 
@@ -258,7 +240,7 @@ impl Ingredient for ValueModalVariant {
 /// state is the scroll offset; the keymap is static data baked into
 /// the renderer.
 struct HelpVariant {
-    scroll: u16,
+    scroll: usize,
     variant_name: &'static str,
     description_text: &'static str,
 }
@@ -282,10 +264,9 @@ impl Ingredient for HelpVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let state = HelpOverlayState {
-            scroll: self.scroll,
-        };
-        HelpOverlayWidget::new(&state, &theme).render(area, buf);
+        let mut help = help::open(&theme);
+        help.scroll_by(i32::try_from(self.scroll).unwrap_or(i32::MAX));
+        help.draw(area, buf, &theme);
     }
 }
 
@@ -312,24 +293,14 @@ struct SearchVariant {
 impl SearchVariant {
     fn send_chars(state: &mut SearchOverlayState, text: &str) {
         for ch in text.chars() {
-            let event = KeyEvent {
-                code: KeyCode::Char(ch),
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Press,
-                state: KeyEventState::NONE,
-            };
+            let event = press(KeyCode::Char(ch));
             let _ = state.handle_key(event);
         }
     }
 
     fn advance_cursor(state: &mut SearchOverlayState, steps: usize) {
         for _ in 0..steps {
-            let event = KeyEvent {
-                code: KeyCode::Down,
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Press,
-                state: KeyEventState::NONE,
-            };
+            let event = press(KeyCode::Down);
             let _ = state.handle_key(event);
         }
     }
@@ -367,7 +338,7 @@ impl Ingredient for SearchVariant {
         Self::send_chars(&mut state, self.query);
         state.refresh_matches(&items);
         Self::advance_cursor(&mut state, self.cursor_advance);
-        SearchOverlayWidget::new(&state, &items, &theme).render(area, buf);
+        SearchOverlayWidget::new(&mut state, &items, &theme).render(area, buf);
     }
 }
 
@@ -378,6 +349,8 @@ struct TextInputVariant {
     title: &'static str,
     initial: &'static str,
     cursor_left: usize,
+    /// Press Enter so the prompt refuses the text and shows why.
+    refused: bool,
     variant_name: &'static str,
     description_text: &'static str,
 }
@@ -392,7 +365,7 @@ impl Ingredient for TextInputVariant {
     }
 
     fn source(&self) -> &str {
-        "conspectus::tui::widgets::input"
+        "tuikit::text_prompt"
     }
 
     fn description(&self) -> &str {
@@ -401,87 +374,56 @@ impl Ingredient for TextInputVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let mut state = TextInputState::new(self.title, self.initial);
-        // `TextInputState::new` lands the cursor at the end so typing
+        // The preview's prompt refuses blank text, as the pin rename does.
+        let mut prompt = TextPrompt::new(self.title, self.initial, |text: &str| {
+            if text.trim().is_empty() {
+                PromptResult::Reject("pin: nothing entered".into())
+            } else {
+                PromptResult::<()>::Stay
+            }
+        });
+        // `TextPrompt::new` lands the cursor at the end so typing
         // appends naturally; the preview moves it left when a variant
         // wants to show the cursor mid-string.
         for _ in 0..self.cursor_left {
-            let event = KeyEvent {
-                code: KeyCode::Left,
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Press,
-                state: KeyEventState::NONE,
-            };
-            let _ = state.handle_key(event);
+            let _ = prompt.handle(press(KeyCode::Left), &());
         }
-        TextInputWidget::new(&state).theme(&theme).render(area, buf);
+        if self.refused {
+            let _ = prompt.handle(press(KeyCode::Enter), &());
+        }
+        prompt.draw(area, buf, &theme);
     }
 }
 
-/// One row in the theme harness — pairs a `[tui.theme]` key name
-/// with its rendered sample. Color rows render a `███` block in
-/// the key's color; Modifier rows render a label with the modifier
-/// applied; StyleSpec rows combine both.
-enum ThemeSample {
-    Color(Color),
-    Modifier(Modifier),
-    Style(StyleSpec),
+/// One row in the theme harness: a `[tui.theme]` key, a sample drawn in
+/// its value, and what it styles. Color rows render a `███` block in the
+/// key's color; modifier rows a label with the modifier applied; style
+/// rows both; width rows the count.
+fn theme_sample_line(key: &str, value: TokenValue, about: &str) -> Line<'static> {
+    let (sample, style) = match value {
+        // Three solid blocks (`█` is the heavy block in Unicode); the
+        // per-cell color reads the key's hue cleanly even under reduced
+        // terminal palettes.
+        TokenValue::Color(color) => ("███              ".to_string(), Style::default().fg(color)),
+        TokenValue::Modifier(modifier) => (
+            "modifier-sample  ".to_string(),
+            Style::default().add_modifier(modifier),
+        ),
+        TokenValue::Style(spec) => ("style-sample     ".to_string(), spec.into_style()),
+        TokenValue::Width(width) => (format!("{width:<17}"), Style::default()),
+    };
+    Line::from(vec![
+        format!("  {key:<24}  ").into(),
+        ratatui::text::Span::styled(sample, style),
+        about.to_string().into(),
+    ])
 }
 
-impl ThemeSample {
-    /// Render a labeled sample as a single `Line`. Column layout:
-    /// `  <key:24>  <preview:18>  <description>`.
-    fn line(&self, key: &'static str, description: &'static str) -> Line<'static> {
-        match self {
-            // Three solid blocks (`█` is the heavy block in Unicode);
-            // the per-cell color reads the key's hue cleanly even
-            // under reduced terminal palettes.
-            ThemeSample::Color(c) => {
-                let mut line = Line::default();
-                line.spans.push(format!("  {key:<24}  ").into());
-                line.spans
-                    .push(ratatui::text::Span::styled("███", Style::default().fg(*c)));
-                line.spans
-                    .push(format!("              {description}").into());
-                line
-            }
-            ThemeSample::Modifier(m) => {
-                let mut line = Line::default();
-                line.spans.push(format!("  {key:<24}  ").into());
-                line.spans.push(ratatui::text::Span::styled(
-                    "modifier-sample  ",
-                    Style::default().add_modifier(*m),
-                ));
-                line.spans.push(description.to_string().into());
-                line
-            }
-            ThemeSample::Style(spec) => {
-                let mut style = Style::default().add_modifier(spec.modifier);
-                if let Some(color) = spec.color {
-                    style = style.fg(color);
-                }
-                let mut line = Line::default();
-                line.spans.push(format!("  {key:<24}  ").into());
-                line.spans
-                    .push(ratatui::text::Span::styled("style-sample     ", style));
-                line.spans.push(description.to_string().into());
-                line
-            }
-        }
-    }
-}
-
-/// A one-section block in the theme harness — a bold header plus
-/// one row per `[tui.theme]` key.
-struct ThemeSection {
-    title: &'static str,
-    rows: Vec<(&'static str, ThemeSample, &'static str)>,
-}
-
-/// The theme harness ingredient renders every `[tui.theme]` key
-/// against `Theme::default()` as a labeled sample column. Forward-
-/// looking: when palette presets (dark/light, ADR follow-up) land,
-/// add additional variants that swap in those preset themes.
+/// The theme harness ingredient renders every `[tui.theme]` key against
+/// `Theme::default()` as a labeled sample column, straight from the
+/// theme's own key list, then the alias keys older files still use.
+/// Forward-looking: when palette presets (dark/light, ADR follow-up)
+/// land, add variants that swap in those preset themes.
 struct ThemeHarnessIngredient;
 
 impl Ingredient for ThemeHarnessIngredient {
@@ -503,22 +445,32 @@ impl Ingredient for ThemeHarnessIngredient {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::styled(
-            "Theme::default() — every [tui.theme] key as a sample.",
-            Style::default().add_modifier(Modifier::BOLD),
-        ));
-        lines.push(Line::raw(""));
-
-        for section in theme_sections(&theme) {
-            lines.push(Line::styled(
-                section.title.to_string(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
-            for (key, sample, description) in &section.rows {
-                lines.push(sample.line(key, description));
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let mut lines: Vec<Line<'static>> = vec![
+            Line::styled(
+                "Theme::default() — every [tui.theme] key as a sample.",
+                bold,
+            ),
+            Line::raw(""),
+        ];
+        for (title, origin) in [
+            ("Framework tokens", KeyOrigin::Token),
+            ("Conspectus roles", KeyOrigin::Named),
+        ] {
+            lines.push(Line::styled(title, bold));
+            for key in theme.keys().into_iter().filter(|key| key.origin == origin) {
+                if let Some(value) = theme.value(&key.name) {
+                    lines.push(theme_sample_line(&key.name, value, &key.about));
+                }
             }
             lines.push(Line::raw(""));
+        }
+        lines.push(Line::styled("Aliases (older keys)", bold));
+        for alias in theme.aliases() {
+            lines.push(Line::raw(format!(
+                "  {:<24}  sets {}",
+                alias.key, alias.target
+            )));
         }
 
         Paragraph::new(lines).render(area, buf);
@@ -527,37 +479,37 @@ impl Ingredient for ThemeHarnessIngredient {
 
 fn main() -> std::io::Result<()> {
     let ingredients: Vec<Box<dyn Ingredient>> = vec![
-        Box::new(MultiSelectVariant {
-            title: " harness (empty) ",
+        Box::new(ChecklistVariant {
+            title: "harness (empty)",
             items: Vec::new(),
             initial_selected: Vec::new(),
             cursor_advance: 0,
-            group_label: "MultiSelect",
+            group_label: "Checklist",
             variant_name: "Empty list",
             description_text: "Sub-editor with zero items — exercises the empty-state render path.",
         }),
-        Box::new(MultiSelectVariant {
-            title: " harness ",
+        Box::new(ChecklistVariant {
+            title: "harness",
             items: ["claude-code", "codex", "opencode", "aider"]
                 .into_iter()
                 .map(String::from)
                 .collect(),
             initial_selected: vec![0, 2],
             cursor_advance: 2,
-            group_label: "MultiSelect",
+            group_label: "Checklist",
             variant_name: "Mid-selection",
             description_text: "Typical sub-editor state: two items checked, cursor mid-list.",
         }),
-        Box::new(MultiSelectVariant {
-            title: " 40 options ",
+        Box::new(ChecklistVariant {
+            title: "40 options",
             items: (0..40)
                 .map(|i| format!("option-{i:02} — long enough label to test wrapping"))
                 .collect(),
             initial_selected: vec![3, 7, 11, 17, 23, 29, 35, 39],
             cursor_advance: 0,
-            group_label: "MultiSelect",
+            group_label: "Checklist",
             variant_name: "Large list (scroll)",
-            description_text: "40-option set with 8 checked entries — exercises the upstream scroll path.",
+            description_text: "40-option set with 8 checked entries — exercises the scroll window and the scrollbar.",
         }),
         Box::new(ControlsVariant {
             view: View::Sessions,
@@ -581,7 +533,7 @@ fn main() -> std::io::Result<()> {
             sort: Sort::Hierarchy,
             open_state: ControlsOpenState::HarnessOpen,
             variant_name: "Harness sub-editor (two selected)",
-            description_text: "Harness multi-select open with claude-code + opencode pre-checked; previews the modal-on-modal stacking.",
+            description_text: "Harness checklist open with claude-code + opencode pre-checked; previews the modal-on-modal stacking.",
         }),
         Box::new(ControlsVariant {
             view: View::Sessions,
@@ -608,7 +560,7 @@ fn main() -> std::io::Result<()> {
             sort: Sort::Hierarchy,
             open_state: ControlsOpenState::MuxStateOpen,
             variant_name: "Mux-state sub-editor (attached + ambiguous)",
-            description_text: "Mux-state multi-select open with attached + ambiguous pre-checked; the third filter sub-editor.",
+            description_text: "Mux-state checklist open with attached + ambiguous pre-checked; the third filter sub-editor.",
         }),
         Box::new(ValueModalVariant {
             label: "cwd",
@@ -652,7 +604,7 @@ fn main() -> std::io::Result<()> {
                 .join("\n"),
             scroll: u16::MAX,
             variant_name: "Scrolled (bottom)",
-            description_text: "Same content as the mid-scroll variant but scrolled to the bottom (u16::MAX clamps to the last line).",
+            description_text: "Same content as the mid-scroll variant but scrolled to the bottom (u16::MAX goes to the end, which shows the last page).",
         }),
         Box::new(HelpVariant {
             scroll: 0,
@@ -670,7 +622,7 @@ fn main() -> std::io::Result<()> {
             scroll: 50,
             variant_name: "Icon legend (scroll 50)",
             description_text:
-                "Scrolled so the Node kind icons (ADR 0073) section is in view — exercises the per-glyph rendering through `push_icon_legend`.",
+                "Scrolled so the Node kind icons (ADR 0073) section is in view — exercises the per-glyph rendering of the legend rows.",
         }),
         Box::new(SearchVariant {
             items: search_mock_items(),
@@ -705,271 +657,45 @@ fn main() -> std::io::Result<()> {
                 "Same backend, different query — cursor advanced two rows to exercise the non-cursor + cursor row styling side by side.",
         }),
         Box::new(TextInputVariant {
-            title: " rename ",
+            title: "rename",
             initial: "",
             cursor_left: 0,
+            refused: false,
             variant_name: "Empty value",
             description_text:
                 "Modal just opened — empty input, cursor at the start, awaiting first keystroke.",
         }),
         Box::new(TextInputVariant {
-            title: " rename ",
+            title: "rename",
             initial: "ingest-refactor",
             cursor_left: 8,
+            refused: false,
             variant_name: "Mid-edit (cursor mid-string)",
             description_text:
-                "Pre-populated alias with the cursor moved 8 chars left — exercises the reversed-cell cursor cue mid-string.",
+                "Pre-populated alias with the cursor moved 8 chars left — exercises the caret mid-string.",
         }),
         Box::new(TextInputVariant {
-            title: " max age ",
+            title: "max age",
             initial:
                 "30d-or-some-other-very-long-text-value-the-operator-might-have-typed-here-to-test-the-window",
             cursor_left: 0,
+            refused: false,
             variant_name: "Long value (cursor at end)",
             description_text:
-                "Value longer than the modal's inner width — exercises the `visible_window` truncation around the cursor.",
+                "Value longer than the modal's inner width — exercises the field's window around the cursor.",
+        }),
+        Box::new(TextInputVariant {
+            title: "Rename pin",
+            initial: "",
+            cursor_left: 0,
+            refused: true,
+            variant_name: "Refused (error line)",
+            description_text:
+                "Enter on blank text: the prompt stays open and grows one row for the reason, until the next edit.",
         }),
         Box::new(ThemeHarnessIngredient),
     ];
     tui_pantry::run!(ingredients)
-}
-
-/// Section index for the theme harness. Each section groups the
-/// `[tui.theme]` keys by their semantic role — harness identity,
-/// recency buckets, mux state, etc. Adding a new key to `Theme`
-/// only requires extending this index, not touching the renderer.
-fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
-    vec![
-        ThemeSection {
-            title: "Harness identity",
-            rows: vec![
-                (
-                    "harness.claude-code",
-                    ThemeSample::Color(theme.harness_color("claude-code")),
-                    "claude row badge",
-                ),
-                (
-                    "harness.codex",
-                    ThemeSample::Color(theme.harness_color("codex")),
-                    "codex row badge",
-                ),
-                (
-                    "harness.opencode",
-                    ThemeSample::Color(theme.harness_color("opencode")),
-                    "opencode row badge",
-                ),
-                (
-                    "harness.aider",
-                    ThemeSample::Color(theme.harness_color("aider")),
-                    "aider row badge",
-                ),
-                (
-                    "harness_unknown",
-                    ThemeSample::Color(theme.harness_unknown),
-                    "fallback when the harness key is unrecognized",
-                ),
-            ],
-        },
-        ThemeSection {
-            title: "Recency buckets",
-            rows: vec![
-                (
-                    "recency_fresh",
-                    ThemeSample::Style(theme.recency_fresh),
-                    "rows touched in the last minute",
-                ),
-                (
-                    "recency_active",
-                    ThemeSample::Style(theme.recency_active),
-                    "rows touched in the last hour",
-                ),
-                (
-                    "recency_recent",
-                    ThemeSample::Style(theme.recency_recent),
-                    "rows touched today",
-                ),
-                (
-                    "recency_cold",
-                    ThemeSample::Style(theme.recency_cold),
-                    "rows older than the recent bucket",
-                ),
-            ],
-        },
-        ThemeSection {
-            title: "Mux state",
-            rows: vec![
-                (
-                    "mux_attached",
-                    ThemeSample::Color(theme.mux_attached),
-                    "◉ glyph + attached counts",
-                ),
-                (
-                    "mux_unmuxed",
-                    ThemeSample::Modifier(theme.mux_unmuxed),
-                    "◯ glyph (modifier-only by default for terminal compat)",
-                ),
-            ],
-        },
-        ThemeSection {
-            title: "Selection / focus",
-            rows: vec![
-                (
-                    "selection_active",
-                    ThemeSample::Modifier(theme.selection_active),
-                    "left-pane focused row",
-                ),
-                (
-                    "selection_inactive",
-                    ThemeSample::Modifier(theme.selection_inactive),
-                    "left-pane unfocused row",
-                ),
-                (
-                    "panel_focus_accent",
-                    ThemeSample::Color(theme.panel_focus_accent),
-                    "► focus arrow + popup-frame border",
-                ),
-            ],
-        },
-        ThemeSection {
-            title: "Structural / semantic",
-            rows: vec![
-                (
-                    "cwd_mark",
-                    ThemeSample::Color(theme.cwd_mark),
-                    "(cwd) launch-context marker",
-                ),
-                (
-                    "link_id",
-                    ThemeSample::Color(theme.link_id),
-                    "session id columns + detail-pane ids",
-                ),
-                (
-                    "placeholder",
-                    ThemeSample::Modifier(theme.placeholder),
-                    "dim hint text + truncated values",
-                ),
-                (
-                    "secondary_text",
-                    ThemeSample::Color(theme.secondary_text),
-                    "short ids + snippet text",
-                ),
-                (
-                    "disclosure",
-                    ThemeSample::Color(theme.disclosure),
-                    "► ▼ expand/collapse glyphs",
-                ),
-                (
-                    "divider",
-                    ThemeSample::Modifier(theme.divider),
-                    "section dividers between chips",
-                ),
-                (
-                    "warning",
-                    ThemeSample::Color(theme.warning),
-                    "▲ ambiguity glyph + stale-cache message",
-                ),
-                (
-                    "error",
-                    ThemeSample::Color(theme.error),
-                    "error toast + status-bar errors",
-                ),
-                (
-                    "success",
-                    ThemeSample::Color(theme.success),
-                    "success toast border",
-                ),
-            ],
-        },
-        ThemeSection {
-            title: "PR state",
-            rows: vec![
-                (
-                    "pr_open",
-                    ThemeSample::Color(theme.pr_open),
-                    "open PR rows + forge_pr default hue",
-                ),
-                (
-                    "pr_closed",
-                    ThemeSample::Color(theme.pr_closed),
-                    "closed PR rows",
-                ),
-                (
-                    "pr_merged",
-                    ThemeSample::Color(theme.pr_merged),
-                    "merged PR rows",
-                ),
-                (
-                    "pr_draft",
-                    ThemeSample::Color(theme.pr_draft),
-                    "draft PR rows",
-                ),
-            ],
-        },
-        ThemeSection {
-            title: "Badge composition",
-            rows: vec![(
-                "badge",
-                ThemeSample::Modifier(theme.badge),
-                "REVERSED|BOLD by default; the chip look",
-            )],
-        },
-        ThemeSection {
-            title: "Node kind (ADR 0073)",
-            rows: vec![
-                (
-                    "node_workspace",
-                    ThemeSample::Color(theme.node_workspace),
-                    "▦ glyph in row tree + detail pane",
-                ),
-                (
-                    "node_repo",
-                    ThemeSample::Color(theme.node_repo),
-                    "◆ glyph in row tree + detail pane",
-                ),
-                (
-                    "node_checkout",
-                    ThemeSample::Color(theme.node_checkout),
-                    "◇ glyph",
-                ),
-                (
-                    "node_agent_session",
-                    ThemeSample::Color(theme.node_agent_session),
-                    "● glyph in detail pane only (row uses pill)",
-                ),
-                (
-                    "node_mux_session",
-                    ThemeSample::Color(theme.node_mux_session),
-                    "▣ glyph",
-                ),
-                (
-                    "node_runtime_process",
-                    ThemeSample::Color(theme.node_runtime_process),
-                    "◈ glyph",
-                ),
-                (
-                    "node_branch",
-                    ThemeSample::Color(theme.node_branch),
-                    "⌥ glyph",
-                ),
-                ("node_fork", ThemeSample::Color(theme.node_fork), "⋎ glyph"),
-            ],
-        },
-        ThemeSection {
-            title: "Detail-pane edge state (ADR 0075)",
-            rows: vec![
-                (
-                    "edge_alt_of",
-                    ThemeSample::Color(theme.edge_alt_of),
-                    "non-winning AltOf rows in the Other zone",
-                ),
-                (
-                    "edge_conflict",
-                    ThemeSample::Color(theme.edge_conflict),
-                    "Conflict rows with the ▲ prefix",
-                ),
-            ],
-        },
-    ]
 }
 
 /// Synthetic item corpus shared across every search variant. Each

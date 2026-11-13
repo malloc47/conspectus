@@ -22,9 +22,13 @@ pub enum Effect {
     /// reflects the just-written change without waiting for the
     /// daemon's next tick.
     SpawnRefresh { force_local: bool },
-    /// Post a transient status-bar toast. Non-blocking; input
-    /// continues to flow to the underlying view.
-    Toast(String),
+    /// Post a transient toast in its severity's colors. Non-blocking;
+    /// input continues to flow to the underlying view.
+    Toast(tuikit::feedback::Feedback),
+    /// Copy `text` to the terminal's clipboard (OSC 52, ADR 0056) and post
+    /// `done` as a success toast, or an error toast saying why the copy
+    /// failed.
+    Copy { text: String, done: String },
     /// Persist the current TUI state to disk. Best-effort;
     /// failures are silently swallowed by the executor.
     Persist,
@@ -72,13 +76,11 @@ pub enum ExecSpec {
     /// staying in the TUI.
     Resume(ResumeTarget),
     /// Open the transcript viewer for an agent session. The executor
-    /// picks native (parse transcript on disk into `ViewerState` +
+    /// picks native (parse transcript on disk into the viewer +
     /// `App::open_viewer_modal`) vs external fallback (spawn
     /// `claude-history` etc.); both paths read the filesystem so the
-    /// reducer never touches them. With a [`ViewerOpen`] the viewer
+    /// reducer never touches them. With a `ViewerOpen` the viewer
     /// lands on that search result with the query highlighted.
-    ///
-    /// [`ViewerOpen`]: crate::viewer::state::ViewerOpen
     ViewSession(AgentSessionId, Option<crate::viewer::state::ViewerOpen>),
     /// Read a mux pane's scrollback now and open it in a pager on the
     /// line a content search found, with `text` picked out. Reads the
@@ -296,6 +298,7 @@ pub fn lifecycle(effect: &Effect) -> Lifecycle {
     match effect {
         Effect::SpawnRefresh { .. }
         | Effect::Toast(_)
+        | Effect::Copy { .. }
         | Effect::Persist
         | Effect::Quit
         | Effect::RunMux(_) => Lifecycle::NONE,

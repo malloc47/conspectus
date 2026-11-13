@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-19 19:33'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -35,3 +36,9 @@ ordinal: 445000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-002`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): re-scoped. The TUI's rows now come from column schemas (`tuikit::columns::ColumnSchema`, ADR 0183 to 0185) built by the row builders in `src/tui/rows/`, and the CLI tables from `ColumnSpec` in `src/output/render.rs`. The meeting point is the column schema rather than a view model: the framework's "plain-text tables" seam (`crates/tuikit/docs/controls/columns.md`; roadmap Tier 2) would let `table sessions` lay out from the same schema. What is left: decide whether the CLI renderer adopts the schema or shares only the cell builders and labels. The CLI and the TUI already share the age ladder (`tuikit::age` through `format_relative_age`) and the snippet cut (`tuikit::text::fit_snippet`, CSP-774).
+<!-- SECTION:NOTES:END -->

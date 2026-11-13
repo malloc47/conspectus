@@ -4,6 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
+use tuikit::age::Age;
+
 use crate::filter::RowFilter;
 use crate::model::{
     CheckoutId, ForgePrId, ForgePrNode, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId,
@@ -12,7 +14,7 @@ use crate::model::{
 use crate::output::render::{node_short_id_from_display, strip_branch_prefix, unique_prefix_len};
 use crate::tui::PrsGrouping;
 use crate::tui::rows::{
-    GroupRow, PrRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency, shorten_home,
+    GroupRow, PrRow, PrStatus, Row, RowId, RowKind, RowTree, ViewLabel, shorten_home,
 };
 
 pub struct PrsBuildInputs<'a> {
@@ -62,38 +64,18 @@ enum Bucket {
     /// A forge repo (`owner/repo`) with no local repo known for its
     /// PRs, so the graph is too sparse to file them anywhere else.
     Remote(String),
-    State(StateBucket),
+    /// The state grouping files a PR under what its state reads as.
+    State(PrStatus),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum StateBucket {
-    Open,
-    Draft,
-    Merged,
-    Closed,
-    Other,
-}
-
-impl StateBucket {
-    fn of(pr: &ForgePrNode) -> Self {
-        let state = pr.state.as_deref().unwrap_or_default().to_ascii_lowercase();
-        match state.as_str() {
-            "open" if pr.is_draft => Self::Draft,
-            "open" => Self::Open,
-            "merged" => Self::Merged,
-            "closed" => Self::Closed,
-            _ => Self::Other,
-        }
-    }
-
-    fn row(self) -> (&'static str, &'static str) {
-        match self {
-            Self::Open => ("prs-open", "Open"),
-            Self::Draft => ("prs-draft", "Draft"),
-            Self::Merged => ("prs-merged", "Merged"),
-            Self::Closed => ("prs-closed", "Closed"),
-            Self::Other => ("prs-other", "Other"),
-        }
+/// The row id and label of a state group.
+fn state_group(status: PrStatus) -> (&'static str, &'static str) {
+    match status {
+        PrStatus::Open => ("prs-open", "Open"),
+        PrStatus::Draft => ("prs-draft", "Draft"),
+        PrStatus::Merged => ("prs-merged", "Merged"),
+        PrStatus::Closed => ("prs-closed", "Closed"),
+        PrStatus::Unknown => ("prs-other", "Other"),
     }
 }
 
@@ -132,10 +114,10 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
         .map(|(node_id, full)| (node_id.as_str(), full[..id_len].to_string()))
         .collect();
 
-    // Each PR's rows (the PR, then the sessions working in its
-    // checkouts), filed under its bucket.
-    let mut buckets: BTreeMap<Bucket, Vec<Row>> = BTreeMap::new();
-    // The forge repos (`owner/repo`) each bucket's PRs come from.
+    // First file every PR the filters admit under its bucket, noting the
+    // forge repos (`owner/repo`) each bucket's PRs come from: a group whose
+    // PRs all come from one names it, so its rows can leave it out.
+    let mut filed: Vec<Filed<'_, '_>> = Vec::new();
     let mut slugs: BTreeMap<Bucket, BTreeSet<String>> = BTreeMap::new();
     for pr in &prs {
         let branch = branches.get(&pr.node_id);
@@ -174,7 +156,7 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
                 .unwrap_or_else(|| repo.common_dir.clone());
             Some((path, repo.clone()))
         };
-        let remote_group = || Bucket::Remote(format!("{}/{}", pr.node.owner, pr.node.repo));
+        let remote_group = || Bucket::Remote(forge_repo(pr));
         let bucket = match inputs.grouping {
             PrsGrouping::Checkout => match pr_checkouts.first() {
                 Some((root, id)) => Bucket::Checkout {
@@ -187,23 +169,51 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
             PrsGrouping::Repo => {
                 repo_group().map_or_else(remote_group, |(path, id)| Bucket::Repo { path, id })
             }
-            PrsGrouping::State => Bucket::State(StateBucket::of(pr.node)),
+            PrsGrouping::State => {
+                Bucket::State(PrStatus::of(pr.node.state.as_deref(), pr.node.is_draft))
+            }
         };
-
         slugs
             .entry(bucket.clone())
             .or_default()
-            .insert(format!("{}/{}", pr.node.owner, pr.node.repo));
-        let rows = buckets.entry(bucket).or_default();
+            .insert(forge_repo(pr));
+        filed.push(Filed {
+            bucket,
+            pr,
+            branch,
+            agents: visible_agents,
+        });
+    }
+    // The forge repo a group names (ADR 0131). A state group spans repos,
+    // so its rows keep theirs.
+    let named = |bucket: &Bucket| -> Option<&str> {
+        slugs
+            .get(bucket)
+            .filter(|slugs| slugs.len() == 1)
+            .and_then(|slugs| slugs.iter().next())
+            .filter(|_| !matches!(bucket, Bucket::State(_)))
+            .map(String::as_str)
+    };
+
+    // Then each PR's rows (the PR, then the sessions working in its
+    // checkouts), under its bucket.
+    let mut buckets: BTreeMap<Bucket, Vec<Row>> = BTreeMap::new();
+    for Filed {
+        bucket,
+        pr,
+        branch,
+        agents,
+    } in filed
+    {
         let node_id = NodeId::ForgePr(pr.id.clone());
-        rows.push(Row {
+        let row = Row {
             id: RowId::Pr(node_id.clone()),
             depth: 1,
-            expandable: !visible_agents.is_empty(),
+            expandable: !agents.is_empty(),
             kind: RowKind::Pr(PrRow {
                 pr_number: pr.node.number,
-                repo_display: format!("{}/{}#{}", pr.node.owner, pr.node.repo, pr.node.number),
-                label: format!("{}/{}#{}", pr.node.owner, pr.node.repo, pr.node.number),
+                repo_display: format!("{}#{}", forge_repo(pr), pr.node.number),
+                forge_repo: named(&bucket).is_none().then(|| forge_repo(pr)),
                 state: pr.node.state.clone(),
                 is_draft: pr.node.is_draft,
                 branch_name: branch
@@ -212,13 +222,15 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
                     .map(str::to_string),
                 tracked: branch.is_some(),
                 title: pr.node.title.clone(),
-                updated_recency: format_recency(now, pr.node.updated_epoch),
+                updated_recency: Age::of(pr.node.updated_epoch, now).map(Age::label),
                 updated_epoch: pr.node.updated_epoch,
                 url: pr.node.url.clone(),
                 primary_node: node_id,
             }),
-        });
-        for agent in visible_agents {
+        };
+        let rows = buckets.entry(bucket).or_default();
+        rows.push(row);
+        for agent in agents {
             rows.push(super::agent_row(
                 agent,
                 2,
@@ -238,32 +250,29 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
         view: ViewLabel::Prs,
         ..RowTree::default()
     };
-    for (bucket, mut rows) in buckets {
-        let mut group = group_row(&bucket, launch_root.as_deref(), inputs.home);
-        // A group whose PRs all come from one forge repo names it, and
-        // its rows drop the `owner/repo` (ADR 0131). A state group
-        // spans repos, so its rows keep it.
-        let named = slugs
-            .get(&bucket)
-            .filter(|slugs| slugs.len() == 1)
-            .and_then(|slugs| slugs.iter().next())
-            .filter(|_| !matches!(bucket, Bucket::State(_)));
-        if let Some(slug) = named {
-            if !matches!(bucket, Bucket::Remote(_))
-                && let RowKind::Group(group) = &mut group.kind
-            {
-                group.display_path = format!("{slug}  {}", group.display_path);
-            }
-            for row in &mut rows {
-                if let RowKind::Pr(pr) = &mut row.kind {
-                    pr.label = format!("#{}", pr.pr_number);
-                }
-            }
-        }
-        tree.rows.push(group);
+    for (bucket, rows) in buckets {
+        tree.rows.push(group_row(
+            &bucket,
+            launch_root.as_deref(),
+            inputs.home,
+            named(&bucket),
+        ));
         tree.rows.extend(rows);
     }
     tree
+}
+
+/// A PR filed under its bucket, with what its rows are built from.
+struct Filed<'p, 'a> {
+    bucket: Bucket,
+    pr: &'p PrData<'a>,
+    branch: Option<&'p BranchLink>,
+    agents: Vec<&'p super::AgentData<'a>>,
+}
+
+/// The forge repo a PR comes from: `owner/repo`.
+fn forge_repo(pr: &PrData<'_>) -> String {
+    format!("{}/{}", pr.node.owner, pr.node.repo)
 }
 
 /// The root of the checkout group the launch directory sits in, the
@@ -283,50 +292,52 @@ fn launch_checkout_root<'b>(
         .max_by_key(String::len)
 }
 
-fn group_row(bucket: &Bucket, launch_root: Option<&str>, home: Option<&Path>) -> Row {
-    let (id, display_path, primary_node, is_launch_context) = match bucket {
+/// A group's header row. A group whose PRs all come from the forge repo
+/// `named` leads with it, its path after (ADR 0131); a remote group is
+/// already named for its forge repo.
+fn group_row(
+    bucket: &Bucket,
+    launch_root: Option<&str>,
+    home: Option<&Path>,
+    named: Option<&str>,
+) -> Row {
+    // The header of a group at `path`, with a note after the path.
+    let local = |path: String, note: Option<&str>, node: NodeId| match (named, note) {
+        (Some(slug), _) => {
+            let detail = note.map_or_else(|| path.clone(), |note| format!("{path}  {note}"));
+            GroupRow::named(slug, Some(node)).with_detail(detail)
+        }
+        (None, Some(note)) => GroupRow::named(path, Some(node)).with_detail(note),
+        (None, None) => GroupRow::at_path(&path, Some(node)),
+    };
+    let (id, header) = match bucket {
         Bucket::Checkout { root, id } => {
             let node = NodeId::Checkout(id.clone());
-            (
-                RowId::Group(node.clone()),
-                shorten_home(root, home),
-                Some(node),
-                launch_root == Some(root.as_str()),
-            )
+            let mut header = local(shorten_home(root, home), None, node.clone());
+            header.is_launch_context = launch_root == Some(root.as_str());
+            (RowId::Group(node), header)
         }
         Bucket::Repo { path, id } => {
             let node = NodeId::Repo(id.clone());
-            (
-                RowId::Group(node.clone()),
-                shorten_home(path, home),
-                Some(node),
-                false,
-            )
+            let header = local(shorten_home(path, home), None, node.clone());
+            (RowId::Group(node), header)
         }
         Bucket::Unchecked { path, id } => {
             let node = NodeId::Repo(id.clone());
-            (
-                RowId::Group(node.clone()),
-                format!("{}  no checkout", shorten_home(path, home)),
-                Some(node),
-                false,
-            )
+            let header = local(shorten_home(path, home), Some("no checkout"), node.clone());
+            (RowId::Group(node), header)
         }
-        Bucket::Remote(slug) => (RowId::Remote(slug.clone()), slug.clone(), None, false),
-        Bucket::State(state) => {
-            let (id, label) = state.row();
-            (RowId::Synthetic(id), label.to_string(), None, false)
+        Bucket::Remote(slug) => (RowId::Remote(slug.clone()), GroupRow::at_path(slug, None)),
+        Bucket::State(status) => {
+            let (id, label) = state_group(*status);
+            (RowId::Synthetic(id), GroupRow::named(label, None))
         }
     };
     Row {
         id,
         depth: 0,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path,
-            primary_node,
-            is_launch_context,
-        }),
+        kind: RowKind::Group(header),
     }
 }
 

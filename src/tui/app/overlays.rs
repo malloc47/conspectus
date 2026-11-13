@@ -1,37 +1,130 @@
-//! Modal-stack accessors: open, close, and peek each overlay.
+//! The modal stack on the App: lending it out with the App as the
+//! entries' context, routing a key to its top, drawing it, and the open,
+//! close, and peek accessors of each overlay.
 
 use super::*;
 
+use crate::tui::Modal;
+use crate::tui::modal::ModalStack;
+use crate::tui::widgets::controls::ControlsPanel;
+use tuikit::overlay::Settled;
+
 impl App {
-    /// Active rename-overlay state, if any. Lives on the modal
-    /// stack (ADR 0085 contract 3); this accessor peeks the top
-    /// entry.
-    pub fn rename_overlay(&self) -> Option<&crate::tui::widgets::input::TextInputState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::Rename(state) => Some(state.inner()),
+    /// Lends the modal stack out for one call, with the rest of the App as
+    /// the entries' context, and puts it back after. While it is lent out
+    /// the App's own stack is empty, so an entry reads its own state from
+    /// itself, never through the App's modal accessors; nothing opens a
+    /// modal from inside the call.
+    pub fn with_modals<R>(&mut self, f: impl FnOnce(&mut ModalStack, &App) -> R) -> R {
+        let mut stack = std::mem::take(&mut self.modal_stack);
+        let out = f(&mut stack, self);
+        debug_assert!(
+            self.modal_stack.is_empty(),
+            "a modal opened while the stack was lent out"
+        );
+        self.modal_stack = stack;
+        out
+    }
+
+    /// One key for the modal on top: what it asked for, with the stack's
+    /// part done (the top closed for a close or a commit). `None` when no
+    /// modal is open, so the key is the main screen's.
+    pub fn press_modal_key(
+        &mut self,
+        key: ratatui::crossterm::event::KeyEvent,
+    ) -> Option<Settled<Modal, Msg>> {
+        self.with_modals(|stack, app| {
+            let outcome = stack.route(key, app)?;
+            Some(stack.settle(outcome))
+        })
+    }
+
+    /// The bookkeeping as a key closes `closed`, before what it committed
+    /// is handled: the status line drops what the modal showed while it
+    /// was open (closing says nothing), and a closing search remembers how
+    /// it was set. Returns a message to send first, if any: a search that
+    /// was not kept drops its preview.
+    pub(crate) fn modal_closed(&mut self, closed: Modal, committed: Option<&Msg>) -> Option<Msg> {
+        self.status_message = None;
+        let Modal::Search(search) = closed else {
+            return None;
+        };
+        self.search_closed(&search);
+        // Keeping the search is the only way out that keeps its preview.
+        let kept = matches!(
+            committed,
+            Some(Msg::ApplyContentSearch { .. } | Msg::KeepContentSearch { .. })
+        );
+        (!kept).then_some(Msg::DiscardContentPreview)
+    }
+
+    /// Draws every open modal over `area`, bottom to top.
+    pub(crate) fn draw_modals(
+        &mut self,
+        area: ratatui::layout::Rect,
+        buf: &mut ratatui::buffer::Buffer,
+    ) {
+        self.with_modals(|stack, app| stack.draw(area, buf, app, app.theme()));
+    }
+
+    /// Open `modal` on top of the stack; it takes the keys from now on.
+    /// The per-overlay openers below do this with the state they build.
+    pub fn open_modal(&mut self, modal: Modal) {
+        self.modal_stack.push(modal);
+    }
+
+    /// Whether any modal is open; an open modal owns every key.
+    pub fn has_modal(&self) -> bool {
+        !self.modal_stack.is_empty()
+    }
+
+    /// Whether an open modal fills the screen (a full-screen viewer), so
+    /// nothing under it is drawn.
+    pub fn modals_fill_screen(&self) -> bool {
+        self.modal_stack.fills_screen()
+    }
+
+    /// The name of the modal on top, as `Modal::NAMES` lists it.
+    pub fn top_modal_name(&self) -> Option<&'static str> {
+        self.modal_stack.top().map(Modal::name)
+    }
+
+    /// The keys the modal on top takes now, as its footer names them
+    /// (`Overlay::hints`), for the status bar to show while it is open;
+    /// `None` when no modal is open.
+    pub fn top_modal_hints(&self) -> Option<tuikit::keys::Footer> {
+        use tuikit::overlay::Overlay;
+        self.modal_stack
+            .top()
+            .map(Overlay::<crate::tui::Msg, App>::hints)
+    }
+
+    /// Whether the overlay on top is typing into a text field: a prompt,
+    /// a form row that takes text, a filter editor, a query, or a find
+    /// prompt. A paste goes only there; in a menu, a list, or a choice
+    /// row its characters would act as keys.
+    pub fn text_field_has_keys(&self) -> bool {
+        self.modal_stack.takes_text()
+    }
+
+    /// The rename prompt, if it is on top of the stack.
+    pub fn rename_overlay(&self) -> Option<&tuikit::text_prompt::TextPrompt<crate::tui::Msg>> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::Rename(prompt) => Some(prompt),
             _ => None,
         }
     }
 
-    /// Mutable access for the runtime's per-key forwarding.
-    pub fn rename_overlay_mut(&mut self) -> Option<&mut crate::tui::RenameOverlayState> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::Rename(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    /// Push a rename overlay onto the modal stack. Caller
-    /// pre-populates the input with the current alias, harness
-    /// title, or empty string per ADR 0030. The raw text-input
-    /// state is wrapped in a `RenameOverlayState` so the
-    /// overlay's Confirm(String) maps to Msg::CommitRename via
-    /// the uniform Overlay trait.
-    pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextInputState) {
-        self.slot_prompt = None;
-        self.modal_stack.push(crate::tui::Modal::Rename(
-            crate::tui::RenameOverlayState::new(state),
-        ));
+    /// Push a rename prompt onto the modal stack. The opener seeds it
+    /// with the current name (an alias, a harness title, a mux's or a
+    /// pin's name, or nothing, per ADR 0030) and gives it the closure
+    /// that turns a confirmed name into the rename it means, so the
+    /// prompt commits that message itself.
+    pub fn open_rename_overlay(
+        &mut self,
+        prompt: tuikit::text_prompt::TextPrompt<crate::tui::Msg>,
+    ) {
+        self.modal_stack.push(crate::tui::Modal::Rename(prompt));
     }
 
     /// Fix the entity the open rename prompt renames.
@@ -39,58 +132,57 @@ impl App {
         self.rename_node = Some(node);
     }
 
-    /// Open the text prompt that edits a pin slot.
-    pub(crate) fn open_slot_prompt(
-        &mut self,
-        prompt: super::SlotPrompt,
-        title: &str,
-        initial: &str,
-    ) {
-        self.open_rename_overlay(crate::tui::widgets::input::TextInputState::new(
-            title, initial,
-        ));
-        self.slot_prompt = Some(prompt);
+    /// Open the prompt that renames the pin `slot`. It checks the new
+    /// name as the pin edit form's name row does (blank, not a pin id, or
+    /// another pin's) and refuses in the prompt, so a refused name renames
+    /// nothing; a name it takes commits the slot's rename.
+    pub(crate) fn open_pin_rename(&mut self, slot: String) {
+        use crate::tui::Msg;
+        use tuikit::text_prompt::{PromptResult, TextPrompt};
+        let initial = slot.clone();
+        let known = self.pin_names();
+        self.open_rename_overlay(TextPrompt::new("Rename pin", initial, move |text: &str| {
+            match crate::tui::widgets::pin_edit::check_name(&slot, &known, text) {
+                Err(why) => PromptResult::Reject(why),
+                Ok(()) => PromptResult::Commit(Msg::CommitSlotRename {
+                    slot: slot.clone(),
+                    new_name: text.trim().to_string(),
+                }),
+            }
+        }));
+    }
+
+    /// The names of every pin in the graph, legacy pins included: the
+    /// names a pin cannot be renamed to.
+    fn pin_names(&self) -> Vec<String> {
+        self.snapshot_handle()
+            .map(|handle| {
+                handle
+                    .snapshot()
+                    .pins
+                    .iter()
+                    .map(|pin| pin.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Open a menu that unpins whichever of `slots` is chosen.
     pub(crate) fn open_pin_menu(&mut self, slots: Vec<String>) {
-        use crate::tui::Msg;
-        use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
-        let entries: Vec<RowMenuEntry> = slots
-            .into_iter()
-            .map(|slot| {
-                RowMenuEntry::new(
-                    format!("Unpin {slot}"),
-                    "remove the pin; the entity and its history stay",
-                    Msg::Unpin(slot),
-                )
-            })
+        use tuikit::action_menu::ActionMenu;
+        let entries: Vec<_> = slots
+            .iter()
+            .map(|slot| crate::tui::actions::unpin_entry(slot))
             .collect();
         if !entries.is_empty() {
-            self.open_row_menu(RowMenuState::new("Pinned", entries));
+            self.open_row_menu(ActionMenu::new("Pinned", entries));
         }
     }
 
     /// Switch to the native view of the entity pin `slot` points at and
     /// select its row.
     pub(crate) fn reveal_slot(&mut self, slot: &str) -> Result<(), String> {
-        let node = self
-            .snapshot_handle()
-            .and_then(|handle| {
-                crate::tui::rows::pin_nodes(handle.snapshot())
-                    .into_iter()
-                    .find(|pin| pin.id.id == slot)
-                    .and_then(|pin| pin.target_node.clone())
-            })
-            .ok_or_else(|| format!("pin `{slot}` has no entity to reveal"))?;
-        let record = self.snapshot_handle().and_then(|handle| {
-            crate::tui::rows::pin_nodes(handle.snapshot())
-                .into_iter()
-                .find(|pin| pin.id.id == slot)
-                .and_then(|pin| pin.target.as_deref())
-                .and_then(|target| target.strip_prefix(crate::model::PinSlot::HISTORY_PREFIX))
-                .map(str::to_string)
-        });
+        let (node, record) = self.slot_target(slot)?;
         self.reveal_node(&node, record)
             .map_err(|why| format!("`{slot}` {why}"))
     }
@@ -114,7 +206,7 @@ impl App {
     pub(crate) fn nav_origin(&self) -> NavEntry {
         NavEntry {
             view: self.active_view,
-            selection: self.selection.clone(),
+            selection: self.tree_state.selected().cloned(),
         }
     }
 
@@ -162,25 +254,11 @@ impl App {
         let Some(handle) = self.snapshot_handle() else {
             return Err("isn't listed: nothing is loaded yet".to_string());
         };
-        let snapshot = handle.snapshot();
-        let view = crate::tui::actions::natural_view(snapshot, node);
+        let Some(view) = crate::tui::actions::natural_view(handle.snapshot(), node) else {
+            return Err("isn't listed in any view".to_string());
+        };
         // History lists a gone entity by its record rather than by node.
-        let record = record_hint
-            .or_else(|| {
-                snapshot
-                    .history
-                    .by_key(&node.to_string())
-                    .map(|(_, meta)| meta.id.clone())
-            })
-            .or_else(|| match node {
-                NodeId::MuxSession(mux) => snapshot
-                    .history
-                    .muxes
-                    .iter()
-                    .find(|record| record.recipe.native_id() == mux.native_id)
-                    .map(|record| record.meta.id.clone()),
-                _ => None,
-            });
+        let record = self.reveal_record(node, record_hint);
         let previous = self.active_view;
         let previous_filter = self.filter.clone();
         self.switch_to_view(view);
@@ -191,7 +269,7 @@ impl App {
         }
         self.rebuild_tree_in_place();
         let Some(index) = self.tree.rows.iter().position(|row| {
-            crate::tui::rows::row_node(&row.id) == Some(node)
+            super::tree::row_matches(row, node)
                 || matches!(&row.id, RowId::History { record_id } if Some(record_id) == record.as_ref())
         }) else {
             // Stay where the operator was.
@@ -216,20 +294,7 @@ impl App {
 
     /// Expand the ancestors of the row at `index` and select it.
     pub(super) fn expand_to_and_select(&mut self, index: usize) {
-        let mut wanted = self.tree.rows[index].depth;
-        let ancestors: Vec<RowId> = self.tree.rows[..index]
-            .iter()
-            .rev()
-            .filter(|row| {
-                let keep = row.depth < wanted;
-                if keep {
-                    wanted = row.depth;
-                }
-                keep
-            })
-            .map(|row| row.id.clone())
-            .collect();
-        self.expanded.extend(ancestors);
+        self.tree_state.reveal(&self.tree.rows, index);
         let id = self.tree.rows[index].id.clone();
         self.set_selection(id);
     }
@@ -289,197 +354,198 @@ impl App {
             return;
         }
         if let Err(why) = self.reveal_node_quiet(&node, None) {
-            self.post_toast(format!("couldn't find the entity: it {why}"));
+            self.post_toast(Feedback::warning(format!(
+                "couldn't find the entity: it {why}"
+            )));
         }
     }
 
     /// The open picker, if it is on top of the stack.
-    pub fn picker(&self) -> Option<&crate::tui::widgets::picker::PickerState> {
-        match self.modal_stack.last()? {
+    pub fn picker(&self) -> Option<&crate::tui::widgets::picker::Picker> {
+        match self.modal_stack.top()? {
             crate::tui::Modal::Picker(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
     /// Mutable access for the runtime's per-key forwarding.
-    pub fn picker_mut(&mut self) -> Option<&mut crate::tui::widgets::picker::PickerState> {
-        match self.modal_stack.last_mut()? {
+    pub fn picker_mut(&mut self) -> Option<&mut crate::tui::widgets::picker::Picker> {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::Picker(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_picker(&mut self, state: crate::tui::widgets::picker::PickerState) {
+    pub fn open_picker(&mut self, state: crate::tui::widgets::picker::Picker) {
         self.modal_stack
             .push(crate::tui::Modal::Picker(Box::new(state)));
     }
 
     pub fn close_picker(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Picker(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Picker(_))) {
             self.modal_stack.pop();
         }
     }
 
     /// Pop the rename overlay if it's on top; no-op otherwise.
     pub fn close_rename_overlay(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Rename(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Rename(_))) {
             self.modal_stack.pop();
         }
     }
 
-    /// Active worktree action menu, if on top of the stack.
-    pub fn worktree_menu(&self) -> Option<&crate::tui::widgets::worktree_menu::WorktreeMenuState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::WorktreeMenu(state) => Some(state.as_ref()),
-            _ => None,
-        }
-    }
-
-    /// Mutable access for the runtime's per-key forwarding.
-    pub fn worktree_menu_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::worktree_menu::WorktreeMenuState> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::WorktreeMenu(state) => Some(state.as_mut()),
+    /// Active worktree action menu, if on top of the stack (not under one
+    /// of its steps).
+    pub fn worktree_menu(&self) -> Option<&tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::WorktreeMenu(menu) => Some(menu.as_ref()),
             _ => None,
         }
     }
 
     /// Push a worktree action menu onto the modal stack.
-    pub fn open_worktree_menu(
-        &mut self,
-        state: crate::tui::widgets::worktree_menu::WorktreeMenuState,
-    ) {
+    pub fn open_worktree_menu(&mut self, menu: tuikit::action_menu::ActionMenu<crate::tui::Msg>) {
         self.modal_stack
-            .push(crate::tui::Modal::WorktreeMenu(Box::new(state)));
+            .push(crate::tui::Modal::WorktreeMenu(Box::new(menu)));
     }
 
-    /// Pop the worktree menu if it's on top; no-op otherwise.
-    pub fn close_worktree_menu(&mut self) {
-        if matches!(
-            self.modal_stack.last(),
-            Some(crate::tui::Modal::WorktreeMenu(_))
-        ) {
-            self.modal_stack.pop();
+    /// Open `modal` as the next step of the overlay on top: the question
+    /// one of its entries asks. `Esc` in it gives that overlay its keys
+    /// back; a commit or `Ctrl-C` closes both.
+    pub fn open_modal_step(&mut self, modal: Modal) {
+        self.modal_stack.push_step(modal);
+    }
+
+    /// The dialog on top of the stack, if one is: a worktree
+    /// confirmation or choice, or the empty Clean up notice.
+    pub fn dialog(&self) -> Option<&tuikit::dialog::Dialog<crate::tui::Msg>> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::Dialog(dialog) => Some(dialog.as_ref()),
+            _ => None,
         }
     }
 
     /// Active bare mux form, if on top of the stack.
-    pub fn new_mux_form(&self) -> Option<&crate::tui::widgets::new_mux::NewMuxFormState> {
-        match self.modal_stack.last()? {
+    pub fn new_mux_form(&self) -> Option<&tuikit::form::Form<crate::tui::Msg>> {
+        match self.modal_stack.top()? {
             crate::tui::Modal::NewMux(state) => Some(state),
             _ => None,
         }
     }
 
     /// Mutable access for the runtime's per-key forwarding.
-    pub fn new_mux_form_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::new_mux::NewMuxFormState> {
-        match self.modal_stack.last_mut()? {
+    pub fn new_mux_form_mut(&mut self) -> Option<&mut tuikit::form::Form<crate::tui::Msg>> {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::NewMux(state) => Some(state),
             _ => None,
         }
     }
 
     /// Push the bare mux form onto the modal stack.
-    pub fn open_new_mux_form(&mut self, state: crate::tui::widgets::new_mux::NewMuxFormState) {
+    pub fn open_new_mux_form(&mut self, state: tuikit::form::Form<crate::tui::Msg>) {
         self.modal_stack.push(crate::tui::Modal::NewMux(state));
     }
 
     /// Pop the bare mux form if it's on top; no-op otherwise.
     pub fn close_new_mux_form(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::NewMux(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::NewMux(_))) {
             self.modal_stack.pop();
         }
     }
 
     /// Active mux action menu, if on top of stack.
-    pub fn mux_menu(&self) -> Option<&crate::tui::widgets::mux_menu::MuxMenuState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::MuxMenu(state) => Some(state),
+    pub fn mux_menu(&self) -> Option<&tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::MuxMenu(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
-    pub fn mux_menu_mut(&mut self) -> Option<&mut crate::tui::widgets::mux_menu::MuxMenuState> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::MuxMenu(state) => Some(state),
+    pub fn mux_menu_mut(
+        &mut self,
+    ) -> Option<&mut tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
+        match self.modal_stack.top_mut()? {
+            crate::tui::Modal::MuxMenu(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_mux_menu(&mut self, state: crate::tui::widgets::mux_menu::MuxMenuState) {
-        self.modal_stack.push(crate::tui::Modal::MuxMenu(state));
+    pub fn open_mux_menu(&mut self, state: tuikit::action_menu::ActionMenu<crate::tui::Msg>) {
+        self.modal_stack
+            .push(crate::tui::Modal::MuxMenu(Box::new(state)));
     }
 
     pub fn close_mux_menu(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::MuxMenu(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::MuxMenu(_))) {
             self.modal_stack.pop();
         }
     }
 
-    /// Open the full-value modal on `state`.
-    pub fn open_value_modal(&mut self, state: crate::tui::widgets::value_modal::ValueModalState) {
-        self.modal_stack.push(crate::tui::Modal::ValueModal(state));
+    /// Open the full-value modal on `value`, at its top.
+    pub fn open_value_modal(&mut self, value: crate::tui::widgets::value_modal::ValueText) {
+        let modal = crate::tui::widgets::value_modal::open(value);
+        self.modal_stack
+            .push(crate::tui::Modal::ValueModal(Box::new(modal)));
         self.status_message = None;
     }
 
     /// Active row action menu, if on top of stack.
-    pub fn row_menu(&self) -> Option<&crate::tui::widgets::row_menu::RowMenuState> {
-        match self.modal_stack.last()? {
+    pub fn row_menu(&self) -> Option<&tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
+        match self.modal_stack.top()? {
             crate::tui::Modal::RowMenu(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
-    pub fn row_menu_mut(&mut self) -> Option<&mut crate::tui::widgets::row_menu::RowMenuState> {
-        match self.modal_stack.last_mut()? {
+    pub fn row_menu_mut(
+        &mut self,
+    ) -> Option<&mut tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::RowMenu(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_row_menu(&mut self, state: crate::tui::widgets::row_menu::RowMenuState) {
+    pub fn open_row_menu(&mut self, state: tuikit::action_menu::ActionMenu<crate::tui::Msg>) {
         self.modal_stack
             .push(crate::tui::Modal::RowMenu(Box::new(state)));
     }
 
     pub fn close_row_menu(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::RowMenu(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::RowMenu(_))) {
             self.modal_stack.pop();
         }
     }
 
     /// Active Clean up modal, if on top of stack.
-    pub fn clean_up(&self) -> Option<&crate::tui::widgets::clean_up::CleanUpState> {
-        match self.modal_stack.last()? {
+    pub fn clean_up(&self) -> Option<&tuikit::checklist::Checklist<crate::tui::Msg>> {
+        match self.modal_stack.top()? {
             crate::tui::Modal::CleanUp(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
-    pub fn clean_up_mut(&mut self) -> Option<&mut crate::tui::widgets::clean_up::CleanUpState> {
-        match self.modal_stack.last_mut()? {
+    pub fn clean_up_mut(&mut self) -> Option<&mut tuikit::checklist::Checklist<crate::tui::Msg>> {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::CleanUp(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_clean_up(&mut self, state: crate::tui::widgets::clean_up::CleanUpState) {
+    pub fn open_clean_up(&mut self, state: tuikit::checklist::Checklist<crate::tui::Msg>) {
         self.modal_stack
             .push(crate::tui::Modal::CleanUp(Box::new(state)));
     }
 
     pub fn close_clean_up(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::CleanUp(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::CleanUp(_))) {
             self.modal_stack.pop();
         }
     }
 
     /// Active mux-launch form, if on top of stack.
-    pub fn mux_launch_form(&self) -> Option<&crate::tui::widgets::mux_launch::MuxLaunchFormState> {
-        match self.modal_stack.last()? {
+    pub fn mux_launch_form(&self) -> Option<&crate::tui::widgets::mux_launch::MuxLaunchForm> {
+        match self.modal_stack.top()? {
             crate::tui::Modal::MuxLaunch(state) => Some(state.as_ref()),
             _ => None,
         }
@@ -487,24 +553,21 @@ impl App {
 
     pub fn mux_launch_form_mut(
         &mut self,
-    ) -> Option<&mut crate::tui::widgets::mux_launch::MuxLaunchFormState> {
-        match self.modal_stack.last_mut()? {
+    ) -> Option<&mut crate::tui::widgets::mux_launch::MuxLaunchForm> {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::MuxLaunch(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_mux_launch_form(
-        &mut self,
-        state: crate::tui::widgets::mux_launch::MuxLaunchFormState,
-    ) {
+    pub fn open_mux_launch_form(&mut self, state: crate::tui::widgets::mux_launch::MuxLaunchForm) {
         self.modal_stack
             .push(crate::tui::Modal::MuxLaunch(Box::new(state)));
     }
 
     pub fn close_mux_launch_form(&mut self) {
         if matches!(
-            self.modal_stack.last(),
+            self.modal_stack.top(),
             Some(crate::tui::Modal::MuxLaunch(_))
         ) {
             self.modal_stack.pop();
@@ -537,7 +600,7 @@ impl App {
             effective: pin.effective.clone(),
             overrides: pin.overrides.clone(),
             inherited,
-            known_pin_names: snapshot.pins.iter().map(|p| p.id.clone()).collect(),
+            known_pin_names: self.pin_names(),
             known_harness_keys: crate::tui::runtime::known_harness_keys(),
             cwd_candidates: crate::tui::runtime::known_cwd_candidates(self, cwd.as_deref()),
             defaults: Some(crate::launch_default::LaunchDefaults::new(
@@ -547,68 +610,65 @@ impl App {
     }
 
     /// Active pin edit form, if on top of stack.
-    pub fn pin_edit_form(&self) -> Option<&crate::tui::widgets::pin_edit::PinEditFormState> {
-        match self.modal_stack.last()? {
+    pub fn pin_edit_form(&self) -> Option<&crate::tui::widgets::pin_edit::PinEditForm> {
+        match self.modal_stack.top()? {
             crate::tui::Modal::PinEdit(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
-    pub fn pin_edit_form_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::pin_edit::PinEditFormState> {
-        match self.modal_stack.last_mut()? {
+    pub fn pin_edit_form_mut(&mut self) -> Option<&mut crate::tui::widgets::pin_edit::PinEditForm> {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::PinEdit(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_pin_edit_form(&mut self, state: crate::tui::widgets::pin_edit::PinEditFormState) {
+    pub fn open_pin_edit_form(&mut self, state: crate::tui::widgets::pin_edit::PinEditForm) {
         self.modal_stack
             .push(crate::tui::Modal::PinEdit(Box::new(state)));
     }
 
     pub fn close_pin_edit_form(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::PinEdit(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::PinEdit(_))) {
             self.modal_stack.pop();
         }
     }
 
-    /// Active controls-overlay state (ADR 0031), if any.
-    /// Lives on the modal stack (ADR 0085 contract 3); this
-    /// accessor peeks the top entry.
-    pub fn controls_overlay(&self) -> Option<&crate::tui::widgets::controls::ControlsOverlayState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::Controls(state) => Some(state),
+    /// The Controls panel (ADR 0031), if it is on top of the stack. An
+    /// editor open over it is a step on top of it, so this is `None`
+    /// while one is.
+    pub fn controls_overlay(&self) -> Option<&ControlsPanel> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::Controls(panel) => Some(panel),
             _ => None,
         }
     }
 
-    /// Mutable access for the runtime's per-key forwarding.
-    pub fn controls_overlay_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::controls::ControlsOverlayState> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::Controls(state) => Some(state),
+    /// Mutable access to the Controls panel on top of the stack.
+    pub fn controls_overlay_mut(&mut self) -> Option<&mut ControlsPanel> {
+        match self.modal_stack.top_mut()? {
+            crate::tui::Modal::Controls(panel) => Some(panel),
             _ => None,
         }
     }
 
-    /// Push a fresh controls overlay onto the modal stack, cursor
-    /// on the active view row.
+    /// Push a fresh Controls panel onto the modal stack, cursor on the
+    /// active view row.
     pub fn open_controls_overlay(&mut self) {
-        let ctx = self.controls_context();
-        self.modal_stack.push(crate::tui::Modal::Controls(
-            crate::tui::widgets::controls::ControlsOverlayState::new(&ctx),
-        ));
+        let row = crate::tui::widgets::controls::opening_row(&self.controls_context());
+        self.open_controls_at(row);
+    }
+
+    /// Push a fresh Controls panel with the cursor on `row`.
+    pub fn open_controls_at(&mut self, row: crate::tui::widgets::controls::ControlsCursor) {
+        let panel = crate::tui::widgets::controls::panel(App::controls_context).at(row);
+        self.modal_stack.push(crate::tui::Modal::Controls(panel));
     }
 
     /// Pop the controls overlay if it's on top; no-op otherwise.
     pub fn close_controls_overlay(&mut self) {
-        if matches!(
-            self.modal_stack.last(),
-            Some(crate::tui::Modal::Controls(_))
-        ) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Controls(_))) {
             self.modal_stack.pop();
         }
     }
@@ -617,7 +677,7 @@ impl App {
     /// modal stack (ADR 0085 contract 3); this accessor peeks the
     /// top entry.
     pub fn search_overlay(&self) -> Option<&crate::tui::widgets::search::SearchOverlayState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::Search(state) => Some(state),
             _ => None,
         }
@@ -626,32 +686,32 @@ impl App {
     pub fn search_overlay_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::search::SearchOverlayState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::Search(state) => Some(state),
             _ => None,
         }
     }
 
-    /// What `/` opens: quick select, on the current view's rows. Returns
-    /// the status hint to show.
-    pub fn open_search_entry(&mut self) -> String {
-        use crate::tui::keybindings::overlay::{SEARCH_KEYS, footer};
+    /// What `/` opens: quick select, on the current view's rows. The
+    /// status bar names its keys, so a message from before goes.
+    pub fn open_search_entry(&mut self) {
         self.open_search_overlay();
-        format!("quick select: type to find · {}", footer(SEARCH_KEYS))
+        self.status_message = None;
     }
 
     /// What `s` opens: content search, with the query filled in when a
-    /// search is active. Returns the status hint to show.
-    pub fn open_content_search_entry(&mut self) -> String {
-        use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, footer};
+    /// search is active. The status bar names its keys, so a message from
+    /// before goes; with live preview off it does not open and the status
+    /// line says why.
+    pub fn open_content_search_entry(&mut self) {
         if !self.config.live_preview_enabled {
-            return crate::tui::widgets::search::CONTENT_SEARCH_OFF.to_string();
+            self.status_message = Some(Feedback::warning(
+                crate::tui::widgets::search::CONTENT_SEARCH_OFF,
+            ));
+            return;
         }
         self.open_content_search_overlay();
-        format!(
-            "search contents: type a query · {}",
-            footer(SEARCH_CONTENT_KEYS)
-        )
+        self.status_message = None;
     }
 
     /// Push a quick-select overlay onto the modal stack, on the current
@@ -714,78 +774,73 @@ impl App {
 
     /// Pop the search overlay if it's on top; no-op otherwise.
     pub fn close_search_overlay(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Search(_))) {
-            self.remember_search_overlay();
-            self.modal_stack.pop();
-            self.commit_modal_search();
+        if let Some(Modal::Search(search)) = self
+            .modal_stack
+            .pop_if(|top| matches!(top, Modal::Search(_)))
+        {
+            self.search_closed(&search);
         }
     }
 
     /// Active `?` help overlay, if any. Lives on the modal
     /// stack (ADR 0085 contract 3); this accessor peeks the top
     /// entry.
-    pub fn help_overlay(&self) -> Option<&crate::tui::widgets::help::HelpOverlayState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::Help(state) => Some(state),
+    pub fn help_overlay(&self) -> Option<&crate::tui::widgets::help::KeymapHelp> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::Help(help) => Some(help),
             _ => None,
         }
     }
 
-    pub fn help_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::help::HelpOverlayState> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::Help(state) => Some(state),
+    pub fn help_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::help::KeymapHelp> {
+        match self.modal_stack.top_mut()? {
+            crate::tui::Modal::Help(help) => Some(help),
             _ => None,
         }
     }
 
-    /// Push a fresh help overlay onto the modal stack.
-    /// Open the Messages overlay and mark its warnings and errors
-    /// seen.
+    /// Open the Messages overlay, which marks the log's warnings and
+    /// errors seen.
     pub fn open_messages_overlay(&mut self) {
-        self.messages.mark_seen();
-        self.modal_stack.push(crate::tui::Modal::Messages(
-            crate::tui::widgets::messages::MessagesOverlayState::new(),
-        ));
+        let list = crate::tui::widgets::messages::open().mark_seen(&mut self.messages);
+        self.modal_stack
+            .push(crate::tui::Modal::Messages(Box::new(list)));
     }
 
-    pub fn messages_overlay(&self) -> Option<&crate::tui::widgets::messages::MessagesOverlayState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::Messages(state) => Some(state),
+    pub fn messages_overlay(&self) -> Option<&crate::tui::widgets::messages::MessagesList> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::Messages(list) => Some(list),
             _ => None,
         }
     }
 
-    /// The open Messages overlay together with the log it reads.
+    /// The open Messages overlay, when it is on top.
     pub fn messages_overlay_mut(
         &mut self,
-    ) -> Option<(
-        &mut crate::tui::widgets::messages::MessagesOverlayState,
-        &crate::tui::messages::MessageLog,
-    )> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::Messages(state) => Some((state, &self.messages)),
+    ) -> Option<&mut crate::tui::widgets::messages::MessagesList> {
+        match self.modal_stack.top_mut()? {
+            crate::tui::Modal::Messages(list) => Some(list),
             _ => None,
         }
     }
 
     pub fn close_messages_overlay(&mut self) {
-        if matches!(
-            self.modal_stack.last(),
-            Some(crate::tui::Modal::Messages(_))
-        ) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Messages(_))) {
             self.modal_stack.pop();
         }
     }
 
+    /// Push a fresh help overlay onto the modal stack, its legends' marks
+    /// in the theme's styles.
     pub fn open_help_overlay(&mut self) {
-        self.modal_stack.push(crate::tui::Modal::Help(
-            crate::tui::widgets::help::HelpOverlayState::new(),
-        ));
+        let help = crate::tui::widgets::help::open(self.theme());
+        self.modal_stack
+            .push(crate::tui::Modal::Help(Box::new(help)));
     }
 
     /// Pop the help overlay if it's on top; no-op otherwise.
     pub fn close_help_overlay(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Help(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Help(_))) {
             self.modal_stack.pop();
         }
     }
@@ -797,37 +852,27 @@ impl App {
         self.modal_stack.pop();
     }
 
-    /// The top of the modal stack, for tests that drive an overlay's own
-    /// key handling and then render it.
+    /// The modal stack, for tests that look at more than the top entry;
+    /// overlay-specific code uses the per-overlay accessors like
+    /// `help_overlay()`.
     #[cfg(test)]
-    pub(crate) fn top_modal_mut(&mut self) -> Option<&mut crate::tui::Modal> {
-        self.modal_stack.last_mut()
-    }
-
-    /// The modal stack (ADR 0085 contract 3). Reserved for
-    /// generic stack-operating code (draw sweep, generic
-    /// input-routing helper); overlay-specific consumers use the
-    /// per-overlay accessors like `help_overlay()`.
-    #[cfg(test)]
-    pub(crate) fn modal_stack(&self) -> &[crate::tui::Modal] {
+    pub(crate) fn modal_stack(&self) -> &ModalStack {
         &self.modal_stack
     }
 
     /// Active `o` full-value modal, if any. Lives on the
     /// modal stack (ADR 0085 contract 3); this accessor peeks the
     /// top entry.
-    pub fn value_modal(&self) -> Option<&crate::tui::widgets::value_modal::ValueModalState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::ValueModal(state) => Some(state),
+    pub fn value_modal(&self) -> Option<&crate::tui::widgets::value_modal::ValueModal> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::ValueModal(modal) => Some(modal),
             _ => None,
         }
     }
 
-    pub fn value_modal_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::value_modal::ValueModalState> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::ValueModal(state) => Some(state),
+    pub fn value_modal_mut(&mut self) -> Option<&mut crate::tui::widgets::value_modal::ValueModal> {
+        match self.modal_stack.top_mut()? {
+            crate::tui::Modal::ValueModal(modal) => Some(modal),
             _ => None,
         }
     }
@@ -835,7 +880,7 @@ impl App {
     /// Pop the value modal if it's on top; no-op otherwise.
     pub fn close_value_modal(&mut self) {
         if matches!(
-            self.modal_stack.last(),
+            self.modal_stack.top(),
             Some(crate::tui::Modal::ValueModal(_))
         ) {
             self.modal_stack.pop();
@@ -845,54 +890,50 @@ impl App {
     /// Read-only access to the active transcript viewer modal.
     /// Lives on the modal stack
     /// (ADR 0085 contract 3); this accessor peeks the top entry.
-    pub fn viewer_modal(&self) -> Option<&crate::viewer::state::ViewerState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::Viewer(state) => Some(state),
+    pub fn viewer_modal(&self) -> Option<&crate::tui::viewer_bridge::TranscriptViewer> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::Viewer(viewer) => Some(viewer),
             _ => None,
         }
     }
 
-    /// Mutable access for the draw path (the widget writes back
-    /// viewport_height + total_lines metrics during render).
-    pub fn viewer_modal_mut(&mut self) -> Option<&mut crate::viewer::state::ViewerState> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::Viewer(state) => Some(state),
+    /// Mutable access to the viewer on top.
+    pub fn viewer_modal_mut(&mut self) -> Option<&mut crate::tui::viewer_bridge::TranscriptViewer> {
+        match self.modal_stack.top_mut()? {
+            crate::tui::Modal::Viewer(viewer) => Some(viewer),
             _ => None,
         }
     }
 
-    /// Push a viewer modal onto the stack. Callers construct the
-    /// initial state via `viewer_bridge::build_viewer_state` and
-    /// pass ownership here.
-    pub fn open_viewer_modal(&mut self, state: crate::viewer::state::ViewerState) {
-        self.modal_stack.push(crate::tui::Modal::Viewer(state));
+    /// Push a viewer modal onto the stack. Callers build the viewer with
+    /// `viewer_bridge::build_viewer` and pass ownership here.
+    pub fn open_viewer_modal(&mut self, viewer: crate::tui::viewer_bridge::TranscriptViewer) {
+        self.modal_stack.push(crate::tui::Modal::Viewer(viewer));
     }
 
     /// The pane scrollback viewer, when it is on top.
-    pub fn pane_viewer(&self) -> Option<&crate::tui::widgets::pane_viewer::PaneViewerState> {
-        match self.modal_stack.last()? {
+    pub fn pane_viewer(&self) -> Option<&crate::tui::widgets::pane_viewer::PaneViewer> {
+        match self.modal_stack.top()? {
             crate::tui::Modal::PaneViewer(state) => Some(state),
             _ => None,
         }
     }
 
-    pub fn pane_viewer_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::pane_viewer::PaneViewerState> {
-        match self.modal_stack.last_mut()? {
+    pub fn pane_viewer_mut(&mut self) -> Option<&mut crate::tui::widgets::pane_viewer::PaneViewer> {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::PaneViewer(state) => Some(state),
             _ => None,
         }
     }
 
-    pub fn open_pane_viewer(&mut self, state: crate::tui::widgets::pane_viewer::PaneViewerState) {
+    pub fn open_pane_viewer(&mut self, state: crate::tui::widgets::pane_viewer::PaneViewer) {
         self.modal_stack
             .push(crate::tui::Modal::PaneViewer(Box::new(state)));
     }
 
     pub fn close_pane_viewer(&mut self) {
         if matches!(
-            self.modal_stack.last(),
+            self.modal_stack.top(),
             Some(crate::tui::Modal::PaneViewer(_))
         ) {
             self.modal_stack.pop();
@@ -901,37 +942,27 @@ impl App {
 
     /// Pop the viewer modal if it's on top; no-op otherwise.
     pub fn close_viewer_modal(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Viewer(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Viewer(_))) {
             self.modal_stack.pop();
         }
     }
 
-    /// Read accessor for the toast engine.
-    /// Returns the engine itself so the renderer can call
-    /// `(&engine).render_ref(...)` directly; `has_toast()` reports
-    /// whether anything is queued.
-    pub fn toast(&self) -> &ratatui_comfy_toaster::ToastEngine<()> {
-        &self.toast
+    /// The toasts on screen, for the renderer.
+    pub fn toasts(&self) -> &Toasts {
+        &self.toasts
     }
 
-    /// Post a transient toast that auto-dismisses after the widget's
-    /// `TOAST_DURATION` window. Called from the runtime side (the
-    /// `Cmd` boundary per ADR 0024). Drains any prior queued toast
-    /// first so the newer feedback supersedes — matches the in-tree
-    /// "replacement" contract the reducer test pins.
-    pub fn post_toast(&mut self, label: impl Into<String>) {
-        let label = label.into();
-        crate::tui::widgets::toast::engine_dismiss_all(&mut self.toast);
-        self.toast
-            .show_toast(crate::tui::widgets::toast::builder_for(label));
+    /// Post a transient toast that goes when its severity's lifetime is
+    /// up. Called from the runtime side (the `Cmd` boundary per ADR
+    /// 0024). It replaces any toast on screen, so the newest feedback is
+    /// the one shown.
+    pub fn post_toast(&mut self, feedback: Feedback) {
+        self.toasts.show(feedback, Instant::now());
     }
 
-    /// Update the engine's frame area and retire expired toasts.
-    /// Called by the runtime once per draw — handles terminal
-    /// resize and drives the polled expiry that replaces the prior
-    /// in-tree `is_expired()` check.
-    pub fn prepare_toast_for_render(&mut self, area: ratatui::layout::Rect) {
-        self.toast.set_area(area);
-        self.toast.tick();
+    /// Retire a toast whose time is up. Called by the runtime once per
+    /// draw.
+    pub fn prepare_toast_for_render(&mut self) {
+        self.toasts.tick(Instant::now());
     }
 }

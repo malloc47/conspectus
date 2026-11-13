@@ -4,57 +4,28 @@ use super::*;
 const DEFAULT: u16 = crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD;
 
 #[test]
-fn parse_key_script_handles_literals_and_named_keys() {
-    let keys = parse_key_script("vj<Enter>").expect("parse");
-    assert_eq!(keys.len(), 3);
-    assert_eq!(keys[0].code, KeyCode::Char('v'));
-    assert_eq!(keys[1].code, KeyCode::Char('j'));
-    assert_eq!(keys[2].code, KeyCode::Enter);
-}
-
-#[test]
-fn parse_key_script_uppercase_carries_shift_modifier() {
-    let keys = parse_key_script("G").expect("parse");
-    assert!(keys[0].modifiers.contains(KeyModifiers::SHIFT));
-}
-
-#[test]
-fn parse_key_script_supports_modifier_prefixes() {
-    let keys = parse_key_script("<C-r>").expect("parse");
-    assert_eq!(keys[0].code, KeyCode::Char('r'));
-    assert!(keys[0].modifiers.contains(KeyModifiers::CONTROL));
-
-    let keys = parse_key_script("<C-A-Delete>").expect("parse");
-    assert_eq!(keys[0].code, KeyCode::Delete);
-    assert!(keys[0].modifiers.contains(KeyModifiers::CONTROL));
-    assert!(keys[0].modifiers.contains(KeyModifiers::ALT));
-}
-
-#[test]
-fn parse_key_script_unterminated_bracket_errors() {
-    let err = parse_key_script("<Enter").unwrap_err();
-    assert!(err.to_string().contains("unterminated"));
-}
-
-#[test]
-fn parse_key_script_unknown_name_errors() {
-    let err = parse_key_script("<Bogus>").unwrap_err();
-    assert!(err.to_string().contains("unknown key name"));
-}
-
-#[test]
-fn buffer_to_ansi_emits_styled_text_with_reset_per_line() {
-    let mut buffer = Buffer::empty(Rect::new(0, 0, 3, 2));
-    buffer.set_string(0, 0, "abc", Style::default().fg(Color::Red));
-    buffer.set_string(0, 1, "xyz", Style::default());
-
-    let out = buffer_to_ansi(&buffer, Rect::new(0, 0, 3, 2));
-    assert!(out.contains("abc"));
-    assert!(out.contains("xyz"));
-    // Red fg = 31m
-    assert!(out.contains("\x1b[31m"));
-    // Reset at end of line
-    assert!(out.matches("\x1b[0m").count() >= 2);
+fn a_bad_key_script_fails_the_snapshot_with_the_reason() {
+    let error = run(
+        RunConfig::defaults(),
+        SnapshotConfig {
+            width: 10,
+            height: 4,
+            keys: "j<Bogus>".into(),
+            pane: SnapshotPane::All,
+            fixture: Some(std::path::PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/showcase.json"
+            ))),
+            export_fixture: None,
+            fixture_root: None,
+            now: None,
+            messages: Vec::new(),
+            toast: None,
+            status: None,
+        },
+    )
+    .expect_err("an unknown key name is an error");
+    assert_eq!(error.to_string(), "unknown key name `<Bogus>`");
 }
 
 #[test]
@@ -175,14 +146,17 @@ fn session_mux_app() -> (App, RunConfig) {
     (app, config)
 }
 
-fn drive(app: &mut App, config: &RunConfig, script: &str) {
+fn drive(app: &mut App, config: &RunConfig, script: &str) -> Notes {
+    let mut notes = Notes::new();
     drive_keys(
         app,
         config,
-        parse_key_script(script).expect("parse"),
-        30,
+        tuikit::testkit::keys::script(script),
+        Rect::new(0, 0, 120, 32),
         None,
+        &mut notes,
     );
+    notes
 }
 
 #[test]
@@ -191,7 +165,11 @@ fn key_prelude_routes_navigation_to_the_focused_right_pane() {
     drive(&mut app, &config, "j");
     let selection = app.selection().cloned();
     assert!(selection.is_some(), "left tree should have a selection");
-    let cursor_before = app.explorer().expect("explorer").cursor;
+    let cursor_before = app
+        .explorer()
+        .expect("explorer")
+        .cursor()
+        .expect("a cursor");
 
     drive(&mut app, &config, "<Tab>jj");
 
@@ -201,7 +179,13 @@ fn key_prelude_routes_navigation_to_the_focused_right_pane() {
         selection,
         "j after <Tab> must not move the left tree"
     );
-    assert_eq!(app.explorer().expect("explorer").cursor, cursor_before + 2);
+    assert_eq!(
+        app.explorer()
+            .expect("explorer")
+            .cursor()
+            .expect("a cursor"),
+        cursor_before + 2
+    );
 }
 
 #[test]
@@ -210,9 +194,7 @@ fn key_prelude_enter_on_a_related_row_drills_and_backspace_returns() {
     let (mut app, config) = session_mux_app();
     drive(&mut app, &config, "j<Tab>");
     let link_row = app
-        .explorer()
-        .expect("explorer")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
         .expect("related row");
@@ -220,12 +202,217 @@ fn key_prelude_enter_on_a_related_row_drills_and_backspace_returns() {
     drive(&mut app, &config, &"j".repeat(link_row));
     drive(&mut app, &config, "<Enter>");
     let explorer = app.explorer().expect("explorer");
-    assert_eq!(explorer.breadcrumb.len(), 1, "Enter should drill one hop");
+    assert_eq!(explorer.frames().len(), 1, "Enter should drill one hop");
     assert!(matches!(
-        explorer.view.focused,
+        explorer.content().focused,
         crate::model::NodeId::MuxSession(_)
     ));
 
     drive(&mut app, &config, "<Backspace>");
-    assert!(app.explorer().expect("explorer").breadcrumb.is_empty());
+    assert!(app.explorer().expect("explorer").frames().is_empty());
+}
+
+const LONG_MESSAGE: &str = "this message runs far past the width the Node zone shows for it";
+
+/// App loaded with one session whose last message is too long for the
+/// Node zone, on the default sessions view.
+fn session_with_long_message_app() -> (App, RunConfig) {
+    use crate::model::{AgentSessionId, AgentSessionNode, GraphNode};
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_last_message_preview(LONG_MESSAGE),
+    ));
+    let config = RunConfig::defaults();
+    let mut app = App::new(config.clone());
+    refresh_from_snapshot(&mut app, &config, snapshot);
+    (app, config)
+}
+
+#[test]
+fn key_prelude_o_and_enter_reach_a_truncated_field_past_the_core_rows() {
+    let (mut app, config) = session_with_long_message_app();
+    drive(&mut app, &config, "j<Tab>F");
+    let state = app.explorer().expect("explorer");
+    let row = state
+        .content()
+        .fields(true)
+        .iter()
+        .position(|field| field.label == "last_message_preview")
+        .expect("expanded detail shows the last message");
+    assert!(row >= state.content().core_fields.len());
+    let cursor = state.cursor().expect("a cursor");
+
+    drive(&mut app, &config, &"j".repeat(row - cursor));
+    drive(&mut app, &config, "o");
+    let modal = app.value_modal().expect("o opens the value modal");
+    assert_eq!(modal.content().label, "last_message_preview");
+    assert_eq!(modal.content().value, LONG_MESSAGE);
+
+    drive(&mut app, &config, "o<Enter>");
+    assert!(app.value_modal().is_none(), "o closes the modal again");
+    assert_eq!(
+        app.toasts().iter().last().map(|toast| toast.text.as_str()),
+        Some("copied: last_message_preview"),
+        "Enter copies the same field"
+    );
+}
+
+#[test]
+fn a_feedback_flag_names_its_severity_or_takes_the_default() {
+    assert_eq!(
+        parse_feedback("error:copy failed: broken pipe", Severity::Success),
+        Feedback::error("copy failed: broken pipe")
+    );
+    assert_eq!(
+        parse_feedback("warning:nothing to undo", Severity::Info),
+        Feedback::warning("nothing to undo")
+    );
+    assert_eq!(
+        parse_feedback("copied: cwd", Severity::Success),
+        Feedback::success("copied: cwd")
+    );
+    assert_eq!(
+        parse_feedback("note: not a severity", Severity::Info),
+        Feedback::info("note: not a severity"),
+        "only the four names are prefixes"
+    );
+}
+
+#[test]
+fn a_pane_hit_opens_the_pane_viewer_on_the_recorded_scrollback() {
+    use crate::content_search::{MuxRef, PaneRef};
+    use crate::tui::effect::{Effect, ExecSpec};
+    let world = tempfile::tempdir().expect("world");
+    let panes = world.path().join(crate::dev_scenarios::PANE_CAPTURES_DIR);
+    fs::create_dir_all(&panes).expect("panes dir");
+    fs::write(
+        panes.join("shell.txt"),
+        "first line\nthe match\nlast line\n",
+    )
+    .expect("capture");
+    let pane = PaneRef {
+        mux: MuxRef {
+            backend: "tmux".into(),
+            socket: None,
+            session: "shell".into(),
+        },
+        // The recorded backend numbers the captures in name order.
+        pane_id: "%1".into(),
+        window_index: "0".into(),
+        pane_index: "0".into(),
+        command: Some("zsh".into()),
+    };
+    let effect = Effect::Exec(ExecSpec::PaneScrollback {
+        pane,
+        line: 2,
+        text: "the match".into(),
+    });
+    let mut app = App::new(RunConfig::defaults());
+    let rebase = Some((std::path::Path::new(FIXTURE_PATH_ROOT), world.path()));
+    let mut notes = Notes::new();
+    run_effects_opening_viewers(&mut app, vec![effect], rebase, &mut notes);
+    assert!(notes.is_empty(), "{notes:?}");
+    let viewer = app.pane_viewer().expect("the pane viewer opens");
+    assert!(
+        viewer
+            .content()
+            .lines
+            .iter()
+            .any(|line| line == "the match")
+    );
+    assert_eq!(viewer.find().matches().len(), 1);
+}
+
+#[test]
+fn every_effect_runs_or_is_skipped_with_a_note_naming_it() {
+    use crate::model::MuxSessionId;
+    use crate::tui::effect::{Effect, ExecSpec, MuxOp, StoreOp};
+    let effects = vec![
+        Effect::Toast(Feedback::success("shown")),
+        Effect::Copy {
+            text: "id".into(),
+            done: "copied: id".into(),
+        },
+        Effect::Exec(ExecSpec::MuxNew {
+            name: "scratch".into(),
+            cwd: "/tmp".into(),
+        }),
+        Effect::Exec(ExecSpec::Rebuild {
+            reference: "gone".into(),
+            attach: false,
+        }),
+        Effect::RunMux(MuxOp::CapturePreview {
+            mux: MuxSessionId::new("editor"),
+            native_id: "editor".into(),
+        }),
+        Effect::WriteStore(StoreOp::Unpin { slot: "one".into() }),
+    ];
+    let mut app = App::new(RunConfig::defaults());
+    let mut notes = Notes::new();
+    run_effects_opening_viewers(&mut app, effects, None, &mut notes);
+    assert_eq!(
+        notes,
+        [
+            "snapshot mode skipped a copy",
+            "snapshot mode skipped a launch",
+            "snapshot mode skipped a rebuild",
+            "snapshot mode skipped a mux command",
+            "snapshot mode skipped a store write",
+        ]
+    );
+    let toasts: Vec<&str> = app
+        .toasts()
+        .iter()
+        .map(|toast| toast.text.as_str())
+        .collect();
+    // The pure effects ran and nothing was refused; the skipped copy still
+    // says what it copied, as the live executor's does, and its toast
+    // replaces the one before it.
+    assert_eq!(toasts, ["copied: id"]);
+}
+
+#[test]
+fn a_menu_pick_and_a_prompt_submit_reach_the_reducer() {
+    // The row menu's first entry pins the session; the reducer asks for a
+    // store write, which the snapshot skips and names.
+    let (mut app, config) = session_mux_app();
+    let notes = drive(&mut app, &config, "j.<Enter>");
+    assert!(app.modal_stack().is_empty(), "the pick closed the menu");
+    assert_eq!(notes, ["snapshot mode skipped a store write"]);
+
+    // A rename commits through the reducer the same way.
+    let (mut app, config) = session_mux_app();
+    let notes = drive(&mut app, &config, "jRx<Enter>");
+    assert!(app.modal_stack().is_empty(), "Enter closed the prompt");
+    assert_eq!(notes, ["snapshot mode skipped a store write"]);
+}
+
+#[test]
+fn the_mux_menus_shortcuts_open_what_their_keys_open_on_the_list() {
+    // The menu shows each entry's shortcut so the operator learns the key
+    // that opens the same form from the list.
+    let menu = crate::tui::actions::mux_menu();
+    let mut checked = 0;
+    for entry in menu.entries() {
+        let key = tuikit::keys::key_label(&entry.shortcut.expect("a shortcut"));
+        let (mut through_menu, config) = session_mux_app();
+        drive(&mut through_menu, &config, &format!("m{key}"));
+        let (mut on_the_list, config) = session_mux_app();
+        drive(&mut on_the_list, &config, &key);
+        assert!(
+            through_menu.top_modal_name().is_some(),
+            "{key} opened a form"
+        );
+        assert_eq!(
+            through_menu.top_modal_name(),
+            on_the_list.top_modal_name(),
+            "`m` then `{key}`"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 2);
 }

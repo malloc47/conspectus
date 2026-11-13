@@ -23,9 +23,19 @@
 //! - **Accelerators act on what the operator is looking at**: the right
 //!   pane's entity when it has focus (`focus`).
 //! - **Rows look alike wherever they appear**: columns, chips, glyphs,
-//!   dimming, focus highlight, and scroll (`rendering`).
+//!   dimming, focus highlight, and scroll (`rendering`), and a kind of
+//!   row's lined-up cells in one place at every width and in every view
+//!   (`columns`).
 //! - **User-visible text speaks the operator's language**: no developer
 //!   artifacts, and one word for one thing (`text`).
+//! - **The chrome fits and agrees with the view**: the tab strip never
+//!   cuts a view's name at any width, and the header counts what the
+//!   active view lists (`chrome`).
+//! - **No overlay shuts the operator in**: the fixture and scenario TUI
+//!   close every overlay with the keys the live TUI uses (`fixture_mode`).
+//! - **Feedback says how much it matters**: the status line, toasts, and
+//!   the Messages log style each report by its severity, and a refused or
+//!   failed gesture never reports like a success (`feedback`).
 //!
 //! # Diagnosis of the reported defects
 //!
@@ -56,6 +66,7 @@
 use std::path::{Path, PathBuf};
 
 use ratatui::layout::Rect;
+use tuikit::feedback::Feedback;
 
 use super::*;
 use crate::filter::RowFilter;
@@ -68,27 +79,44 @@ use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::rows::RowId;
 use crate::tui::ui::{buffer_to_string, render_to_buffer};
 
+/// The plumbing the source-scanning tests share, included from the
+/// integration tests' support directory so one list of scanned trees, and
+/// one set of minimum file counts, serves them all.
+#[path = "../../tests/support/source_tree.rs"]
+mod source_tree;
+
 mod actions;
+mod chrome;
+mod columns;
 mod content_filter;
 mod content_interactions;
+mod conventions;
 mod docs;
+mod feedback;
+mod fixture_mode;
 mod fixtures;
 mod focus;
 mod forms;
 mod freshness;
+mod glyphs;
 mod help;
 mod keys;
 mod layout;
 mod lifecycle;
+mod marks;
 mod menus;
 mod parity;
+mod registry;
 mod rendering;
+mod scrolling;
 mod search_flat;
 mod search_quick;
 mod search_view;
+mod selection;
 mod state;
 mod styling;
 mod text;
+mod text_entry;
 mod undo;
 
 use fixtures::*;

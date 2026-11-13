@@ -4,7 +4,9 @@
 
 Accepted. Amends ADR 0108 (item 2, which left the rest of the UI live,
 including attaching again). Amended by ADR 0142: where this ADR says
-"pin launch", read `rebuild` (and `mux launch`).
+"pin launch", read `rebuild` (and `mux launch`). Amended by ADR 0201: the
+block on a mux's rows also ends when an existence check finds the mux
+still running as the same session.
 
 ## Context
 

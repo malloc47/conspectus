@@ -1,27 +1,63 @@
-//! Right-pane explorer state: detail recompute, cursor, drill, and back.
+//! Right-pane explorer: what the left selection opens it on, what its
+//! keys' outcomes do to the rest of the app, and the words it says.
+//!
+//! The framework explorer (`tuikit::explorer`) keeps the cursor, the
+//! `Other` fold, Expanded Node Detail, the drill frames, and the armed
+//! `Backspace`, and answers every key with an outcome. This module lends
+//! it out with a source over the app's data, carries out each outcome
+//! (the copy, the value modal, the left pane's mirror and restore, the
+//! focus shift), and writes every status hint.
+
+use tuikit::explorer::{ExplorerKey, Outcome, Refreshed, Refusal};
 
 use super::tree::row_matches;
 use super::*;
+use crate::tui::explorer::Graph;
+use crate::tui::keybindings::key_name;
 
 impl App {
-    pub(super) fn recompute_detail(&mut self) {
-        self.detail = None;
-        self.reset_preview_scroll();
-        let Some(selection) = self.selection.as_ref() else {
+    /// Lend the explorer and a source over the rest of the app to `act`,
+    /// then put the explorer back. `None` with no explorer or no
+    /// snapshot.
+    pub(super) fn with_explorer<T>(
+        &mut self,
+        act: impl FnOnce(&mut GraphExplorer, &GraphSource<'_>) -> T,
+    ) -> Option<T> {
+        let mut explorer = self.explorer.take()?;
+        let result = self
+            .graph_source()
+            .map(|source| act(&mut explorer, &source));
+        self.explorer = Some(explorer);
+        result
+    }
+
+    /// Point the explorer at the node the left-pane selection names, or
+    /// clear it when the selection names no node. While the selection
+    /// is still the row the pane reflects (a refresh, a filter or sort
+    /// change, `r`), a drilled pane reloads the node it shows instead,
+    /// and opens on the selection's node only when that one is gone.
+    /// The Preview keeps its scroll here: [`App::update`] returns it to
+    /// its anchor when what it is pointed at changed.
+    pub(super) fn recompute_explorer(&mut self) {
+        let selection = self.tree_state.selected().cloned();
+        let reflected = std::mem::replace(&mut self.explorer_reflects, selection.clone());
+        let Some(selection) = selection else {
             self.explorer = None;
             return;
         };
+        if reflected.as_ref() == Some(&selection) && self.reload_drill() {
+            return;
+        }
         let Some(handle) = self.handle.as_ref() else {
             self.explorer = None;
             return;
         };
         let snapshot = handle.snapshot();
-        let raw_target = match selection {
+        let raw_target = match &selection {
             RowId::Group(node) => Some(node.clone()),
             RowId::AgentSession(node) => Some(node.clone()),
             RowId::MuxSession(node) => Some(node.clone()),
             RowId::Pr(node) => Some(node.clone()),
-            RowId::Fork(node) => Some(node.clone()),
             RowId::Pin { pin_id } => Some(NodeId::Pin(PinId::new(pin_id.clone()))),
             RowId::Nested { node, .. } => Some(node.clone()),
             RowId::Hit { session, .. } => Some(session.clone()),
@@ -37,253 +73,196 @@ impl App {
             self.explorer = None;
             return;
         };
-        let target = raw_target;
-        let home = home_for_config(&self.config);
-        let detail = build_node_detail(DetailInputs {
-            snapshot,
-            target: &target,
-            home: home.as_deref(),
-        });
-        self.detail = detail;
-        self.recompute_explorer_for(target, home.as_deref(), false);
+        self.recompute_explorer_for(raw_target);
     }
 
-    pub(super) fn recompute_explorer_for(
-        &mut self,
-        target: NodeId,
-        home: Option<&std::path::Path>,
-        strip_relationships: bool,
-    ) {
-        let handle = self.handle.as_ref();
-        let Some(handle) = handle else {
-            self.explorer = None;
+    /// Rebuild the node a drilled pane shows from the current snapshot,
+    /// keeping its frames, fold, Expanded Node Detail toggle, and cursor.
+    /// Older frames are rebuilt only when `Backspace` reaches them. Says
+    /// whether it did: not when the pane has no drill, nor when its node
+    /// is gone.
+    fn reload_drill(&mut self) -> bool {
+        if self
+            .explorer
+            .as_ref()
+            .is_none_or(|explorer| explorer.frames().is_empty())
+        {
+            return false;
+        }
+        self.with_explorer(|explorer, source| explorer.refresh(source)) == Some(Refreshed::Kept)
+    }
+
+    /// Show `target`: reload it in place, keeping the cursor, the fold,
+    /// the switch, and the frames, when the explorer already shows it;
+    /// otherwise open the explorer on it afresh, in the window the pane
+    /// last drew.
+    fn recompute_explorer_for(&mut self, target: NodeId) {
+        if self
+            .explorer
+            .as_ref()
+            .is_some_and(|explorer| explorer.id() == &target)
+        {
+            if self.with_explorer(|explorer, source| explorer.refresh(source))
+                != Some(Refreshed::Kept)
+            {
+                self.explorer = None;
+            }
             return;
-        };
-        let view = build_node_view(ExplorerInputs {
-            snapshot: handle.snapshot(),
-            target: &target,
-            home,
-            now: Some(crate::tui::rows::tree_current_unix_epoch()),
-        });
-        match view {
-            None => self.explorer = None,
-            Some(mut view) => {
-                if strip_relationships {
-                    view.relationships.groups.clear();
+        }
+        let window = self.explorer.as_ref().map(GraphExplorer::window);
+        let opened = self
+            .graph_source()
+            .and_then(|source| GraphExplorer::open(&target, &source));
+        self.explorer = opened;
+        if let (Some(explorer), Some(window)) = (self.explorer.as_mut(), window) {
+            explorer.keep_window(window);
+        }
+    }
+
+    /// A key for the explorer: it does its part, and the outcome says
+    /// what is left for the app. With no explorer, `o` says there is
+    /// nothing to open and every other key does nothing.
+    pub(super) fn explorer_key(&mut self, key: ExplorerKey) -> Vec<crate::tui::Effect> {
+        if self.explorer.is_none() {
+            if key == ExplorerKey::Inspect {
+                self.status_message = Some(Feedback::warning(format!(
+                    "explorer: nothing to open here — `{}` opens long values on the cursor row",
+                    key_name("value.inspect")
+                )));
+            }
+            return Vec::new();
+        }
+        match self.with_explorer(|explorer, source| explorer.handle(key, source)) {
+            Some(outcome) => self.explorer_outcome(outcome),
+            None => Vec::new(),
+        }
+    }
+
+    /// Carry out what the explorer's `outcome` asks of the app, and say
+    /// what it means in the status line.
+    pub(super) fn explorer_outcome(&mut self, outcome: Outcome<Graph>) -> Vec<crate::tui::Effect> {
+        match outcome {
+            Outcome::None | Outcome::Toggle { .. } => self.status_message = None,
+            Outcome::Copy { label, text } => {
+                // The executor writes the clipboard (OSC 52, ADR 0056) and
+                // says what was copied, or why the write failed.
+                return vec![crate::tui::Effect::Copy {
+                    text,
+                    done: format!("copied: {label}"),
+                }];
+            }
+            Outcome::Inspect { label, text } => {
+                self.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
+                    label, text,
+                ));
+            }
+            Outcome::Drill { to } => {
+                self.reset_preview_scroll();
+                self.status_message = None;
+                // Mirror sync: when the drilled neighbor has a row in the
+                // current view, the left tree moves to it and opens its
+                // ancestors; when it doesn't, the left selection stays so
+                // the operator's prior position is kept.
+                self.mirror_left_pane_to(&to);
+            }
+            Outcome::Follow { to } => {
+                self.status_message = Some(Feedback::warning(format!(
+                    "explorer: drill target {to:?} not in current snapshot"
+                )));
+            }
+            Outcome::Back { saved, .. } => {
+                self.reset_preview_scroll();
+                self.status_message = None;
+                // The left-pane selection active at the time of the drill
+                // comes back too, so Backspace unwinds both panes together.
+                // It bypasses `set_selection`, which would open the pane
+                // again on the row's own node.
+                if let Some(selection) = saved {
+                    self.tree_state.select(&self.tree.rows, selection);
                 }
-                // When the focused node hasn't changed, preserve
-                // cursor / expansion / breadcrumb across refresh.
-                let preserved = self.explorer.as_ref().and_then(|state| {
-                    if state.view.focused == target {
-                        Some(state.clone())
-                    } else {
-                        None
-                    }
-                });
-                match preserved {
-                    Some(mut state) => {
-                        let prev_key = state.selected_row().map(|row| row.key(&state.view));
-                        // Replace the view while keeping cursor /
-                        // Other-zone expansion / breadcrumb
-                        // identity. ADR 0074 §6: the Other zone is
-                        // either open or closed; there is no
-                        // per-group expansion state to invalidate
-                        // when the view rebuilds.
-                        state.view = view;
-                        if !state.view.has_other_rows() {
-                            state.other_expanded = false;
-                        }
-                        state.reseat_cursor(prev_key);
-                        self.explorer = Some(state);
-                    }
-                    None => {
-                        self.explorer = Some(ExplorerState::new(view));
-                    }
-                }
+                self.explorer_reflects = self.tree_state.selected().cloned();
+            }
+            Outcome::Armed => {
+                self.status_message = Some(Feedback::info(format!(
+                    "explorer: no drill history — press {} again to return to the left pane",
+                    key_name("explorer.back")
+                )));
+            }
+            Outcome::Leave => {
+                self.focus = Focus::Left;
+                self.status_message = None;
+            }
+            Outcome::Refused(refusal) => {
+                self.status_message = Some(Feedback::warning(self.refusal_text(refusal)));
+            }
+        }
+        Vec::new()
+    }
+
+    /// What the status line says when the explorer refuses a key.
+    fn refusal_text(&self, refusal: Refusal) -> String {
+        match refusal {
+            Refusal::NotInSection => {
+                "explorer: nothing to expand here — select the `Other` header to toggle alternates"
+                    .to_string()
+            }
+            Refusal::NothingMore => {
+                let core = self
+                    .explorer
+                    .as_ref()
+                    .map_or(0, |explorer| explorer.content().core_fields.len());
+                format!("explorer: this node kind has no extra fields ({core} total)")
+            }
+            // An unresolved stub names no node, but the Preview shows its
+            // evidence while the cursor is on it, which is where Enter
+            // was just pressed.
+            Refusal::NoFarEnd if self.cursor_on_unresolved() => {
+                "explorer: evidence names no node — the Preview shows it".to_string()
+            }
+            Refusal::NoFarEnd => "explorer: this link leads to no node".to_string(),
+            Refusal::NothingToInspect => "explorer: row has no truncated value to open".to_string(),
+            Refusal::Gone => {
+                "explorer: cannot restore breadcrumb hop — node missing from snapshot".to_string()
             }
         }
     }
 
-    pub(super) fn explorer_move_cursor(&mut self, delta: i32) {
-        let Some(state) = self.explorer.as_mut() else {
-            return;
-        };
-        let rows = state.rows();
-        if rows.is_empty() {
-            state.cursor = 0;
-            return;
-        }
-        state.cursor = crate::tui::cursor::clamp_step(state.cursor, rows.len(), delta);
-        self.status_message = None;
+    /// Whether the explorer's cursor is on an unresolved-evidence row.
+    fn cursor_on_unresolved(&self) -> bool {
+        self.explorer.as_ref().is_some_and(|explorer| {
+            matches!(
+                explorer.cursor_key(),
+                Some(crate::tui::explorer::ExplorerRowKey::OtherUnresolved { .. })
+            )
+        })
     }
 
-    /// Snap the explorer cursor to `index`, clamped to the current
-    /// row count. `usize::MAX` is the convention for "last row" so
-    /// callers can ask for End without needing to recompute row
-    /// counts themselves; this mirrors how `move_selection_to` on
-    /// the left-pane tree handles `Msg::End`.
-    pub(super) fn explorer_jump_cursor_to(&mut self, index: usize) {
-        let Some(state) = self.explorer.as_mut() else {
-            return;
-        };
-        let rows = state.rows();
-        if rows.is_empty() {
-            state.cursor = 0;
-            return;
-        }
-        state.cursor = index.min(rows.len() - 1);
-        self.status_message = None;
-    }
-
-    pub(super) fn explorer_toggle_group(&mut self) {
-        // ADR 0074 renamed the surface from "toggle group" to
-        // "toggle Other zone." The reducer message identifier
-        // (`Msg::ExplorerToggleGroup`) is kept as-is so keybindings
-        // and external callers do not churn; the behavior is
-        // adjusted to flip the Other-zone visibility when the
-        // cursor sits on the `Other` header.
-        let Some(state) = self.explorer.as_mut() else {
-            return;
-        };
-        let rows = state.rows();
-        let Some(row) = rows.get(state.cursor).cloned() else {
-            return;
-        };
-        if !row.is_other_header() {
-            self.status_message = Some(
-                "explorer: nothing to expand here — select the `Other` header to toggle alternates"
-                    .to_string(),
-            );
-            return;
-        }
-        let prev_key = state.selected_row().map(|row| row.key(&state.view));
-        state.other_expanded = !state.other_expanded;
-        state.reseat_cursor(prev_key);
-        self.status_message = None;
+    /// `Backspace` on the left pane with no reveal to return from: say
+    /// so. The right pane's drill is the right pane's `Backspace`'s, so
+    /// the hint points there when the pane has drilled.
+    pub(super) fn left_back(&mut self) {
+        let drilled = self
+            .explorer
+            .as_ref()
+            .is_some_and(|explorer| !explorer.frames().is_empty());
+        let back = key_name("reveal.back");
+        self.status_message = Some(Feedback::warning(if drilled {
+            format!(
+                "{back}: no reveal to return from · {} to the right pane to back out of its drill",
+                key_name("focus.cycle")
+            )
+        } else {
+            format!("{back}: no reveal to return from")
+        }));
     }
 
     pub(super) fn toggle_edge_meta(&mut self) {
         self.edge_meta_visible = !self.edge_meta_visible;
-        self.status_message = Some(
-            if self.edge_meta_visible {
-                "explorer: edge meta visible (provenance · confidence · state)"
-            } else {
-                "explorer: edge meta hidden"
-            }
-            .to_string(),
-        );
-    }
-
-    pub(super) fn explorer_toggle_full_detail(&mut self) {
-        let Some(state) = self.explorer.as_mut() else {
-            return;
-        };
-        let prev_key = state.selected_row().map(|row| row.key(&state.view));
-        let core_len = state.view.core_fields.len();
-        let all_len = state.view.all_fields.len();
-        state.full_detail_expanded = !state.full_detail_expanded;
-        state.reseat_cursor(prev_key);
-        // Render a soft status hint for the no-op case so the
-        // operator knows their toggle was received but the node
-        // kind doesn't carry extras to expand.
-        if core_len == all_len {
-            self.status_message = Some(format!(
-                "explorer: this node kind has no extra fields ({core_len} total)"
-            ));
+        self.status_message = Some(Feedback::success(if self.edge_meta_visible {
+            "explorer: edge meta visible (provenance · confidence · state)"
         } else {
-            self.status_message = None;
-        }
-    }
-
-    pub(super) fn explorer_activate(&mut self) {
-        let Some(state) = self.explorer.as_ref() else {
-            return;
-        };
-        let rows = state.rows();
-        let Some(row) = rows.get(state.cursor).cloned() else {
-            return;
-        };
-        match row {
-            ExplorerRow::OtherHeader { .. } => {
-                self.explorer_toggle_group();
-            }
-            ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. } => {
-                if let Some(target) = state.view.drill_target(&row) {
-                    self.explorer_drill_into(target);
-                }
-            }
-            ExplorerRow::OtherUnresolved { .. } => {
-                self.status_message =
-                    Some("explorer: unresolved evidence — `o` opens detail".to_string());
-            }
-            ExplorerRow::NodeField { .. } => {
-                self.status_message = None;
-            }
-        }
-    }
-
-    pub(super) fn explorer_drill_into(&mut self, target: NodeId) {
-        let Some(state) = self.explorer.as_mut() else {
-            return;
-        };
-        let prev_focused = state.view.focused.clone();
-        let prev_short_label = state.view.short_label.clone();
-        let prev_cursor_key = state.selected_row().map(|row| row.key(&state.view));
-        let prev_other_expanded = state.other_expanded;
-        let prev_full_detail_expanded = state.full_detail_expanded;
-        let prev_left_pane_selection = self.selection.clone();
-        let hop = BreadcrumbHop {
-            focused: prev_focused,
-            short_label: prev_short_label,
-            cursor_key: prev_cursor_key,
-            other_expanded: prev_other_expanded,
-            full_detail_expanded: prev_full_detail_expanded,
-            left_pane_selection: prev_left_pane_selection,
-        };
-        // Build the new view. If we can't load it, leave state alone
-        // and surface a status message.
-        let home = home_for_config(&self.config);
-        let handle = self.handle.as_ref();
-        let Some(handle) = handle else {
-            return;
-        };
-        let next = build_node_view(ExplorerInputs {
-            snapshot: handle.snapshot(),
-            target: &target,
-            home: home.as_deref(),
-            now: Some(crate::tui::rows::tree_current_unix_epoch()),
-        });
-        match next {
-            None => {
-                self.status_message = Some(format!(
-                    "explorer: drill target {target:?} not in current snapshot"
-                ));
-            }
-            Some(view) => {
-                let mut new_state = ExplorerState::new(view);
-                // Carry the breadcrumb stack forward so deep
-                // drills accumulate.
-                new_state.breadcrumb = state.breadcrumb.clone();
-                new_state.breadcrumb.push(hop);
-                self.explorer = Some(new_state);
-                // Recompute the legacy detail too so the renderer
-                // surfaces consistent info during the renderer
-                // transition.
-                self.detail = build_node_detail(DetailInputs {
-                    snapshot: handle.snapshot(),
-                    target: &target,
-                    home: home.as_deref(),
-                });
-                self.reset_preview_scroll();
-                self.status_message = None;
-                // Mirror sync — when the drilled neighbor
-                // has a row in the current view, scroll the left
-                // tree to it and expand any ancestor groups. When
-                // it doesn't, leave the left selection untouched so
-                // the operator's prior position is preserved.
-                self.mirror_left_pane_to(&target);
-            }
-        }
+            "explorer: edge meta hidden"
+        }));
     }
 
     /// Move the left-pane selection to the row corresponding to
@@ -299,95 +278,13 @@ impl App {
         else {
             return;
         };
-        let target_id = self.tree.rows[row_index].id.clone();
-        let target_depth = self.tree.rows[row_index].depth;
-        // Walk back through the flat tree expanding any ancestor
-        // group rows at lower depths so the target row is
-        // materialized in the rendered visible-rows pass.
-        let mut current_depth = target_depth;
-        for ancestor_idx in (0..row_index).rev() {
-            if current_depth == 0 {
-                break;
-            }
-            let ancestor = &self.tree.rows[ancestor_idx];
-            if ancestor.depth < current_depth && ancestor.expandable {
-                self.expanded.insert(ancestor.id.clone());
-                current_depth = ancestor.depth;
-            }
-        }
+        // Expand the ancestor group rows so the target row shows.
+        self.tree_state.reveal(&self.tree.rows, row_index);
         // Bypass `set_selection` so we don't trigger the
-        // recompute_detail path — the explorer was just rebuilt for
+        // recompute_explorer path — the explorer was just rebuilt for
         // the drilled neighbor and that's what we want to keep.
-        self.selection = Some(target_id);
-    }
-
-    pub(super) fn explorer_back(&mut self) {
-        let Some(state) = self.explorer.as_mut() else {
-            return;
-        };
-        let Some(hop) = state.breadcrumb.pop() else {
-            // Treat Backspace as a general "go back" gesture, but
-            // require a two-press confirmation before backing out of
-            // the right pane entirely: the first press surfaces a
-            // hint and arms the focus shift, the second performs it.
-            // Left-pane Backspace keeps the original status hint and
-            // doesn't shift focus.
-            if matches!(self.focus, Focus::Right) {
-                if self.explorer_back_armed {
-                    self.focus = Focus::Left;
-                    self.explorer_back_armed = false;
-                    self.status_message = None;
-                } else {
-                    self.status_message = Some(
-                        "explorer: no drill history — press Backspace again to return to the left pane"
-                            .to_string(),
-                    );
-                    self.explorer_back_armed = true;
-                }
-            } else {
-                self.status_message = Some("explorer: no drill history to back out of".to_string());
-            }
-            return;
-        };
-        let home = home_for_config(&self.config);
-        let handle = self.handle.as_ref();
-        let Some(handle) = handle else {
-            return;
-        };
-        let view = build_node_view(ExplorerInputs {
-            snapshot: handle.snapshot(),
-            target: &hop.focused,
-            home: home.as_deref(),
-            now: Some(crate::tui::rows::tree_current_unix_epoch()),
-        });
-        let Some(view) = view else {
-            self.status_message = Some(
-                "explorer: cannot restore breadcrumb hop — node missing from snapshot".to_string(),
-            );
-            return;
-        };
-        let breadcrumb_remaining = state.breadcrumb.clone();
-        let mut restored = ExplorerState::new(view);
-        restored.other_expanded = hop.other_expanded;
-        restored.breadcrumb = breadcrumb_remaining;
-        restored.full_detail_expanded = hop.full_detail_expanded;
-        restored.reseat_cursor(hop.cursor_key);
-        self.detail = build_node_detail(DetailInputs {
-            snapshot: handle.snapshot(),
-            target: &hop.focused,
-            home: home.as_deref(),
-        });
-        self.explorer = Some(restored);
-        self.reset_preview_scroll();
-        self.status_message = None;
-        // Restore the left-pane selection that was active
-        // at the time of the drill, so Backspace unwinds both panes
-        // together. Bypasses `set_selection` to avoid rebuilding
-        // the explorer we just restored.
-        if let Some(prev_selection) = hop.left_pane_selection
-            && self.tree.rows.iter().any(|row| row.id == prev_selection)
-        {
-            self.selection = Some(prev_selection);
-        }
+        let target_id = self.tree.rows[row_index].id.clone();
+        self.tree_state.select(&self.tree.rows, target_id);
+        self.explorer_reflects = self.tree_state.selected().cloned();
     }
 }

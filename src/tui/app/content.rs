@@ -14,6 +14,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use tuikit::age::Age;
+
 use super::content_history::SearchHistory;
 use super::*;
 use crate::content_search::{PaneHits, Progress, SessionKey};
@@ -251,7 +253,7 @@ impl ContentSearch {
         }
         if let Some(finished) = self.finished_at {
             let age = now.saturating_duration_since(finished).as_secs();
-            note.push_str(&format!(" · scanned {}", age_label(age)));
+            note.push_str(&format!(" · scanned {}", Age::from_secs(age).ago()));
         }
         note
     }
@@ -288,16 +290,6 @@ impl ContentSearch {
             details: Arc::clone(&self.details),
             panes: Arc::clone(&self.panes),
         }
-    }
-}
-
-/// `just now`, or `2m ago`, `1h ago`.
-fn age_label(secs: u64) -> String {
-    match secs {
-        0..=4 => "just now".to_string(),
-        5..=59 => format!("{secs}s ago"),
-        60..=3599 => format!("{}m ago", secs / 60),
-        _ => format!("{}h ago", secs / 3600),
     }
 }
 
@@ -484,7 +476,7 @@ impl App {
             .tree
             .rows
             .iter()
-            .filter(|row| self.expanded.contains(&row.id))
+            .filter(|row| self.tree_state.is_expanded(&row.id))
             .filter_map(|row| match &row.kind {
                 crate::tui::rows::RowKind::AgentSession(session) => Some((
                     session.session.harness_key.clone(),
@@ -825,7 +817,7 @@ impl App {
                     with_panes: false,
                     draft: false,
                 }) {
-                    effects.push(Effect::Toast(note));
+                    effects.push(Effect::Toast(Feedback::warning(note)));
                     return effects;
                 }
                 self.content_stash = None;
@@ -856,7 +848,7 @@ impl App {
                 }) {
                     // Nothing started: the search that was active stays.
                     self.content = displaced;
-                    effects.push(Effect::Toast(note));
+                    effects.push(Effect::Toast(Feedback::warning(note)));
                 } else {
                     self.content_stash = displaced;
                 }
@@ -893,7 +885,7 @@ impl App {
                     with_panes: self.modal_panes(),
                     draft: false,
                 }) {
-                    effects.push(Effect::Toast(note));
+                    effects.push(Effect::Toast(Feedback::warning(note)));
                     return effects;
                 } else {
                     self.content_stash = None;
@@ -980,7 +972,8 @@ impl App {
                     let mux =
                         NodeId::MuxSession(crate::model::MuxSessionId::new(pane.mux.native_id()));
                     if let Err(why) = self.reveal_node(&mux, None) {
-                        self.status_message = Some(format!("{} {why}", pane.mux.session));
+                        self.status_message =
+                            Some(Feedback::warning(format!("{} {why}", pane.mux.session)));
                     }
                 }
                 effects.push(Effect::Exec(crate::tui::effect::ExecSpec::PaneScrollback {
@@ -991,8 +984,8 @@ impl App {
             }
             Msg::OpenSelectedPane => {
                 let selected = self
-                    .selection
-                    .as_ref()
+                    .tree_state
+                    .selected()
                     .and_then(|id| self.tree.rows.iter().find(|row| &row.id == id));
                 let (pane, line) = match selected.map(|row| &row.kind) {
                     Some(RowKind::Pane(row)) => (row.pane.clone(), row.line),
@@ -1071,7 +1064,7 @@ impl App {
             }
             Msg::OpenSearchOptions => {
                 if !self.config.live_preview_enabled {
-                    effects.push(Effect::Toast(CONTENT_OFF_NOTICE.to_string()));
+                    effects.push(Effect::Toast(Feedback::warning(CONTENT_OFF_NOTICE)));
                     return effects;
                 }
                 self.open_content_search_overlay();
@@ -1092,13 +1085,10 @@ impl App {
                 };
                 return self.reduce_content(Msg::SetContentGroup(next));
             }
-            Msg::OpenContentSearchModal => {
-                let hint = self.open_content_search_entry();
-                self.status_message = Some(hint);
-            }
+            Msg::OpenContentSearchModal => self.open_content_search_entry(),
             Msg::OpenSearchHistory => {
                 if self.search_history.is_empty() {
-                    effects.push(Effect::Toast("No searches yet".to_string()));
+                    effects.push(Effect::Toast(Feedback::warning("No searches yet")));
                     return effects;
                 }
                 let now = Instant::now();
@@ -1112,30 +1102,30 @@ impl App {
                     .iter()
                     .enumerate()
                     .rev()
-                    .map(|(index, entry)| crate::tui::widgets::picker::PickerItem {
-                        label: format!("\"{}\"", entry.search.text),
-                        detail: entry.describe(now),
-                        value: index.to_string(),
+                    .map(|(index, entry)| {
+                        crate::tui::widgets::picker::PickerItem::new(
+                            format!("\"{}\"", entry.search.text),
+                            index.to_string(),
+                        )
+                        .detail(entry.describe(now))
                     })
                     .collect();
-                let mut picker = crate::tui::widgets::picker::PickerState::new(
-                    "Searches",
-                    crate::tui::widgets::picker::PickerPurpose::SearchHistory,
+                let viewed = viewed.map(|viewed| viewed.to_string());
+                self.open_picker(crate::tui::widgets::picker::search_history(
                     items,
-                );
-                if let Some(viewed) = viewed {
-                    picker = picker.at_value(&viewed.to_string());
-                }
-                self.open_picker(picker);
+                    viewed.as_deref(),
+                ));
             }
             Msg::ApplySearchEntry if self.active_view != View::Search => {
-                effects.push(Effect::Toast(
-                    "Ctrl-F filters by the search the Search view shows (6)".to_string(),
-                ));
+                effects.push(Effect::Toast(Feedback::warning(format!(
+                    "{} filters by the search the Search view shows ({})",
+                    crate::tui::keybindings::key_name("search.keep"),
+                    crate::tui::keybindings::key_name("view.search"),
+                ))));
             }
             Msg::ApplySearchEntry => {
                 let Some(viewed) = self.viewed_search().cloned() else {
-                    effects.push(Effect::Toast("No search to filter by".to_string()));
+                    effects.push(Effect::Toast(Feedback::warning("No search to filter by")));
                     return effects;
                 };
                 if self.viewed_is_filter() {
@@ -1161,10 +1151,10 @@ impl App {
                 self.scan_new_sessions();
                 self.rebuild_tree_in_place();
                 if let Some(content) = self.content() {
-                    effects.push(Effect::Toast(format!(
+                    effects.push(Effect::Toast(Feedback::success(format!(
                         "Filtering the lists by \"{}\"",
                         content.text
-                    )));
+                    ))));
                 }
             }
             Msg::ContentDetails { generation, batch } => {
@@ -1368,7 +1358,7 @@ impl App {
             .tree
             .rows
             .iter()
-            .filter(|row| row.expandable && is_session(row) && self.expanded.contains(&row.id))
+            .filter(|row| row.expandable && is_session(row) && self.tree_state.is_expanded(&row.id))
             .count();
         for row in &self.tree.rows {
             if !row.expandable || !self.search_auto_expanded.insert(row.id.clone()) {
@@ -1382,7 +1372,7 @@ impl App {
                 }
                 open_sessions += 1;
             }
-            self.expanded.insert(row.id.clone());
+            self.tree_state.expand_id(row.id.clone());
         }
         self.queue_details();
     }
@@ -1487,13 +1477,23 @@ impl App {
     /// matches of the running search (or, with the per-message
     /// grouping, its matching turns), ranked as the Search view ranks.
     pub fn content_view(&self) -> crate::tui::widgets::search::ContentView {
+        let query = self
+            .search_overlay()
+            .map(crate::tui::widgets::search::SearchOverlayState::content_text)
+            .unwrap_or_default();
+        self.content_view_for(&query)
+    }
+
+    /// [`App::content_view`] for a contents modal whose query is `query`:
+    /// what the modal itself asks for while it handles a key or draws.
+    pub fn content_view_for(&self, query: &str) -> crate::tui::widgets::search::ContentView {
         use crate::tui::widgets::search::ContentView;
         let mut view = ContentView::default();
         if !self.config.live_preview_enabled {
             view.unavailable = Some(CONTENT_OFF_NOTICE);
             return view;
         }
-        let Some(content) = self.modal_content() else {
+        let Some(content) = self.modal_content(query) else {
             return view;
         };
         let key = ViewKey {
@@ -1521,17 +1521,14 @@ impl App {
     }
 
     /// The search whose results the contents modal lists: the one it is
-    /// previewing, or else the search whose query it was opened with (the
-    /// one the Search view shows, or the one filtering the lists).
-    fn modal_content(&self) -> Option<&ContentSearch> {
+    /// previewing, or else the search whose query (`query`) it was opened
+    /// with (the one the Search view shows, or the one filtering the
+    /// lists).
+    fn modal_content(&self, query: &str) -> Option<&ContentSearch> {
         let live = self.content.as_ref();
         if live.is_some_and(|content| !content.applied) {
             return live;
         }
-        let query = self
-            .search_overlay()
-            .map(crate::tui::widgets::search::SearchOverlayState::content_text)
-            .unwrap_or_default();
         self.viewed_search()
             .filter(|viewed| !query.is_empty() && viewed.text == query)
             .or(live)
@@ -1562,15 +1559,18 @@ impl App {
         };
         let snapshot = handle.snapshot();
         let now = Some(crate::tui::rows::tree_current_unix_epoch());
+        // An age's label and its tint, read off one clock.
         let age = |time: Option<i64>| {
-            crate::tui::rows::format_recency(now, time)
-                .unwrap_or_else(|| crate::tui::icons::marks::NO_VALUE.to_string())
+            let age = Age::of(time, now);
+            (
+                age.map_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string(), Age::label),
+                age.map(Age::recency),
+            )
         };
         let turn_tag = |hit: &Hit| {
-            format!(
-                "turn {} · {}",
-                hit.turn_index + 1,
-                crate::tui::rows::search::kind_word(hit.kind)
+            crate::tui::widgets::search::turn_tag(
+                hit.turn_index,
+                crate::tui::rows::search::kind_word(hit.kind),
             )
         };
 
@@ -1598,18 +1598,22 @@ impl App {
             let label = session_label(snapshot, &session);
             let chip = crate::tui::rows::harness_label(&session.harness_key);
             let latest = hits.latest.map(|time| time.timestamp());
-            let row_for = |hit: &Hit, turn: Option<String>| ContentRow {
-                target: ContentTarget::Session {
-                    session: session.clone(),
-                    turn_index: hit.turn_index,
-                },
-                label: label.clone(),
-                chip: chip.clone(),
-                hits: hits.count,
-                turn,
-                age: age(hit.timestamp.map(|time| time.timestamp()).or(latest)),
-                snippet: hit.snippet.clone(),
-                highlight: Some(hit.highlight.clone()),
+            let row_for = |hit: &Hit, turn: Option<String>| {
+                let (age, recency) = age(hit.timestamp.map(|time| time.timestamp()).or(latest));
+                ContentRow {
+                    target: ContentTarget::Session {
+                        session: session.clone(),
+                        turn_index: hit.turn_index,
+                    },
+                    label: label.clone(),
+                    chip: chip.clone(),
+                    hits: hits.count,
+                    turn,
+                    age,
+                    recency,
+                    snippet: hit.snippet.clone(),
+                    highlight: Some(hit.highlight.clone()),
+                }
             };
             let details = (content.group.lists_messages())
                 .then(|| {
@@ -1655,6 +1659,7 @@ impl App {
             );
             let chip = pane.pane.command.clone().unwrap_or_default();
             let captured = Some(pane.captured_at);
+            let (pane_age, pane_recency) = age(captured);
             let row_for = |hit: &crate::content_search::PaneHit, tag: Option<String>| ContentRow {
                 target: ContentTarget::Pane {
                     pane: pane.pane.clone(),
@@ -1664,7 +1669,8 @@ impl App {
                 chip: chip.clone(),
                 hits: pane.count,
                 turn: tag,
-                age: age(captured),
+                age: pane_age.clone(),
+                recency: pane_recency,
                 snippet: hit.snippet.clone(),
                 highlight: Some(hit.highlight.clone()),
             };
@@ -1675,7 +1681,7 @@ impl App {
                         captured,
                         (pane.pane.mux.native_id(), pane.pane.pane_id.clone()),
                         usize::MAX - hit.line,
-                        row_for(hit, Some(format!("line {}", hit.line))),
+                        row_for(hit, Some(crate::tui::widgets::search::line_tag(hit.line))),
                     ));
                 }
                 continue;
@@ -1684,7 +1690,7 @@ impl App {
                 pane.hits
                     .iter()
                     .rev()
-                    .map(|hit| row_for(hit, Some(format!("line {}", hit.line))))
+                    .map(|hit| row_for(hit, Some(crate::tui::widgets::search::line_tag(hit.line))))
                     .collect()
             } else {
                 newest.map(|hit| row_for(hit, None)).into_iter().collect()
@@ -1761,15 +1767,18 @@ impl App {
         let _ = self.update(msg);
     }
 
-    /// Remember how the overlay was set, as it closes.
-    pub(crate) fn remember_search_overlay(&mut self) {
-        if let Some(state) = self.search_overlay() {
-            self.search_memory = Some(SearchMemory {
-                group: state.group(),
-                kinds: state.kinds(),
-                panes: state.panes(),
-            });
-        }
+    /// The search overlay `state` has closed: remember how it was set,
+    /// and keep the search it ran.
+    pub(crate) fn search_closed(
+        &mut self,
+        state: &crate::tui::widgets::search::SearchOverlayState,
+    ) {
+        self.search_memory = Some(SearchMemory {
+            group: state.group(),
+            kinds: state.kinds(),
+            panes: state.panes(),
+        });
+        self.commit_modal_search();
     }
 }
 

@@ -1,0 +1,7 @@
+frame 60x1
+text  |/東京 needle   Enter find · Esc cancel                      |
+style |a  b        cccccccccccccccccccccccccc                      |
+legend
+  a  bold
+  b  fg Black, bg White
+  c  fg DarkGray, dim

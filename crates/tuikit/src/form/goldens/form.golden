@@ -1,0 +1,52 @@
+frame 64x20
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |  ┌ Make a thing ────────────────────────────────────────────┐  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |  │  about          a thing to make                          │  |
+style |  a  bbbbbbbbbbbbb  bbbbbbbbbbbbbbb                          a  |
+text  |  │► name           -                                        │  |
+style |  acccccccccccccccccdeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeecca  |
+text  |  │  place          ~/projects/alpha                        √│  |
+style |  a                 fffffffffffffffffffffffffffffffffffff   ga  |
+text  |  │  copy           [x] keep a copy                          │  |
+style |  a                 fffffffffffffff                          a  |
+text  |  │  copies         1                                        │  |
+style |  a                 fffffffffffffffffffffffffffffffffffffff  a  |
+text  |  │  size           (•) small ( ) medium ( ) large           │  |
+style |  a                 ffffffffffffffffffffffffffffff           a  |
+text  |  │  parts          [ ] lid [x] base                         │  |
+style |  a                 ffffffffffffffff                         a  |
+text  |  │  tool           saw              [saw] [drill]           │  |
+style |  a                 ffffffffffffff  hhhhhhiiiiiiii           a  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │a name is required                                        │  |
+style |  ajjjjjjjjjjjjjjjjjj                                        a  |
+text  |  │↑/↓ move · Tab complete/next · S-Tab back                 │  |
+style |  aiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii                 a  |
+text  |  │←/→/Space change · Ctrl-R reset · Enter make · Esc cancel │  |
+style |  aiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii a  |
+text  |  └──────────────────────────────────────────────────────────┘  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+legend
+  a  fg Cyan
+  b  dim, italic
+  c  bold, reversed
+  d  fg Black, bg White
+  e  fg White, bg DarkGray
+  f  fg Gray
+  g  fg Green
+  h  fg Cyan, bold
+  i  dim
+  j  fg Red

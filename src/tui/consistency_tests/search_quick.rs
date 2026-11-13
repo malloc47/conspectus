@@ -10,6 +10,7 @@ use crate::model::{
 };
 use crate::tui::app::{Focus, OpenPlan};
 use crate::tui::explorer::ExplorerRow;
+use tuikit::explorer::ExplorerKey;
 
 fn link(id: &str, source: &NodeId, target: &NodeId, relation: RelationKind) -> GraphLink {
     let mut link = GraphLink::new(
@@ -108,7 +109,7 @@ fn select_node(app: &mut App, node: &NodeId) {
 
 fn plan(app: &App, node: &NodeId) -> OpenPlan {
     let reach = app.search_reachability();
-    app.open_plan(reach.as_ref(), node)
+    app.open_plan(reach.as_ref(), None, node)
 }
 
 fn selected_node(app: &App) -> Option<NodeId> {
@@ -166,11 +167,15 @@ fn a_neighbor_opens_in_the_right_pane_with_the_cursor_on_its_row() {
     assert_eq!(app.focus(), Focus::Right);
     assert_eq!(app.active_view(), View::Sessions, "the left pane stays put");
     let state = app.explorer().expect("an explorer");
-    assert_eq!(state.view.focused, session_id(), "no drill for one hop");
-    assert!(state.breadcrumb.is_empty());
-    let row = state.selected_row().expect("a cursor row");
+    assert_eq!(
+        state.content().focused,
+        session_id(),
+        "no drill for one hop"
+    );
+    assert!(state.frames().is_empty());
+    let row = app.explorer_cursor_row().expect("a cursor row");
     assert!(matches!(row, ExplorerRow::ValidatedLink { .. }), "{row:?}");
-    assert_eq!(state.view.drill_target(&row), Some(mux_id()));
+    assert_eq!(state.content().drill_target(&row), Some(mux_id()));
 }
 
 #[test]
@@ -182,19 +187,23 @@ fn a_farther_entity_drills_along_the_path_and_backspace_retraces_it() {
     assert_eq!(app.focus(), Focus::Right);
     let state = app.explorer().expect("an explorer");
     assert_eq!(
-        state.view.focused,
+        state.content().focused,
         pr_id(7),
         "the last hop before the target"
     );
-    assert_eq!(state.breadcrumb.len(), 2, "one hop per drill");
-    let row = state.selected_row().expect("a cursor row");
-    assert_eq!(state.view.drill_target(&row), Some(pr_id(8)));
+    assert_eq!(state.frames().len(), 2, "one hop per drill");
+    let row = app.explorer_cursor_row().expect("a cursor row");
+    assert_eq!(state.content().drill_target(&row), Some(pr_id(8)));
 
-    app.update(Msg::ExplorerBack);
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
+    app.update(Msg::Explorer(ExplorerKey::Back));
     let state = app.explorer().expect("an explorer");
-    assert_eq!(state.view.focused, session_id(), "back where it started");
-    assert!(state.breadcrumb.is_empty());
+    assert_eq!(
+        state.content().focused,
+        session_id(),
+        "back where it started"
+    );
+    assert!(state.frames().is_empty());
 }
 
 #[test]
@@ -310,8 +319,17 @@ fn tab_then_a_name_then_enter_opens_an_entity_from_another_view() {
 #[test]
 fn the_search_hint_names_the_tab_keys() {
     let mut app = app_on_session();
-    let hint = app.open_search_entry();
-    assert!(hint.contains("Tab current/all"), "{hint}");
+    app.update(Msg::SetStatus(Some(tuikit::feedback::Feedback::success(
+        "filters cleared",
+    ))));
+    app.open_search_entry();
+    assert_eq!(
+        app.status(),
+        None,
+        "opening says nothing; the bar names its keys"
+    );
+    let hint = app.top_modal_hints().expect("quick select is open").text();
+    assert!(hint.contains("Tab search current/all"), "{hint}");
     assert!(!hint.contains("search contents"), "{hint}");
 }
 
@@ -319,7 +337,7 @@ fn the_search_hint_names_the_tab_keys() {
 fn shift_tab_widens_too() {
     let mut app = app_on_session();
     app.open_search_overlay();
-    crate::tui::runtime::handle_search_overlay_key(
+    crate::tui::runtime::modal_key_pure(
         &mut app,
         KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
     );
@@ -356,10 +374,7 @@ fn cursor(app: &App) -> usize {
 }
 
 fn ctrl(app: &mut App, c: char) {
-    crate::tui::runtime::handle_search_overlay_key(
-        app,
-        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL),
-    );
+    crate::tui::runtime::modal_key_pure(app, tuikit::testkit::keys::ctrl(c));
 }
 
 /// Step the cursor down 8 and back up 8, with every key the table binds
@@ -432,9 +447,18 @@ fn the_highlighted_row_scrolls_into_view_past_the_first_screen() {
         }
         assert_eq!(cursor(&app), 25);
         let shown = frame(&mut app, 120, 24);
+        // The marker sits in the modal's gutter, just inside its frame.
+        let left = shown
+            .lines()
+            .find_map(|line| {
+                line.find("┌ / quick select")
+                    .map(|byte| line[..byte].chars().count())
+            })
+            .unwrap_or_else(|| panic!("the quick select frame in:\n{shown}"));
+        let pointer = tuikit::glyphs::marks::POINTER.chars().next();
         let marked = shown
             .lines()
-            .find(|line| line.contains("│> "))
+            .find(|line| line.chars().nth(left + 1) == pointer)
             .unwrap_or_else(|| panic!("a marked row in:\n{shown}"));
         assert!(
             marked.contains("alpha-25"),
@@ -480,4 +504,58 @@ fn quick_select_picks_rows_of_the_pinned_view() {
 #[test]
 fn quick_select_picks_rows_of_the_history_view() {
     quick_select_picks_every_row_of(View::History);
+}
+
+/// Every entity the wider reach finds, from each view: the outcome word
+/// the list draws (from the listing built when the reach widened) is the
+/// plan Enter follows, a view it names lists the entity (Enter switches
+/// there), and an entity no view lists says so and stays put. The world
+/// holds a fork, which no view lists, and pins of every kind.
+#[test]
+fn the_outcome_word_promises_a_view_only_where_enter_finds_the_row() {
+    use crate::tui::search_entities::EntityIndex;
+    let world = crate::tui::rows::pinned::all_kinds_world();
+    let index = EntityIndex::build(&world, true);
+    let (mut views_named, mut unlisted) = (0, 0);
+    for from in [View::Sessions, View::Mux, View::Pinned] {
+        let app = app_over(from, &world);
+        let listing = app.listing();
+        let reach = app.search_reachability();
+        for entity in index.entities() {
+            let node = &entity.node;
+            let drawn = app.open_plan(reach.as_ref(), Some(&listing), node);
+            assert_eq!(
+                drawn,
+                app.open_plan(reach.as_ref(), None, node),
+                "{node} from {from:?}: the word is Enter's plan"
+            );
+            let mut opened = app_over(from, &world);
+            opened.update(Msg::OpenEntity(node.clone()));
+            match drawn {
+                OpenPlan::View(view) => {
+                    views_named += 1;
+                    assert_eq!(opened.active_view(), view, "{node} from {from:?}");
+                    assert!(
+                        opened.status_message().is_none(),
+                        "{node}: {:?}",
+                        opened.status_message()
+                    );
+                }
+                OpenPlan::Unlisted => {
+                    unlisted += 1;
+                    assert_eq!(opened.active_view(), from, "{node}: stays put");
+                    let status = opened.status_message().unwrap_or_default();
+                    assert!(status.contains("isn't listed"), "{node}: {status}");
+                }
+                OpenPlan::Here | OpenPlan::Path(_) => {}
+            }
+        }
+    }
+    assert!(views_named > 0 && unlisted > 0, "both answers are covered");
+    let fork = NodeId::Fork(crate::model::ForkId::new("atelier/fork-1"));
+    let app = app_over(View::Sessions, &world);
+    assert_eq!(
+        app.open_plan(None, Some(&app.listing()), &fork).word(),
+        "not listed"
+    );
 }

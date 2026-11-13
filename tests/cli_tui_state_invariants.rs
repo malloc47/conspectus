@@ -1,16 +1,18 @@
 //! Read-only invariant smoke for the TUI state file
 //! (`$XDG_STATE_HOME/conspectus/tui-state.json`).
 //!
-//! The state file persists the last-active TUI view across
-//! `conspectus tui` restarts. It is **rebuildable cache**, not
+//! The state file persists the last-active TUI view, and each view's
+//! settings, expanded rows, and selected row, across `conspectus tui`
+//! restarts. It is **rebuildable cache**, not
 //! authoritative state — the worst case is the operator starts in
 //! the configured default view instead of their last-active one.
 //!
 //! That posture means only the interactive TUI itself should
 //! create or move the file. Every other surface
-//! (`graph` / `table` / `query` / `node show` / `pin *`) must
-//! leave the file byte-identical: no creation when absent, no
-//! content or mtime drift when present.
+//! (`graph` / `table` / `query` / `node show` / `pin *`, and
+//! `tui --snapshot`) must leave the file byte-identical: no creation
+//! when absent, no content or mtime drift when present. A snapshot
+//! also reopens nothing the file remembers, so it stays deterministic.
 //!
 //! Mirrors the read-only invariant pattern in
 //! `cli_pin_invariants.rs` and
@@ -169,4 +171,80 @@ fn read_only_commands_leave_existing_state_file_byte_identical() {
             "command `{args:?}` bumped the tui-state file mtime",
         );
     }
+}
+
+/// A state file that remembers the showcase's `project` group expanded
+/// and one of its sessions selected. The TUI's own tests check that a
+/// live run reopens exactly that (`src/tui/app/restore_tests.rs`).
+#[cfg(feature = "snapshot")]
+const REMEMBERED_ROWS: &str = r#"{
+  "schema_version": 1,
+  "row_keys": 1,
+  "view_states": {
+    "sessions": {
+      "expanded": ["group:repo:/fixture/repos/project/.git"],
+      "selected": {
+        "row": "session:agent_session:claude-code:/fixture/harness/claude:showcase-claude",
+        "path": ["group:repo:/fixture/repos/project/.git"]
+      }
+    }
+  }
+}"#;
+
+/// The showcase's left pane as `tui --snapshot` draws it, with `home`'s
+/// state directory.
+#[cfg(feature = "snapshot")]
+fn showcase_left_pane(home: &Path) -> String {
+    let output = isolated_cmd(home)
+        .current_dir(home)
+        .args(["tui", "--snapshot", "--snapshot-fixture"])
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/showcase.json"
+        ))
+        .args([
+            // The showcase's anchor time, so ages read the same in both runs.
+            "--snapshot-now",
+            "1790769600",
+            "--snapshot-pane",
+            "left",
+            "--snapshot-width",
+            "150",
+            "--snapshot-height",
+            "20",
+        ])
+        .output()
+        .expect("run snapshot");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[cfg(feature = "snapshot")]
+#[test]
+fn snapshot_neither_reopens_nor_rewrites_remembered_rows() {
+    let plain = tempfile::TempDir::new().expect("home");
+    let expected = showcase_left_pane(plain.path());
+    assert!(
+        !state_path(plain.path()).exists(),
+        "a snapshot creates no state file"
+    );
+
+    let home = tempfile::TempDir::new().expect("home");
+    fs::create_dir_all(state_dir(home.path())).expect("mkdir state");
+    fs::write(state_path(home.path()), REMEMBERED_ROWS).expect("seed tui-state.json");
+    let (bytes_before, mtime_before) = fingerprint(&state_path(home.path()));
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    assert_eq!(
+        showcase_left_pane(home.path()),
+        expected,
+        "the snapshot opens on the default folds and first row"
+    );
+    let (bytes_after, mtime_after) = fingerprint(&state_path(home.path()));
+    assert_eq!(bytes_after, bytes_before);
+    assert_eq!(mtime_after, mtime_before);
 }

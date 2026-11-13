@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::model::NodeId;
-use crate::tui::messages::{CommandRecord, LogEntry, LogTarget};
+use crate::tui::messages::{CommandRecord, LogEntry, LogEntryExt, LogTarget};
 
 /// Run `conspectus <args>` and capture its full output, both for the
 /// caller's summary and as the command record of the message log entry
@@ -51,7 +51,7 @@ pub(super) fn launch_entry(
     let entry = if !summary.success {
         LogEntry::error(&summary.message)
     } else if record.stderr.trim().is_empty() {
-        LogEntry::info(&summary.message)
+        LogEntry::success(&summary.message)
     } else {
         LogEntry::warning(&summary.message)
     };
@@ -71,7 +71,8 @@ pub(super) fn attach_return_entry(
     if let AttachOutcome::Failed(reason) = outcome {
         return LogEntry::error(format!("{what} attach failed: {reason}")).with_target(target);
     }
-    let attached = LogEntry::info(format!("{what} attached/detached")).with_target(target.clone());
+    let attached =
+        LogEntry::success(format!("{what} attached/detached")).with_target(target.clone());
     let Some(runner) = crate::discovery::system_mux_backend(&mux.backend) else {
         return attached;
     };
@@ -291,9 +292,9 @@ pub(super) fn execute_rebuild(
     };
     let Some((attach_target, socket)) = target else {
         if attach {
-            app.post_toast(format!(
+            app.post_toast(Feedback::warning(format!(
                 "`{reference}` came back, but there is no mux to attach to"
-            ));
+            )));
         }
         return;
     };
@@ -518,9 +519,9 @@ pub(super) fn run_mux_attach(
             ));
         }
     };
-    ratatui::restore();
+    term::leave();
     let outcome = runner.attach_session(socket_name, &target.native_id);
-    *terminal = ratatui::init();
+    *terminal = term::enter();
     let _ = terminal.clear();
     attach_outcome(&target.backend, outcome)
 }
@@ -553,7 +554,7 @@ pub(super) fn run_tmux_attach_with_socket(
 ) -> AttachOutcome {
     // Suspend the ratatui terminal so tmux owns the real screen
     // for the duration of the attach.
-    ratatui::restore();
+    term::leave();
 
     let nested = std::env::var_os("TMUX").is_some();
     let subcommand = if nested {
@@ -570,7 +571,7 @@ pub(super) fn run_tmux_attach_with_socket(
     // Re-enter the alt screen + raw mode and swap the terminal in
     // place. Failure to re-init is fatal for the TUI, but we
     // attempted restore() first so the shell stays usable.
-    *terminal = ratatui::init();
+    *terminal = term::enter();
     // Forget any cached frame state — the parent screen was
     // overwritten by tmux, and a clean clear avoids ghost cells
     // from the suspended buffer.
@@ -620,7 +621,7 @@ pub(super) fn run_viewer_launch(
         terminal::{Clear, ClearType},
     };
 
-    ratatui::restore();
+    term::leave();
     let _ = execute!(std::io::stdout(), Clear(ClearType::All), MoveTo(0, 0));
 
     let status = crate::exec::command(crate::exec::Program::ClaudeHistory, &plan.program)
@@ -639,7 +640,7 @@ pub(super) fn run_viewer_launch(
         let _ = std::io::stdin().read_line(&mut buf);
     }
 
-    *terminal = ratatui::init();
+    *terminal = term::enter();
     let _ = terminal.clear();
     outcome
 }
@@ -685,7 +686,7 @@ pub(super) fn execute_show_rebuild_plan(
     let plan = match plan {
         Ok(plan) => plan,
         Err(text) => {
-            app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
+            app.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
                 format!("rebuild plan · {reference}"),
                 text,
             ));
@@ -712,7 +713,7 @@ pub(super) fn execute_show_rebuild_plan(
         .snapshot_handle()
         .and_then(|handle| crate::tui::actions::running_note(handle.snapshot(), reference))
         .map_or_else(String::new, |note| format!("{note}\n\n"));
-    app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::plan(
+    app.open_value_modal(crate::tui::widgets::value_modal::ValueText::plan(
         format!("rebuild plan · {reference}"),
         format!("{note}{plan}"),
         script,

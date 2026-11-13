@@ -8,7 +8,9 @@ onward (pre-1.0, so minor versions may break).
 ## [Unreleased]
 
 Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
-(ADRs 0140 to 0144) rework how pinning works.
+(ADRs 0140 to 0144) rework how pinning works, and the TUI moves onto a
+framework crate of its own (ADRs 0150 to 0199), so its menus, dialogs,
+forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
@@ -35,6 +37,15 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 - **Pinned and History views** (`4`, `5`), ghost muxes in the Mux view,
   a `.` row menu with Pin / Unpin (`p`), a `◉` pin marker, a `pinned
   only` filter, and `N` for mux launch with a worktree toggle.
+- **The TUI reopens each view where you left it.** `tui-state.json`
+  now keeps each view's expanded groups and selected row (every view
+  but Search), so the next `conspectus tui` opens with the same groups
+  open and the same row selected and scrolled into view. A row that is
+  gone gives way to the deepest group above it that is still listed,
+  then the first row; groups that are gone are ignored and leave the
+  file on the next write. `--no-resume-view` opens every view on its
+  default folds instead. The file is also written before the TUI hands
+  the terminal to tmux or a viewer, and when the TUI stops on an error.
 
 ### Changed
 
@@ -46,9 +57,781 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   only, with a diagnostic until `conspectus pin migrate` converts them
   and removes the old tables. The Pins modal and the `B`, `b`, `A`, and
   `L` keys are gone.
+- **Breaking: the hidden `union` and `forks` TUI views are removed.**
+  Neither was in the view switcher, and their groupings did nothing.
+  `conspectus tui --view union|forks` now fails and lists the valid
+  views, and `[tui] default_view = "union"` or `"forks"`, or a
+  `[tui.views.union]` or `[tui.views.forks]` table, is reported as a
+  config diagnostic and ignored, and a `union` or `forks` view remembered
+  in the TUI state file starts the TUI in the default view.
+  `conspectus table union|forks` is unchanged.
+- **`e` does nothing on the left pane.** It flipped a flag nothing drew
+  (or said `detail: no linked entities to expand`). On the right pane it
+  still opens and closes `Other`.
+- **`[tui.theme]` has two muted keys instead of five, and reaches the
+  forms.** `muted` (a modifier, `dim`) and `inert` (a color, dark gray)
+  replace `placeholder`, `divider`, `mux_unmuxed`, `secondary_text`, and
+  `ghost`, which still load as aliases; set several of them differently
+  and they merge by a fixed precedence, with a warning for each key that
+  lost. Setting only `placeholder` now also restyles rules and the
+  unlinked `∘`, and setting only `secondary_text` also recolors gone
+  rows. New keys: `accent`, `link`, `info`, `surface`, `field`,
+  `field_active`, `field_cursor`, and `command_badge_text`; a style may
+  name a background (`white on dark_gray`). The mux launch, new mux, and
+  pin edit forms, the previews, and the transcript viewer now follow the
+  theme; the default look is unchanged. `link_id` loads as an alias of
+  `link`. Within one file a `[tui.theme.harness]` entry now beats the
+  flat `harness_<name>` key (the flat key won by alphabetical order), and
+  info entries in Messages take `info` rather than `success` (both green
+  by default). `docs/operations.md` lists every key, its default, and the
+  older names, with notes for moving a theme across.
+- **Wrapping follows one rule across the TUI.** A word that ends exactly
+  at a row's edge stays on that row (help, the viewers, modals, and
+  previews used to move it down a row); key hints wrap between hints, so
+  a key is never split from its verb and no row starts with `·`; the
+  transcript viewer keeps the blank lines between Markdown paragraphs,
+  lists, and code blocks; and a cut form value or quick select snippet
+  ends in `…` instead of stopping at the edge.
+- **Search snippets favor the text after the match.** A long message's
+  snippet, in the TUI and in `conspectus search --json` (`snippet.text`),
+  is at most 160 terminal cells with its `…` marks (it was 160 characters
+  plus the marks) and spends two thirds of its room after the match,
+  cutting on word edges, instead of centering the match. The
+  `conspectus search` table now cuts its snippet column to `--width` the
+  same way (it centered the match): at 80 columns a long message reads
+  `…eight nine wombat ten eleven twelve…` where it read `…seven eight
+  nine wombat ten eleven…`. The JSON is unchanged.
+- **Ages read one way across the TUI.** The Search view's match, pane,
+  and pane-line rows color their age by how recent it is, as every other
+  row does (they were all gray). The search status says `scanned 0s ago`
+  rather than `scanned just now`, and a scan a day old reads `1d ago`
+  rather than `25h ago`. The History view's Clean up list counts days
+  (`last seen 21d ago`) like the History rows, not weeks. The CLI's
+  tables are unchanged and still go on to weeks.
+- **`[tui.theme] badge_width` sizes every chip.** The content search's
+  chip column and a mux's ` no agent ` placeholder now follow it, so with
+  a narrower or wider chip the labels after them stay in one column. The
+  default look is unchanged.
+- **Modals share one frame and five sizes.** Every menu, prompt, form,
+  list, and reader draws the same border and title (plain, one space each
+  side: the Messages and value titles are no longer bold) and takes one of
+  five sizes. Menus are 64 columns (the row menu was 72, the mux menu 62,
+  the worktree menu 56), forms 80 (the pin edit form was 84, the others
+  76), the value modal the help's size (the picker takes the searches'
+  size, below), and the help two rows taller. Every modal now leaves two
+  columns and a row clear around it, so a menu or form on a short
+  terminal no longer covers the header and status line (it scrolls), and
+  a menu on a narrow one no longer touches the screen's edges. A short
+  worktree menu is only as tall as its entries. Below 44 columns the
+  forms fit their key hints to the frame instead of cutting them, and the
+  empty Clean up wraps its text.
+  `[tui.theme] surface` now also paints the modals' background.
+- **Every list shows its cursor the same way.** The row the cursor is on
+  is marked `►` in the two cells before it and drawn with
+  `[tui.theme] selection_active` (reversed and bold by default), in the
+  menus, Controls, the picker, the checklists and Clean up, quick select,
+  content search and its options, the forms, Messages, and the right pane.
+  The menus were bold only and Controls, the picker, the search lists, and
+  the forms showed `>`. While the tree has focus the right pane keeps its
+  cursor row marked in `selection_inactive` (bold) instead of showing no
+  cursor, and with focus it highlights the whole row rather than one
+  value. The menus now wrap from their last entry to their first and back,
+  like the other short lists. Messages' entries move two cells right for
+  the mark, the search lists' cursor row keeps its dimmed context, a
+  form's focused row highlights its label around the field's own fill, a
+  conflict row in the right pane's Other zone shows its `▲` two cells
+  further in, the armed row menu entry's `►` is no longer red (its label
+  still is), and the checklists cut a long label with `…`. The left
+  pane's tree marks its cursor row the same way, focused or not, so its
+  rows start two cells further right; each row gives the two cells up
+  from its end (the preview, snippet, or content first, then, in a narrow
+  pane, the next cell its order lets go), the mux names keep their widths,
+  and a row a view lists twice is marked and highlighted once. The Search
+  view's header line and the Pinned banner stay at the border, two cells
+  left of the rows.
+- **The focused pane is framed in the accent.** The pane with focus draws
+  its border in `[tui.theme] panel_focus_accent` (cyan by default, and it
+  follows `accent`), beside the `►` before its title that was already
+  that color, also while a dialog is open over it; the other pane keeps
+  the plain border. Nothing else on the screen changes.
+- **The header gives way by importance on a narrow screen.** The header
+  line used to run off the right edge, cutting `4 stopped` to `4` at 40
+  columns and a harness chip mid-name when `show_harness_chips` is on.
+  It now drops whole parts and ends with `…`: the opt-in harness chips
+  first (from the end), then the stopped count, the `▲ N` triage chip,
+  and the mux count; the freshness and the session count stay longest.
+  A header that fits looks as before. The tab strip and the status bar
+  fit by the same rule and look as before.
+- **Empty previews recede like empty panes.** A Preview with nothing to
+  show (`loading mux preview…`, `no mux target for this row`, `no
+  preview for this row`, `no turns yet`, `(empty pane)`, `preview
+  disabled (--no-live-preview)`) is drawn in the dim look the panes'
+  empty messages already have; a Preview that failed to load
+  (`transcript unavailable: …`, `tmux unavailable: …`) keeps the plain
+  look. The right pane's `Select a row to view its detail.` wraps on a
+  pane too narrow for it instead of being cut by the border.
+- **The status bar names only keys that do what it says.** Its hints are
+  generated from the keys of whatever has them. With a dialog open it
+  shows the dialog's keys instead of the main view's (`q quit` and `Tab
+  focus` there were the dialog's keys), without the `[left]`/`[right]`
+  tag, and the menus, Controls, and the searches no longer post a copy of
+  their footer when they open (`worktree: ↑/↓ move · …`, `mux: …`,
+  `quick select: type to find · …`). With the right pane focused,
+  `Enter/a attach X` becomes `a attach X` (the right pane's `Enter`
+  copies or follows), and the left row's view, resume, menu, and fold
+  hints go. On the left pane, `j/k move · h/l fold · Enter default`
+  becomes `↑/↓ move · ←/→ fold`, a group's `Enter/l expand · h collapse`
+  becomes `Enter/←/→ fold`, the PRs view's `^R forges` becomes `Ctrl-R
+  hard refresh`, a pin's `pin `x` is stopped · Enter runs `conspectus
+  rebuild x` to bring it back` (and the removed, planned, and missing
+  forms) becomes `Enter rebuild` (the Preview keeps the sentence), a live
+  PR pin says `Enter show URL`, a row that cannot attach says `a attach:
+  <why>` dimmed instead of `attach: <why>`, and an ambiguous row names
+  `Tab` once (with the right pane focused it reads `Tab focus`). The
+  unseen-messages chip reads `▲ N` while a dialog is open, where `!` does
+  not reach the log, and `▲ N · ! messages` otherwise. A narrow bar keeps
+  more hints, since each gives way on its own (a dialog's keys outrank
+  the view's settings, and under quick select and content search at 60
+  columns `Esc close`, now their last key, gives way before the filter
+  chip), and a status message too long for the bar ends with `…`.
+- **The help page lists every key the main screen binds, one key per
+  row.** The `?` page is generated from the keys themselves, so it always
+  matches them. Rows that described two keys at once now have a row
+  each: `1`, `2`, `3`, and `4` (one per view), `]` and `[`, `<` and `>`,
+  `↑ / k` and `↓ / j`, `← / h` and `→ / l`, `PgDn` and `PgUp`, `Home / g`
+  and `End / G`, and `J` and `K`. Two keys that were bound but missing get
+  rows: `o` (open the right pane's cursor value, from either pane) and
+  `Backspace` (return from a reveal). The second `Enter` row under
+  Navigation goes (the one under Actions stays), and the content search's
+  keys read `s / Ctrl-/ / Ctrl-_ / Ctrl-7`. Every other row reads as
+  before.
+- **`Enter` with Control no longer runs a row's default action.** On the
+  left pane `Enter` now means `Enter` alone, as on the right pane, so
+  `Shift+Enter` and `Alt+Enter` (reveal) can never be taken for it;
+  `Ctrl+Enter`, where a terminal reports it, does nothing.
+- **The right pane's rows read alike.** A field label of 14 characters or
+  more keeps a space before its value (`current_commit e52b2ef`, where it
+  read `current_commite52b2ef`), so a long path beside one starts on the
+  next row. An unresolved row under `Other` stays on one line, its
+  evidence cut in the middle, and shows its provenance and confidence
+  with `E` like the other related rows (it wrapped them onto two or three
+  rows). The `Other` header's arrow takes `[tui.theme] disclosure` like
+  the left pane's arrows. `Enter` on a field with no value (`—`,
+  `— (unknown)`) no longer copies the dash and says "copied".
+- **A letter in a dialog means the letter, not its chords.** Inside
+  menus, prompts, forms, Controls, search, Messages, the help page, the
+  value viewer, and the transcript and pane viewers, a letter key fires
+  plain or with Shift only. `Ctrl-G` and `Alt-G` no longer jump to the
+  top (and `Alt-G` to the bottom) of the help page, the value viewer, and
+  Messages; `Ctrl-G` no longer jumps to the top of the viewers; `Ctrl-D`
+  no longer discards a branch in the close-down choice, and `Ctrl-Y` no
+  longer confirms a worktree removal, merge, or prune or copies in the
+  value viewer. Every list now also moves with `Ctrl-N` and `Ctrl-P`: the
+  row, mux, and worktree menus, Clean up, Controls and its checklists,
+  Messages, and the fields of the new tmux session, launch, and pin edit
+  forms, as search and the picker already did.
+- **One way out of every dialog.** `Esc` steps back one level and
+  closes a dialog at its first; `Ctrl-C` closes the whole dialog from any
+  level, and so does `q` wherever nothing is typed. So `q` now closes the
+  row, mux, and worktree menus, Clean up, Controls (and its checklists,
+  but not its max-age and contents fields, where it types), the worktree
+  confirmations and close-down choice (which it used to back out of), and
+  the content search's options; `Ctrl-C` in the worktree menu's branch
+  prompt, confirmations, and close-down choice closes the menu instead of
+  returning to its list; and in the transcript and pane viewers `q` and
+  `Ctrl-C` leave from the help page and `Ctrl-C` from the find prompt
+  (they used to close only the help or the prompt). Cancelling says
+  nothing: the rename prompt, the worktree menu, the new tmux session
+  form, the mux menu, the launch form, and the pin edit form no longer
+  report `…: cancelled`, and leaving the transcript viewer no longer
+  reports `viewer closed`. Closing any dialog with a key clears the
+  status line, so a hint it showed while open (`controls: …`, `viewing
+  …`) no longer stays behind.
+- **Dialogs draw as a stack.** Every open dialog is drawn, bottom to
+  top, so one opened over another shows the lower one around its frame
+  (only the top one used to be drawn), and a toast now shows over the
+  full-screen transcript and pane viewers, which used to hide it.
+- **Feedback says how much it matters.** Every status-line message,
+  toast, and Messages entry has a severity (info, success, warning,
+  error) and draws in its `[tui.theme]` color. A warning toast's border
+  is yellow and an error toast's red (every toast used to be green, so
+  `copy failed` looked like `copied`); warning toasts stay 3 seconds and
+  error toasts 5 (all used to leave after 1.5). The status line draws
+  hints and confirmations green and failures red (it painted everything
+  yellow; refusals stay yellow). On a screen narrower than 50 columns a
+  long toast wraps inside the screen instead of losing its end, and a
+  word longer than a toast's row, such as a long path, now breaks at the
+  row's edge rather than at a hyphen. A clipboard write that fails on
+  `Enter` or `i` says `copy failed: …` instead of `copied: …`.
+  `[tui.theme] toast_text` (white) sets a toast's text color. Successful
+  toasts and the default screens look as before.
+- **Dialog footers read one way.** Every footer pairs keys with a short
+  verb: `to scroll`, `to close`, `to copy`, `to confirm`, and `to cancel`
+  lose their "to" (the help page, the value viewer, the worktree
+  confirmations), the close-down choice reads `m merge & close`, search
+  reads `Tab search current/all`, `S-Tab list sessions/messages`,
+  `Ctrl-R recall search`, `Ctrl-O set options`, and `Ctrl-S open Search
+  view`, and the forms read `←/→/Space change`. The value viewer's footer
+  names `PgDn`/`PgUp`.
+- **Every modal's keys look and fit one way.** The keys at the bottom of
+  every menu, dialog, checklist, form, search, picker, help page, value
+  viewer, Messages, and Controls recede (the `muted` look of
+  `[tui.theme]`, as the status bar's hints do) under a blank row: menus,
+  dialogs, checklists, and Controls drew them plain, and the searches, the
+  picker, the help pages, the value viewer, and Messages had no blank row.
+  On a screen too short for a whole footer every modal keeps its last
+  rows, which end with the key that closes it (`Esc close`, `Esc cancel`);
+  forms and the searches kept their first rows and lost it, and a prompt
+  too narrow for both of its keys now shows `Esc cancel`. Quick select's
+  and content search's `Esc close` moved to the end of their footers, and
+  Controls' footer starts with `changes apply as you make them`.
+- **Short lists keep their last column.** A menu, pane, or reader too
+  short for a scrollbar (fewer than five rows, such as a menu's entries on
+  a 40x10 screen) no longer leaves a blank column where the bar would go;
+  its rows take the column back.
+- **A menu recedes under its own questions.** While the worktree menu's
+  branch prompt or one of its dialogs is open, the menu's cursor row takes
+  the inactive selection look (bold, its `►` kept), as Controls' does under
+  its editors; it kept the active highlight.
+- **Every text field edits the same way.** The transcript and scrollback
+  find prompts take the keys every other field takes (`Ctrl-A`/`Ctrl-E`,
+  `Ctrl-B`/`Ctrl-F`, `Ctrl-W`, `Ctrl-K`, `Ctrl-Y`), and `Ctrl-U` there
+  clears the whole query instead of only what precedes the cursor. Every
+  field also moves by word on `Alt-←`/`Alt-→` and deletes the next word on
+  `Alt-D`, and `Shift` with `←`, `→`, `Home`, `End`, `Backspace`, or
+  `Delete` no longer swallows the key. The prompts' and find prompts'
+  cursor cell takes the `field_cursor` style of `[tui.theme]` (black on
+  white), as the forms' did, instead of reverse video. An unfocused empty
+  form field's `-` takes the `field` gray, a value of spaces shows its
+  spaces instead of `-`, and a field narrower than 5 cells shows the text
+  around the cursor rather than only the character under it.
+- **Prompts explain a refusal inside themselves and show their keys.**
+  The rename, worktree branch, and controls max-age and contents prompts
+  show `Enter confirm · Esc cancel` on their bottom border (the branch,
+  max-age, and contents prompts showed no keys; the renames showed them
+  on the status line, which now stays as it was). Input a prompt refuses
+  is explained on a red error line inside it, which grows the prompt by
+  one row until the next edit (on a screen of five rows or fewer the
+  reason takes the keys' place on the border): an invalid max age and an
+  empty branch name used to post a toast, and renaming a pin or a tmux
+  session to nothing closed the prompt with a toast (`pin: nothing
+  entered`, `mux rename: name cannot be empty`) where it now stays open
+  for a fix.
+- **Path fields show one hint, and give the path the rest of the row.**
+  The new tmux session and launch forms kept 32 cells after every path
+  for a `Tab: …` hint, so a 60-column form showed four characters of the
+  path; the hint now shows, and takes its cells (at most 30, and at most
+  half the row), only while the field is focused and `Tab` has something
+  to add, and the pin edit form's path rows show it too. The hint names
+  exactly what `Tab` adds, and a long one is shortened in the middle.
+- **Forms submit from any field and keep their keys in view.** `Enter`
+  in the new tmux session form creates the session from either field (it
+  used to move from the name to the cwd first; the footer reads `Enter
+  create`), and opening it with `n` no longer puts its keys on the status
+  line, since the form shows them. An empty name or cwd is explained on
+  the form's error line, just above its keys, until the next edit (it was
+  a toast), and the launch form's error line no longer has a blank line
+  between it and its keys. On a short terminal the new tmux session and
+  launch forms scroll only their fields and keep their keys in view, as
+  the pin edit form did; their keys used to scroll away. The launch form's
+  fields read `name`, `socket`, and `argv` (they read `mux name`, `mux
+  socket`, and `launch argv`), and its `pin` choices are drawn as a choice
+  of one, `(•) don't pin ( ) launch, then pin ( ) pin, don't launch`,
+  instead of as checkboxes.
+  The launch form's worktree repo completes and is marked like the cwd.
+  A path that is missing or not a directory is marked `▲` (it was `!`).
+  Typing a name that only appears inside a known directory (`src` for
+  `~/work/src/app`) no longer completes to it; type the start of the
+  path.
+- **The launch form moves on one ring.** Its socket checkbox, which sat
+  at the end of the name row and only `Tab` reached, is a `server` row
+  of its own under the name (`[ ] own socket`), so `↓` and `Tab` visit
+  the same fields and the name gets the whole row; the `socket` field
+  still appears under it while it is on. A launch the form refuses moves
+  the cursor to the field it is about, as the new tmux session form
+  does; with the name and the harness both empty it names the name
+  first, and `←`/`→` inside a text field no longer clear the error line
+  (only an edit does).
+- **One way to split an argv.** The launch form's `argv`, the pin edit
+  form's `argv` (its checkboxes and its save), `pin edit --set argv=…`,
+  and the previews of a tmux pane's start command split text the same
+  way, as `docs/operations.md` describes. A backslash inside double
+  quotes before an ordinary character now stays (`"a\b"` is `a\b`; the
+  previews and `pin edit` read `ab`), a last lone backslash stands for
+  itself, and the pin edit form and `pin edit --set` refuse an argv that
+  ends inside a quote or on a lone backslash (they closed the quote or
+  dropped the backslash). The forms write an argv back quoted as the
+  previews quote it, so `@`, `%`, and `,` stay bare.
+- **The pin edit form works like the other forms.** Its rows use their
+  short names (`branch` for `worktree_branch`, `resume in` for
+  `resume_into`), so values and the harness choices get more room. A
+  save it refuses says why on the line just above its keys and moves the
+  cursor to the field it is about, and on a very short terminal its keys
+  stay whole while the two lines explaining the focused row give way.
+  The line naming the pin sits under the explanation and scrolls with
+  the rows. `Ctrl-R` acts on the field rows only (on the pin name it no
+  longer puts back the old name), and on a field that had no value of
+  your own it puts back the value the field had and shows where that
+  comes from again (it said `will follow`). A kept value with nothing to
+  follow explains `Ctrl-R drops it; there is nothing to follow yet`.
+- **Menus work one way.** The row menu (`.`), the mux menu (`m`), the
+  worktree menu's list, and the menu `p` opens when several pins point
+  at a row are one control. An entry's own key sits in a column before
+  its label and picks it from anywhere in the menu: `p` on **Pin** (its
+  explanation no longer says `(p)`), and `n` and `N` in the mux menu, the
+  keys that open the same forms from the list; in a menu with such a key
+  the labels sit three columns further right. The mux menu loses its
+  `Mux actions` heading, so at 40x10 its keys stay in view. The worktree
+  menu's list shows the menu's keys (`↑/↓ move · Enter pick · Esc
+  close`) and scrolls on a short terminal instead of cutting its last
+  entries. A menu taller than the screen shows a scrollbar beside its
+  entries, which then wrap a column narrower, and scrolls only as far as
+  the cursor needs instead of keeping the cursor on the last line. The
+  armed **Forget** reads `Forget · press Enter again to confirm`.
+- **Dialogs work one way, and the worktree menu's questions sit over
+  it.** Every confirmation, choice, and notice takes the same keys:
+  `Enter` or `y` goes ahead, `Esc` or `n` goes back, `Ctrl-C` or `q`
+  closes; the close-down choice now goes back on `n` too and reads `m
+  merge & close · d discard & close · Esc/n cancel`. The worktree menu's
+  branch prompt, its merge, remove, and prune confirmations, and its
+  close-down choice open over the menu instead of replacing it, so the
+  menu shows around the prompt; `Esc` returns to the menu with its cursor
+  where it was, and `Ctrl-C` closes both, as before. On a short terminal
+  the confirmations, the close-down choice, and Clean up's
+  nothing-to-clean-up notice keep their keys in view (at 40x10 they cut
+  them off) and their text scrolls with the arrow keys. Dialogs gain a
+  blank row above their text; the heading over the live sessions a
+  worktree hosts takes the warning color as well as bold, while the
+  close-down and prune questions are no longer bold; and the notice's
+  keys read `Enter/Esc close`. `X` opens the close-down choice on its own:
+  `Esc` closes it (it showed a one-entry menu), and it no longer puts its
+  keys on the status line. On a worktree with no branch checked out,
+  **Remove worktree** and **Close down stream…** are shown but cannot be
+  picked, and say why.
+- **Checklists select all or none, count, and show their keys.** The
+  harness, mux state, and PR state editors in Controls and the History
+  view's Clean up take `a` to check every item and `n` to uncheck every
+  item, say on their bottom border how many are checked (`3 of 4
+  selected`), and show their keys at the bottom: `↑/↓ move · Space
+  toggle · a select all · n select none · Enter confirm · Esc cancel`.
+  `PgUp`/`PgDn` move by a screen and `Home`/`End` (or `g`/`G`) go to the
+  first or last item. A checklist gains a blank row above its items,
+  like the menus, so it is a few rows taller; on a short terminal its
+  keys stay at the bottom and its items scroll with the cursor (at 40x10
+  it showed more items and no keys), and a long label still ends with
+  `…`.
+- **The picker works like the search lists and shows its keys.** The
+  **Retarget…** list and the remembered searches take the size quick
+  select and content search have (85% of the screen's width and 80% of
+  its height, at least 60 columns and 12 rows) instead of filling the
+  screen like the help, so a wide screen shows the panes around them and
+  a 60-column one is covered edge to edge. They show their keys at the
+  bottom (`↑/↓ move · Enter pick · Esc close`), move by a screen with
+  `PgUp`/`PgDn`, and show a scrollbar beside a list taller than the
+  frame, which scrolls only as far as the cursor needs (moving back up no
+  longer drags the list along). A candidate too long for its row ends
+  with `…`, and every change to the filter puts the cursor back on the
+  first match (it stayed at the same position). The count in the title
+  sits two spaces after the title (`Retarget project-main  (3/7)`).
+- **Quick select and content search scroll and page like the picker.** A
+  result list taller than the modal shows a scrollbar in the column its
+  rows already left blank, so no column moves as a content search's
+  results arrive, and the list scrolls only as far as the cursor needs
+  (moving back up no longer drags it to the top). `PgUp`/`PgDn` move the
+  cursor by the results shown and stop at the first and the last (they
+  did nothing); the footers do not list them, as the picker's does not.
+  Searching itself and the rest of the look are unchanged.
+- **The controls dialog keeps its keys in view and pages.** The controls
+  dialog (`f`) shows its keys at the bottom while its sections scroll
+  (they were the last lines of the list, so on most screens they never
+  showed), with a scrollbar beside a list taller than the dialog, which
+  scrolls only as far as the cursor needs and shows a section's heading
+  with its first row. `PgUp`/`PgDn` move by a screen and `Home`/`End` (or
+  `g`/`G`) go to the first or last row. A row too long for the dialog
+  ends with `…`. On a short terminal the keys take their rows, so fewer
+  lines of settings show at once. Leaving a filter's editor clears the
+  status line, as leaving a worktree menu's question does. Every setting,
+  its words, and what `Space`, `Enter`, `Esc`, `q`, and `Ctrl-C` do are
+  unchanged.
+- **The pane scrollback viewer reads like the transcript viewer.** Long
+  lines wrap under their line number instead of being cut off at the
+  edge, and the new `w` cuts them at the edge again (ending in `…`); the
+  footer's `wrap·on (w)` chip says which. A find (confirmed, `n`, `N`, or
+  the match the viewer opens on) always puts its line one row below the
+  top, where it used to scroll only when the line was off screen and kept
+  two rows above it; the current match's text is drawn reversed, as in
+  the transcript viewer, and its line number stays in the accent color.
+  The footer names its keys in the one grammar
+  (`j/k/PgDn/PgUp scroll · / find · ? help · a attach · Esc/q close`) and
+  drops the scroll keys first when narrow, then `/ find · ? help`, and
+  the `[ n/m ]` chip counts screen rows. `G` keeps the view at the end,
+  as in the transcript viewer, until a key moves it. `n` before any find
+  says `nothing to find yet: press / to search`; a find that matches
+  nothing says so in its chip only; a wrap note is green, not yellow.
+- **The viewers' help pages name what their keys do.** Their footer read
+  `Esc/q/? close`, though `q` leaves the viewer there; it now reads
+  `j/k/PgDn/PgUp scroll · Esc/? back · q close`. `Ctrl-D`/`Ctrl-U` page
+  by half in the `?` help and the full-value viewer too.
+- **The full-value viewer (`o`, and a rebuild plan) reads like the help.**
+  A value longer than the dialog shows a scrollbar, the keys line is
+  dimmed like the help's and lists `y copy` before the keys that close it
+  (`j/k/PgDn/PgUp scroll · y copy · Esc/q/o close`), and on a narrow
+  terminal it wraps onto a second line instead of losing `y copy` at the
+  edge. An empty value says `nothing to show` instead of a blank body.
+- **Messages (`!`) scrolls like the other lists and readers.** A record
+  longer than its pane shows a scrollbar (and wraps a column narrower
+  beside it), a log longer than its list shows one too, and moving back
+  up inside the entries shown no longer scrolls the list. A summary too
+  long for its row ends in `…` instead of being cut off; on a narrow
+  terminal the keys line wraps onto a second line instead of losing
+  `y copy` and `Esc close` at the edge, and with no messages yet the keys
+  sit at the bottom of the dialog and the note wraps. The rows, colors,
+  and keys are unchanged.
+- **The transcript viewer reads like the pane viewer.** Its keys line
+  names the keys that work in it (`/ find · ? help · Esc/q close` after
+  the toggle chips, with `j/k/PgDn/PgUp scroll` when it fits) and, when
+  narrow, drops the scroll, find, and help keys and then the chips but
+  always keeps `Esc/q close` (at 40 columns it used to lose the close hint
+  at the edge). A toggle (`t`, `T`, `I`, `H`) pressed at the end keeps the
+  view at the end. Hiding the turn a find is on leaves the find on no
+  match until `n` or `N`. The help page lists the find keys before the
+  toggles. What opening at a search result turned on is a note of its own
+  beside the find, and a match that is no longer in the transcript says
+  so as a warning. A transcript whose every turn is hidden says so. Turns,
+  colors, find, and its landing are unchanged; in `[tui.theme]`, user
+  turns now follow `accent` (they followed the codex harness's color) and
+  the cwd `accent` (it followed `cwd_mark`), and compaction summaries take
+  the new key `transcript_compaction` (magenta; they followed
+  `pr_merged`).
+- **The Preview's scroll stops at its ends at once.** Scrolled past the
+  end of a transcript the Preview opened at a search match, or past its
+  top, the first `J` or `K` back moves the Preview; it used to take as
+  many presses as had gone past, and a match on the transcript's last
+  page did not move on the first `K`. When a search appears or goes on
+  the row shown, the Preview starts at the match or at the newest turns
+  rather than at an older offset. A loading or unavailable transcript's
+  note taller than the Preview reads from its top. What the Preview shows
+  is unchanged.
+- **Group headers, session rows, and mux rows give way by one rule when
+  the left pane is narrow.** A cut label, project, path, or mux name ends
+  in `…` instead of stopping at the pane's edge. A session row lets its
+  harness key go first, then its chip, then its age, and keeps its link
+  glyph; a mux row narrows its chips and its name, then lets its age and
+  then its chips go, and keeps its name and state glyph; the cells after
+  them give way row by row. A label, project, or path that cannot keep 8
+  cells leaves the row, and a preview, snippet, or stopped mux's
+  directory needs 7. A stopped mux in the Mux view is drawn as a ghost
+  whole, its `▣` included, and a mux with several agents keeps its age
+  in line with the others: its chips are a column as wide as the widest
+  row's, two chips and `+N` wherever they fit (it showed one chip and
+  `+2` below 76 cells). A row that fits its pane looks as before, apart
+  from those last two. `docs/tui-columns.md` describes the rule.
+- **PR, Pinned, and History rows give way by the same rule.** A narrow
+  PR row cuts its `owner/repo` and keeps its `#N` whole, lets its title,
+  then its branch, then its age and tracking mark go, and keeps its
+  state glyph, which a narrow pane used to cut off. A Pinned or History
+  row lets its chip go first (as before), then its content, then narrows
+  its name and lets its age go, and keeps its name and state word in
+  line at every depth (a nested name may narrow below 8 cells to keep
+  them there). A PR title or a Pinned or History row's content needs 7
+  cells (it showed from 1). Rows that fit look as before.
+- **Search hits read alike in the contents modal and the Search view.**
+  The Search view's hit, pane, and pane line rows take the modal's
+  columns (without its `session` or `pane` word): the harness chip or a
+  pane's command, the name, `turn N · kind`, `line N`, or `N hits`, the
+  age, and a snippet that keeps 20 cells. They give way in the modal's
+  order (the chip, then the age, then the name narrows) instead of being
+  cut at the pane's edge, so a narrow pane shows the snippet it used to
+  lose. A matching turn no longer shows who spoke (`you`, `ai`); a pane
+  row lists its command first and its hit count before its age. The
+  view's hit and pane names are no longer bold. In the modal the ages are
+  tinted by how recent they are and the snippets are gray italics, as in
+  the lists.
+- **Empty lists say so one way.** The Messages log with nothing in it
+  shows its note in the receding look every other empty slot has (it was
+  drawn like an entry), and an empty search or picker wraps its note
+  instead of cutting it with `…` when the window is narrow.
+- **The `Related` rule stays on one row.** On a narrow right pane (40
+  columns) the rule over the related rows cuts its counts with `…`
+  (`2 validated · 2 other ·…  Related ──`) instead of folding onto a
+  second row with its closing `──` stranded under it; the Preview gets the
+  row back.
+- **Rows hold still as a list grows past the pane.** When a left-pane list
+  overflows and its scrollbar appears, its rows keep the columns they had:
+  the Search view's hit names and `turn N · kind` tags keep their widths
+  as results stream in (at 160 columns a tag no longer drops to
+  `turn 46 · mes…`), and the preview or snippet gives the bar its cell.
+- **Nested group headers line up with their parents.** A checkout header
+  under its repo (the Sessions view's checkout grouping) starts its path
+  in the repo header's column; it was two cells further right for each
+  level of nesting. In a narrow pane its count stays in line too.
+- **Quick select lists a group header as its row reads it**: its name,
+  then its path or members (`repo-a  ~/atelier-demo/repo-a`), where it
+  listed the bare path. Its rows give way like every other row: with no
+  context on any listed entity the name takes the row up to its outcome
+  word, and a name cut across its match marks the part of the match that
+  shows.
+- **The right pane's breadcrumb gives way one hop at a time.** A drill
+  chain too long for the title used to jump straight to its first and
+  last hops (`a › … › e`). It now keeps as many hops as fit: the oldest
+  middle hops go first, then the first, with one `…` for each run that
+  went (`a › … › d › e`). When even the last hop does not fit, it is cut
+  with `…` instead of running into the pane's corner, and ` · depth N`
+  is never clipped. Two hops of different kinds with the same name now
+  carry the `·xxxx` id suffix too.
+- **A letter on the main screen means the letter, as in every dialog.**
+  With no dialog open, a character key fires typed alone or with Shift,
+  never with `Ctrl` or `Alt`; the chords the keys name (`Ctrl-R`,
+  `Ctrl-G`, `Ctrl-/`, `Ctrl-L`, `Ctrl-O`, `Ctrl-F`, `Ctrl-C`,
+  `Shift+Enter`, `Alt+Enter`) are unchanged. Keys that stop working: the
+  `Alt` chord of `f`, `!`, `?`, `a`, `i`, `o`, `w`, `v`, `r`, `n`, `m`,
+  `p`, `u`, `]`, `[`, `/`, `s`, `<`, and `>` (so `Alt-a` no longer
+  attaches and `Alt-p` no longer pins) and of the left tree's `h`, `l`,
+  and `g`; the `Ctrl` and `Alt` chords of the left tree's `j`, `k`, and
+  `G` (`Ctrl-j`, which many terminals send for `Ctrl+Enter`, no longer
+  moves the tree) and of the Preview's `J` and `K`; and any other
+  modifier a terminal reports with these keys (Super, Meta). Keys that
+  start working: `q`, `.`, and `1` to `6` when a terminal reports them
+  with Shift.
+- **The right pane's keys are one table, and a few gained meanings.**
+  With the right pane focused, `PgUp` and `PgDn` page the explorer by
+  the rows its zone shows (they moved one row); `h`/`l` and `←`/`→`
+  close and open the `Other` zone, from its header or from a row inside
+  it (they did nothing); `Esc` goes back as `Backspace` does (it did
+  nothing). `Alt` and `Ctrl` chords of `j`, `k`, `g`, and `G` no longer
+  move the explorer or the tree behind it. `Shift+Enter` and
+  `Alt+Enter` still reveal. The help page's right-pane section now lists
+  every key the pane binds (the stale `e` text went), and the status
+  bar's right-pane hint reads `↑/↓ move · Enter copy · e fold ·
+  Backspace back`, `Enter`'s word following the cursor's row (`copy`,
+  `follow`, `fold`). A fold key on a row in no section (`h` on a field)
+  says there is nothing to expand there instead of doing nothing, and
+  `Enter`'s copy disarms an armed `Backspace` as every other key does.
+  See "Keys on the right pane" in `docs/operations.md`.
+- **`Backspace` on the left pane only returns from a reveal.** With no
+  reveal to return from it used to pop the right pane's drill, which the
+  status bar never said; it now says there is nothing to return from,
+  and points at the right pane when that has drilled.
+- **`Backspace` to a node that is gone goes on in the same press.** A
+  drill frame whose node a refresh removed took a press of its own (a
+  warning, and the pane stayed); `Backspace` now skips it and goes back
+  to the frame before it, and says so only when every frame is gone.
+- **The TUI is built on a framework crate of its own.** Its controls,
+  theme, glyphs, key tables, and test kit are `tuikit`, a crate of the
+  repository's Cargo workspace under `crates/tuikit` that Conspectus
+  depends on by path, and the `tui-popup`, `ratatui-cheese`, and
+  `ratatui-comfy-toaster` dependencies are gone.
+  `cargo install --locked --path .` installs `conspectus` and `csp` as
+  before. The changes above are what moving each control onto it
+  changed; `docs/operations.md` lists them by area under "What changed in
+  the TUI".
 
 ### Fixed
 
+- **A mux's rows stop spinning right after a detach.** Coming back from a
+  mux froze its row and its sessions' rows (dimmed, with a spinner, and
+  refusing actions) until a refresh that ran three full discoveries
+  whenever the mux was still running, which is the usual case. The TUI
+  now asks tmux once whether the mux is still the same session and
+  releases the rows at once when it is; a mux that ended, or one replaced
+  by a new session with its name, stays frozen until the refresh shows
+  what became of it. Each mux also clears on its own: attaching a second mux no longer
+  keeps the first one spinning until the second one's refresh, however
+  long you stayed in it. A mux whose session survives with a dead pane
+  (`remain-on-exit`) is released before the refresh shows its new state.
+- **A new mux's name starts as the next one in the series again.** The
+  pin create form filled in `worker-2` when opened from `worker-1`, and
+  the pins that replaced it lost that: the new tmux session form (`n`)
+  and the launch form (`N`) opened with an empty name. Both now start
+  with the next free name after the mux the operator is on (its row, a
+  session in it, or its pin; the right pane's entity while it has
+  focus): the trailing number bumped with its zero padding kept, or
+  `-2`, `-3`, … for a name without one, skipping names a mux (live or
+  gone), history, or a pin already has. From anything else the name
+  still starts empty.
+- **Quick select and the pin menu promise only a view that lists the
+  entity.** Since the Forks view went, quick select's All reach said `in
+  Sessions view` for a fork and then failed on `Enter`, and a fork's pin
+  offered **Reveal in its view**, which failed too; a repo or checkout
+  with no sessions, or a row a view's filter hides, did the same. A
+  result no view lists now says `not listed` (`Enter` says why and stays
+  put), and a pin's menu offers **Reveal in its view** only when that
+  view lists the entity. A pin found by quick select from another view
+  (`in Pinned view`) now opens there; it said the Pinned view did not
+  list it.
+- **The right pane's breadcrumb names a repo by its directory.** A hop
+  for a non-bare repo read `.git` (the last part of its `.git`
+  directory's path), and two such repos in one chain read `.git·.git`
+  twice. A repo is now its working directory's name (`project`; a bare
+  repo keeps `project.git`), and two hops with one name carry the start
+  of the short id their panes show (`project·c955`, `project·41f0`)
+  where a repo, checkout, workspace, or branch carried the end of its
+  path, which two in different places share. A checkout and its repo
+  often share a name now, so both carry that suffix.
+- **A refresh keeps the Preview where you scrolled it.** The periodic
+  refresh, `r`, and a filter or sort change put a Preview scrolled with
+  `J`/`K` (up a transcript, down a pane capture or a PR body) back at
+  its start, even when the selection and the right pane had not moved.
+  The Preview now goes back only when it shows something else: another
+  selection, another node in the right pane, or another row under its
+  cursor (a refresh that puts a different row in the cursor's place
+  counts). A key that does not move the selection (`j` on the last row)
+  and a jump to the row already selected leave it in place too.
+- **Renaming a live mux pin to a taken name renames nothing.** The
+  TUI's **Rename…** prompt let a pin take another pin's name and left
+  the refusal to the pin store, which came after the tmux session had
+  been renamed and the pin's name pinned to it. The prompt now refuses
+  a taken or unusable name on its error line, with the reasons the
+  pin edit form gives (a blank name in the form now reads `pin: nothing
+  entered`, as in the prompt), and the rename checks the name again
+  before it touches the session. `conspectus pin rename` had the same
+  order (it renamed the session, pinned the name, and then failed with
+  ``a pin named `x` already exists``); it now checks the new name
+  first, so a taken or unusable name fails with that reason and leaves
+  the tmux session, the pin's overrides, and `pins.toml` as they were.
+- **A cut snippet keeps the text beside its match.** A snippet cut on
+  word boundaries dropped everything on one side of the match when the
+  only boundary there was the one next to it, so Japanese or Chinese
+  text (no spaces between words) or a long path or URL beside the match
+  showed only the match: `…wombat…`. A boundary now also falls beside
+  any CJK or other two-cell character, and a side whose only word is a
+  token wider than its room (a path, a file name, a URL, a code name, a
+  hash, CJK text) shows the part that fits: `…のテキストと説明 wombat
+  もっと日本語のテキストと説明がここに…`, `…config.toml wombat
+  https://example.com/…`. This holds in the TUI's search results, the
+  Search view, quick select, the `conspectus search` table, and the
+  stored snippet (`snippet.text` in the JSON, whose shape is unchanged).
+  English and other spaced prose is cut as before, at whole words only:
+  a side whose only word does not fit stays empty (`…wombat ten…`)
+  rather than show part of the word.
+- **A file no longer passes for a working directory.** The TUI's path
+  fields offered files as completions and marked an existing file `√`, a
+  path `mux new`, `mux launch`, and a rebuild then refused. They now
+  offer only directories and mark a file `▲`.
+- **Drawing a form reads no files.** A path field listed a directory and
+  checked its path on every frame drawn; it now looks only when its text
+  changes. The launch and pin edit forms looked for an Atelier workspace
+  on every frame to show the default command; they now decide it when
+  the form opens and when the harness or the cwd changes.
+
+- **Text fields keep their cursor in view.** The quick select, content
+  search, and picker queries show a cursor and scroll to keep it on
+  screen (a long query used to be cut off at the frame with no cursor).
+  CJK and emoji text puts the cursor on the character it is on and stays
+  inside its field in the prompts and forms, so it no longer runs past
+  the frame or pushes a path's mark or the pin form's last column aside.
+- **The `?` help names the right key and keeps its headings whole.** The
+  content search row said `Ctrl-L` switches between listing sessions and
+  listing messages; inside the search that is `S-Tab`. A heading too long
+  for a narrow help page wraps instead of being cut off at the frame.
+- **Wide text lines up in the TUI.** CJK, emoji, and accented text is
+  cut and padded by the cells it takes, not its characters, wherever a
+  row, chip, form, or find chip cuts text: a 30-character CJK title is
+  cut at the right pane's 48-cell budget instead of wrapping, an emoji
+  written with a variation selector (`⚠️`) no longer pushes its row a
+  cell past its column, and no cut separates a letter from its accent.
+  A value just over that budget now offers `o` for the full value too,
+  and a find chip shows a 17-character query whole (it cut it at 16).
+- **The rows the TUI counts are the rows it draws.** The right pane, the
+  preview, the left pane's notices, and the worktree menu wrap their text
+  before measuring it, so a scrollbar matches its content, the right
+  pane's last row is no longer hidden behind a spare blank row, and the
+  worktree menu no longer cuts off its last lines at narrow widths. A
+  numbered tool-output line in the transcript viewer that wraps hangs
+  under its text instead of running past the pane's edge.
+
+- **Paging and scrolling in the TUI stay on the content.** `PgDn`/`PgUp`
+  move by the rows on screen in the tree, help, the full-value viewer,
+  the Messages record, and the viewers' help pages (the tree stepped by
+  the terminal height and the dialogs by 8 lines). `G`, or paging past
+  the end, of a full value or a Messages record shows its last lines
+  instead of a blank body, and the next key up moves at once. A tree
+  that shrinks no longer leaves blank rows below it, the `.` row menu
+  scrolls to its cursor and keeps its key hints, and the row, mux, and
+  worktree menus no longer crash a very short terminal.
+- **The cursor stays on a row listed twice.** A tree can list one entity
+  under two parents (a session under two PR checkouts). On the second
+  copy, a refresh or a change of filter or sort moved the
+  cursor up to the first copy, and the tree scrolled to show the first
+  copy instead of the one the cursor was on. Both now stay with the
+  cursor's copy.
+- **The right pane stays on its content too.** Scrolling the Preview
+  (`J`/`K`) past its end shows its last lines instead of blank rows, and
+  the first key back moves it at once; the explorer fills its zone after
+  its rows shrink (hiding edge metadata at the end of a long Related list)
+  instead of leaving the last row over blank rows; and a field that wraps
+  to more rows than the zone shows its label first.
+- **`Enter` and `o` work on every field the right pane shows.** With
+  Expanded Node Detail on (`F`), the fields past the first five did
+  nothing: `Enter` did not copy them, and `o` said the row had no
+  truncated value even beside a `(truncated · o)` hint. Both now act on
+  the field under the cursor, expanded or not.
+- **`a` on a group with several ambiguous muxes says where they are.**
+  On a workspace, repo, or checkout row whose sessions are ambiguous
+  about two or more muxes, `a` said to pick one in the detail pane,
+  which no longer lists them. It now says `N ambiguous muxes here —
+  select a session to see its candidates`: each such session's right
+  pane lists its candidate muxes under `Other`.
+- **`Enter` on unresolved evidence says where the evidence is.** On a
+  right-pane row under `Other` whose evidence names no node, `Enter`
+  said "`o` opens detail", but `o` there only said the row had no
+  truncated value. It now says `evidence names no node — the Preview
+  shows it`: the Preview shows what the evidence records while the
+  cursor is on the row.
+- **A drill in the right pane survives a refresh.** After `Enter`
+  drilled into a neighbor the view has no row for (a session's mux,
+  checkout, repo, or process from the Sessions view), the next periodic
+  refresh, `r`, or a filter or sort change put the pane back on the
+  session with an empty breadcrumb. The pane now stays where you
+  drilled to, with its breadcrumb, `Other` fold, Expanded Node Detail,
+  and cursor, until you move the left selection or jump to a row; if
+  the node it shows is gone, it opens on the selected row's node.
+- **A pull request's state reads one way everywhere.** A closed or merged
+  PR still marked draft drew a draft-yellow `⇄` beside its red or
+  magenta state glyph. The state now beats the draft flag in every cell,
+  view, and group: only an open draft reads as a draft, and a PR with no
+  state reads `?` (`unknown` in Pinned and History), draft or not.
+- **Group headers line up.** The label, path, and count columns are
+  measured over the whole tree, so unfolding a group no longer moves the
+  others' columns (a long name inside a folded group widens them
+  instead); the counts line up when a pin marker is shown, and
+  `Ungrouped` and a PR group with no local repo start their name in the
+  column of the headers beside them.
+- **Chips stay chips on the selected row.** A program chip no longer
+  turns into the selection highlight; like a harness chip, it keeps its
+  look.
+- **A paste can't submit a TUI prompt or form.** The TUI turns on
+  bracketed paste, so a multi-line paste is typed into the field as one
+  line (line breaks become a space) instead of pressing Enter at the end
+  of its first line. A paste outside a text field (the tree, a menu, a
+  form's option row) is ignored rather than read as keys.
+- **Alt-B and Alt-F move by word in every TUI text field.** They did
+  nothing; the transcript and scrollback find prompts also gain word
+  motion on Alt-B/Alt-F and Ctrl-←/Ctrl-→.
+- **`~` in a TUI path field reaches the command expanded.** The new tmux
+  session form, the launch form's cwd and worktree repo, and a pin's
+  path fields expand a leading `~` when they commit, so `mux new`, `mux
+  launch`, and rebuilds get the directory instead of rejecting a literal
+  `~/…` path the form had shown as valid.
+- **Refused input says why.** An invalid max age in the controls, an
+  empty branch name for a new worktree, and an empty name or cwd in the
+  new tmux session form say what is wrong (each on its error line), where
+  they used to do nothing; the field stays open for a fix.
+- **The view tabs fit their pane.** At 100 to 104 columns, and below 53
+  in the stacked layout, the pane's border cut the last view's name in
+  half (`sea`, `his`), the active one included. Names that don't fit now
+  give way from the end of the strip, the active view's name always
+  shows, and the strip ends with `…`.
+- **The header's session count matches the view.** Pinned, History, and
+  Search before a search read `0/N sessions`, and PRs read `4/N` with no
+  filter, as if sessions were filtered out. The count reads `N sessions`
+  unless a filter or a search narrows what the view lists; Search counts
+  the sessions its search found.
+- **Menus close in `tui --fixture` and `dev scenario tui`.** A menu or
+  form opened there (`.`, `N`, or a menu entry) ignored every key, Esc
+  and Ctrl-C included, so the TUI could not be closed. It now moves and
+  closes as usual, and an entry that would write or launch says it isn't
+  available in this mode.
 - **Harness hooks work while `conspectus serve` runs.** The daemon
   applied each hook observation to its live graph only, and the next
   refresh, a few seconds later, dropped it. It now records the

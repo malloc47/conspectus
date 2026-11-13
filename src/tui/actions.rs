@@ -11,6 +11,7 @@ use crate::model::{
 use crate::tui::app::App;
 use crate::tui::rows::RowId;
 use crate::tui::viewer::ViewerDisabled;
+use tuikit::action_menu::{ActionMenu, Confirm, Entry};
 
 /// Resolved target for an attach action.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,11 +104,10 @@ pub fn action_subject(app: &App) -> Subject {
 /// The entity the right pane shows: the link the cursor is on, else the
 /// node the pane is focused on.
 fn right_pane_node(app: &App) -> Option<NodeId> {
-    let state = app.explorer()?;
-    state
-        .selected_row()
-        .and_then(|row| state.view.drill_target(&row))
-        .or_else(|| Some(state.view.focused.clone()))
+    let explorer = app.explorer()?;
+    app.explorer_cursor_row()
+        .and_then(|row| explorer.content().drill_target(&row))
+        .or_else(|| Some(explorer.id().clone()))
 }
 
 fn pin_named<'a>(snapshot: &'a GraphSnapshot, name: &str) -> Option<&'a crate::model::PinNode> {
@@ -268,7 +268,7 @@ fn mux_for_subject(
         // `a` on a workspace, repo, or checkout attaches to the single
         // ambiguous mux scoped to that group, if any.
         group @ (NodeId::Workspace(_) | NodeId::Repo(_) | NodeId::Checkout(_)) => {
-            let muxes = crate::tui::detail::ambiguous_muxes_for_group(snapshot, group);
+            let muxes = crate::tui::rows::ambiguous_muxes_for_group(snapshot, group);
             match muxes.as_slice() {
                 [] => Err(AttachDisabled::UnmuxedSession),
                 [NodeId::MuxSession(id)] => Ok(id.clone()),
@@ -467,19 +467,23 @@ pub fn slots_pinning(snapshot: &GraphSnapshot, subject: &PinSubject) -> Vec<Stri
     pins_for(snapshot, &subject)
 }
 
-/// The view an entity lives in: the one that lists it, where a gone
-/// entity is only listed in History.
-pub fn natural_view(snapshot: &GraphSnapshot, node: &NodeId) -> crate::tui::View {
+/// The view an entity of its kind lives in: the one that lists that
+/// kind, where a gone entity is only listed in History. `None` for the
+/// kinds no view lists (forks, branches, and processes, which only the
+/// right pane shows). Whether that view lists this entity (a repo with
+/// no sessions, a row its filter hides) is `App::reveal_view`'s
+/// question.
+pub fn natural_view(snapshot: &GraphSnapshot, node: &NodeId) -> Option<crate::tui::View> {
     use crate::tui::View;
     let live = snapshot.is_live(node);
-    match node {
+    Some(match node {
+        NodeId::Fork(_) | NodeId::Branch(_) | NodeId::RuntimeProcess(_) => return None,
         NodeId::MuxSession(_) => View::Mux,
         NodeId::Pin(_) => View::Pinned,
-        NodeId::Fork(_) if live => View::Forks,
         NodeId::ForgePr(_) if live => View::Prs,
         _ if !live => View::History,
         _ => View::Sessions,
-    }
+    })
 }
 
 /// The entities pin `name` could point at instead: the other live
@@ -505,11 +509,13 @@ pub fn retarget_candidates(
         if PinKind::of_node(&id) != Some(pin.kind) || Some(&id) == current.as_ref() {
             continue;
         }
-        items.push(PickerItem {
-            label: crate::tui::explorer::title_line(snapshot, node),
-            detail: "running".to_string(),
-            value: id.to_string(),
-        });
+        items.push(
+            PickerItem::new(
+                crate::tui::explorer::title_line(snapshot, node),
+                id.to_string(),
+            )
+            .detail("running"),
+        );
     }
     let history_kind = match pin.kind {
         PinKind::Mux => Some(HistoryKind::Mux),
@@ -537,11 +543,7 @@ pub fn retarget_candidates(
                 ),
                 None => crate::model::gone_word(history_kind.node_kind()).to_string(),
             };
-            items.push(PickerItem {
-                label,
-                detail,
-                value: meta.id.clone(),
-            });
+            items.push(PickerItem::new(label, meta.id.clone()).detail(detail));
         }
     }
     items
@@ -676,10 +678,9 @@ pub fn running_note(snapshot: &GraphSnapshot, reference: &str) -> Option<String>
 /// the view that opened the menu, so the same entity offers the same
 /// verbs everywhere. The History view always has a menu: even with
 /// nothing selected it offers Clean up.
-pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuState> {
+pub fn row_menu_for(app: &App) -> Option<ActionMenu<crate::tui::Msg>> {
     use crate::model::SlotStatus;
     use crate::tui::Msg;
-    use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
     let snapshot = app.snapshot_handle()?.snapshot();
     let in_history = app.active_view() == crate::tui::View::History;
     let subject = action_subject(app);
@@ -720,16 +721,22 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
             PinSubject::Node(node) => Msg::PinNode(node),
             PinSubject::Record(id) => Msg::PinRecord(id),
         };
-        entries.push(RowMenuEntry::new("Pin", "pin this (p)", msg));
+        // `p` pins from the menu as it does from the list.
+        entries.push(
+            Entry::new("Pin", msg)
+                .detail("pin this")
+                .shortcut(tuikit::keys::ch('p')),
+        );
     }
     if let Some(reference) = reference {
         let offer = rebuild_offer(kind, status);
         if offer == RebuildOffer::Full {
-            entries.push(RowMenuEntry::new(
-                "Rebuild",
-                "bring it back without attaching (Enter also attaches)",
-                Msg::RebuildReference(reference.clone()),
-            ));
+            entries.push(
+                Entry::new("Rebuild", Msg::RebuildReference(reference.clone())).detail(format!(
+                    "bring it back without attaching ({} also attaches)",
+                    crate::tui::keybindings::key_name("row.default")
+                )),
+            );
         }
         if offer != RebuildOffer::Nothing {
             let note = if offer == RebuildOffer::PlanOnly {
@@ -737,15 +744,18 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
             } else {
                 "what rebuild would run, without running it"
             };
-            entries.push(RowMenuEntry::new(
-                "Show rebuild plan",
-                note,
-                Msg::ShowRebuildPlan(reference),
-            ));
+            entries.push(
+                Entry::new("Show rebuild plan", Msg::ShowRebuildPlan(reference)).detail(note),
+            );
         }
     }
     if let Some(name) = pins.first() {
-        pin_management_entries(snapshot, &subject, name, app.active_view(), &mut entries);
+        // Reveal goes where the pin's entity is listed; a view that does
+        // not list it (no view lists a fork) gets no entry to fail in.
+        let reveals_elsewhere = app
+            .slot_reveal_view(name)
+            .is_some_and(|view| view != app.active_view());
+        pin_management_entries(name, reveals_elsewhere, &mut entries);
         for extra in pins.iter().skip(1) {
             entries.push(unpin_entry(extra));
         }
@@ -759,68 +769,79 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
                 pins.join(", ")
             )
         };
-        entries.push(RowMenuEntry::new("Forget", note, Msg::ForgetRecord(id)).confirming());
+        entries.push(
+            Entry::new("Forget", Msg::ForgetRecord(id))
+                .detail(note)
+                .confirm(Confirm::Inline),
+        );
     }
     if in_history {
-        entries.push(RowMenuEntry::new(
-            "Clean up…",
-            "forget gone records past their reap age",
-            Msg::OpenCleanUp,
-        ));
+        entries.push(
+            Entry::new("Clean up…", Msg::OpenCleanUp)
+                .detail("forget gone records past their reap age"),
+        );
     }
     let title = menu_title(app, &subject, &pins);
-    (!entries.is_empty()).then(|| RowMenuState::new(title, entries))
+    (!entries.is_empty()).then(|| ActionMenu::new(title, entries))
 }
 
-fn unpin_entry(name: &str) -> crate::tui::widgets::row_menu::RowMenuEntry {
-    crate::tui::widgets::row_menu::RowMenuEntry::new(
+/// The entry that removes the pin `name`, in the row menu and in the menu
+/// `p` opens when several pins point at the row.
+pub(crate) fn unpin_entry(name: &str) -> Entry<crate::tui::Msg> {
+    Entry::new(
         format!("Unpin {name}"),
-        "remove the pin; the entity and its history stay",
         crate::tui::Msg::Unpin(name.to_string()),
+    )
+    .detail("remove the pin; the entity and its history stay")
+}
+
+/// The `m` menu: the two ways to start a new mux, each opening its form.
+/// Their shortcuts are the keys that open the same forms from the list.
+pub fn mux_menu() -> ActionMenu<crate::tui::Msg> {
+    use crate::tui::Msg;
+    use tuikit::keys::ch;
+    ActionMenu::new(
+        "Mux",
+        vec![
+            Entry::new("New tmux session (bare shell)", Msg::OpenNewMuxForm)
+                .detail("shell only, no harness")
+                .shortcut(ch('n')),
+            Entry::new("Launch harness in new mux…", Msg::OpenMuxLaunchForm)
+                .detail("spawn harness; optionally pin it")
+                .shortcut(ch('N')),
+        ],
     )
 }
 
 /// The verbs on a pin: edit, rename, retarget, refresh its snapshot,
-/// reveal its entity, unpin.
+/// reveal its entity (when another view lists it), unpin.
 fn pin_management_entries(
-    snapshot: &GraphSnapshot,
-    subject: &Subject,
     name: &str,
-    current_view: crate::tui::View,
-    entries: &mut Vec<crate::tui::widgets::row_menu::RowMenuEntry>,
+    reveals_elsewhere: bool,
+    entries: &mut Vec<Entry<crate::tui::Msg>>,
 ) {
     use crate::tui::Msg;
-    use crate::tui::widgets::row_menu::RowMenuEntry;
-    entries.push(RowMenuEntry::new(
-        "Edit…",
-        "change the name, cwd, harness, arguments, and more",
-        Msg::OpenSlotEdit(name.to_string()),
-    ));
-    entries.push(RowMenuEntry::new(
-        "Rename…",
-        "change the pin name (a live mux is renamed with it)",
-        Msg::OpenSlotRename(name.to_string()),
-    ));
-    entries.push(RowMenuEntry::new(
-        "Retarget…",
-        "point it at another entity of the same kind",
-        Msg::OpenSlotRetarget(name.to_string()),
-    ));
-    entries.push(RowMenuEntry::new(
-        "Refresh snapshot",
-        "copy the entity's current recipe into the pin",
-        Msg::RefreshSlot(name.to_string()),
-    ));
-    let elsewhere = subject
-        .node
-        .as_ref()
-        .is_some_and(|node| natural_view(snapshot, node) != current_view);
-    if elsewhere {
-        entries.push(RowMenuEntry::new(
-            "Reveal in its view",
-            "jump to the entity in Sessions, Mux, PRs, or History",
-            Msg::RevealSlot(name.to_string()),
-        ));
+    entries.push(
+        Entry::new("Edit…", Msg::OpenSlotEdit(name.to_string()))
+            .detail("change the name, cwd, harness, arguments, and more"),
+    );
+    entries.push(
+        Entry::new("Rename…", Msg::OpenSlotRename(name.to_string()))
+            .detail("change the pin name (a live mux is renamed with it)"),
+    );
+    entries.push(
+        Entry::new("Retarget…", Msg::OpenSlotRetarget(name.to_string()))
+            .detail("point it at another entity of the same kind"),
+    );
+    entries.push(
+        Entry::new("Refresh snapshot", Msg::RefreshSlot(name.to_string()))
+            .detail("copy the entity's current recipe into the pin"),
+    );
+    if reveals_elsewhere {
+        entries.push(
+            Entry::new("Reveal in its view", Msg::RevealSlot(name.to_string()))
+                .detail("jump to the entity in Sessions, Mux, PRs, or History"),
+        );
     }
     entries.push(unpin_entry(name));
 }
@@ -868,6 +889,7 @@ pub fn default_effect(app: &App) -> Option<crate::tui::Effect> {
     use crate::model::{PinKind, SlotStatus};
     use crate::tui::Effect;
     use crate::tui::effect::ExecSpec;
+    use tuikit::feedback::Feedback;
     let snapshot = app.snapshot_handle()?.snapshot();
     let subject = action_subject(app);
     let rebuild = |reference: String, kind: PinKind| {
@@ -885,9 +907,9 @@ pub fn default_effect(app: &App) -> Option<crate::tui::Effect> {
     if let Some(name) = &pin_name {
         let pin = pin_named(snapshot, name)?;
         return match (pin.status, pin.kind) {
-            (SlotStatus::Unknown, _) => Some(Effect::Toast(format!(
+            (SlotStatus::Unknown, _) => Some(Effect::Toast(Feedback::warning(format!(
                 "pin `{name}`: couldn't check whether its target exists; refresh and try again"
-            ))),
+            )))),
             (SlotStatus::Live, PinKind::Mux) => None,
             (SlotStatus::Live, PinKind::Session) => {
                 // A session in a mux attaches; one outside any mux is
@@ -901,30 +923,30 @@ pub fn default_effect(app: &App) -> Option<crate::tui::Effect> {
                 }
             }
             (SlotStatus::Live, PinKind::Pr) => Some(Effect::Toast(match pin.text("url") {
-                Some(url) => format!("pin `{name}`: {url}"),
-                None => format!("pin `{name}`: this PR has no URL on record"),
+                Some(url) => Feedback::info(format!("pin `{name}`: {url}")),
+                None => Feedback::warning(format!("pin `{name}`: this PR has no URL on record")),
             })),
-            (SlotStatus::Live, kind) => Some(Effect::Toast(format!(
+            (SlotStatus::Live, kind) => Some(Effect::Toast(Feedback::warning(format!(
                 "pin `{name}` is a live {}; nothing to rebuild",
                 kind.as_str()
-            ))),
+            )))),
             (
                 SlotStatus::Gone | SlotStatus::Missing | SlotStatus::Planned,
                 kind @ (PinKind::Mux | PinKind::Session | PinKind::Checkout | PinKind::Repo),
             ) => rebuild(name.clone(), kind),
-            (_, kind) => Some(Effect::Toast(format!(
+            (_, kind) => Some(Effect::Toast(Feedback::warning(format!(
                 "pin `{name}`: a {} can't be rebuilt",
                 kind.as_str()
-            ))),
+            )))),
         };
     }
     let kind = subject_kind(snapshot, &subject);
     let record = subject.record?;
     match kind {
         Some(kind @ (PinKind::Mux | PinKind::Checkout | PinKind::Repo)) => rebuild(record, kind),
-        _ => Some(Effect::Toast(
-            "a PR record can't be rebuilt; it only remembers the PR".to_string(),
-        )),
+        _ => Some(Effect::Toast(Feedback::warning(
+            "a PR record can't be rebuilt; it only remembers the PR",
+        ))),
     }
 }
 
@@ -937,29 +959,31 @@ pub fn pin_status_hint(snapshot: &GraphSnapshot, pin_id: &str) -> Option<String>
         .find(|pin| pin.id.id == pin_id)?;
     let name = crate::invocation::invoked_name();
     let rebuild = format!("{name} rebuild {pin_id}");
+    // What the row's own `Enter` does to it, named from its binding.
+    let enter = crate::tui::keybindings::key_name("row.default");
     match pin.status {
         crate::model::SlotStatus::Live => match pin.kind {
             crate::model::PinKind::Mux | crate::model::PinKind::Session => None,
-            crate::model::PinKind::Pr => {
-                Some(format!("pin `{pin_id}` is a live PR · Enter shows its URL"))
-            }
+            crate::model::PinKind::Pr => Some(format!(
+                "pin `{pin_id}` is a live PR · {enter} shows its URL"
+            )),
             kind => Some(format!(
                 "pin `{pin_id}` is a live {} · nothing to rebuild",
                 kind.as_str()
             )),
         },
         crate::model::SlotStatus::Gone => Some(format!(
-            "pin `{pin_id}` is {} · Enter runs `{rebuild}` to bring it back",
+            "pin `{pin_id}` is {} · {enter} runs `{rebuild}` to bring it back",
             crate::model::SlotStatus::Gone.label_for(pin.kind)
         )),
         crate::model::SlotStatus::Unknown => Some(format!(
             "pin `{pin_id}`: couldn't check whether its target exists"
         )),
         crate::model::SlotStatus::Missing => Some(format!(
-            "pin `{pin_id}`: target not found · `{name} pin retarget {pin_id} <target>`, or Enter runs `{rebuild}`"
+            "pin `{pin_id}`: target not found · `{name} pin retarget {pin_id} <target>`, or {enter} runs `{rebuild}`"
         )),
         crate::model::SlotStatus::Planned => Some(format!(
-            "pin `{pin_id}` isn't built yet · Enter runs `{rebuild}`"
+            "pin `{pin_id}` isn't built yet · {enter} runs `{rebuild}`"
         )),
     }
 }
@@ -1003,33 +1027,42 @@ pub(crate) fn preferred_mux_for_session(
     snapshot.preferred_mux_for(session)
 }
 
-/// Human-readable reason text for [`AttachDisabled`]. The runtime
-/// pipes this into the status bar.
+/// Human-readable reason text for [`AttachDisabled`]: `attach:` and
+/// [`attach_disabled_why`]. The runtime posts it when attaching is
+/// refused.
 pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
+    format!("attach: {}", attach_disabled_why(reason))
+}
+
+/// Why attaching is refused, in a few words: what the status bar puts
+/// after a dimmed `a attach`, and what [`attach_disabled_reason`] says
+/// after `attach:`.
+pub fn attach_disabled_why(reason: &AttachDisabled) -> String {
     match reason {
-        AttachDisabled::NoSelection => "attach: no row selected".to_string(),
-        AttachDisabled::UnsupportedRow => {
-            "attach: selected row has no mux to attach to".to_string()
-        }
-        AttachDisabled::UnmuxedSession => "attach: session is not attached to any mux".to_string(),
-        AttachDisabled::MuxNodeMissing => {
-            "attach: mux node missing from snapshot — try `r` to refresh".to_string()
-        }
+        AttachDisabled::NoSelection => "no row selected".to_string(),
+        AttachDisabled::UnsupportedRow => "selected row has no mux to attach to".to_string(),
+        AttachDisabled::UnmuxedSession => "session is not attached to any mux".to_string(),
+        AttachDisabled::MuxNodeMissing => format!(
+            "mux node missing from snapshot — try `{}` to refresh",
+            crate::tui::keybindings::key_name("refresh")
+        ),
         AttachDisabled::UnsupportedBackend(name) => {
             // Report the registered backend set
             // instead of a hardcoded "only tmux."
             let registered = crate::discovery::tmux::KNOWN_MUX_BACKENDS.join(", ");
-            format!("attach: mux backend `{name}` not registered (available: {registered})")
+            format!("mux backend `{name}` not registered (available: {registered})")
         }
         AttachDisabled::CurrentTmuxSession(name) => {
-            format!("attach: refusing to attach current tmux session `{name}`")
+            format!("refusing to attach current tmux session `{name}`")
         }
         AttachDisabled::AmbiguousGroupMuxes(n) => {
-            format!("attach: {n} ambiguous muxes here — pick one in the detail pane")
+            // Each ambiguous session lists its candidate muxes in its
+            // right pane, the place the group's set comes from.
+            format!("{n} ambiguous muxes here — select a session to see its candidates")
         }
         AttachDisabled::MuxGone(name) => {
             format!(
-                "attach: `{name}` isn't running · `{} rebuild {name}` brings it back",
+                "`{name}` isn't running · `{} rebuild {name}` brings it back",
                 crate::invocation::invoked_name()
             )
         }

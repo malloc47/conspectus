@@ -1,6 +1,6 @@
 ---
 source: src/viewer/find_tests.rs
-expression: "draw(&mut state, 120, 12)"
+expression: "draw(&mut viewer, 120, 12)"
 ---
  claude-code:find · /p · 14 turns                                                                                       
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -13,4 +13,4 @@ expression: "draw(&mut state, 120, 12)"
  ↳ result  │ output: a needle in tool output                                                                            
                                                                                                                         
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-[ 19/26 ] · find "needle" 4/4 · showing full tool output · tools·all   (t) · think·off (T) · (q) close
+[ 19/26 ] · find "needle" 4/4 · showing full tool output · tools·all   (t) · think·off (T) · Esc/q close

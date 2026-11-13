@@ -164,17 +164,12 @@ pub(crate) fn expand_home_prefix(cwd: &str) -> String {
     expand_home_prefix_with(cwd, std::env::var_os("HOME").map(PathBuf::from).as_deref())
 }
 
+/// [`expand_home_prefix`] against `home`: the one `~` rule, which the
+/// TUI's path fields also check and commit with.
 pub(crate) fn expand_home_prefix_with(cwd: &str, home: Option<&Path>) -> String {
-    let Some(home) = home else {
-        return cwd.to_string();
-    };
-    if cwd == "~" {
-        return home.to_string_lossy().into_owned();
-    }
-    if let Some(rest) = cwd.strip_prefix("~/") {
-        return home.join(rest).to_string_lossy().into_owned();
-    }
-    cwd.to_string()
+    tuikit::path_field::expand_home(cwd, home)
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[cfg(test)]

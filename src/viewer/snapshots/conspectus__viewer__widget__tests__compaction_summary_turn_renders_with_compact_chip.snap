@@ -1,5 +1,5 @@
 ---
-source: src/viewer/widget.rs
+source: src/viewer/widget_tests.rs
 expression: snapshot_string(&buf)
 ---
  claude-code:compact · /p · 3 turns
@@ -15,4 +15,4 @@ expression: snapshot_string(&buf)
 
 
 ────────────────────────────────────────────────────────────
-[ 1/6 ] · tools·off   (t) · think·off (T) · (q) close
+[ 1/6 ] · tools·off   (t) · think·off (T) · Esc/q close

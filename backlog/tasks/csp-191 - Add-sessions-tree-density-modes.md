@@ -4,6 +4,7 @@ title: Add sessions-tree density modes
 status: To Do
 assignee: []
 created_date: '2026-05-20 03:28'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -31,3 +32,9 @@ ordinal: 439000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-015`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): CSP-270 carries this scope (its title folds CSP-191 in), so plan the work there and close this story when CSP-270 lands. Since this was filed, the sessions rows come from a `tuikit::columns::ColumnSchema` (ADR 0183), so a density mode is a choice of columns and widths (the same-line preview is a column that already gives way when narrow), and the framework roadmap keeps a `density` token on the theme as the seam for row spacing.
+<!-- SECTION:NOTES:END -->

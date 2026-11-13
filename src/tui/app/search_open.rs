@@ -1,6 +1,7 @@
 //! Opening a quick-select result: what Enter does for an entity, and the
 //! word that says so before it is pressed.
 
+use super::listing::Listing;
 use super::tree::row_matches;
 use super::*;
 use crate::model::NodeKind;
@@ -16,6 +17,9 @@ pub enum OpenPlan {
     Path(Vec<NodeId>),
     /// Somewhere else: switch to the view that lists it.
     View(crate::tui::View),
+    /// No view lists it (a fork, or a repo with no sessions) and nothing
+    /// focused leads to it: Enter says so and stays put.
+    Unlisted,
 }
 
 impl OpenPlan {
@@ -34,6 +38,7 @@ impl OpenPlan {
                     crate::tui::widgets::controls::view_label(*view)
                 )
             }
+            Self::Unlisted => "not listed".to_string(),
         }
     }
 }
@@ -59,10 +64,10 @@ impl App {
     fn search_start(&self) -> Option<NodeId> {
         self.explorer
             .as_ref()
-            .map(|state| state.view.focused.clone())
+            .map(|explorer| explorer.id().clone())
             .or_else(|| {
-                self.selection
-                    .as_ref()
+                self.tree_state
+                    .selected()
                     .and_then(|id| crate::tui::rows::row_node(id).cloned())
             })
     }
@@ -92,26 +97,39 @@ impl App {
     }
 
     /// What opening `node` would do now. `reach` comes from
-    /// [`Self::search_reachability`], computed once for many results.
-    pub(crate) fn open_plan(&self, reach: Option<&Reachability>, node: &NodeId) -> OpenPlan {
+    /// [`Self::search_reachability`] and `listing` from [`Self::listing`],
+    /// each computed once for many results; with no `listing` the one view
+    /// that matters is built. A view is promised only when, as switching
+    /// to it would show it, it lists the entity.
+    pub(crate) fn open_plan(
+        &self,
+        reach: Option<&Reachability>,
+        listing: Option<&Listing>,
+        node: &NodeId,
+    ) -> OpenPlan {
         if self.row_index_for_node(node).is_some() {
             return OpenPlan::Here;
         }
         if let Some(path) = reach.and_then(|reach| reach.path_to(node)) {
             return OpenPlan::Path(path.to_vec());
         }
-        let view = self
-            .snapshot_handle()
-            .map_or(crate::tui::View::Sessions, |handle| {
-                crate::tui::actions::natural_view(handle.snapshot(), node)
-            });
-        OpenPlan::View(view)
+        let view = match listing {
+            Some(listing) => self
+                .snapshot_handle()
+                .and_then(|handle| crate::tui::actions::natural_view(handle.snapshot(), node))
+                .filter(|view| {
+                    let record = self.reveal_record(node, None);
+                    listing.lists(*view, node, record.as_deref())
+                }),
+            None => self.reveal_view(node, None),
+        };
+        view.map_or(OpenPlan::Unlisted, OpenPlan::View)
     }
 
     /// Open a quick-select result by the plan its outcome word promised.
     pub(crate) fn open_entity(&mut self, node: &NodeId) {
         let reach = self.search_reachability();
-        match self.open_plan(reach.as_ref(), node) {
+        match self.open_plan(reach.as_ref(), None, node) {
             OpenPlan::Here => {
                 if let Some(index) = self.row_index_for_node(node) {
                     self.expand_to_and_select(index);
@@ -122,7 +140,8 @@ impl App {
                     self.reveal_entity(node);
                 }
             }
-            OpenPlan::View(_) => self.reveal_entity(node),
+            // An unlisted entity's reveal refuses, which says why.
+            OpenPlan::View(_) | OpenPlan::Unlisted => self.reveal_entity(node),
         }
     }
 
@@ -138,7 +157,7 @@ impl App {
                         .map(|found| crate::tui::explorer::title_line(snapshot, found))
                 })
                 .unwrap_or_else(|| node.to_string());
-            self.status_message = Some(format!("{label} {why}"));
+            self.status_message = Some(Feedback::warning(format!("{label} {why}")));
         }
     }
 
@@ -157,8 +176,14 @@ impl App {
         let mut made = 0;
         let mut ok = true;
         for hop in hops {
-            self.explorer_drill_into(hop.clone());
-            if self.explorer.as_ref().map(|state| &state.view.focused) != Some(hop) {
+            let Some(outcome) =
+                self.with_explorer(|explorer, source| explorer.drill_to(hop.clone(), source))
+            else {
+                ok = false;
+                break;
+            };
+            self.explorer_outcome(outcome);
+            if self.explorer.as_ref().map(GraphExplorer::id) != Some(hop) {
                 ok = false;
                 break;
             }
@@ -169,44 +194,31 @@ impl App {
         }
         if !ok {
             for _ in 0..made {
-                self.explorer_back();
+                if let Some(outcome) = self.with_explorer(|explorer, source| explorer.back(source))
+                {
+                    self.explorer_outcome(outcome);
+                }
             }
             self.focus = was_focus;
             return false;
         }
         self.focus = Focus::Right;
-        self.explorer_back_armed = false;
+        if let Some(explorer) = self.explorer.as_mut() {
+            explorer.disarm();
+        }
         self.status_message = None;
         true
     }
 
-    /// Put the explorer cursor on the row relating to `target`.
+    /// Put the explorer cursor on the row relating to `target`, opening
+    /// the `Other` zone when the row sits there: a winner can sit among
+    /// the alternates.
     fn put_cursor_on_neighbor(&mut self, target: &NodeId) -> bool {
-        let Some(state) = self.explorer.as_mut() else {
-            return false;
-        };
-        let find = |state: &ExplorerState| {
-            state
-                .rows()
-                .iter()
-                .position(|row| state.view.drill_target(row).as_ref() == Some(target))
-        };
-        let index = find(state).or_else(|| {
-            // A winner can sit among the alternates when the zone is closed.
-            let was = state.other_expanded;
-            state.other_expanded = true;
-            let found = find(state);
-            if found.is_none() {
-                state.other_expanded = was;
-            }
-            found
-        });
-        match index {
-            Some(index) => {
-                state.cursor = index;
-                true
-            }
-            None => false,
-        }
+        self.with_explorer(|explorer, source| {
+            explorer.seek(source, |view, entry| {
+                view.drill_target(&entry.host).as_ref() == Some(target)
+            })
+        })
+        .unwrap_or(false)
     }
 }

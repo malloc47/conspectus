@@ -11,6 +11,7 @@ use crate::tui::actions::{
 };
 use crate::tui::app::Focus;
 use crate::tui::effect::ExecSpec;
+use tuikit::explorer::ExplorerKey;
 
 fn mux(name: &str) -> NodeId {
     NodeId::MuxSession(MuxSessionId::new(format!("tmux:{name}")))
@@ -87,7 +88,7 @@ fn the_right_pane_subject_is_the_entity_the_cursor_is_on() {
         if matches!(action_subject(&app).node, Some(NodeId::AgentSession(_))) {
             break;
         }
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     assert!(matches!(
         action_subject(&app).node,
@@ -110,7 +111,7 @@ fn v_and_attach_follow_the_right_pane_too() {
         if matches!(action_subject(&app).node, Some(NodeId::AgentSession(_))) {
             break;
         }
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     let NodeId::AgentSession(session) = action_subject(&app).node.expect("a session") else {
         panic!("a session");
@@ -183,7 +184,11 @@ fn enter_on_a_gone_worktree_rebuilds_it_without_attaching() {
 fn enter_on_a_pin_whose_target_could_not_be_checked_says_so() {
     let effects = enter_effect(View::Pinned, "ledger-worktree");
     assert!(
-        matches!(effects.as_slice(), [Effect::Toast(text)] if text.contains("couldn't check")),
+        matches!(
+            effects.as_slice(),
+            [Effect::Toast(note)] if note.text.contains("couldn't check")
+                && note.severity == tuikit::feedback::Severity::Warning
+        ),
         "{effects:?}"
     );
 }
@@ -293,12 +298,17 @@ fn retargeting_offers_the_other_entities_of_the_pins_kind_with_what_tells_them_a
         .iter()
         .find(|item| item.value == "h_agent")
         .expect("a gone mux record is a candidate");
-    assert!(gone.detail.starts_with("stopped"), "{gone:?}");
+    assert!(
+        gone.detail
+            .as_deref()
+            .is_some_and(|d| d.starts_with("stopped")),
+        "{gone:?}"
+    );
     let live = items
         .iter()
         .find(|item| item.label.contains("scratch"))
         .expect("scratch");
-    assert_eq!(live.detail, "running");
+    assert_eq!(live.detail.as_deref(), Some("running"));
     assert!(
         items.iter().all(|item| !item.label.contains("e44d01cb")),
         "a session isn't a mux"
@@ -353,6 +363,10 @@ fn following_waits_for_the_hand_off_to_settle() {
     app.update(Msg::FollowEntity(mux("scratch")));
     app.forget_follow_row();
     assert_eq!(app.active_view(), View::History, "still on stale data");
+    // The existence check released the mux's rows; the data to follow
+    // the entity into is still the stale snapshot.
+    app.update(Msg::HandoffReleased(MuxSessionId::new("tmux:scratch")));
+    assert_eq!(app.active_view(), View::History, "still on stale data");
     app.update(Msg::HandoffSettled);
     assert_eq!(app.active_view(), View::Mux);
 }
@@ -377,7 +391,7 @@ fn an_entity_that_cannot_be_found_leaves_the_operator_in_place_with_a_note() {
     app.forget_follow_row();
     app.update(Msg::HandoffSettled);
     assert_eq!(app.active_view(), View::Pinned);
-    assert!(app.toast().has_toast(), "the operator is told");
+    assert!(!app.toasts().is_empty(), "the operator is told");
 }
 
 #[test]
@@ -405,8 +419,11 @@ fn history_hides_a_pinned_record_unless_following_it_asks_for_it() {
 fn natural_views_follow_the_kind_and_whether_it_is_running() {
     let app = app_in(View::Mux);
     let snapshot = app.snapshot_handle().expect("data").snapshot();
-    assert_eq!(natural_view(snapshot, &mux("scratch")), View::Mux);
-    assert_eq!(natural_view(snapshot, &mux("config-agent3")), View::Mux);
+    assert_eq!(natural_view(snapshot, &mux("scratch")), Some(View::Mux));
+    assert_eq!(
+        natural_view(snapshot, &mux("config-agent3")),
+        Some(View::Mux)
+    );
     let pr = crate::model::NodeId::ForgePr(crate::model::ForgePrId::new(
         "github",
         "github.com",
@@ -414,13 +431,19 @@ fn natural_views_follow_the_kind_and_whether_it_is_running() {
         "conspectus",
         42,
     ));
-    assert_eq!(natural_view(snapshot, &pr), View::Prs);
+    assert_eq!(natural_view(snapshot, &pr), Some(View::Prs));
     let session = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "solo000001"));
-    assert_eq!(natural_view(snapshot, &session), View::Sessions);
+    assert_eq!(natural_view(snapshot, &session), Some(View::Sessions));
     let pin = NodeId::Pin(crate::model::PinId::new("solo"));
-    assert_eq!(natural_view(snapshot, &pin), View::Pinned);
-    let fork = NodeId::Fork(crate::model::ForkId::new("agent-deck:one"));
-    assert_eq!(natural_view(snapshot, &fork), View::Forks);
+    assert_eq!(natural_view(snapshot, &pin), Some(View::Pinned));
+    // Only the right pane shows a fork or a branch: no view lists them.
+    let fork = NodeId::Fork(crate::model::ForkId::new("atelier/fork-1"));
+    assert_eq!(natural_view(snapshot, &fork), None);
+    let branch = NodeId::Branch(crate::model::BranchId::new(
+        crate::model::RepoId::new("/home/op/src/conspectus/.git"),
+        "refs/heads/main",
+    ));
+    assert_eq!(natural_view(snapshot, &branch), None);
 }
 
 #[test]
@@ -499,7 +522,7 @@ fn the_menu_is_the_same_wherever_a_pinned_entity_is_opened_from_the_right_pane()
         if action_subject(&right).node == Some(mux("conspectus-main")) {
             break;
         }
-        right.update(Msg::ExplorerNavDown);
+        right.update(Msg::Explorer(ExplorerKey::Down));
     }
     assert_eq!(action_subject(&right).node, Some(mux("conspectus-main")));
     // Reveal is offered only away from the entity's own view.

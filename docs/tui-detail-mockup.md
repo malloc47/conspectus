@@ -11,6 +11,14 @@ The plan-of-record stays in the backlog stories; this mockup feeds
 the locked layout and behavior decisions back into them when the
 modeling story (`CSP-313`) starts.
 
+The explorer this document describes shipped and is the only detail
+model in the tree. The sectioned detail model it replaced (a flat
+`HeaderField` list grouped under `Session` / `Mux` / `PR` / `Lineage`
+dividers, ADR 0033, with `e` expanding linked entities in place) is
+deleted: `src/tui/detail.rs` and its renderer are gone. `e` keeps one
+meaning, the `Other` zone toggle on the right pane; the left pane
+ignores it.
+
 Companion to [`docs/tui-sessions-mockup.md`](tui-sessions-mockup.md),
 which covers the left-pane row tree. The interaction between the two
 panes — selection in the tree drives the detail; `Enter` on a
@@ -114,8 +122,8 @@ the breadcrumb line is omitted to recover one row.
 ```
 
 A focused inspector for the selected node only. The divider is the
-existing right-anchored chip style (ADR 0033) so it lines up
-visually with the section dividers below.
+right-anchored chip style every zone divider below shares, so the
+chips line up visually.
 
 The default render shows the five Core-marked fields per the
 [Node Core-Summary Fields Reference](#node-core-summary-fields-reference).
@@ -209,7 +217,7 @@ Within every group, resolver-preferred candidates (the link the
 resolver chose for the corresponding `ResolvedRelationship`) sort
 first and carry a trailing `★`. Non-resolved candidates render below
 in provenance-then-confidence-then-link-id order — the same ordering
-`preferred_link` already uses (`src/tui/detail.rs:797`).
+`pick_preferred` (`src/model/link.rs`) uses.
 
 The glyph stays for redundancy: sort order tells the eye, `★` tells
 the cursor.
@@ -800,7 +808,7 @@ re-deriving the reasoning.
   rules.
 - **`CSP-320`** — Expanded Node Detail toggle. Implements the
   `F`-toggle that swaps the Node zone between top-5 and full
-  field set; reuses the existing `HeaderField` infrastructure
+  field set; reads `NodeView::all_fields` (`src/tui/explorer.rs`)
   and the per-kind fields-reference tables in this document.
 - **`CSP-321`** — Left-pane mirror sync (default). Implements
   selection mirroring across drilldown, including breadcrumb-

@@ -1,249 +1,55 @@
-//! `!` Messages overlay (ADR 0105): the TUI's log of operation
-//! outcomes, newest first, with the selected entry's full record
-//! (argv, exit status, stderr, stdout) below the list.
+//! `!` Messages overlay (ADR 0105): the framework's log list
+//! (`tuikit::log_list`) over the App's log of operation outcomes, newest
+//! first, with the selected entry's full record (argv, exit status,
+//! stderr, stdout) under the list.
 //!
-//! Input:
-//! - `j` / `k` / `Down` / `Up` select an entry; `g` / `G` jump to the
-//!   newest / oldest.
-//! - `J` / `K` / `PageDown` / `PageUp` scroll the detail pane.
-//! - `y` copies the selected entry (handled by the runtime, which
-//!   owns the clipboard).
-//! - `Esc` / `q` / `!` close.
+//! The log list owns the reading: the rows (the severity's mark, the age,
+//! the summary and its repeat count), the selection that stops at the
+//! newest and the oldest entry, the detail's scrolling and paging by the
+//! rows it shows, the scrollbars, the footer, and the close keys. What is
+//! Conspectus's is here: the title, the record each entry's detail reads
+//! as (`full_text`), what the empty log says, and `y`, whose copy hook asks
+//! the runtime to copy the record; the runtime does the clipboard write
+//! and the toast. Keys are `MESSAGES_KEYS`: the standard log list table,
+//! `y` to copy, and `!` closing as it opened.
 
-use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::KeyEvent;
-use ratatui::layout::Rect;
-use ratatui::macros::{line, span};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget, Wrap};
-use tui_popup::KnownSize;
+use tuikit::log_list::LogList;
 
-use crate::tui::Theme;
-use crate::tui::messages::{LogEntry, LogLevel, MessageLog};
+use crate::tui::keybindings::overlay::MESSAGES_KEYS;
+use crate::tui::messages::{LogEntry, LogEntryExt, MessageLog, Report};
+use crate::tui::{App, Msg};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MessagesOverlayState {
-    /// Index into the newest-first entry list.
-    pub selected: usize,
-    pub detail_scroll: u16,
+/// The Messages overlay: the framework's log list over the App's log.
+pub type MessagesList = LogList<Report, Msg, App>;
+
+/// The overlay over the App's message log, aged against the clock the rows
+/// use (which snapshot mode freezes).
+pub fn open() -> MessagesList {
+    over(App::messages, |_app: &App| {
+        crate::tui::ui::current_unix_epoch_for_render()
+    })
 }
 
-impl MessagesOverlayState {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The selected entry, if the log has any.
-    pub fn selected_entry<'a>(&self, log: &'a MessageLog) -> Option<&'a LogEntry> {
-        log.newest_first().nth(self.selected)
-    }
-
-    fn select(&mut self, index: usize, len: usize) {
-        let index = index.min(len.saturating_sub(1));
-        if index != self.selected {
-            self.selected = index;
-            self.detail_scroll = 0;
-        }
-    }
-
-    fn scroll_detail(&mut self, delta: i32) {
-        let next = i32::from(self.detail_scroll).saturating_add(delta).max(0);
-        self.detail_scroll = u16::try_from(next).unwrap_or(u16::MAX);
-    }
-}
-
-impl crate::tui::Overlay for MessagesOverlayState {
-    type Ctx<'a> = &'a MessageLog;
-
-    fn handle(&mut self, log: &MessageLog, key: KeyEvent) -> crate::tui::OverlayOutcome {
-        use crate::tui::OverlayOutcome;
-        use crate::tui::keybindings::overlay::{MESSAGES_KEYS, MessagesKey, resolve};
-        let len = log.len();
-        match resolve(MESSAGES_KEYS, key) {
-            Some(MessagesKey::Abort | MessagesKey::Close) => return OverlayOutcome::Close,
-            Some(MessagesKey::Next) => self.select(self.selected + 1, len),
-            Some(MessagesKey::Prev) => {
-                self.select(self.selected.saturating_sub(1), len);
-            }
-            Some(MessagesKey::First) => self.select(0, len),
-            Some(MessagesKey::Last) => self.select(len.saturating_sub(1), len),
-            Some(MessagesKey::DetailDown) => self.scroll_detail(1),
-            Some(MessagesKey::DetailUp) => self.scroll_detail(-1),
-            Some(MessagesKey::DetailPageDown) => self.scroll_detail(8),
-            Some(MessagesKey::DetailPageUp) => self.scroll_detail(-8),
-            // The runtime copies before the key reaches the widget.
-            Some(MessagesKey::Copy) | None => {}
-        }
-        OverlayOutcome::Consumed
-    }
-}
-
-pub struct MessagesWidget<'a> {
-    state: &'a MessagesOverlayState,
-    log: &'a MessageLog,
-    theme: &'a Theme,
-    now: i64,
-}
-
-impl<'a> MessagesWidget<'a> {
-    pub fn new(
-        state: &'a MessagesOverlayState,
-        log: &'a MessageLog,
-        theme: &'a Theme,
-        now: i64,
-    ) -> Self {
-        Self {
-            state,
-            log,
-            theme,
-            now,
-        }
-    }
-}
-
-/// Style for an entry's level glyph and summary.
-pub fn level_style(level: LogLevel, theme: &Theme) -> Style {
-    match level {
-        LogLevel::Info => Style::default().fg(theme.success),
-        LogLevel::Warning => Style::default().fg(theme.warning),
-        LogLevel::Error => Style::default().fg(theme.error),
-    }
-}
-
-impl Widget for MessagesWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let width = area.width.saturating_sub(4).clamp(40, 110);
-        let height = area.height.saturating_sub(2).max(10);
-        let modal = crate::tui::widgets::popup_frame::centered_rect(area, width, height);
-        let label_style = Style::default()
-            .fg(self.theme.panel_focus_accent)
-            .add_modifier(Modifier::BOLD);
-        let title = line![
-            " ",
-            span!(label_style; " Messages · {} ", self.log.len()),
-            " "
-        ];
-        let body = MessagesBody {
-            widget: &self,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
-        };
-        crate::tui::widgets::popup_frame::themed_popup(body, title, self.theme).render(area, buf);
-    }
-}
-
-struct MessagesBody<'a, 'w> {
-    widget: &'a MessagesWidget<'w>,
-    inner_width: usize,
-    inner_height: usize,
-}
-
-impl KnownSize for MessagesBody<'_, '_> {
-    fn width(&self) -> usize {
-        self.inner_width
-    }
-
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for MessagesBody<'_, '_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let MessagesWidget {
-            state,
-            log,
-            theme,
-            now,
-        } = *self.widget;
-        let footer = line![span!(
-            Style::default().add_modifier(theme.placeholder);
-            "{}",
-            crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MESSAGES_KEYS)
-        )];
-        if log.is_empty() {
-            Paragraph::new(vec![
-                Line::raw("No messages yet. Launches, attaches, renames and"),
-                Line::raw("failures from this session are listed here."),
-                Line::raw(""),
-                footer,
-            ])
-            .render(area, buf);
-            return;
-        }
-
-        // List gets up to 40% of the height, the detail the rest.
-        let list_height = (log.len() as u16).min((area.height * 2 / 5).max(3));
-        let list_area = Rect {
-            height: list_height,
-            ..area
-        };
-        let rule_area = Rect {
-            y: area.y + list_height,
-            height: 1,
-            ..area
-        };
-        let detail_area = Rect {
-            y: rule_area.y + 1,
-            height: area.height.saturating_sub(list_height + 2),
-            ..area
-        };
-        let footer_area = Rect {
-            y: area.y + area.height.saturating_sub(1),
-            height: 1,
-            ..area
-        };
-
-        // Keep the selection inside the list window.
-        let first = state
-            .selected
-            .saturating_sub(usize::from(list_height).saturating_sub(1));
-        let lines: Vec<Line> = log
-            .newest_first()
-            .enumerate()
-            .skip(first)
-            .take(usize::from(list_height))
-            .map(|(idx, entry)| list_line(entry, idx == state.selected, theme, now))
-            .collect();
-        Paragraph::new(lines).render(list_area, buf);
-
-        Paragraph::new(Line::from(span!(
-            Style::default().add_modifier(theme.divider);
-            "{}", "─".repeat(usize::from(area.width))
-        )))
-        .render(rule_area, buf);
-
-        if let Some(entry) = state.selected_entry(log) {
-            Paragraph::new(entry.full_text())
-                .wrap(Wrap { trim: false })
-                .scroll((state.detail_scroll, 0))
-                .render(detail_area, buf);
-        }
-        Paragraph::new(footer).render(footer_area, buf);
-    }
-}
-
-fn list_line(entry: &LogEntry, selected: bool, theme: &Theme, now: i64) -> Line<'static> {
-    let age = crate::tui::rows::format_recency(Some(now), Some(entry.at_epoch))
-        .unwrap_or_else(|| "—".to_string());
-    let mut spans = vec![
-        Span::styled(
-            format!("{} ", entry.level.glyph()),
-            level_style(entry.level, theme),
-        ),
-        Span::styled(
-            format!("{age:>4} ago  "),
-            Style::default().fg(theme.secondary_text),
-        ),
-        Span::raw(entry.summary_with_repeats()),
-    ];
-    if selected {
-        for span in &mut spans {
-            span.style = span.style.add_modifier(theme.selection_active);
-        }
-    }
-    Line::from(spans)
+/// The Messages log list over the log `source` finds in a context, aged
+/// against `clock`: the overlay's keys, record, copy, and empty note.
+pub fn over<Cx: ?Sized>(
+    source: impl Fn(&Cx) -> &MessageLog + Send + Sync + 'static,
+    clock: impl Fn(&Cx) -> i64 + Send + Sync + 'static,
+) -> LogList<Report, Msg, Cx> {
+    LogList::new("Messages", source, clock)
+        .keys(MESSAGES_KEYS)
+        .detail(|entry: &LogEntry| entry.full_text())
+        // The clipboard write is the executor's.
+        .copy(|entry: &LogEntry| {
+            Some(Msg::Copy {
+                text: entry.full_text(),
+                done: "copied message".to_string(),
+            })
+        })
+        .empty(
+            "No messages yet. Launches, attaches, renames and\n\
+             failures from this session are listed here.",
+        )
 }
 
 #[cfg(test)]

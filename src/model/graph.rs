@@ -410,6 +410,21 @@ impl GraphSnapshot {
             })
     }
 
+    /// Whether a new mux named `name` would collide with one Conspectus
+    /// knows: a mux node, live or gone, with that session name, or a
+    /// mux in history recorded under it. The socket is ignored, so a
+    /// name taken on any server counts.
+    pub(crate) fn mux_name_taken(&self, name: &str) -> bool {
+        self.nodes
+            .iter()
+            .any(|node| matches!(node, GraphNode::MuxSession(mux) if mux.session_name() == name))
+            || self
+                .history
+                .muxes
+                .iter()
+                .any(|record| record.recipe.name == name)
+    }
+
     /// Whether `id` exists now rather than only in history. Code that
     /// acts on a node, counts it, or links to it checks this first.
     pub fn is_live(&self, id: &NodeId) -> bool {

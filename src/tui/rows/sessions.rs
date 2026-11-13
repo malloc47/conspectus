@@ -20,6 +20,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use tuikit::age::Age;
+
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, NodeId,
@@ -28,7 +30,7 @@ use crate::model::{
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
     AgentSessionRow, GroupRow, MuxIndicator, Row, RowId, RowKind, RowTree, ViewLabel,
-    format_recency, harness_label, shorten_home,
+    harness_label, shorten_home,
 };
 
 /// Inputs to the sessions builder. Tests construct these directly;
@@ -764,18 +766,14 @@ fn push_workspace_row(
         root: workspace_root.to_string(),
     });
 
-    let display_path =
-        crate::tui::rows::workspace_header_label(data.snapshot, workspace_root, home);
+    let header =
+        crate::tui::rows::workspace_header(data.snapshot, workspace_root, home, node_id.clone());
 
     tree.rows.push(Row {
-        id: RowId::Group(node_id.clone()),
+        id: RowId::Group(node_id),
         depth,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path,
-            primary_node: Some(node_id),
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(header),
     });
 }
 
@@ -785,11 +783,10 @@ fn push_repo_row(tree: &mut RowTree, depth: u8, repo: &RepoBucket, home: Option<
         id: RowId::Group(node_id.clone()),
         depth,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: shorten_home(&repo.repo_display_path, home),
-            primary_node: Some(node_id),
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::at_path(
+            &shorten_home(&repo.repo_display_path, home),
+            Some(node_id),
+        )),
     });
 }
 
@@ -807,19 +804,17 @@ fn push_checkout_row(
 ) {
     let wt_id = CheckoutId::new(repo.clone(), worktree_root.to_string());
     let node_id = NodeId::Checkout(wt_id);
-    let mut display_path = shorten_home(worktree_root, home);
+    let mut header = GroupRow::at_path(&shorten_home(worktree_root, home), Some(node_id.clone()));
+    // The marker ends the checkout's name, not its path.
     if let Some(marker) = worktree_marker {
-        display_path.push_str(&format!(" ({marker})"));
+        header.detail = shorten_home(worktree_root, home);
+        header.label = format!("{} ({marker})", header.label);
     }
     tree.rows.push(Row {
-        id: RowId::Group(node_id.clone()),
+        id: RowId::Group(node_id),
         depth,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path,
-            primary_node: Some(node_id),
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(header),
     });
 }
 
@@ -847,11 +842,7 @@ fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>
         id: RowId::Synthetic("ungrouped"),
         depth: 0,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: "Ungrouped".to_string(),
-            primary_node: None,
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::named("Ungrouped", None)),
     });
     let disambiguating = title_disambiguating_sessions(&sessions);
     for entry in sessions {
@@ -940,7 +931,7 @@ fn emit_session_row(
             harness_label: harness_label(&entry.node.harness_key),
             cwd_display,
             project_display: project_display_for_session(&entry, ctx.data, ctx.grouping),
-            recency: format_recency(ctx.now, entry.node.last_active_epoch),
+            recency: Age::of(entry.node.last_active_epoch, ctx.now).map(Age::label),
             activity_epoch: entry.node.last_active_epoch,
             mux_state,
             preview: entry.node.last_message_preview.clone(),

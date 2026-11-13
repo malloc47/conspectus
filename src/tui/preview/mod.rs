@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
+use ratatui::style::Modifier;
 use ratatui::text::Line;
 
 pub use forge::PrQuery;
@@ -32,7 +33,9 @@ use crate::tui::app::App;
 use crate::tui::explorer::FieldValue;
 use crate::tui::rows::{MuxIndicator, RowId, RowKind};
 use crate::tui::viewer_bridge::{TranscriptMissing, load_transcript};
-use crate::viewer::state::ViewerState;
+use crate::viewer::highlight::Marks;
+use crate::viewer::model::TranscriptDocument;
+use crate::viewer::state::Transcript;
 
 /// What the Preview zone shows for a selection.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -156,9 +159,9 @@ pub enum PreviewContent {
     /// The pane's captured text (from `tmux capture-pane -p -J -e`)
     /// and the width tmux laid it out at.
     Text(PaneCapture),
-    /// A parsed transcript, in the viewer state the preview renders it
-    /// with, so its composed lines are cached alongside it.
-    Transcript(Box<ViewerState>),
+    /// A parsed transcript, as the viewer's content the preview renders
+    /// it from, so its composed lines are cached alongside it.
+    Transcript(Box<TranscriptPreview>),
     /// Lines a loader composed: a listing, a file's contents.
     Lines(Vec<Line<'static>>),
     /// The runner reported the target doesn't exist.
@@ -178,7 +181,9 @@ impl PartialEq for PreviewContent {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Text(a), Self::Text(b)) => a == b,
-            (Self::Transcript(a), Self::Transcript(b)) => a.document == b.document,
+            (Self::Transcript(a), Self::Transcript(b)) => {
+                a.transcript.document == b.transcript.document
+            }
             (Self::Lines(a), Self::Lines(b)) => a == b,
             (Self::NoTarget, Self::NoTarget) | (Self::Unsupported, Self::Unsupported) => true,
             (Self::Unavailable(a), Self::Unavailable(b)) | (Self::Failed(a), Self::Failed(b)) => {
@@ -190,6 +195,25 @@ impl PartialEq for PreviewContent {
 }
 
 impl Eq for PreviewContent {}
+
+/// A transcript in the Preview: the viewer's content, drawn from the
+/// toggles' defaults, and the matches of the search on display marked on
+/// it (`search::apply`).
+#[derive(Debug, Clone)]
+pub struct TranscriptPreview {
+    pub transcript: Transcript,
+    pub marks: Marks,
+}
+
+impl TranscriptPreview {
+    /// `document` with nothing marked.
+    pub fn new(document: TranscriptDocument) -> Self {
+        Self {
+            transcript: Transcript::new(document),
+            marks: Marks::default(),
+        }
+    }
+}
 
 impl PreviewContent {
     /// Captured text with no reported pane width.
@@ -304,31 +328,28 @@ pub enum PreviewSubject {
 /// selection until the explorer drills.
 pub fn preview_subject(app: &App) -> PreviewSubject {
     use crate::tui::explorer::RowPreview;
-    let Some(state) = app.explorer() else {
+    let Some(explorer) = app.explorer() else {
         return PreviewSubject::Selection;
     };
-    let row_preview = state
-        .selected_row()
-        .and_then(|row| match state.view.row_preview(&row) {
-            Some(RowPreview::Link { neighbor_id, .. }) => {
-                Some(PreviewSubject::Node(neighbor_id.clone()))
-            }
-            Some(RowPreview::Unresolved { .. }) => Some(PreviewSubject::Unresolved),
-            None => match row {
-                crate::tui::explorer::ExplorerRow::NodeField { index, .. } => state
-                    .view
-                    .fields(state.full_detail_expanded)
-                    .get(index)
-                    .and_then(|field| field.preview.clone())
-                    .map(PreviewSubject::Field),
-                _ => None,
-            },
-        });
+    let row_preview =
+        app.explorer_cursor_row()
+            .and_then(|row| match explorer.content().row_preview(&row) {
+                Some(RowPreview::Link { neighbor_id, .. }) => {
+                    Some(PreviewSubject::Node(neighbor_id.clone()))
+                }
+                Some(RowPreview::Unresolved { .. }) => Some(PreviewSubject::Unresolved),
+                None => match row {
+                    crate::tui::explorer::ExplorerRow::NodeField { field, .. } => {
+                        field.preview.map(PreviewSubject::Field)
+                    }
+                    _ => None,
+                },
+            });
     row_preview.unwrap_or_else(|| {
-        if state.breadcrumb.is_empty() {
+        if explorer.frames().is_empty() {
             PreviewSubject::Selection
         } else {
-            PreviewSubject::Node(state.view.focused.clone())
+            PreviewSubject::Node(explorer.id().clone())
         }
     })
 }
@@ -506,7 +527,7 @@ fn selection_source(app: &App) -> Option<PreviewSource> {
         // Any other row previews the node the right pane shows for it.
         _ => app
             .explorer()
-            .and_then(|state| node_source(app, &state.view.focused)),
+            .and_then(|explorer| node_source(app, explorer.id())),
     }
 }
 
@@ -533,18 +554,20 @@ pub fn pane_native_id(app: &App, mux: &MuxSessionId) -> Option<String> {
 }
 
 /// Load a source that needs no mux backend. Blocking: the live runtime
-/// calls it on a worker thread. `None` for a pane, which captures
-/// through the executor's mux op.
-pub fn load_offline_preview(source: &PreviewSource) -> Option<PreviewContent> {
+/// calls it on a worker thread, so it takes the theme's `muted` modifier
+/// for secondary lines rather than the theme. `None` for a pane, which
+/// captures through the executor's mux op.
+pub fn load_offline_preview(source: &PreviewSource, muted: Modifier) -> Option<PreviewContent> {
     match source {
         PreviewSource::Pane(_) => None,
         PreviewSource::Transcript(session) => Some(load_transcript_preview(session)),
-        PreviewSource::Path(path) => Some(path::load_path_preview(path)),
-        PreviewSource::Git(query) => Some(git::load_git_preview(query)),
-        PreviewSource::PullRequest(query) => Some(forge::load_pr_preview(query)),
+        PreviewSource::Path(path) => Some(path::load_path_preview(path, muted)),
+        PreviewSource::Git(query) => Some(git::load_git_preview(query, muted)),
+        PreviewSource::PullRequest(query) => Some(forge::load_pr_preview(query, muted)),
         PreviewSource::Process(pid) => Some(process::load_process_tree(
             std::path::Path::new("/proc"),
             *pid,
+            muted,
         )),
     }
 }
@@ -553,7 +576,7 @@ pub fn load_offline_preview(source: &PreviewSource) -> Option<PreviewContent> {
 /// the live runtime calls it on a worker thread.
 pub fn load_transcript_preview(session: &AgentSessionId) -> PreviewContent {
     match load_transcript(session) {
-        Ok(document) => PreviewContent::Transcript(Box::new(ViewerState::new(document))),
+        Ok(document) => PreviewContent::Transcript(Box::new(TranscriptPreview::new(document))),
         Err(TranscriptMissing::Unavailable(reason)) => PreviewContent::Unavailable(reason),
         Err(TranscriptMissing::Failed(message)) => PreviewContent::Failed(message),
     }

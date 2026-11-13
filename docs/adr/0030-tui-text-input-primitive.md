@@ -2,7 +2,16 @@
 
 ## Status
 
-Accepted
+Accepted. Narrowed by
+[ADR 0165](0165-tui-text-entry-one-line-editor-and-one-text-field.md): the
+line-edit engine is the framework's `text_edit::LineEdit` (still wrapping
+`tui-input`, with the word keys bound to Alt), every field is drawn by its
+`TextField`, and this module keeps only the modal prompt and its key
+contract, as `TextPromptState`. Narrowed by
+[ADR 0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md):
+the modal prompt and its key contract are the framework's
+`text_prompt::TextPrompt`, which also explains a refused confirm on an
+error line, and this module is gone.
 
 ## Context
 

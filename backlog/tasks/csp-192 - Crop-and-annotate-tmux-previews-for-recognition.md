@@ -4,6 +4,7 @@ title: Crop and annotate tmux previews for recognition
 status: To Do
 assignee: []
 created_date: '2026-05-20 03:28'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -34,3 +35,9 @@ ordinal: 440000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-016`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): the Preview's divider is `tuikit::frame::SectionRule`, which carries no summary today, so re-check this story's "slice landed" claim (target and freshness on the separator) before relying on it. Stale, disabled, and failed states would be the rule's summary or the body's placeholder note (ADR 0190). See the CSP-185 note.
+<!-- SECTION:NOTES:END -->

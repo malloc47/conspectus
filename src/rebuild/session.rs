@@ -229,22 +229,12 @@ fn new_mux_plan(
 
 /// `base`, or `base-2`, `base-3`, … when a mux or record already has it.
 fn unique_mux_name(snapshot: &GraphSnapshot, base: &str) -> String {
-    let taken =
-        |name: &str| {
-            snapshot.nodes.iter().any(
-                |node| matches!(node, GraphNode::MuxSession(mux) if mux.session_name() == name),
-            ) || snapshot
-                .history
-                .muxes
-                .iter()
-                .any(|record| record.recipe.name == name)
-        };
-    if !taken(base) {
+    if !snapshot.mux_name_taken(base) {
         return base.to_string();
     }
     (2..)
         .map(|n| format!("{base}-{n}"))
-        .find(|name| !taken(name))
+        .find(|name| !snapshot.mux_name_taken(name))
         .expect("an unbounded range has a free name")
 }
 

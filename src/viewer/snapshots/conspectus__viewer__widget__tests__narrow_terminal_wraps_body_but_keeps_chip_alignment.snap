@@ -1,5 +1,5 @@
 ---
-source: src/viewer/widget.rs
+source: src/viewer/widget_tests.rs
 expression: snapshot_string(&buf)
 ---
  claude-code:wrap · /p · 1 turn
@@ -13,4 +13,4 @@ expression: snapshot_string(&buf)
 
 
 ────────────────────────────────────────
-[ 1/4 ] · tools·off   (t) · think·off (T
+[ 1/4 ] · tools·off   (t) · Esc/q close

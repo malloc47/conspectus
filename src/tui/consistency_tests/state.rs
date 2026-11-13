@@ -24,14 +24,6 @@ fn words(line: &str) -> Vec<&str> {
     line.split_whitespace().collect()
 }
 
-fn is_age(word: &str) -> bool {
-    let chars: Vec<char> = word.chars().collect();
-    word == "—"
-        || (chars.len() > 1
-            && chars[..chars.len() - 1].iter().all(char::is_ascii_digit)
-            && matches!(chars[chars.len() - 1], 's' | 'm' | 'h' | 'd' | 'w' | '…'))
-}
-
 fn lines_of(view: View) -> Vec<String> {
     let mut app = listing(view);
     left_pane_lines(&frame(&mut app, 220, 40), 220)

@@ -2,7 +2,16 @@
 
 ## Status
 
-Accepted
+Accepted. Narrowed by
+[ADR 0150](0150-tui-framework-workspace-crate.md): the TUI's generic
+widgets, design tokens, and interaction conventions live in the framework
+crate `tuikit` (`crates/tuikit`), which `conspectus` depends on by path;
+the module layout below predates that move, and the runtime (the loop,
+effects, and terminal hand-off) stays in `src/tui`. Narrowed by
+[ADR 0152](0152-tui-framework-dependency-ownership.md): the framework owns
+the TUI's third-party widget crates, and the `tui-popup`,
+`ratatui-cheese`, and `ratatui-comfy-toaster` shims are replaced by its
+own code.
 
 ## Context
 

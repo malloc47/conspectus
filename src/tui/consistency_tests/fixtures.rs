@@ -7,12 +7,10 @@ use super::*;
 pub(super) const NOW: i64 = 1_700_000_000;
 
 /// Every view the operator can switch to.
-pub(super) const ALL_VIEWS: [View; 8] = [
+pub(super) const ALL_VIEWS: [View; 6] = [
     View::Sessions,
     View::Mux,
-    View::Union,
     View::Prs,
-    View::Forks,
     View::Pinned,
     View::History,
     View::Search,
@@ -134,6 +132,23 @@ pub(super) fn world_with(extra: usize) -> GraphSnapshot {
     resolve_snapshot(snapshot)
 }
 
+/// Whether `token` is an age as the TUI draws one: the no-value mark, or
+/// a count and a unit of the framework's default ladder, possibly cut
+/// with the ellipsis mark.
+pub(super) fn is_age(token: &str) -> bool {
+    use tuikit::glyphs::marks;
+    if token == marks::NO_VALUE {
+        return true;
+    }
+    let units = tuikit::age::Ladder::default().units();
+    let body = token.strip_suffix(marks::ELLIPSIS).or_else(|| {
+        units
+            .iter()
+            .find_map(|unit| token.strip_suffix(unit.suffix))
+    });
+    body.is_some_and(|digits| !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
+}
+
 pub(super) fn world() -> GraphSnapshot {
     world_with(0)
 }
@@ -221,6 +236,11 @@ pub(super) fn app_listing_all(view: View) -> App {
     app_over_filtered(view, &world(), filter)
 }
 
+/// The row the status bar takes on a screen of `area`.
+pub(super) fn status_row(area: Rect) -> u16 {
+    crate::tui::ui::screen_areas(area, 0).status.y
+}
+
 pub(super) fn buffer_of(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
     render_to_buffer(app, Rect::new(0, 0, width, height))
 }
@@ -229,12 +249,29 @@ pub(super) fn frame(app: &mut App, width: u16, height: u16) -> String {
     buffer_to_string(&buffer_of(app, width, height))
 }
 
-/// The text of the left pane's rows only, one string per terminal row.
+/// Where the screen puts its header, panes, and status bar on a
+/// `width` by `height` terminal at the default threshold: the layout the
+/// draw uses.
+pub(super) fn panes(width: u16, height: u16) -> crate::tui::ui::ScreenAreas {
+    crate::tui::ui::screen_areas(
+        Rect::new(0, 0, width, height),
+        crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
+    )
+}
+
+/// The text in the left pane's columns, one string per terminal row (the
+/// header and the status bar included), of a frame `width` cells wide.
 pub(super) fn left_pane_lines(frame: &str, width: u16) -> Vec<String> {
-    let half = usize::from(width) / 2;
+    let height = u16::try_from(frame.lines().count()).unwrap_or(u16::MAX);
+    let left = panes(width, height).left;
     frame
         .lines()
-        .map(|line| line.chars().take(half).collect())
+        .map(|line| {
+            line.chars()
+                .skip(usize::from(left.x))
+                .take(usize::from(left.width))
+                .collect()
+        })
         .collect()
 }
 
@@ -287,8 +324,8 @@ pub(super) fn menu_toasts(app: &mut App) -> Vec<String> {
     let mut out = Vec::new();
     for msg in [Msg::TogglePin, Msg::AttachSelected, Msg::ViewSelected] {
         for effect in app.update(msg) {
-            if let crate::tui::Effect::Toast(text) = effect {
-                out.push(text);
+            if let crate::tui::Effect::Toast(note) = effect {
+                out.push(note.text);
             }
         }
     }

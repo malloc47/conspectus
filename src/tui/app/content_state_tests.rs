@@ -34,7 +34,7 @@ fn open_every_session(app: &mut App) {
         .collect();
     for id in rows {
         app.set_selection(id);
-        if !app.expanded.contains(app.selection().unwrap()) {
+        if !app.is_expanded(app.selection().unwrap()) {
             app.update(Msg::ExpandRow);
         }
     }
@@ -277,9 +277,11 @@ fn the_status_note_tells_progress_skips_and_how_old_the_scan_is() {
             .unwrap()
             .status_note(finished + Duration::from_secs(secs))
     };
-    assert_eq!(note(1), "1 session · 1 skipped · scanned just now");
+    // The shared age ladder, as every other age the TUI writes as prose.
+    assert_eq!(note(1), "1 session · 1 skipped · scanned 1s ago");
     assert_eq!(note(125), "1 session · 1 skipped · scanned 2m ago");
     assert_eq!(note(7300), "1 session · 1 skipped · scanned 2h ago");
+    assert_eq!(note(90_000), "1 session · 1 skipped · scanned 1d ago");
 }
 
 #[test]
@@ -361,7 +363,7 @@ fn a_session_past_the_first_few_is_read_when_it_is_opened_not_before() {
         .tree()
         .rows
         .iter()
-        .filter(|row| row.expandable && !app.expanded.contains(&row.id))
+        .filter(|row| row.expandable && !app.is_expanded(&row.id))
         .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
         .map(|row| row.id.clone())
         .collect();

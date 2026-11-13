@@ -3,38 +3,10 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
+use tuikit::testkit::buffer::{count_cells, find_in, rows, tokens};
 
 use super::*;
 use crate::tui::app::Focus;
-
-/// `(start, end)` char columns and text of each whitespace-separated token.
-fn tokens(line: &str) -> Vec<(usize, usize, String)> {
-    let mut out = Vec::new();
-    let mut start = None;
-    let mut text = String::new();
-    for (col, ch) in line.chars().enumerate() {
-        if ch.is_whitespace() {
-            if let Some(from) = start.take() {
-                out.push((from, col, std::mem::take(&mut text)));
-            }
-        } else {
-            start.get_or_insert(col);
-            text.push(ch);
-        }
-    }
-    if let Some(from) = start {
-        out.push((from, line.chars().count(), text));
-    }
-    out
-}
-
-fn is_age(token: &str) -> bool {
-    let chars: Vec<char> = token.chars().collect();
-    token == "—"
-        || (chars.len() > 1
-            && chars[..chars.len() - 1].iter().all(char::is_ascii_digit)
-            && matches!(chars[chars.len() - 1], 's' | 'm' | 'h' | 'd' | 'w' | '…'))
-}
 
 /// Column where the label starts and where the age ends, for the left
 /// pane's row mentioning `label`.
@@ -46,13 +18,13 @@ fn row_grid(lines: &[String], label: &str) -> (usize, Option<usize>) {
     let toks = tokens(line);
     let label_col = toks
         .iter()
-        .find(|(_, _, text)| text.contains(label))
-        .map(|(start, _, _)| *start)
+        .find(|token| token.text.contains(label))
+        .map(|token| token.start)
         .expect("label token");
     let age_end = toks
         .iter()
-        .find(|(_, _, text)| is_age(text))
-        .map(|(_, end, _)| *end);
+        .find(|token| is_age(&token.text))
+        .map(|token| token.end);
     (label_col, age_end)
 }
 
@@ -120,17 +92,15 @@ fn a_pinned_entity_in_its_own_view_wears_the_filled_pin_marker() {
     assert!(!scratch.chars().take(100).any(|c| c == '◉'), "{scratch}");
 }
 
-/// Whether the cells of the first `needle` on `needle_row`'s line have a
+/// Whether the cells of the first `needle` on `row_label`'s line have a
 /// filled background (the badge look every view gives an agent name).
 fn token_is_a_chip(buffer: &Buffer, row_label: &str, needle: &str) -> Option<bool> {
-    let text = buffer_to_string(buffer);
-    let (y, line) = text
-        .lines()
-        .enumerate()
-        .find(|(_, line)| line.contains(row_label) && line.contains(needle))?;
-    let x = line.chars().collect::<String>().find(needle)?;
-    let x = line[..x].chars().count();
-    let cell = &buffer[(u16::try_from(x).ok()?, u16::try_from(y).ok()?)];
+    let y = rows(buffer)
+        .iter()
+        .position(|line| line.contains(row_label) && line.contains(needle))?;
+    let row = Rect::new(0, u16::try_from(y).ok()?, buffer.area.width, 1);
+    let at = find_in(buffer, row, needle)?;
+    let cell = &buffer[(at.x, at.y)];
     Some(cell.bg != Color::Reset || cell.modifier.contains(Modifier::REVERSED))
 }
 
@@ -183,32 +153,21 @@ fn session_rows_show_the_agent_glyph_in_every_view_that_lists_them() {
     }
 }
 
-/// Cells of one half of the frame drawn REVERSED. Chips are reversed
-/// too, so a test compares the count with and without focus rather than
-/// expecting zero.
+/// Cells of one pane drawn REVERSED. Chips are reversed too, so a test
+/// compares the count with and without focus rather than expecting zero.
 fn reversed_cells(buffer: &Buffer, left: bool) -> usize {
-    let half = buffer.area.width / 2;
-    let (from, to) = if left {
-        (0, half)
-    } else {
-        (half, buffer.area.width)
-    };
-    (1..buffer.area.height.saturating_sub(1))
-        .map(|y| {
-            (from..to)
-                .filter(|x| {
-                    buffer[(*x, y)]
-                        .style()
-                        .add_modifier
-                        .contains(Modifier::REVERSED)
-                })
-                .count()
-        })
-        .sum()
+    let areas = panes(buffer.area.width, buffer.area.height);
+    let pane = if left { areas.left } else { areas.right };
+    count_cells(buffer, pane, |cell| {
+        cell.modifier.contains(Modifier::REVERSED)
+    })
 }
 
+/// Only the focused pane reverses its cursor row; the other keeps its
+/// cursor row in the inactive look, which is bold rather than reversed
+/// by default (see `selection.rs`).
 #[test]
-fn an_unfocused_pane_shows_no_highlighted_row() {
+fn only_the_focused_pane_reverses_its_cursor_row() {
     let mut app = app_in(View::Mux);
     select(&mut app, "conspectus-main");
     assert_eq!(app.focus(), Focus::Left);
@@ -222,11 +181,11 @@ fn an_unfocused_pane_shows_no_highlighted_row() {
     // the difference is its highlighted row.
     assert!(
         reversed_cells(&left_focused, true) > reversed_cells(&right_focused, true),
-        "the left pane highlights its row only while focused"
+        "the left pane reverses its row only while focused"
     );
     assert!(
         reversed_cells(&right_focused, false) > reversed_cells(&left_focused, false),
-        "the right pane highlights its row only while focused"
+        "the right pane reverses its row only while focused"
     );
 }
 
@@ -335,4 +294,25 @@ fn listing_pinned_history_marks_those_records_with_the_hollow_pin() {
         .find(|line| line.contains("old-experiment"))
         .expect("unpinned row");
     assert!(!unpinned.chars().take(100).any(|c| c == '◎'), "{unpinned}");
+}
+
+/// The left pane lays each row out from the row and what the App worked
+/// out about it before the frame (`App::tree_row_states`): whether it is
+/// a ghost, whether it awaits the hand-off, and its pin marker. The
+/// renderer itself asks the snapshot and the hand-off nothing.
+#[test]
+fn the_left_pane_lays_rows_out_without_looking_anything_up() {
+    let renderer = include_str!("../ui/left_panel.rs");
+    for needle in [
+        "pinned_nodes(",
+        ".presence(",
+        "row_is_frozen(",
+        "row_awaits_handoff(",
+    ] {
+        assert!(
+            !renderer.contains(needle),
+            "src/tui/ui/left_panel.rs looks a row's state up (`{needle}`); \
+             work it out in `App::tree_row_state` and read it from the row's context"
+        );
+    }
 }

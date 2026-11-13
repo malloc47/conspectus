@@ -146,7 +146,7 @@ fn labels(tree: &RowTree) -> Vec<String> {
         .iter()
         .map(|row| match &row.kind {
             RowKind::Mixed(m) => m.label.clone(),
-            RowKind::Group(g) => format!("[{}]", g.display_path),
+            RowKind::Group(g) => format!("[{}]", g.text()),
             _ => unreachable!(),
         })
         .collect()
@@ -204,7 +204,40 @@ fn rows_say_what_each_record_was() {
     assert_eq!(pr.node_kind, NodeKind::ForgePr);
     assert_eq!(pr.status, "merged");
     assert_eq!(pr.content, "o/r · Ship it");
-    assert_eq!(pr.pr_state.as_deref(), Some("merged"));
+    assert_eq!(pr.pr_status, Some(PrStatus::Merged));
+}
+
+#[test]
+fn a_pr_record_reads_its_state_and_a_draft_only_while_open() {
+    // State beats draft: a record of a closed or merged draft reads its
+    // state, and one with no state reads unknown, draft or not.
+    let cases = [
+        (Some("open"), false, "open"),
+        (Some("open"), true, "draft"),
+        (Some("merged"), true, "merged"),
+        (Some("CLOSED"), true, "closed"),
+        (Some("closed"), false, "closed"),
+        (None, true, "unknown"),
+        (None, false, "unknown"),
+    ];
+    for (state, draft, word) in cases {
+        let mut snapshot = world();
+        let recipe = &mut snapshot.history.prs[0].recipe;
+        recipe.state = state.map(str::to_string);
+        recipe.draft = draft;
+        let tree = build(&snapshot, HistoryGrouping::None);
+        let pr = tree
+            .rows
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::Mixed(m) if m.node_kind == NodeKind::ForgePr => Some(m),
+                _ => None,
+            })
+            .expect("the PR record's row");
+        let case = format!("state {state:?}, draft {draft}");
+        assert_eq!(pr.status, word, "{case}");
+        assert_eq!(pr.pr_status, Some(PrStatus::of(state, draft)), "{case}");
+    }
 }
 
 #[test]
@@ -214,11 +247,11 @@ fn project_grouping_puts_stray_records_in_other() {
     assert_eq!(
         labels(&tree),
         [
-            "[~/src/app]",
+            "[app  ~/src/app]",
             "new-agent",
             "app-feature",
             "old-agent",
-            "[~/src/lost]",
+            "[lost  ~/src/lost]",
             "lost",
             "[Other]",
             "stray",

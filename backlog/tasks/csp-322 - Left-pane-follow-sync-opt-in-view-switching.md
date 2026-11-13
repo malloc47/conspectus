@@ -4,6 +4,7 @@ title: Left-pane follow sync (opt-in view switching)
 status: To Do
 assignee: []
 created_date: '2026-06-01 03:32'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -37,3 +38,9 @@ ordinal: 427000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-036`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): the drill and back stack is the framework's `tuikit::explorer::Explorer` over the host's `ExplorerSource` (ADR 0188); the mirror stays host-side, run on the explorer's `Drill` outcome in `src/tui/app/explorer_nav.rs`, which is where `follow` and `none` go. Two keys moved: the left pane's `Backspace` now returns from a reveal and no longer pops the right pane's drill, and on the right pane `Esc` is Back as well as `Backspace` (ADR 0188, ADR 0192), so "Backspace restores the previous view and selection" must fit that split. The Controls overlay is a `tuikit::settings_panel::SettingsPanel` (ADR 0176) whose rows are listed in `src/tui/widgets/controls.rs`; a row applies as it changes.
+<!-- SECTION:NOTES:END -->

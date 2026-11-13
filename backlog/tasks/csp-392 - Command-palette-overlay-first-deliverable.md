@@ -4,6 +4,7 @@ title: Command palette overlay (first deliverable)
 status: To Do
 assignee: []
 created_date: '2026-06-05 18:40'
+updated_date: '2026-10-31 08:15'
 labels:
   - h-cmd
 milestone: m-17
@@ -39,3 +40,9 @@ ordinal: 517000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `H-CMD-003`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): the palette is a `tuikit::palette::Palette<R>` instance (ADR 0174), as `crates/tuikit/docs/controls/palette.md` ("Seams left open") describes: rows built from the CSP-391 source (`Item::new(verb, action).detail(keys)`), filtered with `every_word`, and an `on_pick` that commits the binding's action. Its query line is the palette's own `LineEdit` (`src/tui/widgets/input.rs` is gone). Category headers are not a palette feature: carry the help section in a cell (palette rows can have several cells laid out by a column schema) or in the detail. A commit routes through `Command::action` today, and through `Msg` once CSP-802 lands. Register the overlay with the conformance suite and `src/tui/consistency_tests/`.
+<!-- SECTION:NOTES:END -->

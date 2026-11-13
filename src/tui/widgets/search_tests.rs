@@ -1,17 +1,34 @@
+use super::rows::*;
 use super::*;
 use crate::model::{AgentSessionId, NodeId};
+use crate::tui::icons::NodeKind;
 use crate::tui::rows::{AgentSessionRow, MuxIndicator, Row, RowKind};
 use crate::tui::search::items_from_rows;
-use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
+use ratatui::crossterm::event::KeyCode;
+use ratatui::text::Line;
+use tuikit::selection::{self, Cursor, GUTTER_WIDTH};
+use tuikit::testkit::keys::{ctrl, press};
 
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+/// A match row as the palette draws it in a list `width` cells wide: the
+/// cursor gutter, then the row's cells, which leave the reserved
+/// scrollbar column before the frame.
+fn build_match_line(
+    label: String,
+    item: Option<&SearchItem<'_>>,
+    m: &SearchMatch,
+    is_cursor: bool,
+    width: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    let haystack = item.map_or("", |item| item.haystack.as_ref());
+    let cells = match_cells(
+        &label,
+        haystack,
+        m,
+        width.saturating_sub(GUTTER_WIDTH + 1),
+        theme,
+    );
+    selection::row(cells, Cursor::of(is_cursor, true), theme)
 }
 
 fn agent_row(key: &str, alias: Option<&str>) -> Row {
@@ -52,7 +69,7 @@ fn typing_query_filters_matches() {
     let mut state = SearchOverlayState::new();
     // Type "puf".
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     assert_eq!(state.matches().len(), 1);
@@ -65,11 +82,11 @@ fn enter_confirms_with_cursor_match() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     // Cursor at 0; Enter confirms the first match.
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(
         outcome,
         SearchOutcome::Confirm(Box::new(rows[0].id.clone()))
@@ -82,13 +99,13 @@ fn arrow_down_moves_cursor_within_matches() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(state.cursor(), 1);
     // Wraps.
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(state.cursor(), 0);
 }
 
@@ -98,18 +115,18 @@ fn enter_on_empty_match_list_cancels() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "no-such-match".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     assert!(state.matches().is_empty());
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(outcome, SearchOutcome::Cancel);
 }
 
 #[test]
 fn esc_cancels() {
     let mut state = SearchOverlayState::new();
-    let outcome = state.handle_key(key(KeyCode::Esc));
+    let outcome = state.handle_key(press(KeyCode::Esc));
     assert_eq!(outcome, SearchOutcome::Cancel);
 }
 
@@ -119,23 +136,13 @@ fn ctrl_n_p_navigate_results() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
-    let ctrl_n = KeyEvent {
-        code: KeyCode::Char('n'),
-        modifiers: KeyModifiers::CONTROL,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    };
+    let ctrl_n = ctrl('n');
     state.handle_key(ctrl_n);
     assert_eq!(state.cursor(), 1);
-    let ctrl_p = KeyEvent {
-        code: KeyCode::Char('p'),
-        modifiers: KeyModifiers::CONTROL,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    };
+    let ctrl_p = ctrl('p');
     state.handle_key(ctrl_p);
     assert_eq!(state.cursor(), 0);
 }
@@ -153,7 +160,7 @@ fn match_line_includes_snippet_with_matched_bytes_highlighted() {
     let items = items_from_rows(std::slice::from_ref(&row_with_preview));
     let mut state = SearchOverlayState::new();
     for c in "puffin".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     let m = &state.matches()[0];
@@ -173,6 +180,24 @@ fn match_line_includes_snippet_with_matched_bytes_highlighted() {
     // renderer can style it.
     let has_match_span = line.spans.iter().any(|s| s.content.as_ref() == "puffin");
     assert!(has_match_span, "match span missing in: {:?}", line.spans);
+    // The cursor row: the marker in its gutter and the whole row in the
+    // active highlight, the match keeping its color inside it.
+    assert!(
+        rendered.starts_with(tuikit::glyphs::marks::POINTER),
+        "{rendered}"
+    );
+    for span in &line.spans {
+        assert!(
+            span.style.add_modifier.contains(theme.selection_active),
+            "{span:?}"
+        );
+    }
+    let matched = line
+        .spans
+        .iter()
+        .find(|s| s.content.as_ref() == "puffin")
+        .expect("match span");
+    assert_eq!(matched.style.fg, Some(theme.match_highlight));
 }
 
 #[test]
@@ -184,16 +209,12 @@ fn match_line_skips_snippet_when_label_equals_haystack() {
         id: RowId::Synthetic("g"),
         depth: 0,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: "puffin/dir".to_string(),
-            primary_node: None,
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::at_path("puffin/dir", None)),
     };
     let items = items_from_rows(std::slice::from_ref(&row));
     let mut state = SearchOverlayState::new();
     for c in "puffin".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     let m = &state.matches()[0];
@@ -217,26 +238,26 @@ fn match_line_skips_snippet_when_label_equals_haystack() {
 fn search_glyph_span_uses_kind_color_for_graph_rows() {
     // Each result row carries a kind glyph in
     // its NodeKind color (ADR 0073). An AgentSession row picks
-    // up the AgentSession glyph + `theme.node_agent_session`
+    // up the AgentSession glyph + `theme.node_agent_session()`
     // color; a MuxSession row picks up the mux glyph + color.
     use crate::model::MuxSessionId;
     let theme = Theme::default();
 
     let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
-    let session_span = search_kind_glyph_span(&RowId::AgentSession(session_id), &theme, false);
+    let session_span = search_kind_glyph_span(&RowId::AgentSession(session_id), &theme);
     let session_glyph = NodeKind::AgentSession.default_glyph();
     assert!(
         session_span.content.starts_with(session_glyph),
         "session glyph span content: {:?}",
         session_span.content,
     );
-    assert_eq!(session_span.style.fg, Some(theme.node_agent_session));
+    assert_eq!(session_span.style.fg, Some(theme.node_agent_session()));
 
     let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
-    let mux_span = search_kind_glyph_span(&RowId::MuxSession(mux_id), &theme, false);
+    let mux_span = search_kind_glyph_span(&RowId::MuxSession(mux_id), &theme);
     let mux_glyph = NodeKind::MuxSession.default_glyph();
     assert!(mux_span.content.starts_with(mux_glyph));
-    assert_eq!(mux_span.style.fg, Some(theme.node_mux_session));
+    assert_eq!(mux_span.style.fg, Some(theme.node_mux_session()));
 }
 
 #[test]
@@ -248,14 +269,13 @@ fn search_glyph_span_falls_back_to_two_spaces_for_kindless_rows() {
             pin_id: "ingest".to_string(),
         },
         &theme,
-        false,
     );
     assert_eq!(pin_span.content, "◉ ");
-    assert_eq!(pin_span.style.fg, Some(theme.node_mux_session));
+    assert_eq!(pin_span.style.fg, Some(theme.node_mux_session()));
 
     // Synthetic ids aren't graph nodes — they get two blank
     // cells so the label column lines up with glyph-bearing rows.
-    let synthetic_span = search_kind_glyph_span(&RowId::Synthetic("ungrouped"), &theme, false);
+    let synthetic_span = search_kind_glyph_span(&RowId::Synthetic("ungrouped"), &theme);
     assert_eq!(synthetic_span.content, "  ");
     assert_eq!(synthetic_span.style.fg, None);
 }
@@ -269,7 +289,7 @@ fn match_line_includes_kind_glyph_before_label() {
     let items = items_from_rows(std::slice::from_ref(&row));
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     let m = &state.matches()[0];
@@ -288,7 +308,7 @@ fn match_line_includes_kind_glyph_before_label() {
         .iter()
         .find(|s| s.content == format!("{agent_glyph} "))
         .expect("kind glyph span present in match line");
-    assert_eq!(glyph_span.style.fg, Some(theme.node_agent_session));
+    assert_eq!(glyph_span.style.fg, Some(theme.node_agent_session()));
 }
 
 #[test]
@@ -297,17 +317,64 @@ fn refresh_matches_resets_cursor_when_truncated() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(state.cursor(), 1);
     // Narrow the query so only one match survives — cursor
     // shouldn't dangle past the new end.
     for c in "fin".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     assert_eq!(state.matches().len(), 1);
     assert_eq!(state.cursor(), 0);
+}
+
+/// How many results the palette's last draw showed (what a page is).
+fn page_rows(state: &SearchOverlayState) -> usize {
+    match &state.palette {
+        Palettes::Quick(palette) => palette.window().page(),
+        Palettes::Content(palette) => palette.window().page(),
+    }
+}
+
+#[test]
+fn page_keys_move_by_the_rows_shown_and_stop_at_the_ends() {
+    let rows: Vec<Row> = (0..30)
+        .map(|n| agent_row(&format!("s{n:02}"), Some(&format!("puffin {n:02}"))))
+        .collect();
+    let items = items_from_rows(&rows);
+    let ctx = || SearchContext {
+        items: &items,
+        content: &[],
+        entities: None,
+        listing: None,
+    };
+    let mut state = SearchOverlayState::new();
+    for c in "puf".chars() {
+        state.handle_in(ctx(), press(KeyCode::Char(c)));
+    }
+    assert_eq!(state.matches().len(), 30);
+    let theme = Theme::default();
+    let area = Rect::new(0, 0, 100, 24);
+    let mut buf = Buffer::empty(area);
+    SearchOverlayWidget::new(&mut state, &items, &theme).render(area, &mut buf);
+    let page = page_rows(&state);
+    assert!(page > 2 && page < 30, "{page}");
+
+    state.handle_in(ctx(), press(KeyCode::PageDown));
+    assert_eq!(state.cursor(), page);
+    for _ in 0..10 {
+        state.handle_in(ctx(), press(KeyCode::PageDown));
+    }
+    assert_eq!(state.cursor(), 29, "stops at the last result");
+    state.handle_in(ctx(), press(KeyCode::PageUp));
+    assert_eq!(state.cursor(), 29 - page);
+    for _ in 0..10 {
+        state.handle_in(ctx(), press(KeyCode::PageUp));
+    }
+    assert_eq!(state.cursor(), 0, "stops at the first");
+    assert_eq!(state.query(), "puf", "the page keys type nothing");
 }

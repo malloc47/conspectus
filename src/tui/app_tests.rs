@@ -7,7 +7,15 @@ use crate::model::{
 };
 use crate::resolve::resolve_snapshot;
 use crate::tui::SessionsGrouping;
+use crate::tui::keybindings::key_name;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
+use tuikit::explorer::ExplorerKey;
+
+/// What the right pane says when `Back` arms with no drill to back out
+/// of, its key named from the keymap.
+fn armed_back_hint() -> String {
+    format!("press {} again", key_name("explorer.back"))
+}
 
 fn make_snapshot_with(sessions: &[(&str, &str, &str)]) -> GraphSnapshot {
     let mut snap = GraphSnapshot::empty();
@@ -170,15 +178,19 @@ fn selected_pinned_session_row_shows_the_session_detail() {
         .expect("a pinned session should render as a session row");
     app.set_selection(row_id);
 
-    let detail = app
-        .detail()
-        .expect("pinned session row should resolve detail");
-    assert_eq!(detail.kind, crate::model::NodeKind::AgentSession);
+    let state = app
+        .explorer()
+        .expect("pinned session row should resolve to a node");
+    assert_eq!(state.content().kind, crate::model::NodeKind::AgentSession);
     assert!(
-        detail
-            .header_fields
-            .iter()
-            .any(|field| { field.label == "pin" && field.value.contains("ingest") })
+        state.content().relationships.groups.iter().any(|group| {
+            group.relation == crate::model::RelationKind::PinTargets
+                && group
+                    .links
+                    .iter()
+                    .any(|link| matches!(&link.neighbor_id, NodeId::Pin(pin) if pin.id == "ingest"))
+        }),
+        "the session should list the pin that points at it"
     );
 }
 
@@ -192,7 +204,7 @@ fn empty_tree_leaves_selection_none() {
         initial_selection_hint: None,
     });
     assert!(app.selection().is_none());
-    assert!(app.detail().is_none());
+    assert!(app.explorer().is_none());
 }
 
 #[test]
@@ -352,11 +364,7 @@ fn nav_down_past_duplicate_row_id_advances_to_the_following_row() {
         id: RowId::Group(id.clone()),
         depth: 0,
         expandable: false,
-        kind: RowKind::Group(GroupRow {
-            display_path: label.to_string(),
-            primary_node: Some(id),
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::named(label, Some(id))),
     };
     let workspace = |key: &str| NodeId::Workspace(WorkspaceId::new(key));
     let dup_id = workspace("dup");
@@ -381,19 +389,66 @@ fn nav_down_past_duplicate_row_id_advances_to_the_following_row() {
     // Step onto the first duplicate, then the second.
     app.update(Msg::NavDown);
     app.update(Msg::NavDown);
-    assert_eq!(app.last_visible_index, Some(2));
-    assert_eq!(app.selection.as_ref(), Some(&RowId::Group(dup_id)));
+    assert_eq!(app.tree_state.position(), Some(2));
+    assert_eq!(app.selection(), Some(&RowId::Group(dup_id)));
 
     // From the second duplicate, NavDown must advance to the
     // row *after* it, not snap back to the row after the first
     // copy.
     app.update(Msg::NavDown);
-    assert_eq!(app.last_visible_index, Some(3));
+    assert_eq!(app.tree_state.position(), Some(3));
     assert_eq!(
-        app.selection.as_ref(),
+        app.selection(),
         Some(&RowId::Group(workspace("c"))),
         "NavDown from the second duplicate must land on the next row, not snap to the row after the first copy",
     );
+}
+
+#[test]
+fn a_rebuild_keeps_the_cursor_on_the_copy_of_a_duplicated_row_it_was_on() {
+    // The tree's one retention routine finds the selected row again by
+    // the copy the cursor was on, not the first copy in the tree, so a
+    // refresh or a projection change doesn't move the cursor up.
+    use crate::tui::rows::{GroupRow, Row, RowId, RowKind};
+
+    let workspace = |key: &str| NodeId::Workspace(WorkspaceId::new(key));
+    let group_row = |id: NodeId, label: &str| Row {
+        id: RowId::Group(id.clone()),
+        depth: 0,
+        expandable: false,
+        kind: RowKind::Group(GroupRow::named(label, Some(id))),
+    };
+    let tree = crate::tui::rows::RowTree {
+        view: crate::tui::rows::ViewLabel::Mux,
+        rows: vec![
+            group_row(workspace("a"), "a"),
+            group_row(workspace("dup"), "dup-first"),
+            group_row(workspace("dup"), "dup-second"),
+            group_row(workspace("c"), "c"),
+        ],
+    };
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&GraphSnapshot::empty()),
+        tree: tree.clone(),
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app.update(Msg::NavDown);
+    app.update(Msg::NavDown);
+    assert_eq!(app.tree_state.position(), Some(2));
+
+    app.update(Msg::SetTree(tree.clone()));
+    assert_eq!(app.tree_state.position(), Some(2), "a rebuild");
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&GraphSnapshot::empty()),
+        tree,
+        loaded_at_epoch: 1_700_000_010,
+        initial_selection_hint: None,
+    });
+    assert_eq!(app.tree_state.position(), Some(2), "a refresh");
+    app.update(Msg::NavDown);
+    assert_eq!(app.selection(), Some(&RowId::Group(workspace("c"))));
 }
 
 #[test]
@@ -513,95 +568,11 @@ fn scroll_preview_by_advances_by_arbitrary_delta() {
 }
 
 #[test]
-fn adjust_left_scroll_keeps_selection_above_top() {
-    let mut app = App::new(RunConfig::defaults());
-    // Selection at line 0 with viewport 5: offset is 0.
-    assert_eq!(app.adjust_left_scroll(0, 5), 0);
-    // Walk the selection down to line 10; offset advances so
-    // the selection is on the bottom edge of the viewport.
-    assert_eq!(app.adjust_left_scroll(10, 5), 6);
-    // Walk back up to line 4 — selection moved above the top
-    // edge, so the offset retreats to it.
-    assert_eq!(app.adjust_left_scroll(4, 5), 4);
-}
-
-#[test]
-fn adjust_left_scroll_holds_when_selection_inside_viewport() {
-    let mut app = App::new(RunConfig::defaults());
-    // Prime offset by scrolling to line 10 in a 5-tall viewport.
-    app.adjust_left_scroll(10, 5);
-    assert_eq!(app.left_scroll(), 6);
-    // Move selection within [6, 10] — offset should not change.
-    assert_eq!(app.adjust_left_scroll(8, 5), 6);
-    assert_eq!(app.adjust_left_scroll(7, 5), 6);
-    assert_eq!(app.adjust_left_scroll(10, 5), 6);
-}
-
-#[test]
-fn adjust_left_scroll_with_zero_viewport_does_nothing() {
-    let mut app = App::new(RunConfig::defaults());
-    app.adjust_left_scroll(10, 5);
-    let before = app.left_scroll();
-    let returned = app.adjust_left_scroll(99, 0);
-    assert_eq!(returned, before);
-    assert_eq!(app.left_scroll(), before);
-}
-
-#[test]
-fn adjust_explorer_scroll_keeps_cursor_in_viewport() {
-    let mut app = App::new(RunConfig::defaults());
-    assert_eq!(app.adjust_explorer_scroll(0, 0, 5), 0);
-    assert_eq!(app.adjust_explorer_scroll(10, 10, 5), 6);
-    assert_eq!(app.adjust_explorer_scroll(4, 4, 5), 4);
-}
-
-#[test]
-fn adjust_explorer_scroll_holds_when_cursor_inside_viewport() {
-    let mut app = App::new(RunConfig::defaults());
-    app.adjust_explorer_scroll(10, 10, 5);
-    assert_eq!(app.explorer_scroll(), 6);
-    assert_eq!(app.adjust_explorer_scroll(8, 8, 5), 6);
-    assert_eq!(app.adjust_explorer_scroll(7, 7, 5), 6);
-    assert_eq!(app.adjust_explorer_scroll(10, 10, 5), 6);
-}
-
-#[test]
-fn adjust_explorer_scroll_with_zero_viewport_does_nothing() {
-    let mut app = App::new(RunConfig::defaults());
-    app.adjust_explorer_scroll(10, 10, 5);
-    let before = app.explorer_scroll();
-    let returned = app.adjust_explorer_scroll(99, 99, 0);
-    assert_eq!(returned, before);
-    assert_eq!(app.explorer_scroll(), before);
-}
-
-#[test]
-fn adjust_explorer_scroll_keeps_wrapped_cursor_line_fully_visible() {
-    // Regression: when the cursor's logical line wraps to 2+
-    // rendered rows, only feeding the line's start row left
-    // the trailing wrap rows below the viewport bottom. The
-    // span-aware API uses the cursor's last row to drive the
-    // "scroll down" branch so a 2-row wrapped cursor line at
-    // the bottom of the content advances the offset enough
-    // for both rows to fit.
-    let mut app = App::new(RunConfig::defaults());
-    // Viewport 5 rows. Cursor's line starts at row 9 and
-    // wraps to 2 rows (occupies 9 and 10). The offset must
-    // advance to 6 so both 9 and 10 fit in [6, 10].
-    assert_eq!(app.adjust_explorer_scroll(9, 10, 5), 6);
-    assert_eq!(app.explorer_scroll(), 6);
-    // Single-row cursor at the same row keeps the older
-    // tighter behavior (offset = 5).
-    let mut app = App::new(RunConfig::defaults());
-    assert_eq!(app.adjust_explorer_scroll(9, 9, 5), 5);
-}
-
-#[test]
 fn scenario_ambiguous_mux_session_is_leaf_after_adr_0071() {
     // ADR 0071: ambiguous mux candidates no longer expand a
     // per-session subtree; the chip stays but the row is a
-    // leaf. The catalog of muxes lives on the shared-ancestor
-    // group's detail pane via `ambiguous_muxes_for_group`.
+    // leaf. The catalog of muxes is what `a` on the shared-ancestor
+    // group reads, via `ambiguous_muxes_for_group`.
     let (mut app, _) = scenario_app("ambiguous-mux");
     select_session(&mut app, "ambiguous");
 
@@ -717,12 +688,12 @@ fn set_data_falls_back_to_nearest_index_when_selection_disappears() {
 }
 
 #[test]
-fn detail_is_recomputed_when_selection_lands_on_a_node_row() {
+fn explorer_is_recomputed_when_selection_lands_on_a_node_row() {
     let app = seeded_app(&[("codex", "a", "/p/proja")]);
     // Selection auto-lands on the first visible row (a group);
-    // groups still produce a NodeDetail because they're backed
-    // by a NodeId.
-    assert!(app.detail().is_some());
+    // groups still open an explorer because they're backed by a
+    // NodeId.
+    assert!(app.explorer().is_some());
 }
 
 // ---- ADR 0031: per-view state retention ----
@@ -825,7 +796,7 @@ fn no_op_view_switch_is_idempotent() {
 use crate::model::{
     Confidence, LinkEndpoint, LinkState, MuxSessionNode, RelationKind, SourceMetadata,
 };
-use crate::tui::explorer::ExplorerRow;
+use crate::tui::explorer::{ExplorerRow, ExplorerRowKey};
 
 fn snapshot_session_with_mux() -> GraphSnapshot {
     // Session → linked_to_mux → mux. Drives the simplest
@@ -906,27 +877,27 @@ fn explorer_home_and_end_snap_cursor_to_first_and_last_row() {
     // cursor to its first / last row when the right pane has
     // focus. Reducer-level test: dispatching the messages
     // directly drives the cursor regardless of which pane has
-    // focus (the focus check happens in `remap_for_focus`).
+    // focus (the keymap's scopes decide which pane a key reaches).
     let mut app = app_for_explorer();
-    let row_count = app.explorer().expect("state").rows().len();
+    let row_count = app.explorer_rows().len();
     assert!(row_count > 1, "fixture should expose multiple rows");
 
     // Walk the cursor down a couple of rows, then End it.
-    app.update(Msg::ExplorerNavDown);
-    app.update(Msg::ExplorerNavDown);
-    app.update(Msg::ExplorerEnd);
+    app.update(Msg::Explorer(ExplorerKey::Down));
+    app.update(Msg::Explorer(ExplorerKey::Down));
+    app.update(Msg::Explorer(ExplorerKey::Last));
     assert_eq!(
-        app.explorer().expect("state").cursor,
+        app.explorer().expect("state").cursor().expect("a cursor"),
         row_count - 1,
-        "ExplorerEnd should snap cursor to the last row",
+        "End should snap cursor to the last row",
     );
 
     // Home brings it back to the top.
-    app.update(Msg::ExplorerHome);
+    app.update(Msg::Explorer(ExplorerKey::First));
     assert_eq!(
-        app.explorer().expect("state").cursor,
+        app.explorer().expect("state").cursor().expect("a cursor"),
         0,
-        "ExplorerHome should snap cursor to the first row",
+        "Home should snap cursor to the first row",
     );
 }
 
@@ -938,8 +909,8 @@ fn explorer_state_initializes_with_cursor_on_the_first_node_field() {
     // down into the relationship rows, at which point the
     // Preview switches to neighbor + edge content.
     let app = app_for_explorer();
-    let state = app.explorer().expect("explorer state present");
-    let row = state.selected_row().expect("selected row");
+    assert!(app.explorer().is_some(), "explorer state present");
+    let row = app.explorer_cursor_row().expect("selected row");
     assert!(matches!(row, ExplorerRow::NodeField { index: 0, .. }));
 }
 
@@ -949,15 +920,13 @@ fn explorer_enter_on_link_drills_into_neighbor_and_pushes_breadcrumb() {
     let before = app
         .explorer()
         .expect("explorer state present")
-        .view
+        .content()
         .focused
         .clone();
     // Walk past the Node fields and onto the first link row,
     // then activate to drill.
     let target_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -967,15 +936,15 @@ fn explorer_enter_on_link_drills_into_neighbor_and_pushes_breadcrumb() {
         })
         .expect("link row");
     for _ in 0..target_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     let after = app.explorer().expect("explorer state after drill");
     // Focus now points at the mux.
-    assert_ne!(after.view.focused, before);
-    assert_eq!(after.view.kind, crate::model::NodeKind::MuxSession);
-    assert_eq!(after.breadcrumb.len(), 1);
-    assert_eq!(after.breadcrumb[0].focused, before);
+    assert_ne!(after.content().focused, before);
+    assert_eq!(after.content().kind, crate::model::NodeKind::MuxSession);
+    assert_eq!(after.frames().len(), 1);
+    assert_eq!(after.frames()[0].id, before);
 }
 
 #[test]
@@ -991,9 +960,7 @@ fn explorer_drill_mirror_sync_keeps_left_pane_when_neighbor_has_no_row() {
         .expect("session selection in app_for_explorer")
         .clone();
     let target_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1003,9 +970,9 @@ fn explorer_drill_mirror_sync_keeps_left_pane_when_neighbor_has_no_row() {
         })
         .expect("link row");
     for _ in 0..target_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     // Sessions view doesn't render the mux as a row, so the
     // left selection should stay put.
     assert_eq!(
@@ -1017,17 +984,17 @@ fn explorer_drill_mirror_sync_keeps_left_pane_when_neighbor_has_no_row() {
     // mirror sync's missing-row fallback only affects the left
     // pane.
     assert_eq!(
-        app.explorer().expect("state").view.kind,
+        app.explorer().expect("state").content().kind,
         crate::model::NodeKind::MuxSession
     );
     let hop = app
         .explorer()
         .expect("state")
-        .breadcrumb
+        .frames()
         .last()
         .expect("one hop after drill")
         .clone();
-    assert_eq!(hop.left_pane_selection.as_ref(), Some(&pre_drill_selection));
+    assert_eq!(hop.saved.as_ref(), Some(&pre_drill_selection));
 }
 
 #[test]
@@ -1087,13 +1054,13 @@ fn explorer_drill_mirrors_left_pane_to_neighbor_when_present_in_tree() {
     app.set_selection(parent_row);
     app.update(Msg::CycleFocus);
     // Walk to a link row whose neighbor is the child session.
-    let rows = app.explorer().expect("state").rows();
+    let rows = app.explorer_rows();
     let link_idx = rows
         .iter()
         .enumerate()
         .find_map(|(idx, row)| match row {
             ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
-                if app.explorer().expect("state").view.drill_target(row)
+                if app.explorer().expect("state").content().drill_target(row)
                     == Some(child_id.clone()) =>
             {
                 Some(idx)
@@ -1102,9 +1069,9 @@ fn explorer_drill_mirrors_left_pane_to_neighbor_when_present_in_tree() {
         })
         .expect("link row drilling into the child session");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     let post = app.selection().expect("selection after drill").clone();
     let child_row = app
         .tree()
@@ -1121,7 +1088,7 @@ fn explorer_drill_mirrors_left_pane_to_neighbor_when_present_in_tree() {
     );
     // Right pane still on the child session.
     assert_eq!(
-        app.explorer().expect("state").view.focused,
+        app.explorer().expect("state").content().focused,
         child_id,
         "explorer should still focus the drilled neighbor",
     );
@@ -1138,9 +1105,7 @@ fn explorer_backspace_restores_left_pane_selection() {
         .expect("session selection in app_for_explorer")
         .clone();
     let target_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1150,18 +1115,18 @@ fn explorer_backspace_restores_left_pane_selection() {
         })
         .expect("link row");
     for _ in 0..target_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     // Backspace.
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert_eq!(
         app.selection().expect("selection after backspace"),
         &pre_drill_selection,
         "left pane should be restored to the pre-drill row",
     );
     assert_eq!(
-        app.explorer().expect("state").view.kind,
+        app.explorer().expect("state").content().kind,
         crate::model::NodeKind::AgentSession,
         "right pane should be restored to the pre-drill node",
     );
@@ -1172,9 +1137,7 @@ fn explorer_backspace_restores_previous_focused_node_and_cursor() {
     let mut app = app_for_explorer();
     // Walk past the Node fields and onto the first link row.
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1184,22 +1147,24 @@ fn explorer_backspace_restores_previous_focused_node_and_cursor() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     let before_state = app.explorer().expect("initial").clone();
-    let before_focus = before_state.view.focused.clone();
-    let before_cursor_key = before_state
-        .selected_row()
-        .map(|row| row.key(&before_state.view));
-    app.update(Msg::ExplorerActivate);
+    let before_focus = before_state.content().focused.clone();
+    let before_cursor_key = app
+        .explorer_cursor_row()
+        .map(|row| row.key(before_state.content()));
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     // Move cursor on the new focused node to prove it gets
     // restored to the *original* one on Backspace.
-    app.update(Msg::ExplorerNavDown);
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Down));
+    app.update(Msg::Explorer(ExplorerKey::Back));
     let restored = app.explorer().expect("restored explorer");
-    assert_eq!(restored.view.focused, before_focus);
-    assert!(restored.breadcrumb.is_empty());
-    let restored_cursor = restored.selected_row().map(|row| row.key(&restored.view));
+    assert_eq!(restored.content().focused, before_focus);
+    assert!(restored.frames().is_empty());
+    let restored_cursor = app
+        .explorer_cursor_row()
+        .map(|row| row.key(restored.content()));
     assert_eq!(restored_cursor, before_cursor_key);
 }
 
@@ -1207,13 +1172,100 @@ fn explorer_backspace_restores_previous_focused_node_and_cursor() {
 fn explorer_back_with_no_breadcrumb_and_left_focus_surfaces_status_hint() {
     let mut app = app_for_explorer();
     assert_eq!(app.focus(), Focus::Left);
-    app.update(Msg::ExplorerBack);
-    assert!(
-        app.status_message()
-            .is_some_and(|s| s.contains("no drill history"))
+    app.update(Msg::NavBack);
+    assert_eq!(
+        app.status_message(),
+        Some(format!("{}: no reveal to return from", key_name("reveal.back")).as_str())
     );
     // Focus stays put when there's nothing to back out of.
     assert_eq!(app.focus(), Focus::Left);
+}
+
+#[test]
+fn the_inspect_key_with_no_explorer_says_what_it_opens() {
+    let mut app = App::new(RunConfig::defaults());
+    assert!(app.explorer().is_none());
+    app.update(Msg::Explorer(ExplorerKey::Inspect));
+    assert_eq!(
+        app.status_message(),
+        Some(
+            format!(
+                "explorer: nothing to open here — `{}` opens long values on the cursor row",
+                key_name("value.inspect")
+            )
+            .as_str()
+        )
+    );
+}
+
+#[test]
+fn the_right_panes_status_hint_names_what_enter_does_on_the_cursor_row() {
+    let mut app = app_for_explorer();
+    app.update(Msg::CycleFocus);
+    let status = |app: &mut App| {
+        let buffer =
+            crate::tui::ui::render_to_buffer(app, ratatui::layout::Rect::new(0, 0, 200, 30));
+        let text = crate::tui::ui::buffer_to_string(&buffer);
+        text.lines().last().unwrap_or_default().to_string()
+    };
+    assert!(
+        status(&mut app).contains("↑/↓ move · Enter copy · e fold · Backspace back"),
+        "a field copies: {}",
+        status(&mut app)
+    );
+    let link = app
+        .explorer_rows()
+        .iter()
+        .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
+        .expect("link row");
+    for _ in 0..link {
+        app.update(Msg::Explorer(ExplorerKey::Down));
+    }
+    assert!(
+        status(&mut app).contains("Enter follow"),
+        "a link drills: {}",
+        status(&mut app)
+    );
+}
+
+#[test]
+fn backspace_on_the_left_pane_leaves_the_right_panes_drill_alone() {
+    // The left pane's Backspace returns from a reveal; the right pane's
+    // drill is the right pane's Backspace's. With no reveal to return
+    // from, the press says so and points at the right pane.
+    let mut app = app_for_explorer();
+    let link = app
+        .explorer_rows()
+        .iter()
+        .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
+        .expect("link row");
+    app.update(Msg::CycleFocus);
+    for _ in 0..link {
+        app.update(Msg::Explorer(ExplorerKey::Down));
+    }
+    app.update(Msg::Explorer(ExplorerKey::Activate));
+    let drilled = app.explorer().expect("state").id().clone();
+    app.update(Msg::CycleFocus);
+    assert_eq!(app.focus(), Focus::Left);
+
+    app.update(Msg::NavBack);
+
+    let state = app.explorer().expect("state");
+    assert_eq!(state.id(), &drilled, "the right pane stays drilled");
+    assert_eq!(state.frames().len(), 1);
+    assert!(
+        app.status_message()
+            == Some(
+                format!(
+                    "{}: no reveal to return from · {} to the right pane to back out of its drill",
+                    key_name("reveal.back"),
+                    key_name("focus.cycle")
+                )
+                .as_str()
+            ),
+        "{:?}",
+        app.status_message()
+    );
 }
 
 #[test]
@@ -1227,16 +1279,16 @@ fn explorer_back_with_no_breadcrumb_and_right_focus_arms_then_shifts_focus_on_se
     app.update(Msg::CycleFocus);
     assert_eq!(app.focus(), Focus::Right);
     // First press: arms the shift and surfaces the hint.
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert_eq!(app.focus(), Focus::Right);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again")),
+            .is_some_and(|s| s.contains(&armed_back_hint())),
         "first backspace should surface the confirmation hint; got: {:?}",
         app.status_message()
     );
     // Second press: actually shifts focus, clears the hint.
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert_eq!(app.focus(), Focus::Left);
     assert!(app.status_message().is_none());
 }
@@ -1251,53 +1303,47 @@ fn explorer_back_armed_state_clears_on_intervening_message() {
     let mut app = app_for_explorer();
     app.update(Msg::CycleFocus);
     assert_eq!(app.focus(), Focus::Right);
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again"))
+            .is_some_and(|s| s.contains(&armed_back_hint()))
     );
     // Intervening navigation cancels the arming.
-    app.update(Msg::ExplorerNavDown);
+    app.update(Msg::Explorer(ExplorerKey::Down));
     // Next Backspace should re-arm, not shift focus.
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert_eq!(app.focus(), Focus::Right);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again"))
+            .is_some_and(|s| s.contains(&armed_back_hint()))
     );
 }
 
 #[test]
-fn explorer_back_arm_survives_per_frame_viewport_reconciliation() {
-    // Regression: the draw path dispatches `LeftViewportChanged` /
-    // `ExplorerViewportChanged` every frame, and
-    // `draw_frame` runs before each key poll. Those layout-plumbing
-    // messages must not count as an "intervening action", otherwise the
-    // empty-stack Backspace arm is cleared before the operator can land
-    // the confirming second press and focus never leaves the right pane
-    // no matter how many times Backspace is pressed.
+fn explorer_back_arm_survives_the_frames_between_presses() {
+    // Regression: `draw_frame` runs before each key poll, so a frame is
+    // always drawn between the two Backspace presses. Drawing it must not
+    // count as an "intervening action", otherwise the empty-stack arm is
+    // cleared before the operator can land the confirming second press
+    // and focus never leaves the right pane however often Backspace is
+    // pressed.
     let mut app = app_for_explorer();
     app.update(Msg::CycleFocus);
     assert_eq!(app.focus(), Focus::Right);
     // First press arms the shift and surfaces the hint.
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert_eq!(app.focus(), Focus::Right);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again"))
+            .is_some_and(|s| s.contains(&armed_back_hint()))
     );
-    // A frame renders between presses, dispatching both reconciliation
-    // messages. These must leave the arm intact.
-    app.update(Msg::LeftViewportChanged {
-        viewport_height: 20,
-    });
-    app.update(Msg::ExplorerViewportChanged {
-        cursor_first_row: 0,
-        cursor_last_row: 0,
-        viewport_height: 20,
-    });
+    // Frames are drawn between the presses, and their windows kept.
+    // They must leave the arm intact.
+    let area = ratatui::layout::Rect::new(0, 0, 100, 30);
+    crate::tui::ui::render_to_buffer(&mut app, area);
+    crate::tui::ui::render_to_buffer(&mut app, area);
     // Second press now completes the focus shift.
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert_eq!(app.focus(), Focus::Left);
     assert!(app.status_message().is_none());
 }
@@ -1311,9 +1357,7 @@ fn explorer_back_unwinds_drill_then_arms_then_shifts_focus() {
     app.update(Msg::CycleFocus);
     assert_eq!(app.focus(), Focus::Right);
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1323,24 +1367,24 @@ fn explorer_back_unwinds_drill_then_arms_then_shifts_focus() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    let before = app.explorer().expect("state").view.focused.clone();
-    app.update(Msg::ExplorerActivate);
-    assert_ne!(app.explorer().expect("state").view.focused, before);
+    let before = app.explorer().expect("state").content().focused.clone();
+    app.update(Msg::Explorer(ExplorerKey::Activate));
+    assert_ne!(app.explorer().expect("state").content().focused, before);
     // First backspace pops the drilldown hop; focus stays right.
-    app.update(Msg::ExplorerBack);
-    assert_eq!(app.explorer().expect("state").view.focused, before);
+    app.update(Msg::Explorer(ExplorerKey::Back));
+    assert_eq!(app.explorer().expect("state").content().focused, before);
     assert_eq!(app.focus(), Focus::Right);
     // Second backspace at the empty stack arms the focus shift.
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert_eq!(app.focus(), Focus::Right);
     assert!(
         app.status_message()
-            .is_some_and(|s| s.contains("press Backspace again"))
+            .is_some_and(|s| s.contains(&armed_back_hint()))
     );
     // Third backspace shifts focus to the left pane.
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert_eq!(app.focus(), Focus::Left);
 }
 
@@ -1383,22 +1427,22 @@ fn explorer_toggle_full_detail_swaps_core_for_all_fields() {
     // app_for_explorer focuses on an agent session, whose
     // all_fields is a superset of core_fields.
     let mut app = app_for_explorer();
-    let core_count = app.explorer().expect("state").view.core_fields.len();
-    let all_count = app.explorer().expect("state").view.all_fields.len();
+    let core_count = app.explorer().expect("state").content().core_fields.len();
+    let all_count = app.explorer().expect("state").content().all_fields.len();
     assert!(
         all_count > core_count,
         "test premise: agent_session should carry extras",
     );
-    let rows_before = app.explorer().expect("state").rows();
+    let rows_before = app.explorer_rows();
     let node_field_count_before = rows_before
         .iter()
         .filter(|r| matches!(r, ExplorerRow::NodeField { .. }))
         .count();
     assert_eq!(node_field_count_before, core_count);
 
-    app.update(Msg::ExplorerToggleFullDetail);
-    assert!(app.explorer().expect("state").full_detail_expanded);
-    let rows_after = app.explorer().expect("state").rows();
+    app.update(Msg::Explorer(ExplorerKey::ToggleFull));
+    assert!(app.explorer().expect("state").view().full);
+    let rows_after = app.explorer_rows();
     let node_field_count_after = rows_after
         .iter()
         .filter(|r| matches!(r, ExplorerRow::NodeField { .. }))
@@ -1406,9 +1450,9 @@ fn explorer_toggle_full_detail_swaps_core_for_all_fields() {
     assert_eq!(node_field_count_after, all_count);
 
     // Toggle back.
-    app.update(Msg::ExplorerToggleFullDetail);
-    assert!(!app.explorer().expect("state").full_detail_expanded);
-    let rows_back = app.explorer().expect("state").rows();
+    app.update(Msg::Explorer(ExplorerKey::ToggleFull));
+    assert!(!app.explorer().expect("state").view().full);
+    let rows_back = app.explorer_rows();
     let node_field_count_back = rows_back
         .iter()
         .filter(|r| matches!(r, ExplorerRow::NodeField { .. }))
@@ -1423,13 +1467,11 @@ fn explorer_full_detail_resets_on_drill_and_restores_on_backspace() {
     // node's toggle state.
     let mut app = app_for_explorer();
     // Turn on Expanded Detail on the original node.
-    app.update(Msg::ExplorerToggleFullDetail);
-    assert!(app.explorer().expect("state").full_detail_expanded);
+    app.update(Msg::Explorer(ExplorerKey::ToggleFull));
+    assert!(app.explorer().expect("state").view().full);
     // Walk to the first link row and drill.
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1439,15 +1481,15 @@ fn explorer_full_detail_resets_on_drill_and_restores_on_backspace() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     // Drilled state should default back to compact.
-    assert!(!app.explorer().expect("state").full_detail_expanded);
+    assert!(!app.explorer().expect("state").view().full);
     // Backspace should restore the prior toggle state.
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
     assert!(
-        app.explorer().expect("state").full_detail_expanded,
+        app.explorer().expect("state").view().full,
         "Backspace should restore the prior node's Expanded Detail toggle",
     );
 }
@@ -1461,9 +1503,7 @@ fn explorer_toggle_group_only_acts_on_other_header() {
     // silently doing nothing.
     let mut app = app_for_explorer();
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1473,9 +1513,9 @@ fn explorer_toggle_group_only_acts_on_other_header() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerToggleGroup);
+    app.update(Msg::Explorer(ExplorerKey::ToggleSection));
     assert!(
         app.status_message()
             .is_some_and(|s| s.contains("nothing to expand"))
@@ -1485,47 +1525,52 @@ fn explorer_toggle_group_only_acts_on_other_header() {
 #[test]
 fn explorer_nav_clamps_inside_flat_row_range() {
     let mut app = app_for_explorer();
-    let len = app.explorer().expect("state").rows().len();
+    let len = app.explorer_rows().len();
     for _ in 0..(len + 5) {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    let cursor = app.explorer().expect("state").cursor;
+    let cursor = app.explorer().expect("state").cursor().expect("a cursor");
     assert!(cursor < len.max(1));
     for _ in 0..(len + 5) {
-        app.update(Msg::ExplorerNavUp);
+        app.update(Msg::Explorer(ExplorerKey::Up));
     }
-    assert_eq!(app.explorer().expect("state").cursor, 0);
+    assert_eq!(
+        app.explorer().expect("state").cursor().expect("a cursor"),
+        0
+    );
 }
 
-#[test]
-fn open_value_modal_when_cursor_has_a_long_value() {
-    // Build an app focused on a session that carries a long
-    // `last_message_preview` so the cursor walks to a row with
-    // a long_value set.
-    let snap = {
-        let mut snap = GraphSnapshot::empty();
-        let repo_id = RepoId::new("/p/proj");
-        snap.nodes
-            .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
-        snap.nodes.push(GraphNode::Checkout(CheckoutNode {
-            id: CheckoutId::new(repo_id, "/p/proj".to_string()),
-            root: "/p/proj".to_string(),
-            git_dir: None,
-            current_branch: None,
-            worktree: None,
-            head_commit: None,
-        }));
-        snap.nodes.push(GraphNode::AgentSession(
-            AgentSessionNode::new(
-                AgentSessionId::new("claude-code", "/state", "abc"),
-                "claude-code".to_string(),
-            )
-            .with_cwd("/p/proj".to_string())
-            .with_last_message_preview("a".repeat(120))
-            .with_last_active_epoch(1_700_000_000),
-        ));
-        resolve_snapshot(snap)
-    };
+/// The title and last message both run past the 48 columns the Node zone
+/// shows, so the title (a core row) and the last message (an extra row,
+/// past the five core rows) each carry a full value to copy or inspect.
+const LONG_TITLE: &str = "a title that runs well past the width the Node zone shows for it";
+const LONG_PREVIEW: &str = "the last message is long as well, so Enter and o have to reach the whole text and not what the pane cut";
+
+/// App focused on an agent session with the long title and last message.
+fn app_with_truncated_fields() -> App {
+    let mut snap = GraphSnapshot::empty();
+    let repo_id = RepoId::new("/p/proj");
+    snap.nodes
+        .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+    snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+        id: CheckoutId::new(repo_id, "/p/proj".to_string()),
+        root: "/p/proj".to_string(),
+        git_dir: None,
+        current_branch: None,
+        worktree: None,
+        head_commit: None,
+    }));
+    snap.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", "abc"),
+            "claude-code".to_string(),
+        )
+        .with_cwd("/p/proj".to_string())
+        .with_title(LONG_TITLE)
+        .with_last_message_preview(LONG_PREVIEW)
+        .with_last_active_epoch(1_700_000_000),
+    ));
+    let snap = resolve_snapshot(snap);
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
@@ -1543,24 +1588,238 @@ fn open_value_modal_when_cursor_has_a_long_value() {
         })
         .expect("session row");
     app.set_selection(row_id);
-    // The session's `last_message_preview` lives only in
-    // `all_fields`, not `core_fields`. Without the full-node
-    // toggle the cursor never lands on it through
-    // navigation. For now we exercise the no-value branch.
-    app.open_value_modal_for_cursor();
-    assert!(app.value_modal().is_none());
-    assert!(
-        app.status_message()
-            .is_some_and(|s| s.contains("no truncated"))
+    app
+}
+
+/// Put the explorer cursor on the `label` field the pane shows.
+fn put_cursor_on_field(app: &mut App, label: &str) {
+    let expanded = app.explorer().expect("state").view().full;
+    let position = app
+        .explorer()
+        .expect("state")
+        .content()
+        .fields(expanded)
+        .iter()
+        .position(|field| field.label == label)
+        .unwrap_or_else(|| panic!("the pane shows no {label} field"));
+    app.update(Msg::Explorer(ExplorerKey::First));
+    for _ in 0..position {
+        app.update(Msg::Explorer(ExplorerKey::Down));
+    }
+    assert_eq!(
+        app.explorer().expect("state").cursor().expect("a cursor"),
+        position
     );
+}
+
+/// Whether the pane shows `field` cut short.
+fn is_cut(field: &crate::tui::explorer::CoreField) -> bool {
+    crate::tui::explorer::grid::field_row(field, &crate::tui::Theme::default()).is_cut()
+}
+
+/// Enter on the focused explorer row: the text and the toast of the copy
+/// it asks the executor for, if it asks for one.
+fn press_enter_copy(app: &mut App) -> Option<(String, String)> {
+    app.update(Msg::Explorer(ExplorerKey::Activate))
+        .into_iter()
+        .find_map(|effect| match effect {
+            crate::tui::Effect::Copy { text, done } => Some((text, done)),
+            _ => None,
+        })
+}
+
+/// `o`: the explorer's inspect key.
+fn press_inspect(app: &mut App) {
+    app.update(Msg::Explorer(ExplorerKey::Inspect));
+}
+
+#[test]
+fn o_opens_a_truncated_field_past_the_core_rows_when_the_node_detail_is_expanded() {
+    let mut app = app_with_truncated_fields();
+    app.update(Msg::Explorer(ExplorerKey::ToggleFull));
+    let state = app.explorer().expect("state");
+    let core_rows = state.content().core_fields.len();
+    let shown = state.content().fields(true);
+    let preview_row = shown
+        .iter()
+        .position(|field| field.label == "last_message_preview")
+        .expect("expanded detail shows the last message");
+    assert!(
+        preview_row >= core_rows,
+        "test premise: the last message sits past the core rows",
+    );
+    put_cursor_on_field(&mut app, "last_message_preview");
+
+    press_inspect(&mut app);
+
+    let modal = app.value_modal().expect("o opens the full-value modal");
+    assert_eq!(modal.content().label, "last_message_preview");
+    assert_eq!(modal.content().value, LONG_PREVIEW);
+}
+
+#[test]
+fn a_failed_clipboard_write_on_enter_says_so_as_an_error() {
+    let mut app = app_with_truncated_fields();
+    app.update(Msg::Explorer(ExplorerKey::ToggleFull));
+    put_cursor_on_field(&mut app, "last_message_preview");
+
+    // Enter asks the executor for the copy; a write that fails says so.
+    let (_, done) = press_enter_copy(&mut app).expect("Enter copies the field");
+    let written = Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+    let toast = crate::tui::runtime::copy_feedback(written, done);
+    assert_eq!(toast.severity, tuikit::feedback::Severity::Error);
+    assert!(toast.text.starts_with("copy failed: "), "{toast:?}");
+}
+
+#[test]
+fn enter_copies_a_field_past_the_core_rows_when_the_node_detail_is_expanded() {
+    let mut app = app_with_truncated_fields();
+    app.update(Msg::Explorer(ExplorerKey::ToggleFull));
+    put_cursor_on_field(&mut app, "last_message_preview");
+
+    let copy = press_enter_copy(&mut app);
+
+    assert_eq!(
+        copy,
+        Some((
+            LONG_PREVIEW.to_string(),
+            "copied: last_message_preview".to_string()
+        )),
+    );
+    // A field with nothing cut copies what it shows.
+    put_cursor_on_field(&mut app, "session_key");
+    assert_eq!(
+        press_enter_copy(&mut app).map(|(text, _)| text).as_deref(),
+        Some("abc"),
+    );
+}
+
+#[test]
+fn enter_copies_the_field_under_the_cursor_with_the_node_detail_collapsed_and_expanded() {
+    for expanded in [false, true] {
+        let mut app = app_with_truncated_fields();
+        if expanded {
+            app.update(Msg::Explorer(ExplorerKey::ToggleFull));
+        }
+        let shown = app
+            .explorer()
+            .expect("state")
+            .content()
+            .fields(expanded)
+            .to_vec();
+        assert!(
+            shown.iter().any(is_cut),
+            "test premise: a shown field is cut short (expanded: {expanded})",
+        );
+        for field in &shown {
+            put_cursor_on_field(&mut app, field.label);
+            let (text, done) = press_enter_copy(&mut app).unwrap_or_default();
+            assert_eq!(
+                text, field.value,
+                "Enter on {} copies it whole, cut or not (expanded: {expanded})",
+                field.label,
+            );
+            assert_eq!(done, format!("copied: {}", field.label));
+        }
+    }
+}
+
+#[test]
+fn enter_on_a_field_with_no_value_copies_nothing() {
+    // A session with no working directory shows `cwd — (unknown)`, a
+    // stand-in for a value it does not have: there is nothing to copy,
+    // so no copy toast claims one.
+    let mut snap = GraphSnapshot::empty();
+    snap.nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", "abc"),
+            "claude-code".to_string(),
+        )));
+    let snap = resolve_snapshot(snap);
+    let tree = build_tree(&snap);
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snap),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let row_id = app
+        .visible_rows()
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::AgentSession(_) => Some(row.id.clone()),
+            _ => None,
+        })
+        .expect("session row");
+    app.set_selection(row_id);
+    put_cursor_on_field(&mut app, "cwd");
+    let shown = app
+        .explorer()
+        .expect("state")
+        .content()
+        .fields(false)
+        .to_vec();
+    let cwd = shown
+        .iter()
+        .find(|field| field.label == "cwd")
+        .expect("cwd");
+    assert!(cwd.placeholder, "test premise: the cwd is a stand-in");
+
+    assert_eq!(press_enter_copy(&mut app), None);
+    assert!(
+        app.toasts()
+            .iter()
+            .all(|toast| !toast.text.starts_with("copied")),
+        "no toast claims a copy"
+    );
+}
+
+#[test]
+fn o_inspects_the_field_under_the_cursor_with_the_node_detail_collapsed_and_expanded() {
+    for expanded in [false, true] {
+        let mut app = app_with_truncated_fields();
+        if expanded {
+            app.update(Msg::Explorer(ExplorerKey::ToggleFull));
+        }
+        let shown = app
+            .explorer()
+            .expect("state")
+            .content()
+            .fields(expanded)
+            .to_vec();
+        for field in &shown {
+            put_cursor_on_field(&mut app, field.label);
+            press_inspect(&mut app);
+            if is_cut(field) {
+                let modal = app
+                    .value_modal()
+                    .unwrap_or_else(|| panic!("o opens {} (expanded: {expanded})", field.label));
+                assert_eq!(modal.content().label, field.label);
+                assert_eq!(modal.content().value, field.value);
+                app.close_value_modal();
+            } else {
+                assert!(
+                    app.value_modal().is_none(),
+                    "{} shows all of its value, so o opens nothing (expanded: {expanded})",
+                    field.label,
+                );
+                assert!(
+                    app.status_message()
+                        .is_some_and(|s| s.contains("no truncated")),
+                );
+            }
+        }
+    }
 }
 
 #[test]
 fn value_modal_close_clears_state() {
     let mut app = app_for_explorer();
     // Simulate an opened modal — exercise the close path.
-    app.modal_stack.push(crate::tui::Modal::ValueModal(
-        crate::tui::widgets::value_modal::ValueModalState::new("command", "long".to_string()),
+    app.open_value_modal(crate::tui::widgets::value_modal::ValueText::new(
+        "command",
+        "long".to_string(),
     ));
     assert!(app.value_modal().is_some());
     app.close_value_modal();
@@ -1585,7 +1844,7 @@ fn scenario_process_cardinality_exposes_upstream_process_groups() {
     app.set_selection(target);
     let state = app.explorer().expect("explorer for session");
     let labels: Vec<&str> = state
-        .view
+        .content()
         .relationships
         .groups
         .iter()
@@ -1617,7 +1876,7 @@ fn scenario_codex_fd_current_exposes_session_linked_groups() {
     app.set_selection(target);
     let state = app.explorer().expect("explorer for session");
     let downstream_kinds: Vec<&str> = state
-        .view
+        .content()
         .relationships
         .groups
         .iter()
@@ -1648,7 +1907,7 @@ fn scenario_ambiguous_mux_exposes_two_candidate_muxes() {
     app.set_selection(target);
     let state = app.explorer().expect("explorer for session");
     let total_mux_links: usize = state
-        .view
+        .content()
         .relationships
         .groups
         .iter()
@@ -1667,11 +1926,9 @@ fn scenario_ambiguous_mux_exposes_two_candidate_muxes() {
 #[test]
 fn explorer_state_resets_when_left_tree_selection_changes() {
     let mut app = app_for_explorer();
-    let initial_focused = app.explorer().expect("state").view.focused.clone();
+    let initial_focused = app.explorer().expect("state").content().focused.clone();
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1681,10 +1938,10 @@ fn explorer_state_resets_when_left_tree_selection_changes() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate); // drill into mux
-    let drilled_focused = app.explorer().expect("state").view.focused.clone();
+    app.update(Msg::Explorer(ExplorerKey::Activate)); // drill into mux
+    let drilled_focused = app.explorer().expect("state").content().focused.clone();
     assert_ne!(initial_focused, drilled_focused);
     // Selecting a different row in the left tree should reset
     // the explorer to that new node — the right pane is the
@@ -1720,8 +1977,448 @@ fn explorer_state_resets_when_left_tree_selection_changes() {
         .expect("first session row");
     app.set_selection(row_id);
     let after = app.explorer().expect("explorer after reselect");
-    assert_eq!(after.view.focused, initial_focused);
-    assert!(after.breadcrumb.is_empty());
+    assert_eq!(after.content().focused, initial_focused);
+    assert!(after.frames().is_empty());
+}
+
+// ----- The right pane's drill across a refresh -----
+
+fn session_node(key: &str) -> NodeId {
+    NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", key))
+}
+
+fn mux_node(name: &str) -> NodeId {
+    NodeId::MuxSession(crate::model::MuxSessionId::new(name))
+}
+
+/// A repo checked out at `/p/proj`, an agent session working there for
+/// each of `sessions`, a tmux session for each of `muxes`, and a
+/// `linked_to_mux` candidate for each `(session, mux)` of `links`. The
+/// Sessions view lists the sessions and none of the muxes.
+fn sessions_and_muxes(sessions: &[&str], muxes: &[&str], links: &[(&str, &str)]) -> GraphSnapshot {
+    let mut snap = GraphSnapshot::empty();
+    let repo_id = RepoId::new("/p/proj");
+    snap.nodes
+        .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+    snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+        id: CheckoutId::new(repo_id, "/p/proj".to_string()),
+        root: "/p/proj".to_string(),
+        git_dir: None,
+        current_branch: None,
+        worktree: None,
+        head_commit: None,
+    }));
+    for key in sessions {
+        snap.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("claude-code", "/state", *key),
+                "claude-code".to_string(),
+            )
+            .with_cwd("/p/proj".to_string())
+            .with_last_active_epoch(1_700_000_000),
+        ));
+    }
+    for name in muxes {
+        snap.nodes.push(GraphNode::MuxSession(
+            MuxSessionNode::new(
+                crate::model::MuxSessionId::new(*name),
+                "tmux".to_string(),
+                (*name).to_string(),
+            )
+            .with_activity_epoch(1_700_000_000)
+            .with_created_epoch(1_700_000_000),
+        ));
+    }
+    for (session, name) in links {
+        snap.candidate_links.push(crate::model::GraphLink {
+            id: format!("{session}-in-{name}"),
+            source: session_node(session),
+            target: LinkEndpoint::Node { id: mux_node(name) },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+    }
+    resolve_snapshot(snap)
+}
+
+/// Deliver `snap` the way the periodic refresh and `r` do.
+fn refresh_with(app: &mut App, snap: &GraphSnapshot) {
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(snap),
+        tree: build_tree(snap),
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+}
+
+fn session_row(app: &App, key: &str) -> RowId {
+    app.tree()
+        .rows
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::AgentSession(s) if s.session.session_key == key => Some(row.id.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("a row for session {key}"))
+}
+
+/// An app on the Sessions view with `snap` loaded and the left pane on
+/// the session `key`.
+fn app_on_session(snap: &GraphSnapshot, key: &str) -> App {
+    let mut app = App::new(RunConfig::defaults());
+    refresh_with(&mut app, snap);
+    let row = session_row(&app, key);
+    app.set_selection(row);
+    app
+}
+
+fn move_explorer_cursor_to(app: &mut App, index: usize) {
+    app.update(Msg::Explorer(ExplorerKey::First));
+    for _ in 0..index {
+        app.update(Msg::Explorer(ExplorerKey::Down));
+    }
+}
+
+/// Put the explorer cursor on the row that leads to `target`, opening
+/// the `Other` zone when that is where the row is.
+fn put_explorer_cursor_on(app: &mut App, target: &NodeId) {
+    let find = |app: &App| {
+        let state = app.explorer().expect("explorer state");
+        app.explorer_rows()
+            .iter()
+            .position(|row| state.content().drill_target(row).as_ref() == Some(target))
+    };
+    let index = find(app).unwrap_or_else(|| {
+        let header = app
+            .explorer_rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::OtherHeader { .. }))
+            .unwrap_or_else(|| panic!("no row leads to {target}"));
+        move_explorer_cursor_to(app, header);
+        app.update(Msg::Explorer(ExplorerKey::ToggleSection));
+        find(app).unwrap_or_else(|| panic!("no row leads to {target}"))
+    });
+    move_explorer_cursor_to(app, index);
+}
+
+fn drill_to(app: &mut App, target: &NodeId) {
+    put_explorer_cursor_on(app, target);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
+    assert_eq!(
+        &app.explorer().expect("explorer state").content().focused,
+        target,
+        "the drill lands on {target}"
+    );
+}
+
+#[test]
+fn a_refresh_keeps_a_drill_into_a_neighbor_the_view_has_no_row_for() {
+    // The session could be in either tmux session. The resolver picks
+    // one, so the other lists the session in its `Other` zone, which
+    // gives the drilled pane a fold to keep.
+    let snap = sessions_and_muxes(
+        &["abc"],
+        &["work", "spare"],
+        &[("abc", "work"), ("abc", "spare")],
+    );
+    let mut app = app_on_session(&snap, "abc");
+    let left = app.selection().cloned();
+    let picked = {
+        let state = app.explorer().expect("explorer state");
+        app.explorer_rows()
+            .iter()
+            .find_map(|row| match row {
+                ExplorerRow::ValidatedLink { .. } => state.content().drill_target(row),
+                _ => None,
+            })
+            .expect("the resolver picks one tmux session")
+    };
+    let other = if picked == mux_node("work") {
+        mux_node("spare")
+    } else {
+        mux_node("work")
+    };
+    app.update(Msg::CycleFocus);
+    drill_to(&mut app, &other);
+    assert_eq!(
+        app.selection(),
+        left.as_ref(),
+        "premise: the Sessions view has no row for a mux, so the left pane stays"
+    );
+    // Open the fold, show every field, and leave the cursor on the
+    // session's row inside the fold.
+    put_explorer_cursor_on(&mut app, &session_node("abc"));
+    app.update(Msg::Explorer(ExplorerKey::ToggleFull));
+    let before = app.explorer().expect("explorer state").clone();
+    let cursor = app
+        .explorer_cursor_row()
+        .map(|row| row.key(before.content()));
+    assert!(before.view().is_open(&ExplorerRowKey::OtherHeader) && before.view().full);
+    assert_eq!(before.frames().len(), 1);
+
+    refresh_with(&mut app, &snap);
+
+    let after = app.explorer().expect("explorer state after the refresh");
+    assert_eq!(after.content().focused, other, "the pane stays on the mux");
+    assert_eq!(after.frames(), before.frames(), "the breadcrumb stays");
+    assert!(
+        after.view().is_open(&ExplorerRowKey::OtherHeader),
+        "the fold stays open"
+    );
+    assert!(after.view().full, "every field still shows");
+    assert_eq!(
+        app.explorer_cursor_row()
+            .map(|row| row.key(after.content())),
+        cursor,
+        "the cursor stays on the session's row"
+    );
+    assert_eq!(app.selection(), left.as_ref());
+}
+
+#[test]
+fn a_sort_or_filter_change_keeps_a_drill_while_the_left_selection_stays() {
+    let snap = sessions_and_muxes(&["abc"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    let left = app.selection().cloned();
+    drill_to(&mut app, &mux_node("work"));
+    let rebuilds = app.tree_rebuilds;
+
+    let filter = app.filter().clone();
+    app.update(Msg::SetSort(crate::tui::Sort::Recency));
+    app.update(Msg::SetFilter(filter));
+
+    assert_eq!(app.tree_rebuilds, rebuilds + 2, "premise: both rebuild");
+    assert_eq!(app.selection(), left.as_ref());
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.content().focused, mux_node("work"));
+    assert_eq!(state.frames().len(), 1);
+    assert_eq!(state.frames()[0].id, session_node("abc"));
+}
+
+#[test]
+fn picking_the_selected_row_opens_the_right_pane_on_it() {
+    // A pick (the row search, a menu entry, quick select's `here`)
+    // shows the picked row's node, even when the left pane is already
+    // on that row and the right pane has drilled away from it.
+    let snap = sessions_and_muxes(&["abc"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    let row = app.selection().cloned().expect("a selection");
+    drill_to(&mut app, &mux_node("work"));
+
+    app.update(Msg::SelectRow(Box::new(row)));
+
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.content().focused, session_node("abc"));
+    assert!(state.frames().is_empty());
+}
+
+#[test]
+fn moving_the_left_selection_opens_the_right_pane_on_the_new_row() {
+    let snap = sessions_and_muxes(&["abc", "def"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    drill_to(&mut app, &mux_node("work"));
+    let from = app.selection().cloned().expect("a selection");
+    let to = session_row(&app, "def");
+    let position = |id: &RowId| {
+        app.visible_rows()
+            .iter()
+            .position(|row| &row.id == id)
+            .expect("both sessions show")
+    };
+    let steps = position(&to) as i64 - position(&from) as i64;
+    for _ in 0..steps.unsigned_abs() {
+        app.update(if steps > 0 { Msg::NavDown } else { Msg::NavUp });
+    }
+    assert_eq!(app.selection(), Some(&to));
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.content().focused, session_node("def"));
+    assert!(state.frames().is_empty());
+}
+
+#[test]
+fn a_refresh_that_removes_the_drilled_node_opens_the_right_pane_on_the_left_selection() {
+    let snap = sessions_and_muxes(&["abc"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    drill_to(&mut app, &mux_node("work"));
+
+    refresh_with(&mut app, &sessions_and_muxes(&["abc"], &[], &[]));
+
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.content().focused, session_node("abc"));
+    assert!(state.frames().is_empty());
+}
+
+#[test]
+fn backspace_to_a_frame_whose_node_is_gone_skips_it_in_the_same_press() {
+    // Both sessions are in one tmux session. From the first, drill into
+    // the mux and on to the second session, whose row the left pane
+    // moves to; then a refresh finds the mux gone.
+    let snap = sessions_and_muxes(
+        &["abc", "def"],
+        &["work"],
+        &[("abc", "work"), ("def", "work")],
+    );
+    let mut app = app_on_session(&snap, "abc");
+    let first = app.selection().cloned();
+    app.update(Msg::CycleFocus);
+    drill_to(&mut app, &mux_node("work"));
+    drill_to(&mut app, &session_node("def"));
+    assert_eq!(app.selection(), Some(&session_row(&app, "def")));
+    refresh_with(&mut app, &sessions_and_muxes(&["abc", "def"], &[], &[]));
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.content().focused, session_node("def"));
+    assert_eq!(state.frames().len(), 2);
+
+    // The mux's frame can't be restored, so the press skips it and goes
+    // on to the first session, and the left pane with it.
+    app.update(Msg::Explorer(ExplorerKey::Back));
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.content().focused, session_node("abc"));
+    assert!(state.frames().is_empty());
+    assert_eq!(app.selection(), first.as_ref());
+    assert_eq!(app.focus(), Focus::Right);
+    assert_eq!(app.status_message(), None);
+}
+
+#[test]
+fn backspace_with_every_frame_gone_says_so_and_keeps_the_pane() {
+    let snap = sessions_and_muxes(
+        &["abc", "def"],
+        &["work"],
+        &[("abc", "work"), ("def", "work")],
+    );
+    let mut app = app_on_session(&snap, "abc");
+    app.update(Msg::CycleFocus);
+    drill_to(&mut app, &mux_node("work"));
+    drill_to(&mut app, &session_node("def"));
+    refresh_with(&mut app, &sessions_and_muxes(&["def"], &[], &[]));
+    assert_eq!(app.explorer().expect("explorer state").frames().len(), 2);
+
+    app.update(Msg::Explorer(ExplorerKey::Back));
+    assert!(
+        app.status_message()
+            .is_some_and(|s| s.contains("node missing from snapshot")),
+        "the press says the nodes are gone; got {:?}",
+        app.status_message()
+    );
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(
+        state.content().focused,
+        session_node("def"),
+        "the pane stays"
+    );
+    assert!(state.frames().is_empty(), "the gone frames are dropped");
+
+    // With nothing left to go back to, the next press arms.
+    app.update(Msg::Explorer(ExplorerKey::Back));
+    assert!(
+        app.status_message()
+            .is_some_and(|s| s.contains(&armed_back_hint()))
+    );
+}
+
+// ------------------------------------------------------------------
+// The Preview's scroll across a refresh.
+// ------------------------------------------------------------------
+
+/// Scroll the Preview `rows` away from its anchor: down with `J` from
+/// the top (a mux's pane capture), or up with `K` from a transcript's
+/// newest turns, where `J` stops at once.
+fn scroll_preview(app: &mut App, rows: u16) {
+    app.update(Msg::ScrollPreviewBy(i32::from(rows)));
+    if app.preview_scroll() == 0 {
+        app.update(Msg::ScrollPreviewBy(-i32::from(rows)));
+    }
+    assert_eq!(app.preview_scroll(), rows, "premise: the Preview scrolled");
+}
+
+#[test]
+fn a_refresh_keeps_the_preview_where_it_was_scrolled() {
+    // The left selection, the explorer's node, and its cursor row stay,
+    // so the Preview shows what it showed and keeps its place.
+    let snap = sessions_and_muxes(&["abc"], &["work"], &[("abc", "work")]);
+    let mut app = app_on_session(&snap, "abc");
+    scroll_preview(&mut app, 3);
+
+    refresh_with(&mut app, &snap);
+    assert_eq!(app.preview_scroll(), 3, "the refresh and `r` keep it");
+
+    let filter = app.filter().clone();
+    app.update(Msg::SetSort(crate::tui::Sort::Recency));
+    app.update(Msg::SetFilter(filter));
+    assert_eq!(app.preview_scroll(), 3, "a sort or filter change keeps it");
+
+    // A key that does not move the selection, and a jump to the row
+    // already selected, leave the Preview on what it shows.
+    let row = app.selection().cloned().expect("a selection");
+    app.update(Msg::NavDown);
+    assert_eq!(app.selection(), Some(&row), "premise: the last row");
+    assert_eq!(app.preview_scroll(), 3, "a key that moves nothing keeps it");
+    app.update(Msg::SelectRow(Box::new(row)));
+    assert_eq!(app.preview_scroll(), 3, "a jump to the same row keeps it");
+
+    // A drilled pane keeps its Preview's place too.
+    app.update(Msg::CycleFocus);
+    drill_to(&mut app, &mux_node("work"));
+    scroll_preview(&mut app, 4);
+    refresh_with(&mut app, &snap);
+    assert_eq!(app.preview_scroll(), 4);
+}
+
+#[test]
+fn a_refresh_that_changes_what_the_preview_shows_starts_it_at_its_anchor() {
+    // Another left selection: the selected session is gone.
+    let both = sessions_and_muxes(
+        &["abc", "def"],
+        &["work"],
+        &[("abc", "work"), ("def", "work")],
+    );
+    let mut app = app_on_session(&both, "abc");
+    let abc = app.selection().cloned();
+    scroll_preview(&mut app, 3);
+    refresh_with(
+        &mut app,
+        &sessions_and_muxes(&["def"], &["work"], &[("def", "work")]),
+    );
+    assert_ne!(
+        app.selection(),
+        abc.as_ref(),
+        "premise: the selection moved"
+    );
+    assert_eq!(app.preview_scroll(), 0, "another selection");
+
+    // Another focused node: the drilled mux is gone, so the pane opens on
+    // the left selection's session.
+    let mut app = app_on_session(&both, "abc");
+    drill_to(&mut app, &mux_node("work"));
+    scroll_preview(&mut app, 3);
+    refresh_with(&mut app, &sessions_and_muxes(&["abc", "def"], &[], &[]));
+    assert_eq!(
+        app.explorer().expect("explorer state").content().focused,
+        session_node("abc"),
+        "premise: the pane left the gone mux"
+    );
+    assert_eq!(app.preview_scroll(), 0, "another focused node");
+
+    // Another cursor row in the same place: the session's mux is now
+    // another one, whose row takes the cursor's position.
+    let mut app = app_on_session(&both, "abc");
+    put_explorer_cursor_on(&mut app, &mux_node("work"));
+    let state = app.explorer().expect("explorer state");
+    let (position, row) = (state.cursor(), state.cursor_key().cloned());
+    scroll_preview(&mut app, 3);
+    refresh_with(
+        &mut app,
+        &sessions_and_muxes(&["abc", "def"], &["spare"], &[("abc", "spare")]),
+    );
+    let state = app.explorer().expect("explorer state");
+    assert_eq!(state.cursor(), position, "premise: the same position");
+    assert_ne!(state.cursor_key(), row.as_ref(), "premise: another row");
+    assert_eq!(app.preview_scroll(), 0, "another cursor row");
 }
 
 // ------------------------------------------------------------------
@@ -1730,25 +2427,24 @@ fn explorer_state_resets_when_left_tree_selection_changes() {
 
 #[test]
 fn explorer_copy_target_returns_value_on_node_field_row() {
-    let app = app_for_explorer();
+    let mut app = app_for_explorer();
     // Cursor defaults to the first Node-zone field row, which is
     // the focused agent session's `id` field.
-    let (label, value) = app
-        .explorer_copy_target()
-        .expect("Node-zone field rows have a copy target");
-    assert!(!label.is_empty(), "label must caption the toast");
+    let (value, done) =
+        press_enter_copy(&mut app).expect("Node-zone field rows have a copy target");
+    assert!(
+        done.len() > "copied: ".len(),
+        "the label must caption the toast"
+    );
     assert!(!value.is_empty(), "value must be the clipboard payload");
 }
 
 #[test]
 fn explorer_copy_target_is_none_when_cursor_walks_onto_link_row() {
-    // Enter on link rows still drills; the copy seam must
-    // refuse so the runtime falls through to ExplorerActivate.
+    // Enter on link rows still drills; nothing is copied.
     let mut app = app_for_explorer();
     let link_idx = app
-        .explorer()
-        .expect("explorer state present")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1758,9 +2454,14 @@ fn explorer_copy_target_is_none_when_cursor_walks_onto_link_row() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    assert!(app.explorer_copy_target().is_none());
+    assert!(press_enter_copy(&mut app).is_none());
+    assert_eq!(
+        app.explorer().expect("state").content().kind,
+        crate::model::NodeKind::MuxSession,
+        "it drilled instead"
+    );
 }
 
 #[test]
@@ -1784,29 +2485,24 @@ fn selected_session_id_is_none_on_non_session_selection() {
     // Drop the selection so we cover the "nothing selected" arm
     // (which is the same as a non-session selection from the
     // runtime's perspective).
-    app.selection = None;
+    app.tree_state.deselect();
     assert!(app.selected_session_id().is_none());
 }
 
 #[test]
 fn post_toast_supersedes_prior_toast() {
-    // Posting a new toast drains any prior
-    // queued toast so the newer feedback is the one rendered.
-    // Under the upstream engine the queue length stays at 1
-    // after a second post even though the engine itself supports
-    // queueing — `engine_dismiss_all` runs before each show.
+    // Posting a new toast replaces the one showing, so the newer
+    // feedback is the one rendered, whatever its severity.
     let mut app = app_for_explorer();
-    assert!(!app.toast().has_toast());
-    app.post_toast("copied: cwd");
-    assert!(app.toast().has_toast());
-    assert_eq!(app.toast().queue_len(), 1);
-    app.post_toast("copied: id");
+    assert!(app.toasts().is_empty());
+    app.post_toast(Feedback::success("copied: cwd"));
+    assert_eq!(app.toasts().len(), 1);
+    app.post_toast(Feedback::error("copy failed: broken pipe"));
+    assert_eq!(app.toasts().len(), 1, "a newer toast replaces the older");
     assert_eq!(
-        app.toast().queue_len(),
-        1,
-        "newer toast must drain the queue"
+        app.toasts().iter().last(),
+        Some(&Feedback::error("copy failed: broken pipe"))
     );
-    assert_eq!(app.toast().current_message(), Some("copied: id"));
 }
 
 #[test]
@@ -1841,7 +2537,7 @@ fn restore_persisted_state_applies_state_and_mirrors_config() {
         last_view: Some(View::Sessions),
         sort: Some(crate::tui::Sort::Recency),
         mux_recency: None,
-        preview_wrap: Some(crate::tui::PreviewWrap::None),
+        preview_wrap: Some(crate::tui::WrapMode::None),
         session_preview: None,
         view_states: BTreeMap::new(),
     };
@@ -1856,6 +2552,7 @@ fn restore_persisted_state_applies_state_and_mirrors_config() {
             grouping: Some(crate::tui::Grouping::Sessions(
                 crate::tui::SessionsGrouping::Repo,
             )),
+            tree: crate::tui_state::PersistedTree::default(),
         },
     );
     crate::tui_state::write_tui_state(&cache, &persisted).expect("seed state");
@@ -1865,7 +2562,7 @@ fn restore_persisted_state_applies_state_and_mirrors_config() {
     app.restore_persisted_state();
 
     assert_eq!(app.sort(), crate::tui::Sort::Recency);
-    assert_eq!(app.preview_wrap(), crate::tui::PreviewWrap::None);
+    assert_eq!(app.preview_wrap(), crate::tui::WrapMode::None);
     assert_eq!(app.filter(), &filter);
     assert_eq!(
         app.grouping(),
@@ -1896,6 +2593,7 @@ fn restore_persisted_state_preserves_explicit_cli_overrides() {
             grouping: Some(crate::tui::Grouping::Sessions(
                 crate::tui::SessionsGrouping::Repo,
             )),
+            tree: crate::tui_state::PersistedTree::default(),
         },
     );
     crate::tui_state::write_tui_state(&cache, &persisted).expect("seed state");
@@ -1960,7 +2658,10 @@ mod modal_stack {
         assert!(app.modal_stack().is_empty());
         app.open_help_overlay();
         assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Help(_))));
+        assert!(matches!(
+            app.modal_stack().iter().next(),
+            Some(Modal::Help(_))
+        ));
         assert!(app.help_overlay().is_some());
     }
 
@@ -1982,22 +2683,28 @@ mod modal_stack {
 
     #[test]
     fn help_overlay_esc_key_returns_close_via_overlay_trait() {
-        use crate::tui::widgets::help::HelpOverlayState;
-        use crate::tui::{Overlay, OverlayOutcome};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        let mut state = HelpOverlayState::new();
+        use tuikit::overlay::{Outcome, Overlay};
+        let app = App::new(RunConfig::defaults());
+        let mut help = crate::tui::widgets::help::open(app.theme());
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert_eq!(state.handle((), key), OverlayOutcome::Close);
+        assert_eq!(
+            Overlay::<Msg, App>::handle(&mut help, key, &app),
+            Outcome::Close
+        );
     }
 
     #[test]
     fn help_overlay_scroll_key_returns_consumed_via_overlay_trait() {
-        use crate::tui::widgets::help::HelpOverlayState;
-        use crate::tui::{Overlay, OverlayOutcome};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        let mut state = HelpOverlayState::new();
+        use tuikit::overlay::{Outcome, Overlay};
+        let app = App::new(RunConfig::defaults());
+        let mut help = crate::tui::widgets::help::open(app.theme());
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert_eq!(state.handle((), key), OverlayOutcome::Consumed);
+        assert_eq!(
+            Overlay::<Msg, App>::handle(&mut help, key, &app),
+            Outcome::Consumed
+        );
     }
 
     // Controls overlay lives on the same
@@ -2011,7 +2718,7 @@ mod modal_stack {
         app.open_controls_overlay();
         assert_eq!(app.modal_stack().len(), 1);
         assert!(matches!(
-            app.modal_stack().first(),
+            app.modal_stack().iter().next(),
             Some(Modal::Controls(_))
         ));
         assert!(app.controls_overlay().is_some());
@@ -2094,25 +2801,32 @@ mod modal_stack {
     }
 
     // Rename, search, value_modal on the
-    // same stack. ValueModal implements the Overlay trait
-    // (its Continue/Close outcomes map cleanly to
-    // Consumed/Close); rename and search stay with their
-    // specialized dispatchers.
+    // same stack. ValueModal is the framework's pager, which
+    // implements the Overlay trait for any context; rename and
+    // search stay with their specialized dispatchers.
+    /// A rename prompt whose confirm does nothing, for stack tests.
+    fn staying_prompt() -> tuikit::text_prompt::TextPrompt<Msg> {
+        tuikit::text_prompt::TextPrompt::new("rename", "", |_: &str| {
+            tuikit::text_prompt::PromptResult::Stay
+        })
+    }
+
     #[test]
     fn open_rename_pushes_modal_rename_onto_stack() {
-        use crate::tui::widgets::input::TextInputState;
         let mut app = App::new(RunConfig::defaults());
-        app.open_rename_overlay(TextInputState::new("rename", ""));
+        app.open_rename_overlay(staying_prompt());
         assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Rename(_))));
+        assert!(matches!(
+            app.modal_stack().iter().next(),
+            Some(Modal::Rename(_))
+        ));
         assert!(app.rename_overlay().is_some());
     }
 
     #[test]
     fn close_rename_pops_when_top_is_rename() {
-        use crate::tui::widgets::input::TextInputState;
         let mut app = App::new(RunConfig::defaults());
-        app.open_rename_overlay(TextInputState::new("rename", ""));
+        app.open_rename_overlay(staying_prompt());
         app.close_rename_overlay();
         assert!(app.modal_stack().is_empty());
         assert!(app.rename_overlay().is_none());
@@ -2123,7 +2837,10 @@ mod modal_stack {
         let mut app = App::new(RunConfig::defaults());
         app.open_search_overlay();
         assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Search(_))));
+        assert!(matches!(
+            app.modal_stack().iter().next(),
+            Some(Modal::Search(_))
+        ));
         assert!(app.search_overlay().is_some());
     }
 
@@ -2138,22 +2855,30 @@ mod modal_stack {
 
     #[test]
     fn value_modal_esc_key_returns_close_via_overlay_trait() {
-        use crate::tui::widgets::value_modal::ValueModalState;
-        use crate::tui::{Overlay, OverlayOutcome};
+        use crate::tui::widgets::value_modal::{ValueText, open};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
+        use tuikit::overlay::{Outcome, Overlay};
+        let app = App::new(RunConfig::defaults());
+        let mut modal = open(ValueText::new("cwd", "/very/long/path".to_string()));
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert_eq!(state.handle((), key), OverlayOutcome::Close);
+        assert_eq!(
+            Overlay::<Msg, App>::handle(&mut modal, key, &app),
+            Outcome::Close
+        );
     }
 
     #[test]
     fn value_modal_scroll_key_returns_consumed_via_overlay_trait() {
-        use crate::tui::widgets::value_modal::ValueModalState;
-        use crate::tui::{Overlay, OverlayOutcome};
+        use crate::tui::widgets::value_modal::{ValueText, open};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
+        use tuikit::overlay::{Outcome, Overlay};
+        let app = App::new(RunConfig::defaults());
+        let mut modal = open(ValueText::new("cwd", "/very/long/path".to_string()));
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert_eq!(state.handle((), key), OverlayOutcome::Consumed);
+        assert_eq!(
+            Overlay::<Msg, App>::handle(&mut modal, key, &app),
+            Outcome::Consumed
+        );
     }
 
     #[test]
@@ -2162,11 +2887,10 @@ mod modal_stack {
         // (ValueModal covered separately since it exercises
         // the Overlay trait path.) Peek accessors report the
         // exact top variant only; pop reveals each in turn.
-        use crate::tui::widgets::input::TextInputState;
         let mut app = App::new(RunConfig::defaults());
         app.open_controls_overlay();
         app.open_search_overlay();
-        app.open_rename_overlay(TextInputState::new("rename", ""));
+        app.open_rename_overlay(staying_prompt());
         app.open_help_overlay();
         assert_eq!(app.modal_stack().len(), 4);
         assert!(app.help_overlay().is_some());
@@ -2185,53 +2909,63 @@ mod modal_stack {
         assert!(app.modal_stack().is_empty());
     }
 
-    // viewer_modal migrates as a nested
-    // reducer entry. Msg::Viewer(ViewerMsg) is the App-level
-    // wrapper; the reducer arm pops, delegates to
-    // viewer::input::reduce, and pushes back or leaves
-    // popped based on the returned ViewerEffect.
+    // The transcript viewer is the framework's pager on the stack: its
+    // keys go to it through the stack like any overlay's, and its close
+    // settles like any overlay's.
+    fn viewer(document: crate::viewer::model::TranscriptDocument) -> App {
+        let mut app = App::new(RunConfig::defaults());
+        app.open_viewer_modal(crate::tui::viewer_bridge::viewer(document, None));
+        app
+    }
+
+    fn viewer_key(app: &mut App, code: ratatui::crossterm::event::KeyCode) {
+        crate::tui::runtime::modal_key_pure(app, tuikit::testkit::keys::press(code));
+    }
+
     #[test]
     fn open_viewer_pushes_modal_viewer_onto_stack() {
-        use crate::viewer::model::TranscriptDocument;
-        use crate::viewer::state::ViewerState;
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
+        let app = viewer(crate::viewer::model::TranscriptDocument::default());
         assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Viewer(_))));
+        assert!(matches!(
+            app.modal_stack().iter().next(),
+            Some(Modal::Viewer(_))
+        ));
         assert!(app.viewer_modal().is_some());
     }
 
     #[test]
-    fn viewer_msg_close_pops_stack_and_sets_status() {
-        use crate::viewer::input::ViewerMsg;
-        use crate::viewer::model::TranscriptDocument;
-        use crate::viewer::state::ViewerState;
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
-        let effects = app.update(Msg::Viewer(ViewerMsg::Close));
-        assert!(effects.is_empty());
+    fn esc_closes_the_viewer_silently() {
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Esc);
         assert!(app.modal_stack().is_empty());
-        assert_eq!(app.status_message(), Some("viewer closed"));
+        assert_eq!(app.status_message(), None, "leaving the viewer is silent");
     }
 
     #[test]
-    fn viewer_msg_scroll_leaves_modal_on_top() {
-        use crate::viewer::input::ViewerMsg;
-        use crate::viewer::model::TranscriptDocument;
-        use crate::viewer::state::ViewerState;
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
-        let effects = app.update(Msg::Viewer(ViewerMsg::ScrollDown));
-        assert!(effects.is_empty());
+    fn ctrl_c_in_the_viewer_find_prompt_leaves_the_viewer() {
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char('/'));
+        assert!(
+            app.viewer_modal()
+                .is_some_and(|v| v.find().prompt().is_some())
+        );
+        crate::tui::runtime::modal_key_pure(&mut app, tuikit::testkit::keys::ctrl('c'));
+        assert!(
+            app.modal_stack().is_empty(),
+            "dismissing reaches past the prompt"
+        );
+    }
+
+    #[test]
+    fn scrolling_leaves_the_viewer_on_top() {
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char('j'));
         assert!(app.viewer_modal().is_some());
     }
 
     #[test]
-    fn viewer_find_msgs_edit_the_prompt_and_run_the_find() {
-        use crate::viewer::find::ViewerFindMsg;
-        use crate::viewer::input::ViewerMsg;
+    fn keys_edit_the_viewers_prompt_and_run_the_find() {
         use crate::viewer::model::{TranscriptDocument, TranscriptTurn, TurnKind, TurnRole};
-        use crate::viewer::state::ViewerState;
         let mut document = TranscriptDocument::default();
         document.turns.push(TranscriptTurn {
             role: TurnRole::User,
@@ -2241,60 +2975,41 @@ mod modal_stack {
             aborted: false,
             hidden: false,
         });
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(document));
-        app.update(Msg::Viewer(ViewerMsg::FindOpen));
+        let mut app = viewer(document);
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char('/'));
         for c in "needle".chars() {
-            assert!(
-                app.update(Msg::ViewerFind(ViewerFindMsg::Insert(c)))
-                    .is_empty()
-            );
+            viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char(c));
         }
-        let state = app.viewer_modal().expect("viewer");
+        let viewer = app.viewer_modal().expect("viewer");
         assert_eq!(
-            state.find.prompt.as_ref().map(|p| p.text.as_str()),
+            viewer
+                .find()
+                .prompt()
+                .map(tuikit::text_edit::LineEdit::value),
             Some("needle")
         );
-        app.update(Msg::ViewerFind(ViewerFindMsg::Confirm));
-        let state = app.viewer_modal().expect("viewer stays open");
-        assert!(state.find.prompt.is_none());
-        assert_eq!(state.find.matches, [0]);
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Enter);
+        let viewer = app.viewer_modal().expect("viewer stays open");
+        assert!(viewer.find().prompt().is_none());
+        assert_eq!(viewer.find().matches(), [0]);
     }
 
     #[test]
-    fn viewer_find_msg_without_a_viewer_on_top_is_a_no_op() {
-        use crate::viewer::find::ViewerFindMsg;
-        let mut app = App::new(RunConfig::defaults());
-        assert!(
-            app.update(Msg::ViewerFind(ViewerFindMsg::Confirm))
-                .is_empty()
-        );
-        assert!(app.modal_stack().is_empty());
+    fn a_toggle_shows_its_turns_and_stays_in_the_viewer() {
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Char('T'));
+        let viewer = app.viewer_modal().expect("the viewer stays open");
+        assert!(viewer.content().show_thinking);
     }
 
     #[test]
-    fn viewer_msg_without_open_viewer_is_a_no_op() {
-        use crate::viewer::input::ViewerMsg;
-        let mut app = App::new(RunConfig::defaults());
-        let effects = app.update(Msg::Viewer(ViewerMsg::Close));
-        assert!(effects.is_empty());
-        assert!(app.modal_stack().is_empty());
-    }
-
-    #[test]
-    fn viewer_msg_with_help_on_top_leaves_viewer_underneath_untouched() {
-        use crate::viewer::input::ViewerMsg;
-        use crate::viewer::model::TranscriptDocument;
-        use crate::viewer::state::ViewerState;
-        let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
+    fn a_key_with_help_on_top_leaves_the_viewer_underneath_untouched() {
+        let mut app = viewer(crate::viewer::model::TranscriptDocument::default());
         app.open_help_overlay();
-        // Msg::Viewer must only fire when Viewer is on top.
-        // Help is on top now, so the reducer no-ops.
-        let effects = app.update(Msg::Viewer(ViewerMsg::Close));
-        assert!(effects.is_empty());
-        assert_eq!(app.modal_stack().len(), 2);
-        assert!(app.help_overlay().is_some());
+        // Keys go to the top entry only: Esc closes the help.
+        viewer_key(&mut app, ratatui::crossterm::event::KeyCode::Esc);
+        assert_eq!(app.modal_stack().len(), 1);
+        assert!(app.viewer_modal().is_some());
     }
 }
 
@@ -2328,7 +3043,7 @@ mod reducer_effects {
     #[test]
     fn set_status_emits_no_effects() {
         let mut app = App::new(RunConfig::defaults());
-        let effects = app.update(Msg::SetStatus(Some("hi".to_string())));
+        let effects = app.update(Msg::SetStatus(Some(Feedback::info("hi"))));
         assert!(effects.is_empty());
     }
 
@@ -2344,10 +3059,13 @@ mod reducer_effects {
         let effects = app.update(Msg::AttachSelected);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
-            Effect::Toast(reason) => assert!(
-                reason.starts_with("attach: "),
-                "expected attach disabled reason, got {reason:?}",
-            ),
+            Effect::Toast(reason) => {
+                assert!(
+                    reason.text.starts_with("attach: "),
+                    "expected attach disabled reason, got {reason:?}",
+                );
+                assert_eq!(reason.severity, tuikit::feedback::Severity::Warning);
+            }
             other => panic!("expected Toast, got {other:?}"),
         }
     }
@@ -2358,7 +3076,7 @@ mod reducer_effects {
         let effects = app.update(Msg::ResumeSelected);
         assert_eq!(
             effects,
-            vec![Effect::Toast("resume: nothing selected".to_string())]
+            vec![Effect::Toast(Feedback::warning("resume: nothing selected"))]
         );
     }
 
@@ -2394,7 +3112,7 @@ mod reducer_effects {
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             Effect::Toast(reason) => assert!(
-                reason.contains("aider"),
+                reason.text.contains("aider"),
                 "expected aider-unsupported reason, got {reason:?}",
             ),
             other => panic!("expected Toast, got {other:?}"),
@@ -2466,9 +3184,9 @@ mod reducer_effects {
         let effects = app.update(Msg::CommitRename("value".to_string()));
         assert_eq!(
             effects,
-            vec![Effect::Toast(
-                "rename: lost selection before commit".to_string()
-            )]
+            vec![Effect::Toast(Feedback::error(
+                "rename: lost selection before commit"
+            ))]
         );
     }
 
@@ -2519,15 +3237,84 @@ mod reducer_effects {
         }
     }
 
+    /// Replace the open prompt's text and press Enter, through the stack.
+    fn confirm_rename(
+        app: &mut App,
+        text: &str,
+    ) -> tuikit::overlay::Settled<crate::tui::Modal, Msg> {
+        use ratatui::crossterm::event::KeyCode;
+        use tuikit::testkit::keys::{ctrl, press};
+        let _ = app.press_modal_key(ctrl('u'));
+        for c in text.chars() {
+            let _ = app.press_modal_key(press(KeyCode::Char(c)));
+        }
+        app.press_modal_key(press(KeyCode::Enter))
+            .expect("the rename prompt is open")
+    }
+
+    #[test]
+    fn the_mux_rename_prompt_refuses_a_blank_name_and_says_why() {
+        let (mut app, _mux_id) = app_with_mux_selection("editor");
+        crate::tui::runtime::open_rename_overlay(&mut app);
+        assert_eq!(
+            app.rename_overlay()
+                .map(tuikit::text_prompt::TextPrompt::value),
+            Some("editor")
+        );
+        assert_eq!(app.status_message(), None, "the prompt draws its own keys");
+        let settled = confirm_rename(&mut app, "  ");
+        assert!(settled.closed.is_empty() && settled.message.is_none());
+        assert_eq!(
+            app.rename_overlay()
+                .and_then(tuikit::text_prompt::TextPrompt::error),
+            Some("mux rename: name cannot be empty")
+        );
+        assert!(app.toasts().is_empty(), "the prompt says why, not a toast");
+    }
+
+    #[test]
+    fn the_mux_rename_prompt_commits_the_typed_name() {
+        let (mut app, _mux_id) = app_with_mux_selection("editor");
+        crate::tui::runtime::open_rename_overlay(&mut app);
+        let settled = confirm_rename(&mut app, "workshop");
+        assert_eq!(settled.closed.len(), 1, "a commit closes the prompt");
+        assert_eq!(
+            settled.message,
+            Some(Msg::CommitRename("workshop".to_string()))
+        );
+    }
+
+    #[test]
+    fn the_session_rename_prompt_takes_blank_text_as_clearing_the_alias() {
+        let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
+        select_session(&mut app, "Session One");
+        crate::tui::runtime::open_rename_overlay(&mut app);
+        let settled = confirm_rename(&mut app, "");
+        assert_eq!(settled.message, Some(Msg::CommitRename(String::new())));
+    }
+
+    #[test]
+    fn cancelling_a_rename_says_nothing() {
+        use ratatui::crossterm::event::KeyCode;
+        use tuikit::testkit::keys::press;
+        let (mut app, _mux_id) = app_with_mux_selection("editor");
+        crate::tui::runtime::open_rename_overlay(&mut app);
+        crate::tui::runtime::modal_key_pure(&mut app, press(KeyCode::Char('x')));
+        crate::tui::runtime::modal_key_pure(&mut app, press(KeyCode::Esc));
+        assert!(app.rename_overlay().is_none(), "Esc closes the prompt");
+        assert_eq!(app.status_message(), None);
+        assert!(app.toasts().is_empty());
+    }
+
     #[test]
     fn commit_rename_with_empty_value_on_mux_emits_toast() {
         let (mut app, _mux_id) = app_with_mux_selection("editor");
         let effects = app.update(Msg::CommitRename("   ".to_string()));
         assert_eq!(
             effects,
-            vec![Effect::Toast(
-                "mux rename: name cannot be empty".to_string()
-            )]
+            vec![Effect::Toast(Feedback::warning(
+                "mux rename: name cannot be empty"
+            ))]
         );
     }
 
@@ -2650,16 +3437,16 @@ mod reducer_effects {
 #[test]
 fn set_preview_wrap_updates_the_mode_and_persists() {
     let mut app = App::new(RunConfig::defaults());
-    assert_eq!(app.preview_wrap(), crate::tui::PreviewWrap::Smart);
-    let effects = app.update(Msg::SetPreviewWrap(crate::tui::PreviewWrap::Plain));
-    assert_eq!(app.preview_wrap(), crate::tui::PreviewWrap::Plain);
+    assert_eq!(app.preview_wrap(), crate::tui::WrapMode::Smart);
+    let effects = app.update(Msg::SetPreviewWrap(crate::tui::WrapMode::Plain));
+    assert_eq!(app.preview_wrap(), crate::tui::WrapMode::Plain);
     assert!(
         effects.contains(&crate::tui::Effect::Persist),
         "{effects:?}"
     );
     assert_eq!(
         app.build_persisted_state().preview_wrap,
-        Some(crate::tui::PreviewWrap::Plain)
+        Some(crate::tui::WrapMode::Plain)
     );
 }
 
@@ -2695,10 +3482,10 @@ fn handoff_return_marks_mux_and_linked_sessions_until_settled() {
 
     app.update(Msg::HandoffReturned(mux.clone()));
     let handoff = app.handoff().expect("pending hand-off");
-    assert!(handoff.muxes.contains(&mux));
+    assert!(handoff.muxes().contains(&mux));
     assert!(
         handoff
-            .sessions
+            .sessions()
             .contains(&AgentSessionId::new("claude-code", "/state", "abc"))
     );
     assert!(app.row_awaits_handoff(&session_row));
@@ -2706,9 +3493,9 @@ fn handoff_return_marks_mux_and_linked_sessions_until_settled() {
         let entry = app.previews().get(source).expect("content stays on screen");
         assert!(entry.stale, "{source:?} reloads after the hand-off");
     }
-    assert!(app.take_handoff_refresh_request());
+    assert!(app.take_handoff_refresh_request().is_some());
     assert!(
-        !app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_none(),
         "one refresh per hand-off"
     );
 
@@ -2738,11 +3525,11 @@ fn the_pane_coming_back_into_view_asks_for_a_refresh_without_freezing_rows() {
     app.update(Msg::ViewRegained);
 
     assert!(
-        app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_some(),
         "coming back refreshes like returning from an attach"
     );
     assert!(
-        !app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_none(),
         "one refresh per return"
     );
     assert!(
@@ -2759,13 +3546,13 @@ fn repeated_handoffs_accumulate_until_settled() {
     let first = crate::model::MuxSessionId::new("one");
     let second = crate::model::MuxSessionId::new("two");
     app.update(Msg::HandoffReturned(first.clone()));
-    assert!(app.take_handoff_refresh_request());
+    assert!(app.take_handoff_refresh_request().is_some());
     let started_at = app.handoff().expect("pending").started_at;
 
     app.update(Msg::HandoffReturned(second.clone()));
     let handoff = app.handoff().expect("pending");
     assert_eq!(
-        handoff.muxes,
+        handoff.muxes(),
         BTreeSet::from([first, second]),
         "a second return before the refresh lands keeps the first mux pending"
     );
@@ -2774,11 +3561,11 @@ fn repeated_handoffs_accumulate_until_settled() {
         "the spinner keeps its phase"
     );
     assert!(
-        handoff.sessions.is_empty(),
+        handoff.sessions().is_empty(),
         "muxes without linked sessions mark no session rows"
     );
     assert!(
-        app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_some(),
         "the second return asks again"
     );
 }
@@ -2791,9 +3578,9 @@ fn launch_started_marks_the_mux_without_requesting_a_refresh() {
     app.update(Msg::LaunchStarted(mux.clone()));
 
     let handoff = app.handoff().expect("launch marks the row");
-    assert!(handoff.muxes.contains(&mux));
+    assert!(handoff.muxes().contains(&mux));
     assert!(
-        !app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_none(),
         "the attach that follows asks for the refresh, not the launch"
     );
 }
@@ -2808,9 +3595,9 @@ fn launch_aborted_drops_only_its_own_mark() {
     app.update(Msg::HandoffReturned(other.clone()));
     app.update(Msg::LaunchAborted(launching.clone()));
     let handoff = app.handoff().expect("the other hand-off stays pending");
-    assert_eq!(handoff.muxes, BTreeSet::from([other]));
+    assert_eq!(handoff.muxes(), BTreeSet::from([other]));
     assert!(
-        app.take_handoff_refresh_request(),
+        app.take_handoff_refresh_request().is_some(),
         "the other hand-off's refresh request survives"
     );
 
@@ -2834,7 +3621,7 @@ fn launch_mark_survives_the_attach_return_until_settled() {
         handoff.started_at, started_at,
         "the spinner keeps its phase"
     );
-    assert!(app.take_handoff_refresh_request());
+    assert!(app.take_handoff_refresh_request().is_some());
     app.update(Msg::HandoffSettled);
     assert!(app.handoff().is_none());
 }
@@ -2856,9 +3643,9 @@ fn actions_on_a_row_awaiting_the_handoff_refresh_are_refused_until_it_settles() 
         "work",
     )));
     assert!(app.selected_row_awaits_handoff());
-    let toast = vec![crate::tui::Effect::Toast(
-        crate::tui::app::HANDOFF_PENDING_HINT.to_string(),
-    )];
+    let toast = vec![crate::tui::Effect::Toast(Feedback::warning(
+        crate::tui::app::HANDOFF_PENDING_HINT,
+    ))];
     for msg in [Msg::AttachSelected, Msg::ResumeSelected] {
         assert_eq!(app.update(msg), toast);
     }

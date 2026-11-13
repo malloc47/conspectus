@@ -1,8 +1,6 @@
 //! Detail-pane graph explorer view model.
 //!
-//! Replaces the recursive `HeaderField.expanded_fields` model that
-//! `detail.rs` exposes. The renderer wants three distinct surfaces
-//! per focused node:
+//! The renderer wants three distinct surfaces per focused node:
 //!
 //! - A focused **Node** zone with the node's own core summary
 //!   fields. The per-kind picks come from the Core column of the
@@ -18,18 +16,23 @@
 //!   `edge` row that summarizes provenance, confidence, state, and
 //!   the resolver verdict.
 //!
-//! Drilldown and breadcrumbs are tracked by the reducer; the
-//! view model exposes the data each frame needs, not the navigation
-//! state itself.
+//! The cursor, the fold, the drill frames, and the armed `Backspace`
+//! are the framework explorer's (`tuikit::explorer`); `source` adapts
+//! this view model to it, and the view model exposes the data each
+//! frame needs, not the navigation state itself.
 //!
 //! [Node Core-Summary Fields Reference]: ../docs/tui-detail-mockup.md
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use ratatui::style::Style;
+use ratatui::text::Span;
+use tuikit::age::Age;
+use tuikit::breadcrumb::Hop;
+use tuikit::explorer::Frame;
+use tuikit::glyphs::marks;
+use tuikit::text;
 
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Confidence, ForgePrNode, ForkNode, GraphLink,
@@ -41,6 +44,11 @@ use crate::output::table::node_short_id;
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::rows::shorten_home;
 use crate::tui::theme::Theme;
+
+pub(crate) mod grid;
+mod source;
+
+pub use source::{Graph, GraphExplorer, GraphSource};
 
 // -----------------------------------------------------------------------------
 // Builder entry points
@@ -113,10 +121,9 @@ pub struct NodeView {
     pub kind: NodeKind,
     /// Compact identity line shown in the title.
     pub title_line: String,
-    /// Compact `kind:short_tag` label for this node. Used
-    /// by [`BreadcrumbHop::short_label`] when this view is the
-    /// before-drill focused node, and by the right-pane title to
-    /// render the full drilldown chain.
+    /// Compact `kind:short_tag` label for this node: the tag a drill
+    /// frame keeps when the explorer drills away from it, which the
+    /// right-pane title's chain draws through [`breadcrumb_hops`].
     pub short_label: String,
     /// FNV-1a 64-bit short id.
     pub short_id: String,
@@ -132,20 +139,27 @@ pub struct NodeView {
     pub relationships: RelationshipExplorer,
 }
 
+/// The most cells the pane shows of a long free-text value (a title, a
+/// message, a command line, a URL). Past them the value is cut with `…`,
+/// the row says so, and `o` opens it whole.
+pub const LONG_VALUE_CELLS: usize = 48;
+
 /// One field row in the Node or Preview zone.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoreField {
     pub label: &'static str,
-    /// Display value, with `~`-shortening already applied.
+    /// The whole value, with `~`-shortening already applied. Enter
+    /// copies it whole, cut or not.
     pub value: String,
     /// `true` when [`Self::value`] is a placeholder (`— (unknown)`,
-    /// etc.). The renderer dims placeholder rows.
+    /// etc.). The renderer dims placeholder rows, and there is nothing
+    /// to copy.
     pub placeholder: bool,
     /// Optional trailing annotation glyph (`▲`, `⟳`, …).
     pub annotation: Option<&'static str>,
-    /// Full untruncated value when [`Self::value`] is a truncated
-    /// preview. `o` opens it in the full-value modal.
-    pub long_value: Option<String>,
+    /// The most cells of [`Self::value`] the pane shows, cut at the end
+    /// past them; `None` shows it all, wrapping in a narrow pane.
+    pub cut_at: Option<usize>,
     /// Optional graph-kind chip rendered next to the value.
     /// Used by the renderer to surface that e.g. a `cwd` path
     /// resolves to a `repo` / `workspace` / `checkout` node, without
@@ -199,7 +213,7 @@ impl CoreField {
             value: value.into(),
             placeholder: false,
             annotation: None,
-            long_value: None,
+            cut_at: None,
             kind_chip: None,
             preview: None,
         }
@@ -211,15 +225,19 @@ impl CoreField {
             value: value.into(),
             placeholder: true,
             annotation: None,
-            long_value: None,
+            cut_at: None,
             kind_chip: None,
             preview: None,
         }
     }
 
-    fn with_long(mut self, full: String) -> Self {
-        self.long_value = Some(full);
-        self
+    /// A field holding long free text, of which the pane shows the first
+    /// [`LONG_VALUE_CELLS`].
+    fn long(label: &'static str, value: impl Into<String>) -> Self {
+        Self {
+            cut_at: Some(LONG_VALUE_CELLS),
+            ..Self::plain(label, value)
+        }
     }
 
     fn with_kind_chip(mut self, kind: NodeKind) -> Self {
@@ -249,7 +267,7 @@ impl CoreField {
 
     /// A field holding a timestamp, shown as its age.
     fn timestamp(label: &'static str, epoch: i64, now: Option<i64>) -> Self {
-        Self::plain(label, relative_epoch(epoch, now)).previewing(FieldValue::Timestamp(epoch))
+        Self::plain(label, ago(epoch, now)).previewing(FieldValue::Timestamp(epoch))
     }
 
     /// A field whose value is the path `raw`, shown `~`-shortened.
@@ -426,8 +444,8 @@ pub struct RelationshipGroup {
     pub neighbor_kind: String,
     /// One row per neighbor (ADR 0107). Resolver-picked neighbors
     /// sort first; the rest follow their strongest link's
-    /// `(provenance, confidence, link_id)` order matching
-    /// `crate::tui::detail::preferred_link`.
+    /// `(provenance, confidence, link_id)` order, the order
+    /// `crate::model::pick_preferred` ranks candidates in.
     pub links: Vec<RelationshipLink>,
     /// Unresolved-evidence stubs not represented by a concrete
     /// neighbor.
@@ -541,12 +559,12 @@ impl LinkStateLabel {
 }
 
 // -----------------------------------------------------------------------------
-// Navigation cursor + breadcrumb
+// Row identity and the rows the explorer lists
 // -----------------------------------------------------------------------------
 
 /// Stable identity for a flat selectable row in the explorer (ADR
-/// 0074 §6). Used by the reducer to preserve cursor position across
-/// rebuilds (snapshot refresh, drilldown). Link rows are keyed by
+/// 0074 §6): the key the framework explorer keeps its cursor by across
+/// rebuilds (snapshot refresh, a fold, `Backspace`). Link rows are keyed by
 /// neighbor rather than by link id (ADR 0107) so a change of
 /// representative link — a pin authored, a hook record going stale —
 /// keeps the cursor on the same row.
@@ -578,21 +596,19 @@ pub struct NeighborRowKey {
     pub neighbor: NodeId,
 }
 
-/// Flat selectable row in the explorer. The reducer builds this
-/// list from the [`NodeView`] plus the per-frame
-/// `other_expanded` flag. The order matches what the renderer
-/// draws top-to-bottom so cursor index and rendered row index
-/// agree.
+/// Flat selectable row in the explorer: the host's row of each entry
+/// the explorer source lists for the [`NodeView`] and its frame's view
+/// (whether the `Other` zone is open, whether every field shows). The
+/// order matches what the renderer draws top-to-bottom so cursor index
+/// and rendered row index agree.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExplorerRow {
-    /// One of the focused node's core summary rows. Carries the
-    /// underlying [`CoreField`] index so `o` can find the long
-    /// value when the row was truncated.
-    NodeField {
-        index: usize,
-        label: &'static str,
-        long_value: Option<String>,
-    },
+    /// One of the focused node's field rows. `index` is its place in
+    /// the list the pane shows ([`NodeView::fields`] for the current
+    /// Expanded Node Detail state). The row carries the field itself,
+    /// so Enter, `o`, and the Preview act on what the row shows without
+    /// looking the field up again.
+    NodeField { index: usize, field: CoreField },
     /// A resolver-winner row in the validated zone. `Enter` drills.
     ValidatedLink {
         group_index: usize,
@@ -619,8 +635,8 @@ impl ExplorerRow {
     /// Stable key for cursor persistence across rebuilds.
     pub fn key(&self, view: &NodeView) -> ExplorerRowKey {
         match self {
-            Self::NodeField { label, .. } => ExplorerRowKey::NodeField {
-                label: (*label).to_string(),
+            Self::NodeField { field, .. } => ExplorerRowKey::NodeField {
+                label: field.label.to_string(),
             },
             Self::ValidatedLink {
                 group_index,
@@ -652,91 +668,9 @@ impl ExplorerRow {
             }
         }
     }
-
-    /// Long value attached to this row, when present. Drives the `o`
-    /// open-value modal.
-    pub fn long_value(&self) -> Option<&str> {
-        match self {
-            Self::NodeField { long_value, .. } => long_value.as_deref(),
-            _ => None,
-        }
-    }
-
-    /// True for rows that participate in the Other-zone toggle
-    /// (header + its children). Used by the reducer to decide which
-    /// row identifies the toggle target.
-    pub fn is_other_header(&self) -> bool {
-        matches!(self, Self::OtherHeader { .. })
-    }
 }
 
 impl NodeView {
-    /// Build the ordered list of selectable rows the cursor steps
-    /// through. `expanded` is the set of multi-link group headers
-    /// whose children are visible.
-    ///
-    /// Single-link groups always render as one composite row regardless
-    /// of `expanded`. Per locked decision 5 there is no header form for
-    /// a count-of-one group.
-    ///
-    /// `expanded_detail` swaps the Node zone's top-5 render
-    /// for the full per-kind field set when the operator has toggled
-    /// the Expanded Node Detail view on. The relationship rows are
-    /// unaffected.
-    pub fn flat_rows(&self, other_expanded: bool, expanded_detail: bool) -> Vec<ExplorerRow> {
-        let mut rows = Vec::new();
-        for (index, field) in self.fields(expanded_detail).iter().enumerate() {
-            rows.push(ExplorerRow::NodeField {
-                index,
-                label: field.label,
-                long_value: field.long_value.clone(),
-            });
-        }
-        // Validated zone: every link whose resolver state is
-        // `Resolves` becomes a flat selectable row. The groups are
-        // pre-sorted (ADR 0074 §4) so the rows inherit a stable
-        // kind → verb → label scan order.
-        for (group_index, group) in self.relationships.groups.iter().enumerate() {
-            for (link_index, link) in group.links.iter().enumerate() {
-                if matches!(link.edge_state, EdgeStateLabel::Resolves) {
-                    rows.push(ExplorerRow::ValidatedLink {
-                        group_index,
-                        link_index,
-                    });
-                }
-            }
-        }
-        // Other zone: alts, conflicts, and unresolved stubs under a
-        // single collapsible header. Skip the header entirely when
-        // the zone is empty so a fully-validated node doesn't carry
-        // a dangling control row.
-        let has_other = self.has_other_rows();
-        if has_other {
-            rows.push(ExplorerRow::OtherHeader {
-                expanded: other_expanded,
-            });
-            if other_expanded {
-                for (group_index, group) in self.relationships.groups.iter().enumerate() {
-                    for (link_index, link) in group.links.iter().enumerate() {
-                        if !matches!(link.edge_state, EdgeStateLabel::Resolves) {
-                            rows.push(ExplorerRow::OtherLink {
-                                group_index,
-                                link_index,
-                            });
-                        }
-                    }
-                    for (unresolved_index, _) in group.unresolved.iter().enumerate() {
-                        rows.push(ExplorerRow::OtherUnresolved {
-                            group_index,
-                            unresolved_index,
-                        });
-                    }
-                }
-            }
-        }
-        rows
-    }
-
     /// Neighbor identity for the link row at
     /// `(group_index, link_index)`.
     fn neighbor_row_key(&self, group_index: usize, link_index: usize) -> Option<NeighborRowKey> {
@@ -804,51 +738,11 @@ pub struct RelationshipCounts {
     pub unresolved: usize,
 }
 
-/// One frame of drill history. The reducer pushes a hop when the
-/// operator presses `Enter` on a link row; Backspace pops the
-/// most-recent hop and restores the saved cursor + expansion state.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BreadcrumbHop {
-    /// The node the cursor was focused on *before* the drill that
-    /// produced this hop.
-    pub focused: NodeId,
-    /// Compact `kind:short_tag` identity label for the hop,
-    /// rendered as one segment of the breadcrumb chain. Callers can
-    /// disambiguate same-short-label collisions across the chain
-    /// using [`render_breadcrumb_chain`], which suffixes the last-4
-    /// of the focused node's display when two hops collide.
-    pub short_label: String,
-    /// Cursor row identity at the time of the drill, so Backspace
-    /// can re-find it.
-    pub cursor_key: Option<ExplorerRowKey>,
-    /// Whether the `Other` zone was expanded at the time of the
-    /// drill, so Backspace can restore it (ADR 0074 §6 — replaces
-    /// the prior per-group expansion set).
-    pub other_expanded: bool,
-    /// Whether the Node zone had its Expanded Detail toggle on at
-    /// the time of the drill, so Backspace can restore it.
-    pub full_detail_expanded: bool,
-    /// Left-pane row selection at the time of the drill
-    /// (`[tui.detail].left_pane_sync = "mirror"`), so Backspace can
-    /// restore both panes together. `None` when no row was selected
-    /// (the empty-tree case at boot).
-    pub left_pane_selection: Option<crate::tui::rows::RowId>,
-}
-
-/// Identity for one slot in the [`NodeView`]'s neighbor list — used
-/// by the reducer to pick which link to drill into.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LinkRef {
-    pub direction: Direction,
-    pub group_index: usize,
-    pub link_index: usize,
-}
-
 impl NodeView {
-    /// Lookup helper for the reducer: resolve the currently-selected
-    /// flat row into the neighbor `NodeId` to drill into. Returns
-    /// `None` for non-drillable rows (node fields, group headers,
-    /// unresolved evidence).
+    /// Where a row leads: the neighbor `NodeId` a link row drills into,
+    /// which the explorer source answers `follow` with. Returns `None`
+    /// for non-drillable rows (node fields, group headers, unresolved
+    /// evidence).
     pub fn drill_target(&self, row: &ExplorerRow) -> Option<NodeId> {
         let (group_index, link_index) = match row {
             ExplorerRow::ValidatedLink {
@@ -911,155 +805,44 @@ impl NodeView {
     }
 }
 
-/// Format a breadcrumb chain for the right-pane title.
-/// Each hop renders as `<kind-glyph> <tag>` so the operator can
-/// scan the drill chain by symbol rather than reading the verbose
-/// `kind:tag` text form. The glyph is drawn in the kind color
-/// (ADR 0073); the tag and separators use the theme's secondary
-/// text color so the row reads as one quiet line with bursts of
-/// kind identity. Hops that share a `short_label` get a `·xxxx`
-/// suffix on the tag (last-4 of the focused node's display) so
-/// two same-named hops disambiguate. Elision keeps the chain
-/// inside `available` cells: full chain → `first … last` →
-/// `… last` → just `last` as the chain narrows. Returns `None`
-/// when `hops` is empty so callers can skip the breadcrumb glyph
-/// entirely.
-pub fn render_breadcrumb_chain(
-    hops: &[BreadcrumbHop],
-    theme: &Theme,
-    available: usize,
-) -> Option<Line<'static>> {
-    if hops.is_empty() {
-        return None;
-    }
-    let rendered = build_breadcrumb_hops(hops, theme);
-    Some(build_breadcrumb_line(&rendered, theme, available))
-}
-
-/// Per-hop render data. Owns the glyph + tag strings plus the
-/// effective color so the rendering pass can splice spans without
-/// re-resolving the theme. `width` is the display-cell count for
-/// `<glyph> <tag>` so elision can sum cells across hops.
-#[derive(Clone, Debug, PartialEq)]
-struct RenderedBreadcrumbHop {
-    glyph: String,
-    glyph_color: Color,
-    tag: String,
-    width: usize,
-}
-
-fn build_breadcrumb_hops(hops: &[BreadcrumbHop], theme: &Theme) -> Vec<RenderedBreadcrumbHop> {
-    let mut counts: std::collections::HashMap<&str, usize> =
-        std::collections::HashMap::with_capacity(hops.len());
-    for hop in hops {
-        *counts.entry(hop.short_label.as_str()).or_insert(0) += 1;
-    }
-    hops.iter()
-        .map(|hop| {
-            let kind = NodeKind::from(&hop.focused);
-            let style = node_kind_style(kind, theme);
-            // ForgePr's slate color is `Color::Reset` (the caller
-            // is supposed to pick `theme.pr_open` / `pr_closed` /
-            // `pr_merged` / `pr_draft` from PR state). The
-            // breadcrumb does not have PR state on hand, so fall
-            // back to `pr_open` — the same dodge `kind_chip_span`
-            // uses for the same reason.
-            let color = if matches!(kind, NodeKind::ForgePr) {
-                theme.pr_open
-            } else {
-                style.color
-            };
-            let raw_tag = hop
-                .short_label
+/// The right-pane title's breadcrumb hops, one per drill frame, for
+/// [`Breadcrumb`](tuikit::breadcrumb::Breadcrumb): the glyph of the
+/// frame's node kind in its kind color (ADR 0073; a PR's glyph takes
+/// the `pr_open` hue, since the frame holds no PR state), the tag from
+/// the frame's `kind:tag` short label with the `kind:` dropped (the
+/// glyph carries the kind), and four characters of the `id` row the
+/// node's pane shows, which the breadcrumb shows only when two hops have
+/// one tag.
+pub fn breadcrumb_hops(frames: &[Frame<Graph>], theme: &Theme) -> Vec<Hop> {
+    frames
+        .iter()
+        .map(|frame| {
+            let kind = node_kind_style(NodeKind::from(&frame.id), theme);
+            let tag = frame
+                .tag
                 .split_once(':')
-                .map_or(hop.short_label.as_str(), |(_, tag)| tag);
-            let tag = if counts.get(hop.short_label.as_str()).copied().unwrap_or(0) > 1 {
-                let id_text = hop.focused.to_string();
-                let tail: String = id_text.chars().rev().take(4).collect();
-                let tail: String = tail.chars().rev().collect();
-                format!("{raw_tag}·{tail}")
-            } else {
-                raw_tag.to_string()
-            };
-            let width = style.width + 1 + UnicodeWidthStr::width(tag.as_str());
-            RenderedBreadcrumbHop {
-                glyph: style.glyph,
-                glyph_color: color,
-                tag,
-                width,
-            }
+                .map_or(frame.tag.as_str(), |(_, tag)| tag);
+            Hop::new(tag)
+                .glyph(Span::styled(kind.glyph, Style::default().fg(kind.color)))
+                .suffix(hop_suffix(&frame.id))
         })
         .collect()
 }
 
-const BREADCRUMB_SEPARATOR: &str = " › ";
-const BREADCRUMB_SEPARATOR_WIDTH: usize = 3;
-const BREADCRUMB_ELLIPSIS: &str = "…";
-const BREADCRUMB_ELLIPSIS_WIDTH: usize = 1;
-
-fn build_breadcrumb_line(
-    rendered: &[RenderedBreadcrumbHop],
-    theme: &Theme,
-    available: usize,
-) -> Line<'static> {
-    let secondary = Style::default().fg(theme.secondary_text);
-    let full_width: usize = rendered.iter().map(|h| h.width).sum::<usize>()
-        + BREADCRUMB_SEPARATOR_WIDTH * rendered.len().saturating_sub(1);
-    if full_width <= available || rendered.len() <= 1 {
-        return spans_for_hops(rendered, secondary);
-    }
-    // Try `first <SEP> … <SEP> last`.
-    let first = rendered.first().expect("rendered non-empty");
-    let last = rendered.last().expect("rendered non-empty");
-    let with_first =
-        first.width + last.width + BREADCRUMB_ELLIPSIS_WIDTH + BREADCRUMB_SEPARATOR_WIDTH * 2;
-    if with_first <= available {
-        return Line::from(vec![
-            styled_glyph(first, secondary),
-            Span::raw(" "),
-            Span::styled(first.tag.clone(), secondary),
-            Span::styled(BREADCRUMB_SEPARATOR, secondary),
-            Span::styled(BREADCRUMB_ELLIPSIS, secondary),
-            Span::styled(BREADCRUMB_SEPARATOR, secondary),
-            styled_glyph(last, secondary),
-            Span::raw(" "),
-            Span::styled(last.tag.clone(), secondary),
-        ]);
-    }
-    // Try `… <SEP> last`.
-    let only_last = last.width + BREADCRUMB_ELLIPSIS_WIDTH + BREADCRUMB_SEPARATOR_WIDTH;
-    if only_last <= available {
-        return Line::from(vec![
-            Span::styled(BREADCRUMB_ELLIPSIS, secondary),
-            Span::styled(BREADCRUMB_SEPARATOR, secondary),
-            styled_glyph(last, secondary),
-            Span::raw(" "),
-            Span::styled(last.tag.clone(), secondary),
-        ]);
-    }
-    // Last-resort: just the last hop, no elision marker.
-    Line::from(vec![
-        styled_glyph(last, secondary),
-        Span::raw(" "),
-        Span::styled(last.tag.clone(), secondary),
-    ])
-}
-
-fn spans_for_hops(rendered: &[RenderedBreadcrumbHop], secondary: Style) -> Line<'static> {
-    let mut spans = Vec::with_capacity(rendered.len() * 4);
-    for (idx, hop) in rendered.iter().enumerate() {
-        if idx > 0 {
-            spans.push(Span::styled(BREADCRUMB_SEPARATOR, secondary));
+/// What tells a hop from another with its tag: four characters of the
+/// `id` row the right pane shows for the node. A session's key, a mux's
+/// name, and a pin's name differ at their ends, so the suffix is the end;
+/// every other kind's `id` row is its short id (a hash of the node id),
+/// so the suffix is its start. The end of the node id would not do for
+/// those: a repo, checkout, workspace, or branch is tagged by the end of
+/// its path or ref, which two of them in different places share.
+fn hop_suffix(id: &NodeId) -> String {
+    match id {
+        NodeId::AgentSession(_) | NodeId::MuxSession(_) | NodeId::Pin(_) => {
+            text::clip_start(&id.to_string(), 4)
         }
-        spans.push(styled_glyph(hop, secondary));
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(hop.tag.clone(), secondary));
+        _ => node_short_id(id).chars().take(4).collect(),
     }
-    Line::from(spans)
-}
-
-fn styled_glyph(hop: &RenderedBreadcrumbHop, _secondary: Style) -> Span<'static> {
-    Span::styled(hop.glyph.clone(), Style::default().fg(hop.glyph_color))
 }
 
 /// Borrowed view of the Preview-zone content for a single cursor row.
@@ -1167,6 +950,17 @@ pub fn short_node_label(node: &GraphNode) -> String {
             .find(|seg| !seg.is_empty())
             .unwrap_or(path)
     }
+    /// A repo's name: the working directory of a non-bare repo, whose
+    /// common dir is its `.git` (`~/repos/project/.git` is `project`),
+    /// and a bare repo's own directory (`/srv/git/project.git`).
+    fn repo_dir_name(common_dir: &str) -> &str {
+        let mut segments = common_dir.rsplit(['/', '\\']).filter(|seg| !seg.is_empty());
+        match (segments.next(), segments.next()) {
+            (Some(".git"), Some(work_dir)) => work_dir,
+            (Some(dir), _) => dir,
+            (None, _) => common_dir,
+        }
+    }
     match node {
         GraphNode::AgentSession(s) => {
             let tag =
@@ -1174,15 +968,10 @@ pub fn short_node_label(node: &GraphNode) -> String {
                     .rsplit(['-', '/'])
                     .find(|seg| !seg.is_empty())
                     .unwrap_or(s.id.session_key.as_str());
-            let tag = if tag.chars().count() > 8 {
-                &tag[tag.len().saturating_sub(8)..]
-            } else {
-                tag
-            };
-            format!("session:{tag}")
+            format!("session:{}", text::clip_start(tag, 8))
         }
         GraphNode::MuxSession(m) => format!("mux:{}", m.native_id),
-        GraphNode::Pin(p) => format!("pin:{}", truncate(&p.label, 16)),
+        GraphNode::Pin(p) => format!("pin:{}", text::truncate_end(&p.label, 16)),
         GraphNode::RuntimeProcess(p) => {
             let head = p
                 .command
@@ -1190,15 +979,15 @@ pub fn short_node_label(node: &GraphNode) -> String {
                 .map(|cmd| basename(cmd.split_whitespace().next().unwrap_or(cmd)).to_string())
                 .or_else(|| p.pid.map(|pid| format!("pid {pid}")))
                 .unwrap_or_else(|| basename(&p.observation_key).to_string());
-            let head = truncate(&head, 14);
+            let head = text::truncate_end(&head, 14);
             format!("proc:{head}")
         }
         GraphNode::ForgePr(pr) => format!("pr:{}/{}#{}", pr.owner, pr.repo, pr.number),
         GraphNode::Fork(f) => {
             let tag = f.name.as_deref().unwrap_or(f.provider_source_key.as_str());
-            format!("fork:{}", truncate(tag, 16))
+            format!("fork:{}", text::truncate_end(tag, 16))
         }
-        GraphNode::Repo(r) => format!("repo:{}", basename(&r.common_dir)),
+        GraphNode::Repo(r) => format!("repo:{}", repo_dir_name(&r.common_dir)),
         GraphNode::Checkout(c) => format!("co:{}", basename(&c.root)),
         GraphNode::Workspace(w) => {
             let tag = w.name.as_deref().unwrap_or_else(|| basename(&w.root));
@@ -1224,9 +1013,9 @@ pub(crate) fn title_line(snapshot: &GraphSnapshot, node: &GraphNode) -> String {
         GraphNode::MuxSession(m) => m.display_label(),
         GraphNode::Pin(p) => format!("pin:{}", p.label),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
-            (Some(pid), Some(cmd)) => format!("pid {pid}: {}", truncate(cmd, 48)),
+            (Some(pid), Some(cmd)) => format!("pid {pid}: {}", text::truncate_end(cmd, 48)),
             (Some(pid), None) => format!("pid {pid}"),
-            (None, Some(cmd)) => truncate(cmd, 48),
+            (None, Some(cmd)) => text::truncate_end(cmd, 48),
             (None, None) => p.observation_key.clone(),
         },
         GraphNode::ForgePr(pr) => format!("{}/{}#{}", pr.owner, pr.repo, pr.number),
@@ -1312,7 +1101,7 @@ fn repo_core(r: &RepoNode, home: Option<&Path>) -> Vec<CoreField> {
             CoreField::plain("remotes", value).previewing(FieldValue::List(r.remotes.clone())),
         );
     } else {
-        fields.push(CoreField::placeholder("remotes", "—"));
+        fields.push(CoreField::placeholder("remotes", marks::NO_VALUE));
     }
     if let Some(path) = r.source_paths.first() {
         let value = if r.source_paths.len() > 1 {
@@ -1328,7 +1117,7 @@ fn repo_core(r: &RepoNode, home: Option<&Path>) -> Vec<CoreField> {
             CoreField::plain("source_paths", value).previewing(FieldValue::Path(path.clone())),
         );
     } else {
-        fields.push(CoreField::placeholder("source_paths", "—"));
+        fields.push(CoreField::placeholder("source_paths", marks::NO_VALUE));
     }
     fields.push(CoreField::plain(
         "full_id",
@@ -1348,7 +1137,10 @@ fn checkout_core(c: &CheckoutNode, home: Option<&Path>) -> Vec<CoreField> {
                 .previewing(FieldValue::Node(NodeId::Branch(branch.clone()))),
         );
     } else {
-        fields.push(CoreField::placeholder("current_branch", "— (detached)"));
+        fields.push(CoreField::placeholder(
+            "current_branch",
+            format!("{} (detached)", marks::NO_VALUE),
+        ));
     }
     fields.push(
         CoreField::plain("repo", format!("{}", c.id.repo))
@@ -1357,7 +1149,7 @@ fn checkout_core(c: &CheckoutNode, home: Option<&Path>) -> Vec<CoreField> {
     if let Some(git_dir) = &c.git_dir {
         fields.push(CoreField::path("git_dir", git_dir, home));
     } else {
-        fields.push(CoreField::placeholder("git_dir", "—"));
+        fields.push(CoreField::placeholder("git_dir", marks::NO_VALUE));
     }
     fields
 }
@@ -1370,13 +1162,13 @@ fn workspace_core(w: &WorkspaceNode, home: Option<&Path>) -> Vec<CoreField> {
     if let Some(name) = &w.name {
         fields.push(CoreField::text("name", name.clone()));
     } else {
-        fields.push(CoreField::placeholder("name", "—"));
+        fields.push(CoreField::placeholder("name", marks::NO_VALUE));
     }
     fields.push(CoreField::path("root", &w.root, home));
     if let Some(provider) = &w.provider {
         fields.push(CoreField::glossary("provider", provider.clone()));
     } else {
-        fields.push(CoreField::placeholder("provider", "—"));
+        fields.push(CoreField::placeholder("provider", marks::NO_VALUE));
     }
     fields.push(CoreField::plain(
         "full_id",
@@ -1405,15 +1197,10 @@ fn agent_session_core(
     if let Some(alias) = &alias {
         fields.push(CoreField::text("alias", alias.clone()));
     } else if let Some(title) = s.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        let truncated = truncate(title, 48);
-        let mut field = CoreField::plain("title", truncated.clone())
-            .previewing(FieldValue::Text(title.to_string()));
-        if truncated.len() < title.len() {
-            field = field.with_long(title.to_string());
-        }
-        fields.push(field);
+        fields
+            .push(CoreField::long("title", title).previewing(FieldValue::Text(title.to_string())));
     } else {
-        fields.push(CoreField::placeholder("alias", "—"));
+        fields.push(CoreField::placeholder("alias", marks::NO_VALUE));
     }
     fields.push(match &s.cwd {
         Some(cwd) => {
@@ -1423,7 +1210,7 @@ fn agent_session_core(
                 None => field,
             }
         }
-        None => CoreField::placeholder("cwd", "— (unknown)"),
+        None => CoreField::placeholder("cwd", format!("{} (unknown)", marks::NO_VALUE)),
     });
     let mut status = CoreField::plain("status", session_status(s, now));
     if s.last_active_epoch.is_some() {
@@ -1458,13 +1245,10 @@ fn agent_session_extras(
         );
     }
     if let Some(preview) = &s.last_message_preview {
-        let truncated = truncate(preview, 48);
-        let mut field = CoreField::plain("last_message_preview", truncated.clone())
-            .previewing(FieldValue::Text(preview.clone()));
-        if truncated.len() < preview.len() {
-            field = field.with_long(preview.clone());
-        }
-        fields.push(field);
+        fields.push(
+            CoreField::long("last_message_preview", preview.clone())
+                .previewing(FieldValue::Text(preview.clone())),
+        );
     }
     if let Some(kind) = s.session_kind {
         fields.push(CoreField::glossary(
@@ -1501,12 +1285,12 @@ fn mux_session_core(
                 None => field,
             }
         }
-        None => CoreField::placeholder("cwd", "— (unknown)"),
+        None => CoreField::placeholder("cwd", format!("{} (unknown)", marks::NO_VALUE)),
     });
     let attached = match m.client_attached {
         Some(true) => "yes".to_string(),
         Some(false) => "no".to_string(),
-        None => "—".to_string(),
+        None => marks::NO_VALUE.to_string(),
     };
     let mut attached_field = CoreField::plain("attached", attached.clone());
     if m.client_attached.is_none() {
@@ -1520,7 +1304,7 @@ fn mux_session_core(
     fields.push(attached_field);
     fields.push(match m.activity_epoch {
         Some(epoch) => CoreField::timestamp("last_active", epoch, now),
-        None => CoreField::placeholder("last_active", "—"),
+        None => CoreField::placeholder("last_active", marks::NO_VALUE),
     });
     fields
 }
@@ -1531,13 +1315,10 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         fields.push(CoreField::timestamp("created", epoch, now));
     }
     if let Some(cmd) = &m.active_pane_command {
-        let truncated = truncate(cmd, 48);
-        let mut field = CoreField::plain("active_pane_command", truncated.clone())
-            .previewing(FieldValue::Command(split_command_line(cmd)));
-        if truncated.len() < cmd.len() {
-            field = field.with_long(cmd.clone());
-        }
-        fields.push(field);
+        fields.push(
+            CoreField::long("active_pane_command", cmd.clone())
+                .previewing(FieldValue::Command(split_command_line(cmd))),
+        );
     }
     if let Some(pid) = m.active_pane_pid {
         fields.push(
@@ -1549,13 +1330,10 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         fields.push(CoreField::path("active_pane_current_path", path, None));
     }
     if let Some(cmd) = &m.active_pane_start_command {
-        let truncated = truncate(cmd, 48);
-        let mut field = CoreField::plain("active_pane_start_command", truncated.clone())
-            .previewing(FieldValue::Command(split_command_line(cmd)));
-        if truncated.len() < cmd.len() {
-            field = field.with_long(cmd.clone());
-        }
-        fields.push(field);
+        fields.push(
+            CoreField::long("active_pane_start_command", cmd.clone())
+                .previewing(FieldValue::Command(split_command_line(cmd))),
+        );
     }
     fields
 }
@@ -1629,28 +1407,21 @@ fn runtime_process_core(
             }
             format!("{pid}{annotation}")
         }
-        None => "—".to_string(),
+        None => marks::NO_VALUE.to_string(),
     };
     fields.push(CoreField {
         label: "pid",
         value: pid_value,
         placeholder: p.pid.is_none(),
         annotation: None,
-        long_value: None,
+        cut_at: None,
         kind_chip: None,
         preview: p.pid.map(FieldValue::Process),
     });
     let command_field = match &p.command {
-        Some(cmd) => {
-            let truncated = truncate(cmd, 48);
-            let mut field = CoreField::plain("command", truncated.clone())
-                .previewing(FieldValue::Command(split_command_line(cmd)));
-            if truncated.len() < cmd.len() {
-                field = field.with_long(cmd.clone());
-            }
-            field
-        }
-        None => CoreField::placeholder("command", "—"),
+        Some(cmd) => CoreField::long("command", cmd.clone())
+            .previewing(FieldValue::Command(split_command_line(cmd))),
+        None => CoreField::placeholder("command", marks::NO_VALUE),
     };
     fields.push(command_field);
     fields.push(match p.role {
@@ -1664,11 +1435,11 @@ fn runtime_process_core(
                 RuntimeProcessRole::Unknown => "unknown",
             },
         ),
-        None => CoreField::plain("role", "—"),
+        None => CoreField::plain("role", marks::NO_VALUE),
     });
     fields.push(match p.observed_epoch {
         Some(epoch) => CoreField::timestamp("observed", epoch, now),
-        None => CoreField::placeholder("observed", "—"),
+        None => CoreField::placeholder("observed", marks::NO_VALUE),
     });
     fields
 }
@@ -1729,7 +1500,7 @@ fn branch_core(b: &BranchNode) -> Vec<CoreField> {
                 commit: commit.clone(),
             })
         }
-        None => CoreField::placeholder("current_commit", "—"),
+        None => CoreField::placeholder("current_commit", marks::NO_VALUE),
     });
     fields.push(match &b.upstream {
         Some(upstream) => {
@@ -1739,7 +1510,7 @@ fn branch_core(b: &BranchNode) -> Vec<CoreField> {
                 ahead_behind: Some((b.refname.clone(), upstream.clone())),
             })
         }
-        None => CoreField::placeholder("upstream", "—"),
+        None => CoreField::placeholder("upstream", marks::NO_VALUE),
     });
     fields.push(
         CoreField::plain("repo", format!("{}", b.id.repo))
@@ -1755,12 +1526,12 @@ fn fork_core(f: &ForkNode) -> Vec<CoreField> {
     )];
     fields.push(match &f.name {
         Some(name) => CoreField::text("name", name.clone()),
-        None => CoreField::placeholder("name", "—"),
+        None => CoreField::placeholder("name", marks::NO_VALUE),
     });
     fields.push(CoreField::glossary("provider", f.provider.clone()));
     fields.push(match &f.scope {
         Some(scope) => CoreField::glossary("scope", scope.clone()),
-        None => CoreField::placeholder("scope", "—"),
+        None => CoreField::placeholder("scope", marks::NO_VALUE),
     });
     fields.push(match f.capabilities.first() {
         Some(first) => {
@@ -1774,7 +1545,7 @@ fn fork_core(f: &ForkNode) -> Vec<CoreField> {
                 values: f.capabilities.clone(),
             })
         }
-        None => CoreField::placeholder("capabilities", "—"),
+        None => CoreField::placeholder("capabilities", marks::NO_VALUE),
     });
     fields
 }
@@ -1803,22 +1574,15 @@ fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
     }
     fields.push(match &pr.head_ref {
         Some(head) => CoreField::text("head", head.clone()),
-        None => CoreField::placeholder("head", "—"),
+        None => CoreField::placeholder("head", marks::NO_VALUE),
     });
     fields.push(match pr.updated_epoch {
         Some(epoch) => CoreField::timestamp("updated", epoch, now),
-        None => CoreField::placeholder("updated", "—"),
+        None => CoreField::placeholder("updated", marks::NO_VALUE),
     });
     fields.push(match &pr.url {
-        Some(url) => {
-            let truncated = truncate(url, 48);
-            let mut field = CoreField::plain("url", truncated.clone());
-            if truncated.len() < url.len() {
-                field = field.with_long(url.clone());
-            }
-            field
-        }
-        None => CoreField::placeholder("url", "—"),
+        Some(url) => CoreField::long("url", url.clone()),
+        None => CoreField::placeholder("url", marks::NO_VALUE),
     });
     fields
 }
@@ -1841,26 +1605,18 @@ fn forge_pr_extras(pr: &ForgePrNode) -> Vec<CoreField> {
 
 fn session_status(s: &AgentSessionNode, now: Option<i64>) -> String {
     match s.last_active_epoch {
-        Some(epoch) => format!("active · last {}", relative_epoch(epoch, now)),
-        None => "—".to_string(),
+        Some(epoch) => format!("active · last {}", ago(epoch, now)),
+        None => marks::NO_VALUE.to_string(),
     }
 }
 
-fn relative_epoch(epoch: i64, now: Option<i64>) -> String {
-    crate::tui::rows::format_recency(now, Some(epoch))
-        .map_or_else(|| "—".to_string(), |age| format!("{age} ago"))
+/// How long ago `epoch` was at `now` (`4m ago`), or the no-value mark
+/// when the time is unknown.
+fn ago(epoch: i64, now: Option<i64>) -> String {
+    Age::of(Some(epoch), now).map_or_else(|| marks::NO_VALUE.to_string(), Age::ago)
 }
 
 use crate::tui::preview::split_command_line;
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.chars().count() <= max {
-        return value.to_string();
-    }
-    let mut out: String = value.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
 
 // ----- Relationship explorer assembly ---------------------------------------
 
@@ -2127,9 +1883,9 @@ fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
         GraphNode::MuxSession(m) => m.display_label(),
         GraphNode::Pin(p) => format!("pin:{}", p.label),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
-            (Some(pid), Some(cmd)) => format!("{} · pid {pid}", truncate(cmd, 24)),
+            (Some(pid), Some(cmd)) => format!("{} · pid {pid}", text::truncate_end(cmd, 24)),
             (Some(pid), None) => format!("pid {pid}"),
-            (None, Some(cmd)) => truncate(cmd, 32),
+            (None, Some(cmd)) => text::truncate_end(cmd, 32),
             (None, None) => p.observation_key.clone(),
         },
         GraphNode::ForgePr(pr) => format!("{}/{}#{}", pr.owner, pr.repo, pr.number),

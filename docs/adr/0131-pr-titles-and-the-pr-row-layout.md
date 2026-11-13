@@ -3,7 +3,11 @@
 ## Status
 
 Accepted. Amends ADR 0129 (item 2, where the local-branch marker sits)
-and ADR 0112 (the title was only known to the preview).
+and ADR 0112 (the title was only known to the preview). Amended by
+[ADR 0184](0184-tui-pr-pinned-and-history-rows-come-from-schemas-and-headers-carry-two-cells.md):
+a row's `#N` is decided while PRs are filed, a narrow row cuts its
+`owner/repo` and keeps the number whole, and the title and branch give
+way by the left pane's one narrow-width policy.
 
 ## Context
 

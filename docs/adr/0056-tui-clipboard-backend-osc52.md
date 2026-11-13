@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by
+[ADR 0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md):
+the OSC 52 writer and its encoder move into the framework's
+`tuikit::feedback::clipboard` and write to a sink the host supplies;
+`src/tui/clipboard.rs` keeps `copy_to_clipboard`, which passes stdout.
 
 ## Context
 

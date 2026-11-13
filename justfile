@@ -8,20 +8,46 @@ fmt:
     cargo fmt --all -- --check
 
 clippy:
-    cargo clippy --all-targets --all-features -- -D warnings
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 test:
-    cargo test --all-targets --all-features
+    cargo test --workspace --all-targets --all-features
 
 nextest:
-    cargo nextest run --all-targets --all-features
+    cargo nextest run --workspace --all-targets --all-features
 
 diff-check:
     git diff --check
 
 # Rustdoc with warnings as errors (broken or private intra-doc links)
 doc:
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
+# The framework with its cargo features off, then with `richtext` alone.
+# A workspace build turns `richtext` on through the host, so only these
+# builds catch code outside `tuikit::richtext` that comes to need it, or an
+# item only that module uses left ungated. `-p tuikit` keeps the host's
+# features out; the lib-only lints also build without `testkit`, which the
+# crate's own tests always turn on.
+tuikit-features:
+    cargo clippy -p tuikit --no-default-features -- -D warnings
+    cargo clippy -p tuikit --no-default-features --all-targets -- -D warnings
+    cargo clippy -p tuikit --no-default-features --features richtext -- -D warnings
+    cargo clippy -p tuikit --no-default-features --features richtext --all-targets -- -D warnings
+    cargo test -p tuikit --no-default-features
+    cargo test -p tuikit --no-default-features --features richtext
+
+# Rehearse moving the framework into a repository of its own (ADR 0199):
+# export `crates/tuikit` at HEAD with its history into a scratch
+# repository, make its manifest stand alone, add its root files, and run
+# fmt, clippy, the tests, and the docs there with no file of this
+# repository reachable. Takes the script's arguments: a scratch directory
+# (default target/separation-rehearsal, removed afterwards), `--self-test`
+# (a host-relative leak must fail it; CI runs this), `--keep`, and
+# `--allow-dirty`. Builds the crate from scratch: minutes and a few GB, so
+# it is not part of `check`.
+separation-rehearsal *args:
+    scripts/export-tuikit.sh {{args}}
 
 # Regenerate the comprehensive showcase fixture (ADR 0070).
 #
@@ -100,7 +126,7 @@ screenshots:
 demo:
     cargo run --quiet --features snapshot -- tui --fixture tests/fixtures/showcase.json
 
-check: fmt clippy test nextest doc diff-check
+check: fmt clippy test nextest tuikit-features doc diff-check
 
 # Drop into a disposable Conspectus home (private tmux, stub harnesses,
 # a git repo) for manual testing; `just scratch smoke` runs the checks.

@@ -175,7 +175,7 @@ fn p_pins_exactly_what_the_menus_pin_entry_pins() {
             let Some(pin) = app
                 .row_menu()
                 .and_then(|menu| menu.entries().iter().find(|entry| entry.label == "Pin"))
-                .map(|entry| entry.msg.clone())
+                .map(|entry| entry.outcome.clone())
             else {
                 app.close_row_menu();
                 panic!("{}: no Pin entry for a pinnable row", describe(view, &id));
@@ -203,7 +203,7 @@ fn rows_with_nothing_to_pin_say_why_instead_of_doing_nothing() {
     app.set_selection(bucket);
     let effects = app.update(Msg::TogglePin);
     assert!(
-        matches!(effects.as_slice(), [Effect::Toast(text)] if !text.is_empty()),
+        matches!(effects.as_slice(), [Effect::Toast(note)] if !note.text.is_empty()),
         "{effects:?}"
     );
 }

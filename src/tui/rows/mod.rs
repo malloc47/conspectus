@@ -19,19 +19,21 @@
 
 use std::path::Path;
 
+use tuikit::age::Age;
+
 use crate::model::{AgentSessionId, MuxSessionId, NodeId};
 use crate::tui::View;
 
 pub(crate) mod content;
-pub mod forks;
 pub mod history;
 pub mod mux;
 pub mod pinned;
+mod pr_status;
 pub mod prs;
 pub mod search;
 pub mod sessions;
-pub mod union;
 
+pub use pr_status::PrStatus;
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
 /// Stable, hashable row identity. Used by the selection state
@@ -47,7 +49,6 @@ pub enum RowId {
     AgentSession(NodeId),
     MuxSession(NodeId),
     Pr(NodeId),
-    Fork(NodeId),
     /// A record row in the History view (ADR 0140), keyed on the
     /// record's stable id.
     History {
@@ -109,9 +110,7 @@ pub enum ViewLabel {
     #[default]
     Sessions,
     Mux,
-    Union,
     Prs,
-    Forks,
     Pinned,
     History,
     Search,
@@ -122,9 +121,7 @@ impl From<View> for ViewLabel {
         match view {
             View::Sessions => Self::Sessions,
             View::Mux => Self::Mux,
-            View::Union => Self::Union,
             View::Prs => Self::Prs,
-            View::Forks => Self::Forks,
             View::Pinned => Self::Pinned,
             View::History => Self::History,
             View::Search => Self::Search,
@@ -143,6 +140,24 @@ pub struct Row {
     pub kind: RowKind,
 }
 
+/// The framework's tree keeps its selection and folds by `RowId`, and
+/// reads a row's depth and whether it has children from here.
+impl tuikit::tree::TreeRow for Row {
+    type Id = RowId;
+
+    fn id(&self) -> &RowId {
+        &self.id
+    }
+
+    fn depth(&self) -> u16 {
+        u16::from(self.depth)
+    }
+
+    fn expandable(&self) -> bool {
+        self.expandable
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 // AgentSessionRow carries a handful of optional display strings and
 // is the only variant the renderer hot-loops over. Boxing would push
@@ -155,7 +170,6 @@ pub enum RowKind {
     AgentSession(AgentSessionRow),
     MuxSession(MuxSessionRow),
     Pr(PrRow),
-    Fork(ForkRow),
     /// A row of any kind in the Pinned and History views, drawn in the
     /// shared mixed-kind columns.
     Mixed(MixedRow),
@@ -185,6 +199,8 @@ pub struct PaneRow {
     pub deduplicated: usize,
     /// How long ago the scrollback was read.
     pub age: String,
+    /// When the scrollback was read, which tints the age.
+    pub age_epoch: Option<i64>,
     /// The newest matching line's position in the scrollback, from 1.
     pub line: usize,
     /// The newest matching line, cropped around the match.
@@ -205,6 +221,8 @@ pub struct PaneHitRow {
     pub line: usize,
     /// How long ago the scrollback was read.
     pub age: String,
+    /// When the scrollback was read, which tints the age.
+    pub age_epoch: Option<i64>,
     pub snippet: String,
     pub highlight: std::ops::Range<usize>,
 }
@@ -234,6 +252,9 @@ pub struct HitRow {
     pub kind: &'static str,
     /// When it was said, as an age; a dash when the turn has no time.
     pub age: String,
+    /// When it was said, which tints the age; `None` when the turn has
+    /// no time.
+    pub age_epoch: Option<i64>,
     /// The window of text around the match.
     pub snippet: String,
     /// Byte range of the match inside `snippet`.
@@ -282,13 +303,16 @@ pub struct MixedRow {
     pub label: String,
     pub status: String,
     pub tone: MixedTone,
-    /// Age as `format_recency` renders it; `None` when unknown.
+    /// Age on the framework's default ladder (`tuikit::age`); `None`
+    /// when unknown.
     pub age: Option<String>,
     /// The instant behind [`Self::age`], which picks the age's recency
     /// color the way the other views do.
     pub age_epoch: Option<i64>,
-    /// The state glyph of a row in the Mux grid, where the Mux view
-    /// draws a glyph rather than a word.
+    /// The state as a glyph, for a stopped mux in the Mux view: a view of
+    /// one kind of entity shows state as a glyph (ADR 0145), so the row is
+    /// drawn in the running muxes' columns. `None` for a Pinned or History
+    /// row, which spells its state in `status`.
     pub state: Option<EntityState>,
     /// The agent or program the entity runs, drawn as the same filled
     /// chip the other views use.
@@ -296,12 +320,11 @@ pub struct MixedRow {
     /// What follows the chip: a directory, a title, a repo and branch.
     pub content: String,
     pub primary_node: NodeId,
-    /// PR state, which tints the PR glyph.
-    pub pr_state: Option<String>,
+    /// A PR's state, when the row knows it: it tints the PR glyph and
+    /// the status word.
+    pub pr_status: Option<PrStatus>,
     /// The pin marker cell after the kind glyph.
     pub marker: PinMarker,
-    /// Which column grid draws the row.
-    pub grid: MixedGrid,
 }
 
 /// An agent or program name drawn as a chip.
@@ -340,8 +363,30 @@ pub enum PinMarker {
     /// A pin on an entity that is running (`◉`).
     Running,
     /// A pin on an entity that is stopped, removed, missing, or not
-    /// started yet (`◎`, in the ghost color).
+    /// started yet (`◎`, in the ghost look).
     Stopped,
+}
+
+/// The tree hands a row's pin marker to the row's producer as its mark:
+/// on for a running pinned entity, off for one that isn't.
+impl From<PinMarker> for tuikit::tree::RowMark {
+    fn from(marker: PinMarker) -> Self {
+        match marker {
+            PinMarker::None => Self::None,
+            PinMarker::Running => Self::On,
+            PinMarker::Stopped => Self::Off,
+        }
+    }
+}
+
+impl From<tuikit::tree::RowMark> for PinMarker {
+    fn from(mark: tuikit::tree::RowMark) -> Self {
+        match mark {
+            tuikit::tree::RowMark::None => Self::None,
+            tuikit::tree::RowMark::On => Self::Running,
+            tuikit::tree::RowMark::Off => Self::Stopped,
+        }
+    }
 }
 
 /// The state a primary-entity row draws as a glyph: sessions and
@@ -358,22 +403,19 @@ pub enum EntityState {
     Unknown,
 }
 
-/// How a mixed-kind row lays out its columns.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MixedGrid {
-    /// Label, status, age, then chip and content, as in the Pinned and
-    /// History views.
-    Columns,
-    /// The Mux view's grid (name, chip, age, state), so a ghost mux
-    /// lines up with the live ones around it.
-    Mux,
-}
-
-/// A workspace / repo / worktree label row.
+/// A group header: a workspace, repo, checkout, or bucket that the rows
+/// beneath it belong to. It says two things, drawn as two cells: its
+/// name, and what more there is to say about it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupRow {
-    /// Human-friendly path with `$HOME` shortened to `~`.
-    pub display_path: String,
+    /// The header's name, drawn bold: the last part of the group's path, a
+    /// workspace's name, the forge repo a PR group's PRs come from, or a
+    /// bucket's label.
+    pub label: String,
+    /// What the header says after its name, dim: the group's whole path
+    /// with `$HOME` shortened to `~`, a workspace's members and provider,
+    /// a forge repo, `no checkout`. Empty when there is nothing more.
+    pub detail: String,
     /// Underlying node id when the group corresponds to a single
     /// node, `None` for synthetic buckets.
     pub primary_node: Option<NodeId>,
@@ -383,6 +425,70 @@ pub struct GroupRow {
     /// can tell where they launched from; the runtime also uses it
     /// to pick the initial selection and pre-expand ancestors.
     pub is_launch_context: bool,
+}
+
+impl GroupRow {
+    /// The header of the group at `path` (`~`-shortened), for the node
+    /// `primary_node` when it stands for one: named by the path's last
+    /// part, with the whole path after it when the two differ.
+    pub fn at_path(path: &str, primary_node: Option<NodeId>) -> Self {
+        let label = path_label(path);
+        let detail = if label == path {
+            String::new()
+        } else {
+            path.to_string()
+        };
+        Self {
+            label,
+            detail,
+            primary_node,
+            is_launch_context: false,
+        }
+    }
+
+    /// A header named `label` with nothing after it: Ungrouped, a kind or
+    /// state bucket.
+    pub fn named(label: impl Into<String>, primary_node: Option<NodeId>) -> Self {
+        Self {
+            label: label.into(),
+            detail: String::new(),
+            primary_node,
+            is_launch_context: false,
+        }
+    }
+
+    /// The header with `detail` after its name.
+    #[must_use]
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = detail.into();
+        self
+    }
+
+    /// The header's words as its row reads them: the name, then what
+    /// follows it, two cells apart.
+    pub fn text(&self) -> String {
+        if self.detail.is_empty() {
+            self.label.clone()
+        } else {
+            format!("{}  {}", self.label, self.detail)
+        }
+    }
+}
+
+/// The last part of a path, which names a header for it: `project` for
+/// `~/src/project`, `~` for the home directory itself. A trailing `/` is
+/// ignored; text with no `/` is its own last part.
+pub fn path_label(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    if trimmed == "~" {
+        return trimmed.to_string();
+    }
+    trimmed
+        .rsplit('/')
+        .next()
+        .filter(|part| !part.is_empty())
+        .unwrap_or(trimmed)
+        .to_string()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -520,7 +626,7 @@ pub enum MuxIndicator {
     Unmuxed,
 }
 
-/// A mux-session row in the mux or union view.
+/// A mux-session row in the mux view.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MuxSessionRow {
     pub mux: MuxSessionId,
@@ -569,12 +675,12 @@ pub struct MuxSessionRow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PrRow {
     pub pr_number: u64,
-    /// `owner/repo#N`: the text search matches, and the left-pane
-    /// label unless the group names the repo.
+    /// `owner/repo#N`: the text search matches.
     pub repo_display: String,
-    /// What the left pane shows for the PR: `#N` under a group that
-    /// names the forge repo, else [`Self::repo_display`] (ADR 0131).
-    pub label: String,
+    /// The forge repo (`owner/repo`) the left pane names before the
+    /// number, or `None` under a group that names it, where the row reads
+    /// `#N` (ADR 0131).
+    pub forge_repo: Option<String>,
     pub state: Option<String>,
     pub is_draft: bool,
     pub branch_name: Option<String>,
@@ -589,15 +695,25 @@ pub struct PrRow {
     pub primary_node: NodeId,
 }
 
-/// A fork row in the forks view.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ForkRow {
-    pub fork_label: String,
-    pub provider: String,
-    pub scope: Option<String>,
-    pub parent_label: Option<String>,
-    pub child_count: usize,
-    pub primary_node: NodeId,
+impl PrRow {
+    /// What the PR's state reads as on its row.
+    pub fn status(&self) -> PrStatus {
+        PrStatus::of(self.state.as_deref(), self.is_draft)
+    }
+
+    /// The PR's number as its row shows it: `#N`.
+    pub fn number(&self) -> String {
+        format!("#{}", self.pr_number)
+    }
+
+    /// What the left pane names the PR by: `owner/repo#N`, or `#N` under
+    /// a group that names the forge repo.
+    pub fn label(&self) -> String {
+        match &self.forge_repo {
+            Some(repo) => format!("{repo}{}", self.number()),
+            None => self.number(),
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -627,31 +743,20 @@ pub fn shorten_home(path: &str, home: Option<&Path>) -> String {
     path.to_string()
 }
 
-/// Assemble the canonical workspace top-row display string used by
-/// the Workspaces view (ADR 0062) and by the
-/// hybrid Sessions/Graph workspace headers (ADR 0064):
-/// `<name>  <repo-a+repo-b+...>  (<provider>)`. The member list and
-/// provider segment are each prefixed with two spaces so the eye
-/// can pick out the three slots without a glyph budget. Sections
-/// are omitted cleanly when their data is missing — a workspace
-/// with no members drops the join segment, with no provider drops
-/// the parens, and with neither degrades to its bare label.
-pub fn format_workspace_display(
-    workspace_label: &str,
-    member_display_names: &[String],
-    provider: Option<&str>,
-) -> String {
-    let mut out = workspace_label.to_string();
+/// What a workspace header says after its name (ADR 0062, 0064): its
+/// members joined with `+`, then its provider in parentheses, two cells
+/// apart so the eye picks out the two without a glyph budget
+/// (`repo-a+repo-b  (agent-deck)`). Either is left out when missing, and
+/// a workspace with neither says nothing more.
+pub fn workspace_header_detail(member_display_names: &[String], provider: Option<&str>) -> String {
+    let mut parts = Vec::with_capacity(2);
     if !member_display_names.is_empty() {
-        out.push_str("  ");
-        out.push_str(&member_display_names.join("+"));
+        parts.push(member_display_names.join("+"));
     }
     if let Some(provider) = provider {
-        out.push_str("  (");
-        out.push_str(provider);
-        out.push(')');
+        parts.push(format!("({provider})"));
     }
-    out
+    parts.join("  ")
 }
 
 /// Operator-facing path for a repo (ADR 0034). A non-bare repo's
@@ -678,19 +783,21 @@ pub fn repo_display_path(
     .unwrap_or_else(|| repo.common_dir.clone())
 }
 
-/// Header text for a workspace group, shared by the sessions and mux
-/// views so both read identically: the workspace node's `name`, else
-/// the root's last component, else the `~`-shortened root, followed by
-/// its members and provider per [`format_workspace_display`].
-pub fn workspace_header_label(
+/// The header of a workspace group, shared by the sessions and mux views
+/// so both read identically: the workspace node's `name`, else the root's
+/// last component, else the `~`-shortened root, then its members and
+/// provider ([`workspace_header_detail`]).
+pub fn workspace_header(
     snapshot: &crate::model::GraphSnapshot,
     workspace_root: &str,
     home: Option<&Path>,
-) -> String {
+    primary_node: NodeId,
+) -> GroupRow {
     let label = workspace_display_name(snapshot, workspace_root, home);
     let provider = workspace_node(snapshot, workspace_root).and_then(|w| w.provider.as_deref());
     let members = workspace_member_names(snapshot, workspace_root);
-    format_workspace_display(&label, &members, provider)
+    GroupRow::named(label, Some(primary_node))
+        .with_detail(workspace_header_detail(&members, provider))
 }
 
 /// The name a workspace header leads with (its bold label): the
@@ -934,7 +1041,6 @@ pub(crate) fn row_node(id: &RowId) -> Option<&NodeId> {
         | RowId::AgentSession(node)
         | RowId::MuxSession(node)
         | RowId::Pr(node)
-        | RowId::Fork(node)
         | RowId::Nested { node, .. }
         | RowId::Pane { mux: node, .. } => Some(node),
         _ => None,
@@ -975,6 +1081,118 @@ pub(crate) fn live_pin_target(
     snapshot.find_node(&id).is_some().then_some(id)
 }
 
+/// The muxes that sessions under `group` are ambiguous about: every mux
+/// that a session whose natural parent is `group` lists as one of two or
+/// more active `LinkedToMux` candidates (ADR 0071). The resolver has not
+/// picked a winner for these, so the operator decides which to attach to.
+///
+/// The natural parent is the same shape the Sessions view uses (ADR
+/// 0064):
+///
+/// - `Workspace` group: sessions with an active `AssociatedWith` link to
+///   this workspace.
+/// - `Checkout` group: sessions with an active `AssociatedWith` link to
+///   this checkout and no workspace association.
+/// - `Repo` group: the same checkout-scoped sessions, over every checkout
+///   of this repo.
+///
+/// Any other node returns empty.
+pub(crate) fn ambiguous_muxes_for_group(
+    snapshot: &crate::model::GraphSnapshot,
+    group: &NodeId,
+) -> Vec<NodeId> {
+    let mut muxes: std::collections::BTreeSet<NodeId> = std::collections::BTreeSet::new();
+    for session in sessions_scoped_to_group(snapshot, group) {
+        let unique_targets: std::collections::BTreeSet<NodeId> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                matches!(link.state, crate::model::LinkState::Active)
+                    && link.source == session
+                    && link.relation == crate::model::RelationKind::LinkedToMux
+            })
+            .filter_map(|link| link.target_node_id().cloned())
+            .collect();
+        if unique_targets.len() >= 2 {
+            muxes.extend(unique_targets);
+        }
+    }
+    muxes.into_iter().collect()
+}
+
+fn sessions_scoped_to_group(snapshot: &crate::model::GraphSnapshot, group: &NodeId) -> Vec<NodeId> {
+    match group {
+        NodeId::Workspace(_) => sessions_associated_with(snapshot, group),
+        NodeId::Checkout(_) => sessions_associated_with(snapshot, group)
+            .into_iter()
+            .filter(|session| !session_has_workspace_association(snapshot, session))
+            .collect(),
+        NodeId::Repo(repo_id) => {
+            // `CheckoutId` carries the owning repo id directly on the
+            // node, so walk nodes rather than relying on a
+            // resolver-produced `BelongsToRepo` link. This works for
+            // synthetic fixtures that bypass the git discovery
+            // adapter.
+            let mut checkouts: Vec<NodeId> = snapshot
+                .nodes
+                .iter()
+                .filter_map(|node| match node {
+                    crate::model::GraphNode::Checkout(co) if &co.id.repo == repo_id => {
+                        Some(NodeId::Checkout(co.id.clone()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            checkouts.sort();
+            checkouts.dedup();
+            let mut out: Vec<NodeId> = checkouts
+                .iter()
+                .flat_map(|checkout| {
+                    sessions_associated_with(snapshot, checkout)
+                        .into_iter()
+                        .filter(|session| !session_has_workspace_association(snapshot, session))
+                })
+                .collect();
+            out.sort();
+            out.dedup();
+            out
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn sessions_associated_with(
+    snapshot: &crate::model::GraphSnapshot,
+    target: &NodeId,
+) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            matches!(link.state, crate::model::LinkState::Active)
+                && link.relation == crate::model::RelationKind::AssociatedWith
+                && matches!(&link.source, NodeId::AgentSession(_))
+                && link.target_node_id() == Some(target)
+        })
+        .map(|link| link.source.clone())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn session_has_workspace_association(
+    snapshot: &crate::model::GraphSnapshot,
+    session: &NodeId,
+) -> bool {
+    snapshot.candidate_links.iter().any(|link| {
+        matches!(link.state, crate::model::LinkState::Active)
+            && link.source == *session
+            && link.relation == crate::model::RelationKind::AssociatedWith
+            && matches!(link.target_node_id(), Some(NodeId::Workspace(_)))
+    })
+}
+
 fn program_name(command: &str) -> Option<String> {
     let command = command.trim();
     let name = command.rsplit('/').next().unwrap_or(command);
@@ -985,67 +1203,17 @@ pub fn harness_label(harness_key: &str) -> String {
     crate::discovery::harness::display_label_for(harness_key)
 }
 
-/// Format an activity epoch as a human-readable recency string
-/// (`2m`, `17m`, `1h`, `2d`). `now` is passed explicitly so the
-/// function stays time-independent for tests. Returns `None` when
-/// either side is missing.
-///
-/// Rules:
-/// - 0..60 seconds → "Ns" (rare, but renders cleanly).
-/// - 60s..1h → "Nm".
-/// - 1h..24h → "Nh".
-/// - >= 24h → "Nd".
-/// - Future timestamps (clock skew) clamp to "0s".
-pub fn format_recency(now: Option<i64>, activity_epoch: Option<i64>) -> Option<String> {
-    let now = now?;
-    let then = activity_epoch?;
-    let delta = (now - then).max(0);
-    if delta < 60 {
-        return Some(format!("{delta}s"));
-    }
-    let minutes = delta / 60;
-    if minutes < 60 {
-        return Some(format!("{minutes}m"));
-    }
-    let hours = minutes / 60;
-    if hours < 24 {
-        return Some(format!("{hours}h"));
-    }
-    let days = hours / 24;
-    Some(format!("{days}d"))
-}
-
-/// Coarse activity buckets (Phase 3 of the styling overhaul). The
-/// renderer maps each bucket to a `Theme` style so the recency
-/// column carries a freshness signal in color in addition to the
-/// numeric label. Bucket boundaries:
-///
-/// - `< 5m`   → [`RecencyBucket::Fresh`]
-/// - `< 1h`   → [`RecencyBucket::Active`]
-/// - `< 1d`   → [`RecencyBucket::Recent`]
-/// - `≥ 1d`   → [`RecencyBucket::Cold`]
-///
-/// Returns `None` when either side of the delta is missing so the
-/// caller can fall back to placeholder styling.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecencyBucket {
-    Fresh,
-    Active,
-    Recent,
-    Cold,
-}
-
 // Shared row-assembly helpers (`agent_row`, `mux_indicator`,
-// `session_matches_filter`, …) used by the per-view builders in
-// `rows/{union,prs,forks}.rs` and `output/{prs,forks}.rs`.
+// `session_matches_filter`, …) used by the PRs view builder in
+// `rows/prs.rs`.
 //
 // `rows/mux.rs::agent_row` is separate because it takes a different
 // input struct (`AttachedAgent`).
 
-/// Snapshot of an `AgentSessionNode` prepared for the sessions
-/// / union / prs / forks row builders. The `node_id` field is
-/// the stringified `NodeId::AgentSession(agent.id)` used to
-/// index the `candidate_counts` map.
+/// Snapshot of an `AgentSessionNode` prepared for the PRs row
+/// builder. The `node_id` field is the stringified
+/// `NodeId::AgentSession(agent.id)` used to index the
+/// `candidate_counts` map.
 #[derive(Clone, Debug)]
 pub(crate) struct AgentData<'a> {
     pub node_id: String,
@@ -1054,10 +1222,10 @@ pub(crate) struct AgentData<'a> {
     pub alias: Option<String>,
 }
 
-/// Build an `AgentSession` row for a single `AgentData`. Every
-/// non-mux row-tree builder consumes this — the mux builder
-/// uses its own near-twin (`rows/mux.rs::agent_row`) because
-/// it works over a different input struct.
+/// Build an `AgentSession` row for a single `AgentData`. The PRs
+/// builder consumes this; the mux builder uses its own near-twin
+/// (`rows/mux.rs::agent_row`) because it works over a different
+/// input struct.
 pub(crate) fn agent_row(
     agent: &AgentData<'_>,
     depth: u8,
@@ -1079,7 +1247,7 @@ pub(crate) fn agent_row(
             harness_label: harness_label(&agent.id.harness_key),
             cwd_display: agent.node.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
             project_display: None,
-            recency: format_recency(now, agent.node.last_active_epoch),
+            recency: Age::of(agent.node.last_active_epoch, now).map(Age::label),
             activity_epoch: agent.node.last_active_epoch,
             mux_state: mux_indicator(candidate_count),
             preview: agent.node.last_message_preview.clone(),
@@ -1125,36 +1293,6 @@ pub(crate) fn session_matches_filter(
         last_active_epoch: agent.node.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
     })
-}
-
-pub fn recency_bucket(now: Option<i64>, activity_epoch: Option<i64>) -> Option<RecencyBucket> {
-    let now = now?;
-    let then = activity_epoch?;
-    let delta = (now - then).max(0);
-    Some(if delta < 5 * 60 {
-        RecencyBucket::Fresh
-    } else if delta < 60 * 60 {
-        RecencyBucket::Active
-    } else if delta < 24 * 60 * 60 {
-        RecencyBucket::Recent
-    } else {
-        RecencyBucket::Cold
-    })
-}
-
-impl RecencyBucket {
-    /// Build the [`ratatui::style::Style`] for this bucket from the
-    /// active `Theme`. The mapping pulls the per-bucket `StyleSpec`
-    /// directly so operators who override a single bucket through
-    /// `[tui.theme]` see the change immediately.
-    pub fn style(self, theme: &crate::tui::Theme) -> ratatui::style::Style {
-        match self {
-            Self::Fresh => theme.recency_fresh.into_style(),
-            Self::Active => theme.recency_active.into_style(),
-            Self::Recent => theme.recency_recent.into_style(),
-            Self::Cold => theme.recency_cold.into_style(),
-        }
-    }
 }
 
 /// Projection state consumed by [`build_tree_for_view`]. Read from
@@ -1264,11 +1402,6 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
                 mux_recency,
             })
         }
-        View::Union => union::build_union_tree(union::UnionBuildInputs {
-            snapshot,
-            home: home.as_deref(),
-            filter,
-        }),
         View::Prs => prs::build_prs_tree(prs::PrsBuildInputs {
             snapshot,
             home: home.as_deref(),
@@ -1279,10 +1412,6 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
             filter,
             now,
             cwd,
-        }),
-        View::Forks => forks::build_forks_tree(forks::ForksBuildInputs {
-            snapshot,
-            home: home.as_deref(),
         }),
         View::History => history::build_history_tree(history::HistoryBuildInputs {
             snapshot,

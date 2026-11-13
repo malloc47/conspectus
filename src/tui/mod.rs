@@ -16,8 +16,6 @@ use crate::filter::RowFilter;
 pub mod actions;
 mod app;
 pub mod clipboard;
-mod cursor;
-pub mod detail;
 pub mod effect;
 pub mod explorer;
 pub mod icons;
@@ -25,6 +23,7 @@ pub mod keybindings;
 pub mod keymap;
 pub mod messages;
 pub mod modal;
+pub mod paths;
 pub mod preview;
 pub mod preview_wrap;
 pub mod relation_path;
@@ -45,7 +44,7 @@ pub mod worktree_actions;
 
 pub use app::{App, ContentSearch, ContentStatus, Msg};
 pub use effect::Effect;
-pub use modal::{Modal, Overlay, OverlayOutcome, RenameOverlayState};
+pub use modal::Modal;
 #[cfg(feature = "snapshot")]
 pub use runtime::run_from_fixture;
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
@@ -86,6 +85,12 @@ pub struct RunConfig {
     /// `--grouping` or `--sessions-grouping`. When `false`, persisted
     /// state may override.
     pub explicit_grouping: bool,
+    /// Whether each view reopens with the rows the last run left
+    /// expanded and selected, from persisted state. Off under
+    /// `--no-resume-view` and `--snapshot`, so the start is the same
+    /// every time; the view to start in is decided before the TUI
+    /// starts.
+    pub resume_view: bool,
     /// Background graph refresh cadence.
     pub refresh_interval: Duration,
     /// Selected mux pane capture cadence.
@@ -127,7 +132,7 @@ pub struct RunConfig {
     /// Initial preview-pane wrap mode (ADR 0106). Sourced from
     /// `[tui] preview_wrap`; the controls overlay changes it in memory
     /// and the last choice is restored from persisted TUI state.
-    pub default_preview_wrap: PreviewWrap,
+    pub default_preview_wrap: WrapMode,
     /// Initial preview for agent sessions in tmux (ADR 0112). Sourced
     /// from `[tui] session_preview`; the controls overlay changes it in
     /// memory and the last choice is restored from persisted TUI state.
@@ -185,6 +190,7 @@ impl RunConfig {
             explicit_filter: false,
             explicit_sort: false,
             explicit_grouping: false,
+            resume_view: true,
             refresh_interval: Duration::from_secs(30),
             mux_preview_interval: Duration::from_secs(2),
             live_preview_enabled: true,
@@ -196,7 +202,7 @@ impl RunConfig {
             show_edge_meta: false,
             show_harness_chips: false,
             default_mux_recency: MuxRecency::default(),
-            default_preview_wrap: PreviewWrap::default(),
+            default_preview_wrap: WrapMode::default(),
             default_session_preview: SessionPreview::default(),
             narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
@@ -212,17 +218,14 @@ impl RunConfig {
     }
 }
 
-/// Which of the registered row-tree views to render initially.
-/// Mirrors `Projection` from `conspectus table <ROWS>` so the
-/// terminology stays consistent across CLI and TUI.
+/// Which of the registered row-tree views to render initially. The
+/// names are the `--view` values and the `[tui.views.*]` config keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum View {
     Sessions,
     Mux,
-    Union,
     Prs,
-    Forks,
     /// Pin slots, whatever their kind (ADR 0141).
     Pinned,
     /// Gone entities Conspectus remembers (ADR 0140).
@@ -291,53 +294,10 @@ impl MuxRecency {
 }
 
 /// How the preview pane fits a captured mux pane into its width
-/// (ADR 0106).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PreviewWrap {
-    /// Wrap every line at the preview width, rules and borders
-    /// included.
-    Plain,
-    /// Wrap content but truncate formatting — rules, box borders, and
-    /// padding — so decorations don't spill onto extra rows.
-    #[default]
-    Smart,
-    /// Keep tmux's own layout at the pane's width and clip whatever
-    /// doesn't fit the preview.
-    None,
-}
-
-impl PreviewWrap {
-    /// Stable token used for config and persistence.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Plain => "plain",
-            Self::Smart => "smart",
-            Self::None => "none",
-        }
-    }
-
-    /// Human label for the controls overlay.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Plain => "plain wrap",
-            Self::Smart => "smart wrap",
-            Self::None => "no wrap",
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim() {
-            "plain" => Some(Self::Plain),
-            "smart" => Some(Self::Smart),
-            "none" => Some(Self::None),
-            _ => None,
-        }
-    }
-
-    /// All variants in stable display order.
-    pub const ALL: [PreviewWrap; 3] = [Self::Smart, Self::Plain, Self::None];
-}
+/// (ADR 0106): the framework's wrap modes (ADR 0181), which
+/// [`preview_wrap`] spells for `[tui] preview_wrap`, the state file, and
+/// the controls overlay.
+pub use tuikit::richtext::WrapMode;
 
 /// What the Preview shows for an agent session in tmux (ADR 0112).
 /// Sessions outside tmux always show their transcript.
@@ -406,14 +366,6 @@ pub enum MuxGrouping {
     Workspace,
 }
 
-/// Top-level grouping in the union view (per ADR 0031).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UnionGrouping {
-    Kind,
-    Repo,
-}
-
 /// Top-level grouping in the PRs view (ADR 0031, ADR 0114).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -424,14 +376,6 @@ pub enum PrsGrouping {
     Repo,
     /// By state: open, draft, merged, closed.
     State,
-}
-
-/// Top-level grouping in the forks view (per ADR 0031).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ForksGrouping {
-    Provider,
-    Parent,
 }
 
 /// Top-level grouping in the Pinned view (ADR 0141).
@@ -485,9 +429,7 @@ pub enum SearchGrouping {
 pub enum Grouping {
     Sessions(SessionsGrouping),
     Mux(MuxGrouping),
-    Union(UnionGrouping),
     Prs(PrsGrouping),
-    Forks(ForksGrouping),
     Pinned(PinnedGrouping),
     History(HistoryGrouping),
     Search(SearchGrouping),
@@ -499,9 +441,7 @@ impl Grouping {
         match self {
             Self::Sessions(_) => View::Sessions,
             Self::Mux(_) => View::Mux,
-            Self::Union(_) => View::Union,
             Self::Prs(_) => View::Prs,
-            Self::Forks(_) => View::Forks,
             Self::Pinned(_) => View::Pinned,
             Self::History(_) => View::History,
             Self::Search(_) => View::Search,
@@ -515,9 +455,7 @@ impl Grouping {
         match view {
             View::Sessions => Self::Sessions(SessionsGrouping::Graph),
             View::Mux => Self::Mux(MuxGrouping::Session),
-            View::Union => Self::Union(UnionGrouping::Kind),
             View::Prs => Self::Prs(PrsGrouping::Checkout),
-            View::Forks => Self::Forks(ForksGrouping::Provider),
             View::Pinned => Self::Pinned(PinnedGrouping::Project),
             View::History => Self::History(HistoryGrouping::Project),
             View::Search => Self::Search(SearchGrouping::None),
@@ -532,20 +470,15 @@ impl Grouping {
             Self::Sessions(SessionsGrouping::Workspace) | Self::Mux(MuxGrouping::Workspace) => {
                 "workspace"
             }
-            Self::Sessions(SessionsGrouping::Repo)
-            | Self::Mux(MuxGrouping::Repo)
-            | Self::Union(UnionGrouping::Repo) => "repo",
+            Self::Sessions(SessionsGrouping::Repo) | Self::Mux(MuxGrouping::Repo) => "repo",
             Self::Sessions(SessionsGrouping::Checkout) => "checkout",
             Self::Sessions(SessionsGrouping::ScanRoot) => "scan-root",
             Self::Sessions(SessionsGrouping::None) => "none",
             Self::Mux(MuxGrouping::Session) => "session",
             Self::Mux(MuxGrouping::Host) => "host",
-            Self::Union(UnionGrouping::Kind) => "kind",
             Self::Prs(PrsGrouping::Checkout) => "checkout",
             Self::Prs(PrsGrouping::Repo) => "repo",
             Self::Prs(PrsGrouping::State) => "state",
-            Self::Forks(ForksGrouping::Provider) => "provider",
-            Self::Forks(ForksGrouping::Parent) => "parent",
             Self::Pinned(PinnedGrouping::Project) => "project",
             Self::Pinned(PinnedGrouping::Kind) => "kind",
             Self::Pinned(PinnedGrouping::None) => "none",
@@ -589,18 +522,10 @@ impl Grouping {
                 Self::Mux(MuxGrouping::Repo),
                 Self::Mux(MuxGrouping::Workspace),
             ],
-            View::Union => &[
-                Self::Union(UnionGrouping::Kind),
-                Self::Union(UnionGrouping::Repo),
-            ],
             View::Prs => &[
                 Self::Prs(PrsGrouping::Checkout),
                 Self::Prs(PrsGrouping::Repo),
                 Self::Prs(PrsGrouping::State),
-            ],
-            View::Forks => &[
-                Self::Forks(ForksGrouping::Provider),
-                Self::Forks(ForksGrouping::Parent),
             ],
             View::Pinned => &[
                 Self::Pinned(PinnedGrouping::Project),
@@ -660,16 +585,8 @@ mod tests {
             Grouping::Mux(MuxGrouping::Session)
         );
         assert_eq!(
-            Grouping::default_for(View::Union),
-            Grouping::Union(UnionGrouping::Kind)
-        );
-        assert_eq!(
             Grouping::default_for(View::Prs),
             Grouping::Prs(PrsGrouping::Checkout)
-        );
-        assert_eq!(
-            Grouping::default_for(View::Forks),
-            Grouping::Forks(ForksGrouping::Provider)
         );
     }
 
@@ -678,9 +595,7 @@ mod tests {
         for view in [
             View::Sessions,
             View::Mux,
-            View::Union,
             View::Prs,
-            View::Forks,
             View::Pinned,
             View::History,
             View::Search,
@@ -730,9 +645,7 @@ mod tests {
         for view in [
             View::Sessions,
             View::Mux,
-            View::Union,
             View::Prs,
-            View::Forks,
             View::Pinned,
             View::History,
             View::Search,

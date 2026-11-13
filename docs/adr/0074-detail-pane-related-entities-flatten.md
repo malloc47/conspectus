@@ -2,10 +2,21 @@
 
 ## Status
 
-Accepted. Narrowed 2026-10-02 by [ADR 0107](0107-related-view-neighbor-granularity.md):
+Accepted. Supersedes the sectioned detail pane of
+[ADR 0033](0033-tui-detail-pane-sections.md) and the `Ambiguous muxes`
+section of [ADR 0071](0071-ambiguous-mux-scope-and-detail.md). Narrowed 2026-10-02 by [ADR 0107](0107-related-view-neighbor-granularity.md):
 rows are one per neighbor rather than one per candidate link, the
 Other zone holds only neighbors the resolver did not pick, and row
-keys identify neighbors.
+keys identify neighbors. Amended by
+[ADR 0187](0187-tui-detail-rows-are-a-property-grid-and-a-row-reports-what-it-asks-for.md):
+the rows are the framework's property grid rows, and the Other
+header's arrow takes the `disclosure` color the tree's arrows take.
+Narrowed by
+[ADR 0188](0188-tui-the-explorer-is-a-framework-control-over-a-host-source.md)
+(decision 6): a refresh or a filter or sort change keeps a drill, its
+breadcrumb, and its cursor while the left selection stays on the row
+the pane reflects, including a drill into a neighbor the view has no
+row for.
 
 ## Context
 

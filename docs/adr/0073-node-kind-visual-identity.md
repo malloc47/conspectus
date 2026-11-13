@@ -13,7 +13,11 @@ request states, the pin marker) are a separate vocabulary, set by
 the branch, fork, and runtime-process glyphs `⎇` `⑂` `⚙` become `⌥` `⋎` `◈`,
 because the originals are missing from common monospace fonts (or can take
 emoji presentation) and draw wider than a cell. Every glyph the TUI draws is
-now measured and recorded in `icons::VETTED`.
+now measured and recorded in a vetted-glyph table. Amended by
+[ADR 0154](0154-tui-glyph-marks-vetted-table-and-scan.md): that table (the
+former `icons::VETTED`) lives in the framework crate's `glyphs` module, the
+node-kind and state glyphs are registered into it from `icons`, and the
+scan that fails on an unmeasured glyph covers every source of both crates.
 
 ## Context
 

@@ -55,6 +55,20 @@ menu for the selected repo / worktree / mux; **`X`** jumps straight to
 close-down; **`N`** opens the mux launch form with the worktree toggle
 already on (Space toggles it off for a plain launch).
 
+Each menu entry but the reveals asks before it acts, in a box over the
+menu: *New worktree* asks for the branch name, *Merge back & close*,
+*Remove worktree*, and *Prune merged worktrees* ask you to confirm (and
+list the live sessions the worktree hosts), and *Close down stream* asks
+how to land the branch. In a confirmation `Enter` or `y` goes ahead; in
+the close-down choice `m` merges and `d` discards; in the branch prompt
+`Enter` creates the worktree. In each, `Esc` goes back to the menu (so
+does `n`, outside the prompt), and `Ctrl-C` closes the menu altogether
+(so does `q`, outside the prompt, where it is a letter of the name). `X`
+opens the close-down choice on its own, so `Esc` there closes it.
+*Remove worktree* and *Close down stream* act on the worktree's branch,
+so on a worktree with no branch checked out they are shown but cannot be
+picked.
+
 ## Two concepts worth understanding
 
 ### Close-down (winding a stream down)

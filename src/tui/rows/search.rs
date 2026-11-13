@@ -11,6 +11,8 @@
 use std::cmp::Ordering;
 use std::path::Path;
 
+use tuikit::age::Age;
+
 use crate::content_search::{MAX_PANE_HITS_PER_ENTRY, PaneHits};
 use crate::filter::RowFilter;
 use crate::model::{GraphSnapshot, MuxSessionId, NodeId};
@@ -21,7 +23,6 @@ use crate::viewer::search::{Grouping, Hit, SessionHits, cmp_hits, cmp_hits_acros
 use super::sessions::{SessionsBuildInputs, build_sessions_tree};
 use super::{
     GroupRow, HitOrigin, HitRow, PaneHitRow, PaneRow, Row, RowId, RowKind, RowTree, ViewLabel,
-    format_recency,
 };
 
 pub struct SearchBuildInputs<'a> {
@@ -165,11 +166,7 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
                     id: RowId::Bucket(label.clone()),
                     depth: 0,
                     expandable: true,
-                    kind: RowKind::Group(GroupRow {
-                        display_path: label,
-                        primary_node: None,
-                        is_launch_context: false,
-                    }),
+                    kind: RowKind::Group(GroupRow::at_path(&label, None)),
                 });
                 for item in members {
                     push_item(&mut tree, item, 1);
@@ -255,11 +252,7 @@ fn build_flat(
                 id: RowId::Bucket(label.clone()),
                 depth: 0,
                 expandable: true,
-                kind: RowKind::Group(GroupRow {
-                    display_path: label,
-                    primary_node: None,
-                    is_launch_context: false,
-                }),
+                kind: RowKind::Group(GroupRow::at_path(&label, None)),
             });
             1
         };
@@ -431,8 +424,8 @@ fn mux_node(pane: &PaneHits) -> NodeId {
 
 /// How long ago a pane's scrollback was read.
 fn pane_age(pane: &PaneHits, now: Option<i64>) -> String {
-    format_recency(now, Some(pane.captured_at))
-        .unwrap_or_else(|| crate::tui::icons::marks::NO_VALUE.to_string())
+    Age::of(Some(pane.captured_at), now)
+        .map_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string(), Age::label)
 }
 
 /// A pane's row: where a session row would be.
@@ -453,6 +446,7 @@ fn pane_row(pane: &PaneHits, now: Option<i64>) -> Row {
             count: pane.count,
             deduplicated: pane.deduplicated,
             age: pane_age(pane, now),
+            age_epoch: Some(pane.captured_at),
             line: newest.map_or(1, |hit| hit.line),
             snippet: newest.map(|hit| hit.snippet.clone()).unwrap_or_default(),
             highlight: newest.map_or(0..0, |hit| hit.highlight.clone()),
@@ -484,6 +478,7 @@ fn pane_hit_rows(pane: &PaneHits, now: Option<i64>, flat: bool) -> Vec<Row> {
                 origin: flat.then(|| origin.clone()),
                 line: hit.line,
                 age: pane_age(pane, now),
+                age_epoch: Some(pane.captured_at),
                 snippet: hit.snippet.clone(),
                 highlight: hit.highlight.clone(),
             }),
@@ -515,8 +510,9 @@ fn hit_rows(session_row: &Row, details: &[Hit], now: Option<i64>) -> Vec<Row> {
                 kind: kind_word(hit.kind),
                 age: hit
                     .timestamp
-                    .and_then(|time| format_recency(now, Some(time.timestamp())))
-                    .unwrap_or_else(|| crate::tui::icons::marks::NO_VALUE.to_string()),
+                    .and_then(|time| Age::of(Some(time.timestamp()), now))
+                    .map_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string(), Age::label),
+                age_epoch: hit.timestamp.map(|time| time.timestamp()),
                 snippet: hit.snippet.clone(),
                 highlight: hit.highlight.clone(),
             }),

@@ -22,7 +22,9 @@
 //! - [`render_columns_listing`] for the `conspectus columns` surface
 //! - [`render_rows`] (the columnar/card dispatcher) and its width-
 //!   fitting helpers ([`natural_widths`], [`fit_to_width`],
-//!   [`display_width`], [`truncate_to_width`])
+//!   [`display_width`], [`truncate_to_width`]). Measuring and cutting
+//!   a cell are `tuikit::text`'s, shared with the TUI; allocating
+//!   column budgets (`fit_to_width`) is this renderer's own.
 //! - The ADR 0022 color palette helpers ([`header_style`],
 //!   [`push_styled`], …)
 //! - The recency formatter ([`format_relative_age`])
@@ -37,7 +39,6 @@
 use std::fmt::Write as _;
 
 use anstyle::{Ansi256Color, AnsiColor, Effects, Reset, Style};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub use crate::config::Projection;
 
@@ -1125,37 +1126,17 @@ pub fn fit_to_width(naturals: &[usize], header: &[String], target: usize) -> Vec
     budgets
 }
 
+/// Terminal cells `s` takes: the framework's measure, so a CLI table and
+/// the TUI agree on how wide a cell is.
 pub fn display_width(s: &str) -> usize {
-    UnicodeWidthStr::width(s)
+    tuikit::text::width(s)
 }
 
-/// Truncate `s` to fit within `budget` display columns, appending `…` when
-/// truncation actually happens. `budget == 0` yields an empty string;
-/// `budget == 1` yields a bare `…`.
+/// `s` cut to fit within `budget` display columns, ending in `…` when
+/// text was cut: the framework's end cut. `budget == 0` yields an empty
+/// string and `budget == 1` a bare `…`.
 pub fn truncate_to_width(s: &str, budget: usize) -> String {
-    if budget == 0 {
-        return String::new();
-    }
-    if display_width(s) <= budget {
-        return s.to_string();
-    }
-    if budget == 1 {
-        return "…".to_string();
-    }
-    // Reserve one column for the ellipsis.
-    let limit = budget - 1;
-    let mut out = String::new();
-    let mut used = 0usize;
-    for ch in s.chars() {
-        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if used + w > limit {
-            break;
-        }
-        out.push(ch);
-        used += w;
-    }
-    out.push('…');
-    out
+    tuikit::text::truncate_end(s, budget)
 }
 
 // -----------------------------------------------------------------------------
@@ -1165,23 +1146,17 @@ pub fn truncate_to_width(s: &str, budget: usize) -> String {
 /// Format `then_epoch` relative to `now_epoch` as a compact recency
 /// string (`12s`, `5m`, `2h`, `3d`, `4w`). Future-dated values render
 /// as `now`.
+///
+/// This is the TUI's age ladder (`tuikit::age`) going on to weeks: the
+/// two agree on every age under a week and use the same thresholds, so
+/// a session reads `3h` in a table and in the tree. The TUI stops at
+/// days so its four-cell age column keeps day precision; a table has no
+/// such column and keeps the shorter week count for old records.
 pub fn format_relative_age(then_epoch: i64, now_epoch: i64) -> String {
-    let delta = now_epoch.saturating_sub(then_epoch);
-    if delta < 0 {
+    if then_epoch > now_epoch {
         return "now".to_string();
     }
-    let secs = delta as u64;
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else if secs < 86_400 {
-        format!("{}h", secs / 3600)
-    } else if secs < 7 * 86_400 {
-        format!("{}d", secs / 86_400)
-    } else {
-        format!("{}w", secs / (7 * 86_400))
-    }
+    tuikit::age::Ladder::WEEKS.label(tuikit::age::Age::between(then_epoch, now_epoch))
 }
 
 // -----------------------------------------------------------------------------

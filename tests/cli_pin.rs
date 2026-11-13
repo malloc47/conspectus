@@ -461,6 +461,96 @@ fn renaming_a_live_mux_slot_renames_the_tmux_session_with_it() {
     );
 }
 
+/// A fake `tmux` in `<home>/fake-tmux/`: it lists one live session,
+/// `name`, in the world's repo, succeeds at everything else, and appends
+/// every call's arguments to the returned log, one call per line.
+/// Returns the `PATH` that puts it first, and the log.
+fn fake_tmux(world: &World, name: &str) -> (std::ffi::OsString, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = world.home.join("fake-tmux");
+    std::fs::create_dir_all(&dir).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let repo = world.repo.display();
+    let pid = std::process::id();
+    let rows = dir.join("sessions");
+    std::fs::write(
+        &rows,
+        format!("{name}\t{repo}\t{now}\t{now}\tsleep\t{pid}\t{repo}\tsleep 600\t0\t\t0\t$1\n"),
+    )
+    .unwrap();
+    let log = dir.join("calls");
+    let script = dir.join("tmux");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\ncase \"$1\" in\nlist-sessions) cat '{rows}' ;;\nesac\n",
+            log = log.display(),
+            rows = rows.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    (path, log)
+}
+
+#[test]
+fn renaming_a_live_mux_slot_to_a_refused_name_changes_nothing() {
+    let world = World::new();
+    let (path, log) = fake_tmux(&world, "live-pin");
+    let run = |args: &[&str]| {
+        let output = world
+            .conspectus()
+            .env("PATH", &path)
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let renames = || {
+        std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .filter(|call| call.starts_with("rename-session"))
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let (ok, stderr) = run(&["pin", "add", "live-pin"]);
+    assert!(ok, "{stderr}");
+    planned(&world, &["other-pin"]);
+    let pins = world.pins_text();
+
+    for (new_name, reason) in [
+        ("other-pin", "a pin named `other-pin` already exists"),
+        (" padded", "isn't a usable pin name"),
+    ] {
+        let (ok, stderr) = run(&["pin", "rename", "live-pin", new_name]);
+        assert!(!ok, "renaming to {new_name:?} should fail");
+        assert!(stderr.contains(reason), "{new_name:?}: {stderr}");
+        assert_eq!(renames(), Vec::<String>::new(), "{new_name:?}");
+        assert_eq!(
+            world.pins_text(),
+            pins,
+            "{new_name:?}: the pins file changed"
+        );
+    }
+
+    // The pin is a live mux the fake serves: a free name renames the
+    // session through it.
+    let (ok, stderr) = run(&["pin", "rename", "live-pin", "free-pin"]);
+    assert!(ok, "{stderr}");
+    assert_eq!(renames(), ["rename-session -t live-pin free-pin"]);
+}
+
 fn planned(world: &World, names: &[&str]) {
     for name in names {
         world.ok(&["pin", "add", "--planned", "--kind", "mux", "--name", name]);

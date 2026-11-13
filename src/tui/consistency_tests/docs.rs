@@ -13,7 +13,7 @@ use crate::tui::rows::{RowKind, words};
 const DOC: &str = "docs/tui-columns.md";
 
 fn doc() -> String {
-    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(DOC))
+    std::fs::read_to_string(source_tree::workspace_root().join(DOC))
         .unwrap_or_else(|err| panic!("{DOC}: {err}"))
 }
 
@@ -130,9 +130,7 @@ fn view_heading(view: View) -> &'static str {
     match view {
         View::Sessions => "Sessions view",
         View::Mux => "Mux view",
-        View::Union => "Union view",
         View::Prs => "PRs view",
-        View::Forks => "Forks view",
         View::Pinned => "Pinned view",
         View::History => "History view",
         View::Search => "Search view",
@@ -147,7 +145,6 @@ fn row_kind_headings(kind: &RowKind) -> &'static [&'static str] {
         RowKind::AgentSession(_) => &["Session row"],
         RowKind::MuxSession(_) => &["Mux row"],
         RowKind::Pr(_) => &["PR row"],
-        RowKind::Fork(_) => &["Fork row"],
         RowKind::Mixed(_) => &["Pin row", "History row"],
         RowKind::Hit(_) => &["Hit row"],
         RowKind::Pane(_) => &["Pane row"],
@@ -172,7 +169,6 @@ fn every_view_and_row_kind_has_a_heading() {
         "Session row",
         "Mux row",
         "PR row",
-        "Fork row",
         "Pin row",
         "History row",
         "Hit row",
@@ -212,7 +208,7 @@ fn the_reference_speaks_the_operators_language() {
 
 #[test]
 fn the_reference_is_linked_from_the_places_people_start() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = source_tree::workspace_root();
     for file in ["docs/index.md", "docs/design.md", "README.md"] {
         let text = std::fs::read_to_string(root.join(file)).unwrap();
         assert!(text.contains("tui-columns.md"), "{file} should link {DOC}");

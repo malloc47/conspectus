@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-25 02:00'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -42,3 +43,9 @@ ordinal: 460000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-022`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): no `status_running`, `status_waiting`, `status_idle`, or `status_error` colors exist or are reserved. New colors are host roles registered with the framework theme (`ROLES` in `src/tui/theme.rs`, ADR 0153), set under `[tui.theme]`; a header chip is a `tuikit::chip::StatusChip` (ADR 0157); a row glyph is a cell of the view's column schema built in `src/tui/rows/` (ADR 0183), and a new glyph needs a vetted entry in the glyph table (`tuikit::glyphs` or the host's `src/tui/icons.rs`, ADR 0154).
+<!-- SECTION:NOTES:END -->

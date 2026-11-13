@@ -8,7 +8,27 @@ app-wide and never persisted, the single exception to the per-view,
 saved, structural-only filters below. Amended by
 [ADR 0149](0149-two-level-search-current-and-wider-context.md): `/` is quick
 select over the current context (the rows after these filters), and `Tab`
-widens it to every entity.
+widens it to every entity. Amended by
+[ADR 0151](0151-tui-framework-control-set-and-house-rules.md): the
+`union` and `forks` views are retired, along with `UnionGrouping`,
+`ForksGrouping`, `--view union|forks`, and their `[tui.views.*]` tables;
+the `conspectus table union|forks` projections stay. Amended by
+[ADR 0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md):
+the harness, mux-state, and PR-state editors are the framework's
+`Checklist`, which also selects all or none and counts what is checked;
+the multi-select primitive named under the module layout below is gone.
+Amended by [ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md): the Controls
+overlay is the framework's `SettingsPanel`, its rows built from the App on
+every key and frame, and its editors open as steps over it whose answers
+step back to it. Amended by
+[ADR 0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md):
+the per-view expanded set, selection, and left-panel scroll are one
+framework `TreeState`, saved and restored whole with the position the
+selection showed at. Amended by
+[ADR 0202](0202-tui-each-view-reopens-with-the-rows-it-had-expanded-and-selected.md):
+the expanded set and the selection of every view but Search also outlive
+the process in `tui-state.json`, beside the filter and grouping, and each
+view reopens with them the first time it lists rows.
 
 ## Context
 

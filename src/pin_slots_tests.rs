@@ -216,6 +216,26 @@ fn rename_keeps_the_slots_place_and_refuses_a_taken_name() {
 }
 
 #[test]
+fn check_rename_refuses_what_rename_would_without_writing() {
+    let (_dir, store) = store();
+    for id in ["a", "b"] {
+        store.add(mux_slot(id)).unwrap();
+    }
+    let before = std::fs::read_to_string(store.path()).unwrap();
+    assert!(matches!(
+        store.check_rename("a", "b"),
+        Err(SlotError::DuplicateId(id)) if id == "b"
+    ));
+    assert!(matches!(
+        store.check_rename("a", " padded "),
+        Err(SlotError::Invalid(_))
+    ));
+    assert!(store.check_rename("a", "free").is_ok());
+    assert!(store.check_rename("a", "a").is_ok(), "its own name is fine");
+    assert_eq!(std::fs::read_to_string(store.path()).unwrap(), before);
+}
+
+#[test]
 fn slots_move_to_a_place_in_the_order() {
     let (_dir, store) = store();
     for id in ["a", "b", "c", "d"] {

@@ -1,82 +1,122 @@
 use super::*;
-use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
+use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::KeyCode;
+use ratatui::layout::Rect;
+use ratatui::text::Line;
+use tuikit::help::HelpRow;
+use tuikit::overlay::Outcome;
+use tuikit::testkit::keys::{ctrl, press};
 
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+/// Where a description starts: the indent and the key column.
+const KEY_COLUMN_WIDTH: usize = 16;
+
+/// The page's lines laid out `width` cells wide (`None` wraps nothing),
+/// the footer last, as the modal draws them.
+fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
+    let help = open(theme);
+    let width = width.unwrap_or(usize::MAX);
+    let mut lines = help.content().lines(theme, width);
+    lines.extend(help.footer().lines(width, theme));
+    lines
 }
 
-/// Every `KEYBINDINGS` entry's key label
-/// must appear somewhere in `keymap_sections`'s rendered
-/// output, so the dispatcher and the help overlay can't drift:
-/// failing this test means a binding is missing from the
-/// operator-facing help.
+fn draw(help: &mut KeymapHelp, area: Rect, theme: &Theme) -> Buffer {
+    let mut buf = Buffer::empty(area);
+    help.draw(area, &mut buf, theme);
+    buf
+}
+
+fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
+    body_lines_for_width(theme, None)
+}
+
+/// The keymap page's rows and the keymap's bindings, both ways.
+///
+/// Table to page: every binding has exactly one row, whose keys are every
+/// key it binds and whose description starts with its help text.
+///
+/// Page to table: every key row is a binding's row (each key it lists
+/// reaches that binding in its scope) or an annotation's row that starts
+/// with the key of the binding it follows; no annotation names a binding
+/// the keymap lacks.
 #[test]
-fn every_keybindings_entry_appears_in_help_sections() {
-    // Ratatui-cheese `Binding::key(&self)` returns the key
-    // string; the haystack now holds every operator-facing
-    // key label. Check each KEYBINDINGS entry.
-    //
-    // Multi-key help rows collapse several bindings into one
-    // string (e.g. "1 – 5", "j / k / ↓ / ↑"). The test
-    // maps each KEYBINDINGS entry to one or more equivalent
-    // string forms the help output uses, and asserts at
-    // least one of those forms is present.
-    fn equivalent_forms(label: &str) -> Vec<String> {
-        match label {
-            "1" | "2" | "3" | "4" | "5" => vec![
-                label.to_string(),
-                "1 – 5".to_string(),
-                "1 / 2 / 3 / 4".to_string(),
-            ],
-            "Ctrl-c" => vec!["Ctrl-C".to_string()],
-            "Ctrl-g" => vec!["Ctrl-G".to_string()],
-            "Ctrl-f" => vec!["Ctrl-F".to_string()],
-            "Ctrl-r" => vec!["Ctrl-R".to_string()],
-            "Ctrl-l" => vec!["Ctrl-L".to_string()],
-            "Ctrl-o" => vec!["Ctrl-O".to_string()],
-            "Down" | "Up" => vec!["↓".to_string(), "↑".to_string()],
-            "Right" | "Left" => vec!["→".to_string(), "←".to_string()],
-            "Home" | "End" => vec!["g".to_string(), "G".to_string()],
-            other => vec![other.to_string()],
+fn the_keymap_page_and_the_keymap_agree_both_ways() {
+    use tuikit::keys::{ActiveScopes, Binding, Scope};
+    let theme = Theme::default();
+    let keymap = crate::tui::keybindings::keymap();
+    let notes = annotations(&theme);
+    assert_eq!(tuikit::help::unanchored(keymap, &notes), Vec::<&str>::new());
+    let rows: Vec<(String, String)> = sections(&theme)
+        .into_iter()
+        .flat_map(|section| section.rows)
+        .filter_map(|row| match row {
+            HelpRow::Keys {
+                keys, description, ..
+            } => Some((keys, description.into_owned())),
+            HelpRow::Legend { .. } => None,
+        })
+        .collect();
+    let labels = |binding: &Binding<_, _>| -> Vec<String> {
+        let mut labels: Vec<String> = Vec::new();
+        for key in binding.keys() {
+            let label = tuikit::keys::key_label(key);
+            if !labels.contains(&label) {
+                labels.push(label);
+            }
         }
+        labels
+    };
+    // Table to page.
+    for binding in keymap.bindings() {
+        let joined = labels(binding).join(" / ");
+        let found = rows
+            .iter()
+            .filter(|(keys, description)| {
+                *keys == joined && description.starts_with(binding.help())
+            })
+            .count();
+        assert_eq!(found, 1, "`{}` ({joined}) has {found} rows", binding.id());
     }
-
-    use crate::tui::keybindings::{KEYBINDINGS, KeyMode, key_label};
-    // Concatenate every section's binding key strings.
-    let sections = keymap_sections();
-    let mut haystack = String::new();
-    for section in &sections {
-        for binding in &section.bindings {
-            haystack.push_str(binding.key());
-            haystack.push('\n');
-        }
-    }
-
-    let mut missing: Vec<String> = Vec::new();
-    for binding in KEYBINDINGS {
-        if binding.mode != KeyMode::Global {
+    // Page to table.
+    let after: Vec<(&str, String)> = notes
+        .iter()
+        .filter_map(|note| match note {
+            HelpAnnotation::RowAfter {
+                id,
+                row: HelpRow::Keys { keys, .. },
+            } => Some((*id, keys.clone())),
+            _ => None,
+        })
+        .collect();
+    for (keys, description) in &rows {
+        let binding = keymap.bindings().iter().find(|binding| {
+            labels(binding).join(" / ") == *keys && description.starts_with(binding.help())
+        });
+        let Some(binding) = binding else {
+            let (anchor, _) = after
+                .iter()
+                .find(|(_, row)| row == keys)
+                .unwrap_or_else(|| panic!("`{keys}` is no binding's row: {description}"));
+            let first = keymap
+                .get(anchor)
+                .and_then(|binding| labels(binding).into_iter().next())
+                .expect("an anchored binding");
+            assert!(
+                keys.starts_with(&format!("{first} ")),
+                "`{keys}` follows `{anchor}` but does not start with its key `{first}`"
+            );
             continue;
-        }
-        let label = key_label(&binding.key);
-        let forms = equivalent_forms(&label);
-        if !forms.iter().any(|f| haystack.contains(f)) {
-            missing.push(format!(
-                "binding {label:?} (help: {help:?}) not in help sections",
-                help = binding.help_text,
-            ));
+        };
+        let active = if let Scope::Pane(name) = binding.scope() {
+            ActiveScopes::pane(name)
+        } else {
+            ActiveScopes::global()
+        };
+        for key in binding.keys() {
+            let reached = keymap.resolve(active, key.example()).map(Binding::id);
+            assert_eq!(reached, Some(binding.id()), "`{keys}` row: {description}");
         }
     }
-    assert!(
-        missing.is_empty(),
-        "CSP-468 wave 5 drift: KEYBINDINGS entries missing from help sections:\n{}",
-        missing.join("\n")
-    );
 }
 
 #[test]
@@ -152,43 +192,37 @@ fn help_body_includes_mux_state_legend() {
 
 #[test]
 fn esc_closes_help_overlay() {
-    let mut state = HelpOverlayState::new();
-    assert_eq!(state.handle_key(key(KeyCode::Esc)), HelpOutcome::Close);
+    let mut help = open(&Theme::default());
+    assert_eq!(help.handle_key(press(KeyCode::Esc)), Outcome::Close);
 }
 
 #[test]
 fn q_and_question_mark_close_help_overlay() {
-    let mut state = HelpOverlayState::new();
-    assert_eq!(
-        state.handle_key(key(KeyCode::Char('q'))),
-        HelpOutcome::Close
-    );
-    assert_eq!(
-        state.handle_key(key(KeyCode::Char('?'))),
-        HelpOutcome::Close
-    );
+    let mut help = open(&Theme::default());
+    assert_eq!(help.handle_key(press(KeyCode::Char('q'))), Outcome::Dismiss);
+    assert_eq!(help.handle_key(press(KeyCode::Char('?'))), Outcome::Close);
 }
 
 #[test]
 fn ctrl_c_closes_help_overlay() {
-    let mut state = HelpOverlayState::new();
-    let event = KeyEvent {
-        code: KeyCode::Char('c'),
-        modifiers: KeyModifiers::CONTROL,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    };
-    assert_eq!(state.handle_key(event), HelpOutcome::Close);
+    let mut help = open(&Theme::default());
+    assert_eq!(help.handle_key(ctrl('c')), Outcome::Dismiss);
 }
 
 #[test]
 fn other_keys_are_swallowed_not_propagated() {
-    let mut state = HelpOverlayState::new();
+    let mut help = open(&Theme::default());
     assert_eq!(
-        state.handle_key(key(KeyCode::Char('j'))),
-        HelpOutcome::Continue
+        help.handle_key(press(KeyCode::Char('j'))),
+        Outcome::Consumed
     );
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), HelpOutcome::Continue);
+    assert_eq!(help.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
+    assert_eq!(
+        help.handle_key(press(KeyCode::Char('/'))),
+        Outcome::Consumed,
+        "the keymap help has no find"
+    );
+    assert!(!help.takes_text());
 }
 
 #[test]
@@ -212,18 +246,26 @@ fn body_lines_cover_every_documented_key() {
         "r ",
         "S ",
         "q / Ctrl-C",
-        "1 / 2 / 3",
-        "] / [",
+        "1 ",
+        "6 ",
+        "] ",
+        "[ ",
         "F ",
         "Ctrl-G",
         "/ ",
-        "j / k / ↓ / ↑",
-        "l / → / h / ←",
-        "PgDn / PgUp",
-        "g / G",
+        "s / Ctrl-/ / Ctrl-_ / Ctrl-7",
+        "↑ / k",
+        "↓ / j",
+        "← / h",
+        "→ / l",
+        "PgDn",
+        "PgUp",
+        "Home / g",
+        "End / G",
         "Tab",
-        "J / K",
-        "j / k",
+        "J ",
+        "K ",
+        "o ",
         "e ",
         "Backspace",
         "E ",
@@ -247,22 +289,29 @@ fn body_lines_cover_every_documented_key() {
         "Refresh discovery now",
         "Resume the selected un-muxed agent session",
         "Quit",
-        "Switch directly to the sessions / mux / PRs / pinned view",
-        "Cycle to next / previous view",
+        "Switch directly to the sessions view",
+        "Switch directly to the pinned view",
+        "Cycle to the next view",
+        "Cycle to the previous view",
         "Clear all active filters",
         "Cycle grouping forward",
         "Quick select: find a row of this view",
         "Find anything, whichever view it lives in",
         "Search contents: what was said in the sessions and what is in mux scrollback",
-        "Search view: show the previous (older) or next (newer) remembered search",
-        "Move selection down / up",
-        "Expand / collapse the selected left-tree row",
-        "Page through the row tree",
-        "First / last row",
+        "Search view: show the previous (older) remembered search",
+        "Search view: show the next (newer) remembered search",
+        "Move the selection down",
+        "Move the selection up",
+        "Expand the selected left-tree row",
+        "Collapse the selected left-tree row",
+        "Page down through the row tree",
+        "Jump to the first row",
+        "Jump to the last row",
+        "Return to where the last reveal started",
         "Cycle focus",
         "Scroll the right-panel preview",
         "Move the explorer cursor",
-        "Toggle expand/collapse on a multi-link",
+        "Open or close the Other zone",
         "Back out of the most recent drilldown",
         "Toggle Expanded Node Detail",
         "Toggle edge meta",
@@ -309,11 +358,12 @@ fn narrow_width_wraps_descriptions_under_a_hanging_indent() {
 #[test]
 fn jumping_to_the_end_shows_the_last_lines_not_blank_space() {
     let theme = Theme::default();
-    let mut state = HelpOverlayState::new();
-    state.handle_key(key(KeyCode::Char('G')));
+    let mut help = open(&theme);
+    help.handle_key(press(KeyCode::Char('G')));
     let area = Rect::new(0, 0, 80, 24);
-    let mut buf = Buffer::empty(area);
-    HelpOverlayWidget::new(&state, &theme).render(area, &mut buf);
+    let buf = draw(&mut help, area, &theme);
+    let window = help.window();
+    assert_eq!(window.offset(), window.last_offset(), "the last page");
     let rendered: String = (0..area.height)
         .map(|y| {
             (0..area.width)
@@ -323,8 +373,12 @@ fn jumping_to_the_end_shows_the_last_lines_not_blank_space() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        rendered.contains("to close"),
+        rendered.contains("Esc/q/? close"),
         "end of keymap should be visible after G:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Enter starts it"),
+        "the last legend row, not a blank body:\n{rendered}"
     );
 }
 
@@ -334,7 +388,7 @@ const TERMINAL_WIDTHS: [u16; 4] = [60, 80, 120, 160];
 /// The cells the help body's text gets at a terminal width: the modal's
 /// inner width, less the scrollbar column.
 fn text_width_at(terminal_width: u16) -> usize {
-    let modal = help_modal_rect(Rect::new(0, 0, terminal_width, 40));
+    let modal = HelpPage::SIZE.rect(Rect::new(0, 0, terminal_width, 40), 0);
     usize::from(modal.width.saturating_sub(2)).saturating_sub(1)
 }
 
@@ -387,20 +441,20 @@ fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
     for terminal in TERMINAL_WIDTHS {
         let area = Rect::new(0, 0, terminal, 24);
         let mut seen = std::collections::BTreeSet::new();
-        let mut state = HelpOverlayState::new();
+        let mut help = open(&theme);
         for _ in 0..80 {
-            let mut buf = Buffer::empty(area);
-            HelpOverlayWidget::new(&state, &theme).render(area, &mut buf);
+            // As the app draws it: what the frame showed sizes the next page.
+            let buf = draw(&mut help, area, &theme);
             // The text columns only: inside the frame, left of the
             // scrollbar.
-            let modal = help_modal_rect(area);
+            let modal = HelpPage::SIZE.rect(area, 0);
             for y in modal.y + 1..modal.y + modal.height - 1 {
                 let row: String = (modal.x + 1..modal.x + modal.width - 2)
                     .map(|x| buf[(x, y)].symbol().to_string())
                     .collect();
                 seen.extend(row.split_whitespace().map(str::to_string));
             }
-            state.handle_key(key(KeyCode::PageDown));
+            help.handle_key(press(KeyCode::PageDown));
         }
         let missing: Vec<&String> = source.iter().filter(|word| !seen.contains(*word)).collect();
         assert!(
@@ -409,4 +463,71 @@ fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
             &missing[..missing.len().min(12)]
         );
     }
+}
+
+/// The content search row names the key the search itself binds for
+/// listing sessions or messages, not the Search view's.
+#[test]
+fn the_content_search_row_names_the_key_the_search_binds() {
+    use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, SearchKey};
+    use tuikit::keys::{Hint, KeyRow, rows};
+    let label = rows(SEARCH_CONTENT_KEYS)
+        .find_map(|row| match row {
+            KeyRow::Bind {
+                action: SearchKey::Granularity,
+                hint: Hint::Shown { label, .. },
+                ..
+            } => Some(*label),
+            _ => None,
+        })
+        .expect("the search shows its sessions/messages key");
+    let row = sections(&Theme::default())
+        .into_iter()
+        .flat_map(|section| section.rows)
+        .find_map(|row| match row {
+            HelpRow::Keys {
+                keys, description, ..
+            } if keys.contains("Ctrl-/") => Some(description),
+            _ => None,
+        })
+        .expect("the content search row");
+    assert!(
+        row.contains(&format!("{label} switches between listing sessions")),
+        "{row}"
+    );
+}
+
+/// The right pane's section is generated from the table the keymap takes
+/// in as the right pane's scope, so every key it binds has a row that says
+/// what it does, and the page lists no key the pane does not bind.
+#[test]
+fn the_right_panes_section_is_generated_from_its_table() {
+    use crate::tui::keybindings::RIGHT_PANE_KEYS;
+    use tuikit::keys::{KeyRow, key_label, rows};
+    assert!(tuikit::help::undescribed(RIGHT_PANE_KEYS).is_empty());
+    let section = sections(&Theme::default())
+        .into_iter()
+        .find(|section| section.title == "Detail-pane graph explorer (right focus)")
+        .expect("the right pane's section");
+    let keys: Vec<String> = section
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            HelpRow::Keys { keys, .. } => Some(keys.clone()),
+            HelpRow::Legend { .. } => None,
+        })
+        .collect();
+    for row in rows(RIGHT_PANE_KEYS) {
+        if let KeyRow::Bind { key, .. } = row {
+            let label = key_label(key);
+            assert!(
+                keys.iter()
+                    .any(|row| row.split(" / ").any(|key| key == label)),
+                "`{label}` has no row: {keys:?}"
+            );
+        }
+    }
+    // One row per action the table binds, then the program-wide `E`.
+    assert_eq!(keys.len(), 14, "{keys:?}");
+    assert_eq!(keys.last().map(String::as_str), Some("E"));
 }

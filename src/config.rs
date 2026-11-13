@@ -23,7 +23,7 @@ use crate::filter::{
     RowFilter,
 };
 use crate::tui::icons::parse_icon_override;
-use crate::tui::theme::{Theme, ThemeKeyKind, parse_color, parse_modifier, parse_style_spec};
+use crate::tui::theme::{OverrideError, OverrideProblem, OverrideValue, Theme};
 use crate::tui::{Grouping, View};
 
 /// Filename Conspectus looks for in project trees.
@@ -315,7 +315,7 @@ pub struct TuiConfig {
     pub default_view: Option<crate::tui::View>,
     /// Starting preview-pane wrap mode (ADR 0106). Sourced from
     /// `[tui] preview_wrap`; defaults to smart wrap.
-    pub preview_wrap: crate::tui::PreviewWrap,
+    pub preview_wrap: crate::tui::WrapMode,
     /// Starting preview for agent sessions in tmux (ADR 0112). Sourced
     /// from `[tui] session_preview`; defaults to the transcript.
     pub session_preview: crate::tui::SessionPreview,
@@ -331,7 +331,7 @@ impl Default for TuiConfig {
             show_harness_chips: false,
             narrow_layout_threshold: DEFAULT_NARROW_LAYOUT_THRESHOLD,
             default_view: None,
-            preview_wrap: crate::tui::PreviewWrap::default(),
+            preview_wrap: crate::tui::WrapMode::default(),
             session_preview: crate::tui::SessionPreview::default(),
         }
     }
@@ -357,9 +357,7 @@ pub struct TuiDetailConfig {
 pub struct TuiViewsConfig {
     pub sessions: TuiViewConfig,
     pub mux: TuiViewConfig,
-    pub union: TuiViewConfig,
     pub prs: TuiViewConfig,
-    pub forks: TuiViewConfig,
     pub pinned: TuiViewConfig,
     pub history: TuiViewConfig,
     pub search: TuiViewConfig,
@@ -371,9 +369,7 @@ impl TuiViewsConfig {
         match view {
             View::Sessions => &self.sessions,
             View::Mux => &self.mux,
-            View::Union => &self.union,
             View::Prs => &self.prs,
-            View::Forks => &self.forks,
             View::Pinned => &self.pinned,
             View::History => &self.history,
             View::Search => &self.search,
@@ -613,11 +609,14 @@ struct TuiViewsFile {
     #[serde(default)]
     mux: Option<TuiViewFile>,
     #[serde(default)]
-    union: Option<TuiViewFile>,
-    #[serde(default)]
     prs: Option<TuiViewFile>,
+    /// Tables for views that no longer exist. Their content is never
+    /// read; they are kept only so the loader can tell the operator
+    /// that the table does nothing now.
     #[serde(default)]
-    forks: Option<TuiViewFile>,
+    union: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    forks: Option<serde::de::IgnoredAny>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1240,26 +1239,24 @@ fn merge_tui(
             diagnostics,
         );
         merge_tui_view(
-            &mut config.views.union,
-            views.union,
-            View::Union,
-            path,
-            diagnostics,
-        );
-        merge_tui_view(
             &mut config.views.prs,
             views.prs,
             View::Prs,
             path,
             diagnostics,
         );
-        merge_tui_view(
-            &mut config.views.forks,
-            views.forks,
-            View::Forks,
-            path,
-            diagnostics,
-        );
+        for (retired, present) in [("union", views.union), ("forks", views.forks)] {
+            if present.is_some() {
+                diagnostics.push(ConfigDiagnostic {
+                    path: path.to_path_buf(),
+                    message: format!(
+                        "`[tui.views.{retired}]` is ignored: the {retired} view was removed; \
+                         the views are {}",
+                        view_choices()
+                    ),
+                });
+            }
+        }
     }
 
     // Seed the sessions grouping from the legacy alias only when the
@@ -1303,15 +1300,20 @@ fn merge_tui(
             None => diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),
                 message: format!(
-                    "invalid `[tui] default_view` value `{raw}`; \
-                     expected one of sessions, mux, union, prs, forks"
+                    "invalid `[tui] default_view` value `{raw}`{}; expected one of {}",
+                    if is_retired_view_name(&raw) {
+                        " (that view was removed)"
+                    } else {
+                        ""
+                    },
+                    view_choices()
                 ),
             }),
         }
     }
 
     if let Some(raw) = file.preview_wrap {
-        match crate::tui::PreviewWrap::parse(&raw) {
+        match crate::tui::preview_wrap::parse(&raw) {
             Some(wrap) => config.preview_wrap = wrap,
             None => diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),
@@ -1341,93 +1343,82 @@ fn merge_tui(
     }
 }
 
-/// Apply `[tui.theme]` overrides to the in-memory [`Theme`]. Each
-/// entry routes by [`ThemeKeyKind`]; unknown keys, non-string values,
-/// and unparseable specs each emit a per-key [`ConfigDiagnostic`]
-/// and leave the corresponding field at its default value.
+/// Apply `[tui.theme]` overrides to the in-memory [`Theme`]. The
+/// `icons` and `harness` sub-tables are Conspectus's own; every other
+/// entry, and each `[tui.theme.harness]` entry as `harness.<key>`, goes
+/// through the framework theme's walk, which resolves the alias keys
+/// (ADR 0153). Unknown keys, wrong value types, unparseable specs, and
+/// alias keys another key in the same file overrules each emit a
+/// per-key [`ConfigDiagnostic`] and leave that entry's target as it was.
 fn merge_tui_theme(
     theme: &mut Theme,
     overrides: BTreeMap<String, toml::Value>,
     path: &Path,
     diagnostics: &mut Vec<ConfigDiagnostic>,
 ) {
-    let known: BTreeMap<&'static str, ThemeKeyKind> = Theme::known_keys()
-        .iter()
-        .map(|entry| (entry.name, entry.kind))
-        .collect();
-
+    let mut entries: Vec<(String, toml::Value)> = Vec::new();
     for (key, value) in overrides {
-        if key == "icons" {
-            merge_tui_theme_icons(theme, value, path, diagnostics);
-            continue;
+        match key.as_str() {
+            "icons" => merge_tui_theme_icons(theme, value, path, diagnostics),
+            "harness" => collect_tui_theme_harness(value, path, diagnostics, &mut entries),
+            _ => entries.push((key, value)),
         }
-        if key == "harness" {
-            merge_tui_theme_harness(theme, value, path, diagnostics);
-            continue;
-        }
-        if key == "badge_width" {
-            match value.as_integer().and_then(|width| usize::try_from(width).ok()) {
-                Some(width) if width >= crate::tui::theme::MIN_BADGE_WIDTH => {
-                    theme.badge_width = width;
-                }
-                _ => diagnostics.push(ConfigDiagnostic {
-                    path: path.to_path_buf(),
-                    message: format!(
-                        "`[tui.theme].badge_width` must be an integer of at least {} (got `{value}`)",
-                        crate::tui::theme::MIN_BADGE_WIDTH
-                    ),
-                }),
-            }
-            continue;
-        }
-        let Some(&kind) = known.get(key.as_str()) else {
-            diagnostics.push(ConfigDiagnostic {
-                path: path.to_path_buf(),
-                message: format!("unknown `[tui.theme]` key `{key}`"),
-            });
-            continue;
-        };
-        let raw = if let Some(s) = value.as_str() {
-            s.to_string()
-        } else {
-            diagnostics.push(ConfigDiagnostic {
-                path: path.to_path_buf(),
-                message: format!(
-                    "`[tui.theme].{key}` must be a string (got `{}`)",
-                    value.type_str()
-                ),
-            });
-            continue;
-        };
-        match kind {
-            ThemeKeyKind::Color => match parse_color(&raw) {
-                Ok(color) => {
-                    theme.set_color(&key, color);
-                }
-                Err(err) => diagnostics.push(ConfigDiagnostic {
-                    path: path.to_path_buf(),
-                    message: format!("`[tui.theme].{key}`: {err}"),
-                }),
-            },
-            ThemeKeyKind::Modifier => match parse_modifier(&raw) {
-                Ok(modifier) => {
-                    theme.set_modifier(&key, modifier);
-                }
-                Err(err) => diagnostics.push(ConfigDiagnostic {
-                    path: path.to_path_buf(),
-                    message: format!("`[tui.theme].{key}`: {err}"),
-                }),
-            },
-            ThemeKeyKind::StyleSpec => match parse_style_spec(&raw) {
-                Ok(spec) => {
-                    theme.set_style_spec(&key, spec);
-                }
-                Err(err) => diagnostics.push(ConfigDiagnostic {
-                    path: path.to_path_buf(),
-                    message: format!("`[tui.theme].{key}`: {err}"),
-                }),
-            },
-        }
+    }
+    let problems = theme.apply_overrides(
+        entries
+            .iter()
+            .map(|(key, value)| (key.as_str(), theme_override_value(value))),
+    );
+    for problem in problems {
+        let value = entries
+            .iter()
+            .find(|(key, _)| *key == problem.key)
+            .map(|(_, value)| value);
+        diagnostics.push(ConfigDiagnostic {
+            path: path.to_path_buf(),
+            message: theme_problem_message(&problem, value),
+        });
+    }
+}
+
+/// A TOML value as the theme walk reads it.
+fn theme_override_value(value: &toml::Value) -> OverrideValue<'_> {
+    match value {
+        toml::Value::String(text) => OverrideValue::Text(text),
+        toml::Value::Integer(number) => OverrideValue::Integer(*number),
+        _ => OverrideValue::Other,
+    }
+}
+
+/// Where a theme key lives in the config file: `[tui.theme].<key>`, or
+/// `[tui.theme.harness].<key>` for a per-harness color.
+fn theme_key_location(key: &str) -> String {
+    match key.strip_prefix(crate::tui::theme::role::HARNESS_PREFIX) {
+        Some(harness) => format!("`[tui.theme.harness].{harness}`"),
+        None => format!("`[tui.theme].{key}`"),
+    }
+}
+
+/// The operator-facing message for one theme entry the walk did not
+/// apply as written. `value` is the entry's TOML value.
+fn theme_problem_message(problem: &OverrideError, value: Option<&toml::Value>) -> String {
+    let key = &problem.key;
+    let at = theme_key_location(key);
+    match &problem.problem {
+        OverrideProblem::UnknownKey => format!("unknown `[tui.theme]` key `{key}`"),
+        OverrideProblem::NotText => format!(
+            "{at} must be a string (got `{}`)",
+            value.map_or("nothing", toml::Value::type_str)
+        ),
+        OverrideProblem::NotWidth { min } => format!(
+            "{at} must be an integer of at least {min} (got `{}`)",
+            value.map(ToString::to_string).unwrap_or_default()
+        ),
+        OverrideProblem::Invalid(reason) => format!("{at}: {reason}"),
+        OverrideProblem::Shadowed { target, by } => format!(
+            "{at} is ignored: {} in the same file also sets `{target}`, and wins",
+            theme_key_location(by)
+        ),
     }
 }
 
@@ -1474,19 +1465,18 @@ fn merge_tui_theme_icons(
     }
 }
 
-/// Apply `[tui.theme.harness]` overrides to `theme.harness_colors`.
-/// Table keys are harness keys registered via the
-/// adapter registry; unknown keys emit a diagnostic listing the
-/// registered set and leave the target map entry alone. Non-table
-/// values and non-string entries produce diagnostics without
-/// touching state.
-fn merge_tui_theme_harness(
-    theme: &mut Theme,
+/// Collect `[tui.theme.harness]` entries for the theme walk as
+/// `harness.<key>`. Table keys are harness keys registered via the
+/// adapter registry; an unknown key emits a diagnostic listing the
+/// registered set, and a non-table value emits one without touching
+/// state. Value errors are reported by the walk.
+fn collect_tui_theme_harness(
     value: toml::Value,
     path: &Path,
     diagnostics: &mut Vec<ConfigDiagnostic>,
+    entries: &mut Vec<(String, toml::Value)>,
 ) {
-    let Some(table) = value.as_table() else {
+    let toml::Value::Table(table) = value else {
         diagnostics.push(ConfigDiagnostic {
             path: path.to_path_buf(),
             message: format!(
@@ -1503,38 +1493,19 @@ fn merge_tui_theme_harness(
             .collect();
     for (key, value) in table {
         if !registered.contains(key.as_str()) {
-            let registered_list: Vec<String> = registered
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect();
             diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),
                 message: format!(
                     "unknown `[tui.theme.harness]` key `{key}`; registered harnesses: {}",
-                    registered_list.join(", ")
+                    registered.iter().copied().collect::<Vec<_>>().join(", ")
                 ),
             });
             continue;
         }
-        let Some(raw) = value.as_str() else {
-            diagnostics.push(ConfigDiagnostic {
-                path: path.to_path_buf(),
-                message: format!(
-                    "`[tui.theme.harness].{key}` must be a string (got `{}`)",
-                    value.type_str()
-                ),
-            });
-            continue;
-        };
-        match parse_color(raw) {
-            Ok(color) => {
-                theme.harness_colors.insert(key.clone(), color);
-            }
-            Err(err) => diagnostics.push(ConfigDiagnostic {
-                path: path.to_path_buf(),
-                message: format!("`[tui.theme.harness].{key}`: {err}"),
-            }),
-        }
+        entries.push((
+            format!("{}{key}", crate::tui::theme::role::HARNESS_PREFIX),
+            value,
+        ));
     }
 }
 
@@ -1671,13 +1642,27 @@ fn view_config_key(view: View) -> &'static str {
     match view {
         View::Sessions => "sessions",
         View::Mux => "mux",
-        View::Union => "union",
         View::Prs => "prs",
-        View::Forks => "forks",
         View::Pinned => "pinned",
         View::History => "history",
         View::Search => "search",
     }
+}
+
+/// The views `default_view` accepts, spelled as the config and `--view`
+/// spell them, in tab order.
+fn view_choices() -> String {
+    crate::tui::widgets::controls::VIEW_OPTIONS
+        .iter()
+        .map(|view| view_config_key(*view))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Names of views that were removed, so a config written for an older
+/// build is told what happened instead of just "invalid".
+fn is_retired_view_name(raw: &str) -> bool {
+    matches!(raw.trim().to_ascii_lowercase().as_str(), "union" | "forks")
 }
 
 fn grouping_choices_for(view: View) -> String {
@@ -1720,18 +1705,10 @@ fn parse_config_duration(raw: &str) -> Result<u64, String> {
 /// forms pass through unchanged. When `home` is `None`, the raw
 /// path is returned even if it starts with `~` — the loader has no
 /// home to splice in and the operator-visible result is at least
-/// stable rather than half-resolved.
+/// stable rather than half-resolved. This is the one `~` rule, which
+/// the pin store and the TUI's path fields share.
 fn expand_home(raw: &str, home: Option<&Path>) -> PathBuf {
-    let Some(home) = home else {
-        return PathBuf::from(raw);
-    };
-    if raw == "~" {
-        return home.to_path_buf();
-    }
-    if let Some(rest) = raw.strip_prefix("~/") {
-        return home.join(rest);
-    }
-    PathBuf::from(raw)
+    tuikit::path_field::expand_home(raw, home)
 }
 
 fn merge_table(config: &mut TableConfig, file: TableFile) {
@@ -1761,9 +1738,7 @@ fn parse_view_name(raw: &str) -> Option<crate::tui::View> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "sessions" => Some(View::Sessions),
         "mux" => Some(View::Mux),
-        "union" => Some(View::Union),
         "prs" => Some(View::Prs),
-        "forks" => Some(View::Forks),
         "pinned" => Some(View::Pinned),
         "history" => Some(View::History),
         "search" => Some(View::Search),

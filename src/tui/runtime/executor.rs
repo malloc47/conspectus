@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::tui::keybindings::UNDO_KEY;
-use crate::tui::messages::{LogEntry, LogTarget};
+use crate::tui::messages::{LogEntry, LogEntryExt, LogTarget};
 use crate::tui::undo::Undo;
 
 /// Run one pure (no-terminal) effect. Shared between
@@ -13,7 +13,7 @@ pub(super) fn execute_pure_effect(app: &mut App, effect: Effect) {
     // snapshot modes never offer a gesture that emits them; if one
     // arrives anyway, say so instead of dropping it silently.
     if !pure_executor_runs(&effect) {
-        app.post_toast("that isn't available in this mode");
+        app.post_toast(Feedback::warning("that isn't available in this mode"));
         return;
     }
     match effect {
@@ -24,7 +24,11 @@ pub(super) fn execute_pure_effect(app: &mut App, effect: Effect) {
             // will become the sole quit signal once every quit
             // path routes through here.
         }
-        Effect::Toast(label) => app.post_toast(label),
+        Effect::Toast(feedback) => app.post_toast(feedback),
+        Effect::Copy { text, done } => {
+            let written = crate::tui::clipboard::copy_to_clipboard(&text);
+            app.post_toast(copy_feedback(written, done));
+        }
         Effect::Persist => app.persist_state(),
         Effect::SpawnRefresh { force_local } => {
             if force_local {
@@ -111,9 +115,9 @@ pub(super) fn execute_commit_alias_rename(
     new_display_name: Option<String>,
 ) {
     let Some(handle) = app.snapshot_handle().cloned() else {
-        let _ = app.update(Msg::SetStatus(Some(
-            "rename: no graph loaded yet".to_string(),
-        )));
+        let _ = app.update(Msg::SetStatus(Some(Feedback::warning(
+            "rename: no graph loaded yet",
+        ))));
         return;
     };
     let snapshot = handle.snapshot();
@@ -184,7 +188,7 @@ pub(super) fn execute_commit_alias_rename(
         Some(suffix) => format!("{alias_status} · {suffix}"),
         None => alias_status,
     };
-    app.report(LogEntry::info(final_status));
+    app.report(LogEntry::success(final_status));
 }
 
 /// Rename `rename`'s session through its mux's own backend: `tmux`,
@@ -219,9 +223,9 @@ pub(super) fn execute_commit_mux_rename(
     new_name: String,
 ) {
     let Some(handle) = app.snapshot_handle().cloned() else {
-        let _ = app.update(Msg::SetStatus(Some(
-            "mux rename: no graph loaded yet".to_string(),
-        )));
+        let _ = app.update(Msg::SetStatus(Some(Feedback::warning(
+            "mux rename: no graph loaded yet",
+        ))));
         return;
     };
     let snapshot = handle.snapshot();
@@ -277,7 +281,7 @@ pub(super) fn execute_commit_mux_rename(
     let entry = if !renamed {
         LogEntry::error(summary)
     } else if pin_update_failures.is_empty() {
-        LogEntry::info(summary)
+        LogEntry::success(summary)
     } else {
         LogEntry::warning(summary)
     };
@@ -331,14 +335,16 @@ pub(super) fn execute_exec_spec(
         ExecSpec::Resume(target) => match &target {
             ResumeTarget::Launch { label, .. } => {
                 let entry = if launch_resume(&target) {
-                    LogEntry::info(format!("resumed: {label}"))
+                    LogEntry::success(format!("resumed: {label}"))
                 } else {
                     LogEntry::error(format!("resume of {label} failed to launch"))
                 };
                 app.report(entry);
             }
             other => {
-                let _ = app.update(Msg::SetStatus(Some(resume_disabled_reason(other))));
+                let _ = app.update(Msg::SetStatus(Some(Feedback::warning(
+                    resume_disabled_reason(other),
+                ))));
             }
         },
         ExecSpec::ViewSession(session_id, open) => {
@@ -382,7 +388,7 @@ pub(super) fn open_pane_scrollback(
     match tmux.pane_history(pane.mux.socket.as_deref(), &pane.pane_id) {
         Ok(TmuxCaptureOutcome::Captured(capture)) => {
             let scrollback = crate::content_search::panes::scrollback_lines(&capture.text);
-            app.open_pane_viewer(crate::tui::widgets::pane_viewer::PaneViewerState::open(
+            app.open_pane_viewer(crate::tui::widgets::pane_viewer::open(
                 pane.clone(),
                 scrollback.lines,
                 line,
@@ -390,10 +396,10 @@ pub(super) fn open_pane_scrollback(
             ));
         }
         _ => {
-            let _ = app.update(Msg::SetStatus(Some(format!(
+            let _ = app.update(Msg::SetStatus(Some(Feedback::warning(format!(
                 "{} {}.{} could not be read now",
                 pane.mux.session, pane.window_index, pane.pane_index
-            ))));
+            )))));
         }
     }
 }
@@ -410,10 +416,12 @@ pub(super) fn execute_view_session(
     session_id: crate::model::AgentSessionId,
     open: Option<&crate::viewer::state::ViewerOpen>,
 ) {
-    if let Some(state) = crate::tui::viewer_bridge::build_viewer_state_at(&session_id, open) {
+    if let Some(viewer) = crate::tui::viewer_bridge::build_viewer_at(&session_id, open) {
         let label = format!("{}:{}", session_id.harness_key, session_id.session_key);
-        app.open_viewer_modal(state);
-        let _ = app.update(Msg::SetStatus(Some(format!("viewing {label}"))));
+        app.open_viewer_modal(viewer);
+        let _ = app.update(Msg::SetStatus(Some(Feedback::info(format!(
+            "viewing {label}"
+        )))));
         return;
     }
     let target = resolve_viewer_target(&session_id, &PathBinaryProbe);
@@ -422,12 +430,14 @@ pub(super) fn execute_view_session(
             let outcome = run_viewer_launch(terminal, &plan);
             refresh(app, config);
             app.report(match outcome {
-                ViewerOutcome::Exited => LogEntry::info(format!("viewed: {}", plan.label)),
+                ViewerOutcome::Exited => LogEntry::success(format!("viewed: {}", plan.label)),
                 ViewerOutcome::Failed(reason) => LogEntry::error(format!("view failed: {reason}")),
             });
         }
         ViewerTarget::Disabled(reason) => {
-            let _ = app.update(Msg::SetStatus(Some(viewer_disabled_reason(&reason))));
+            let _ = app.update(Msg::SetStatus(Some(Feedback::warning(
+                viewer_disabled_reason(&reason),
+            ))));
         }
     }
 }
@@ -446,7 +456,7 @@ fn slot_store_or_report(app: &mut App) -> Option<crate::pin_slots::SlotStore> {
 /// markers and the Pinned view catch up, and log either way.
 fn finish_slot_write(app: &mut App, outcome: Result<String, String>) {
     let entry = match outcome {
-        Ok(summary) => LogEntry::info(summary),
+        Ok(summary) => LogEntry::success(summary),
         Err(message) => LogEntry::error(message),
     };
     app.report(entry);
@@ -611,7 +621,25 @@ fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_nam
     let Some(handle) = app.snapshot_handle().cloned() else {
         return;
     };
-    let snapshot = handle.snapshot();
+    let outcome = rename_slot_with(handle.snapshot(), &store, tmux, slot, new_name);
+    finish_slot_write(app, outcome);
+}
+
+/// Rename pin `slot` in `store` to `new_name`; a live mux pin in
+/// `snapshot` renames its session through `tmux` and pins the name
+/// override. The summary to log, or why it failed. A name the store
+/// would refuse is refused before anything is renamed, so the session
+/// and the override stay as they were.
+pub(super) fn rename_slot_with(
+    snapshot: &crate::model::GraphSnapshot,
+    store: &crate::pin_slots::SlotStore,
+    tmux: &dyn MuxBackend,
+    slot: &str,
+    new_name: &str,
+) -> Result<String, String> {
+    store
+        .check_rename(slot, new_name)
+        .map_err(|err| format!("rename failed: {err}"))?;
     let mut notes = Vec::new();
     let live_mux = crate::tui::rows::pin_nodes(snapshot)
         .into_iter()
@@ -630,7 +658,7 @@ fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_nam
         match crate::rename::plan_mux_rename(snapshot, &mux, new_name.to_string()) {
             Ok(plan) => {
                 for (slot, result) in
-                    crate::rename::apply_pin_slot_updates(&store, &plan.pin_slot_updates)
+                    crate::rename::apply_pin_slot_updates(store, &plan.pin_slot_updates)
                 {
                     if let Err(err) = result {
                         notes.push(format!("pin update failed: {slot}: {err}"));
@@ -638,30 +666,26 @@ fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_nam
                 }
                 match rename_mux_via_backend(tmux, &plan.mux_rename) {
                     Ok(()) => notes.push(format!("renamed the mux to `{new_name}`")),
-                    Err(reason) => {
-                        finish_slot_write(app, Err(format!("rename failed: {reason}")));
-                        return;
-                    }
+                    Err(reason) => return Err(format!("rename failed: {reason}")),
                 }
                 let name = (
                     "name".to_string(),
                     crate::model::FieldValue::Text(new_name.to_string()),
                 );
-                if let Err(err) = crate::pin_ops::edit(&store, slot, &[name], &[]) {
+                if let Err(err) = crate::pin_ops::edit(store, slot, &[name], &[]) {
                     notes.push(format!("name override not set: {err}"));
                 }
             }
             Err(err) => notes.push(format!("the mux keeps its name: {err}")),
         }
     }
-    let outcome = crate::pin_ops::rename(&store, slot, new_name)
+    crate::pin_ops::rename(store, slot, new_name)
         .map(|_| {
             let mut parts = vec![format!("renamed pin `{slot}` to `{new_name}`")];
             parts.extend(notes);
             parts.join(" · ")
         })
-        .map_err(|err| format!("rename failed: {err}"));
-    finish_slot_write(app, outcome);
+        .map_err(|err| format!("rename failed: {err}"))
 }
 
 /// Executor branch for `StoreOp::SavePin`: apply the form's overrides,
@@ -750,7 +774,7 @@ fn execute_reap_records(app: &mut App, ids: std::collections::BTreeSet<String>) 
         return;
     };
     let entry = match crate::history::reap::reap(&store, &ids) {
-        Ok(removed) => LogEntry::info(format!(
+        Ok(removed) => LogEntry::success(format!(
             "forgot {removed} history record{}",
             if removed == 1 { "" } else { "s" }
         )),
@@ -762,3 +786,7 @@ fn execute_reap_records(app: &mut App, ids: std::collections::BTreeSet<String>) 
 #[cfg(test)]
 #[path = "executor_undo_tests.rs"]
 mod undo_tests;
+
+#[cfg(test)]
+#[path = "executor_rename_tests.rs"]
+mod rename_tests;

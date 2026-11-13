@@ -1,5 +1,93 @@
+# The repository is a Cargo workspace: the `conspectus` package at the root
+# and the `tuikit` framework crate under `crates/` (ADR 0150). `Cargo.lock`
+# and `rust-toolchain.toml` are shared at the root.
+[workspace]
+members = [".", "crates/tuikit"]
+# Both members are defaults, so a bare `cargo build`, `cargo clippy`, or
+# `cargo test` still reaches the framework crate; CI and `just` pass
+# `--workspace` regardless.
+default-members = [".", "crates/tuikit"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+ansi-to-tui = { version = "8.0.1", default-features = false }
+anstyle = "1.0"
+anyhow = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["serde", "alloc"] }
+clap = { version = "4.5", features = ["derive"] }
+comfy-table = { version = "7", default-features = false }
+indexmap = { version = "2.7", features = ["serde"] }
+# `conspectus serve` filesystem watchers (ADR 0081). Wraps
+# inotify (Linux), kqueue + FSEvents (macOS), kqueue (BSD).
+# Used as a latency optimization on top of interval polling;
+# the daemon falls back to polling cleanly when watcher
+# installation fails for any reason (rlimit, EACCES, NFS, …).
+notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
+# Unix FFI shim for `conspectus serve`'s socket path resolution
+# (getuid for the `$TMPDIR/conspectus-$UID/` fallback per
+# ADR 0038). Already pulled in transitively via signal-hook +
+# rusqlite; promoted to a direct dep so the daemon's socket
+# code can name it explicitly. Tiny, pure-FFI, mature.
+libc = "0.2"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "macros"] }
+# Zero-copy archive format for the on-disk graph snapshot
+# (ADR 0083). Replaces the SQLite-backed persistence layer; the
+# daemon writes a single mmap-able artifact per cycle, readers
+# deserialize once with bytecheck validation. The
+# `serde_json::Value` payloads inside `Metadata` are handled via
+# a `MetadataAsJson` adapter in `src/model/rkyv_adapters.rs` per
+# the ADR 0083 amendment (option c).
+rkyv = { version = "0.8", features = ["bytecheck", "alloc"] }
+# mmap wrapper for the on-disk snapshot reader (ADR 0083). The
+# snapshot module maps the file, validates the header + rkyv
+# payload via `bytecheck`, then hands consumers an
+# `&ArchivedGraphSnapshot` that borrows directly from the
+# mapped pages. memmap2 is the standard idiomatic Rust mmap
+# crate; tiny, mature, MIT-licensed.
+memmap2 = "0.9"
+# Base64 codec for the daemon socket's `snapshot` response
+# (CSP-443). The wire framing stays length-prefixed JSON per
+# ADR 0038; binary snapshot bytes ride in a `data.bytes`
+# base64 field so the protocol surface stays uniform. The
+# ~4/3 size expansion is fine at conspectus's snapshot scale
+# (single-digit MB); a binary-frame variant is the natural
+# upgrade if snapshots ever push past the 16 MiB frame cap.
+base64 = "0.22"
+rusqlite = { version = "0.39", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# `conspectus serve` graceful shutdown (ADR 0080). Registers
+# SIGINT/SIGTERM against an Arc<AtomicBool> the scheduler +
+# socket-listener threads poll between cycles. Unix-only at the
+# signal layer; the project is already single-machine /
+# single-user per ADR 0036 + ADR 0038 so this is not a fresh
+# portability tax.
+signal-hook = "0.3"
+terminal_size = "0.4"
+thiserror = "2.0"
+toml = "0.8"
+toml_edit = "0.22"
+tui-input = { version = "0.15", default-features = false, features = ["ratatui-crossterm"] }
+tui-markdown = { version = "0.3", default-features = false, features = ["highlight-code"] }
+unicode-width = "0.2"
+
+# Dev-only dependencies share the same table; each member opts in under
+# its own `[dev-dependencies]`.
+assert_cmd = "2.0"
+insta = "1.42"
+# CSP-424 spike: evaluating tui-pantry as a Storybook-style widget
+# preview harness. Lives in dev-deps; promoted (or ripped) per the
+# spike's go/no-go outcome.
+tui-pantry = "0.4"
+predicates = "3.1"
+tempfile = "3.15"
+
 # Curated clippy lints (CSP-466). Adds a whole-workspace
-# `[lints.clippy]` table so drive-by fixes land in one place
+# `[workspace.lints.clippy]` table so drive-by fixes land in one place
 # instead of six copies of the same pattern. Levels:
 #
 # - `deny`: enforced by CI (`cargo clippy -D warnings`); no
@@ -14,7 +102,7 @@
 # culture around ADRs and per-module `//!` headers rather than
 # per-fn docs. Cast-truncation is allowed in TUI layout modules
 # via per-module `#![allow]` where it's the intentional shape.
-[lints.clippy]
+[workspace.lints.clippy]
 # Pedantic lints whose fixes are behavior-preserving, enforced so
 # past cleanups don't regress. `match_wildcard_for_single_variants`
 # matters most: a wildcard arm over a two-variant enum would hide a
@@ -59,99 +147,68 @@ match_same_arms = "allow"
 # references there would make the APIs worse without saving a copy.
 needless_pass_by_value = "allow"
 
-[lints.rustdoc]
+[workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"
 
 [package]
 name = "conspectus"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 # `src/bin/csp.rs` installs `csp`, the sanctioned short name (ADR 0118),
 # so `cargo run` needs to know which binary is the default.
 default-run = "conspectus"
-license = "MIT"
+license.workspace = true
 description = "AI work graph status tool"
+
+[lints]
+workspace = true
 
 [features]
 # Dev-only `conspectus tui --snapshot` mode (ADR 0067). Renders one
 # TUI frame to stdout with ANSI styling preserved so agents can
 # iterate on renderer changes without a manual screenshot loop.
 # Off by default; `just check` and CI enable it through
-# `--all-features`, while release/downstream builds leave it off.
-snapshot = []
+# `--all-features`, while release/downstream builds leave it off. The
+# key-script parser, the one-frame driver, and the ANSI writer it uses
+# are the framework's test kit.
+snapshot = ["tuikit/testkit"]
 
 [dependencies]
-ansi-to-tui = { version = "8.0.1", default-features = false }
-anstyle = "1.0"
-anyhow = "1.0"
-chrono = { version = "0.4", default-features = false, features = ["serde", "alloc"] }
-clap = { version = "4.5", features = ["derive"] }
-comfy-table = { version = "7", default-features = false }
-indexmap = { version = "2.7", features = ["serde"] }
-# `conspectus serve` filesystem watchers (ADR 0081). Wraps
-# inotify (Linux), kqueue + FSEvents (macOS), kqueue (BSD).
-# Used as a latency optimization on top of interval polling;
-# the daemon falls back to polling cleanly when watcher
-# installation fails for any reason (rlimit, EACCES, NFS, …).
-notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
-# Unix FFI shim for `conspectus serve`'s socket path resolution
-# (getuid for the `$TMPDIR/conspectus-$UID/` fallback per
-# ADR 0038). Already pulled in transitively via signal-hook +
-# rusqlite; promoted to a direct dep so the daemon's socket
-# code can name it explicitly. Tiny, pure-FFI, mature.
-libc = "0.2"
-ratatui = { version = "0.30", default-features = false, features = ["crossterm", "macros"] }
-# Zero-copy archive format for the on-disk graph snapshot
-# (ADR 0083). Replaces the SQLite-backed persistence layer; the
-# daemon writes a single mmap-able artifact per cycle, readers
-# deserialize once with bytecheck validation. The
-# `serde_json::Value` payloads inside `Metadata` are handled via
-# a `MetadataAsJson` adapter in `src/model/rkyv_adapters.rs` per
-# the ADR 0083 amendment (option c).
-rkyv = { version = "0.8", features = ["bytecheck", "alloc"] }
-# mmap wrapper for the on-disk snapshot reader (ADR 0083). The
-# snapshot module maps the file, validates the header + rkyv
-# payload via `bytecheck`, then hands consumers an
-# `&ArchivedGraphSnapshot` that borrows directly from the
-# mapped pages. memmap2 is the standard idiomatic Rust mmap
-# crate; tiny, mature, MIT-licensed.
-memmap2 = "0.9"
-# Base64 codec for the daemon socket's `snapshot` response
-# (CSP-443). The wire framing stays length-prefixed JSON per
-# ADR 0038; binary snapshot bytes ride in a `data.bytes`
-# base64 field so the protocol surface stays uniform. The
-# ~4/3 size expansion is fine at conspectus's snapshot scale
-# (single-digit MB); a binary-frame variant is the natural
-# upgrade if snapshots ever push past the 16 MiB frame cap.
-base64 = "0.22"
-ratatui-cheese = "0.7"
-ratatui-comfy-toaster = { version = "0.4", default-features = false }
-tui-popup = "0.7"
-rusqlite = { version = "0.39", features = ["bundled"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-# `conspectus serve` graceful shutdown (ADR 0080). Registers
-# SIGINT/SIGTERM against an Arc<AtomicBool> the scheduler +
-# socket-listener threads poll between cycles. Unix-only at the
-# signal layer; the project is already single-machine /
-# single-user per ADR 0036 + ADR 0038 so this is not a fresh
-# portability tax.
-signal-hook = "0.3"
-terminal_size = "0.4"
-thiserror = "2.0"
-toml = "0.8"
-toml_edit = "0.22"
-tui-input = { version = "0.15", default-features = false, features = ["ratatui-crossterm"] }
-tui-markdown = { version = "0.3", default-features = false, features = ["highlight-code"] }
-unicode-width = "0.2"
+anstyle = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+indexmap = { workspace = true }
+notify = { workspace = true }
+libc = { workspace = true }
+ratatui = { workspace = true }
+rkyv = { workspace = true }
+memmap2 = { workspace = true }
+base64 = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+signal-hook = { workspace = true }
+terminal_size = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+# The TUI framework crate (ADR 0150): design tokens, controls, and
+# interaction conventions. It depends on nothing from this package. Its
+# `richtext` feature owns the rich-text crates the Preview and the
+# transcript viewer draw with: ANSI captures, Markdown with highlighted
+# code, and tables (ADR 0152, ADR 0181).
+tuikit = { path = "crates/tuikit", features = ["richtext"] }
+unicode-width = { workspace = true }
 
 [dev-dependencies]
-assert_cmd = "2.0"
-insta = "1.42"
-# CSP-424 spike: evaluating tui-pantry as a Storybook-style widget
-# preview harness. Lives in dev-deps; promoted (or ripped) per the
-# spike's go/no-go outcome.
-tui-pantry = "0.4"
-predicates = "3.1"
-tempfile = "3.15"
+assert_cmd = { workspace = true }
+insta = { workspace = true }
+# The framework's test kit (key scripts, frame driver, buffer probes,
+# goldens, the conformance suite, source-scan helpers) for the tests and
+# the preview example; production builds leave the feature off.
+tuikit = { path = "crates/tuikit", features = ["testkit"] }
+tui-pantry = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }

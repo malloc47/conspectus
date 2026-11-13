@@ -1,350 +1,39 @@
-//! Overlay keymaps (ADR 0123).
+//! The TUI's own overlay key tables (ADR 0123, ADR 0160).
 //!
-//! Every overlay resolves its keys through a `const` table of
-//! [`KeyRow`]s and renders its footer hint from the same table, so the
+//! The key-table model and the standard tables (menus, dialogs, pagers,
+//! text prompts, checklists, palettes, settings panels, forms) are
+//! `tuikit::keys`; the picker is a palette on the standard palette table,
+//! Controls is a settings panel on the standard settings table, and quick
+//! select and content search are palettes on tables of their own (their
+//! options pane takes the standard palette option keys). This module holds
+//! the tables of the overlays that are the TUI's own: search, the help
+//! page, the value modal, Messages (the standard log list table with its
+//! copy key), the three forms (built on the standard form rows), and the
+//! pane viewer's own keys (the framework's pager takes the rest; the
+//! transcript viewer's toggles are the viewer's own table); and the modal
+//! key convention every modal is checked against.
+//!
+//! Every overlay resolves its keys through one of these tables or a
+//! standard one and renders its footer from the same table, so the
 //! footer cannot advertise a key the handler does not act on. Each
-//! overlay has its own action enum and matches on it exhaustively: a
-//! row whose action the handler ignores does not compile.
-//!
-//! Keys no row binds fall through to the overlay's text field, if it
-//! has one. A key that means different things in different fields
-//! (Space types in a text field but toggles an option field) resolves
-//! to an action, and the handler decides what that action does where
-//! the cursor is.
+//! overlay matches its action enum exhaustively: a row whose action the
+//! handler ignores does not compile. Keys no row binds fall through to
+//! the overlay's text field, if it has one.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
+use tuikit::glyphs::marks;
+use tuikit::keys::{
+    Convention, EnterMeans, FORM_KEYS, FORM_OPTION_KEYS, FormKey, KeyAction, KeyRole, KeyRow,
+    LOG_LIST_KEYS, LogListKey, PAGER_KEYS, PagerKey, SpaceMeans, alias, ch, ctrl, include, key,
+    shown,
+};
 
-use super::KeyMatcher;
-
-/// How a bound key appears in its overlay's footer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hint {
-    /// Shown as `label` under `verb`. Rows that share a verb share one
-    /// footer segment, their labels joined with `/`: `↑/↓ move`.
-    Shown {
-        label: &'static str,
-        verb: &'static str,
-    },
-    /// Bound but left out of the footer on purpose: vim-style
-    /// aliases (`j`/`k`) and the universal Ctrl-C.
-    Alias,
-}
-
-/// One row of an overlay keymap.
-#[derive(Debug)]
-pub enum KeyRow<A: 'static> {
-    Bind {
-        key: KeyMatcher,
-        action: A,
-        hint: Hint,
-    },
-    /// Footer text with no key of its own, such as "type to edit".
-    Note(&'static str),
-}
-
-/// The action the first row matching `event` binds, if any.
-pub fn resolve<A: Copy>(rows: &[KeyRow<A>], event: KeyEvent) -> Option<A> {
-    rows.iter().find_map(|row| match row {
-        KeyRow::Bind { key, action, .. } if key.matches(event.modifiers, event.code) => {
-            Some(*action)
-        }
-        _ => None,
-    })
-}
-
-/// The footer hint for `rows`: one segment per verb or note, in the
-/// order each first appears, joined with ` · `.
-pub fn footer<A>(rows: &[KeyRow<A>]) -> String {
-    enum Segment {
-        Keys {
-            verb: &'static str,
-            labels: Vec<&'static str>,
-        },
-        Note(&'static str),
-    }
-    let mut segments: Vec<Segment> = Vec::new();
-    for row in rows {
-        match row {
-            KeyRow::Bind {
-                hint: Hint::Shown { label, verb },
-                ..
-            } => {
-                let existing = segments.iter_mut().find_map(|segment| match segment {
-                    Segment::Keys { verb: v, labels } if v == verb => Some(labels),
-                    _ => None,
-                });
-                match existing {
-                    Some(labels) => labels.push(label),
-                    None => segments.push(Segment::Keys {
-                        verb,
-                        labels: vec![label],
-                    }),
-                }
-            }
-            KeyRow::Bind {
-                hint: Hint::Alias, ..
-            } => {}
-            KeyRow::Note(text) => segments.push(Segment::Note(text)),
-        }
-    }
-    segments
-        .iter()
-        .map(|segment| match segment {
-            Segment::Keys { verb, labels } => format!("{} {verb}", labels.join("/")),
-            Segment::Note(text) => (*text).to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(" · ")
-}
-
-/// Rows whose footer label does not name the key they bind, as
-/// `(label, bound key)` pairs. Empty when the table is consistent.
-pub fn mislabeled<A>(rows: &[KeyRow<A>]) -> Vec<(&'static str, String)> {
-    rows.iter()
-        .filter_map(|row| match row {
-            KeyRow::Bind {
-                key,
-                hint: Hint::Shown { label, .. },
-                ..
-            } if !label_names_key(label, key) => Some((*label, super::key_label(key))),
-            _ => None,
-        })
-        .collect()
-}
-
-fn label_names_key(label: &str, key: &KeyMatcher) -> bool {
-    let code = match key {
-        KeyMatcher::Exact { code, .. } | KeyMatcher::AnyMod(code) => *code,
-        KeyMatcher::UpperChar(c) | KeyMatcher::AnyModExceptCtrl(c) => KeyCode::Char(*c),
-    };
-    let ctrl = matches!(key, KeyMatcher::Exact { modifiers, .. } if modifiers.contains(KeyModifiers::CONTROL));
-    let named = match code {
-        KeyCode::Up => &["↑", "Up"][..],
-        KeyCode::Down => &["↓", "Down"],
-        KeyCode::Left => &["←", "Left"],
-        KeyCode::Right => &["→", "Right"],
-        KeyCode::BackTab => &["S-Tab", "Shift-Tab"],
-        KeyCode::Char(' ') => &["Space"],
-        KeyCode::PageUp => &["PgUp"],
-        KeyCode::PageDown => &["PgDn"],
-        _ => &[],
-    };
-    if named.contains(&label) {
-        return true;
-    }
-    let base = super::key_label(&KeyMatcher::AnyMod(code));
-    if ctrl {
-        label.eq_ignore_ascii_case(&format!("Ctrl-{base}"))
-    } else {
-        label == base
-    }
-}
+use crate::tui::widgets::pane_viewer::PaneKey;
 
 // ---------------------------------------------------------------------
-// Row builders. Code-only matches (`AnyMod`) keep the long-standing
-// behavior of ignoring modifiers; Ctrl-C is the one chord every
-// overlay binds, always first and always to its `Abort` action.
-// ---------------------------------------------------------------------
-
-const fn key(code: KeyCode) -> KeyMatcher {
-    KeyMatcher::AnyMod(code)
-}
-
-const fn ch(c: char) -> KeyMatcher {
-    KeyMatcher::AnyMod(KeyCode::Char(c))
-}
-
-const fn ctrl(c: char) -> KeyMatcher {
-    KeyMatcher::Exact {
-        modifiers: KeyModifiers::CONTROL,
-        code: KeyCode::Char(c),
-    }
-}
-
-const fn shown<A>(
-    key: KeyMatcher,
-    action: A,
-    label: &'static str,
-    verb: &'static str,
-) -> KeyRow<A> {
-    KeyRow::Bind {
-        key,
-        action,
-        hint: Hint::Shown { label, verb },
-    }
-}
-
-const fn alias<A>(key: KeyMatcher, action: A) -> KeyRow<A> {
-    KeyRow::Bind {
-        key,
-        action,
-        hint: Hint::Alias,
-    }
-}
-
-/// What the search options pane binds. Space and Enter both flip the
-/// option under the cursor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchOptionKey {
-    Abort,
-    Back,
-    Down,
-    Up,
-    Toggle,
-}
-
-/// The pane behind `Ctrl-O` in the contents modal: what a search looks in.
-pub const SEARCH_OPTION_KEYS: &[KeyRow<SearchOptionKey>] = &[
-    alias(ctrl('c'), SearchOptionKey::Abort),
-    shown(key(KeyCode::Up), SearchOptionKey::Up, "↑", "move"),
-    shown(key(KeyCode::Down), SearchOptionKey::Down, "↓", "move"),
-    alias(ctrl('n'), SearchOptionKey::Down),
-    alias(ctrl('p'), SearchOptionKey::Up),
-    alias(key(KeyCode::Char('k')), SearchOptionKey::Up),
-    alias(key(KeyCode::Char('j')), SearchOptionKey::Down),
-    shown(
-        key(KeyCode::Char(' ')),
-        SearchOptionKey::Toggle,
-        "Space",
-        "toggle",
-    ),
-    alias(key(KeyCode::Enter), SearchOptionKey::Toggle),
-    shown(key(KeyCode::Esc), SearchOptionKey::Back, "Esc", "back"),
-    alias(ctrl('o'), SearchOptionKey::Back),
-];
-
-// ---------------------------------------------------------------------
-// Menus: Controls, the pins menu, the mux menu.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MenuKey {
-    Abort,
-    Up,
-    Down,
-    Pick,
-    Close,
-}
-
-pub const MENU_KEYS: &[KeyRow<MenuKey>] = &[
-    alias(ctrl('c'), MenuKey::Abort),
-    shown(key(KeyCode::Up), MenuKey::Up, "↑", "move"),
-    alias(ch('k'), MenuKey::Up),
-    shown(key(KeyCode::Down), MenuKey::Down, "↓", "move"),
-    alias(ch('j'), MenuKey::Down),
-    shown(key(KeyCode::Enter), MenuKey::Pick, "Enter", "pick"),
-    shown(key(KeyCode::Esc), MenuKey::Close, "Esc", "close"),
-];
-
-// ---------------------------------------------------------------------
-// Controls: a panel whose changes apply as they are made. Space acts on
-// the focused row (selects a choice, toggles a checkbox, opens an
-// editor); Enter applies the focused choice and closes; Esc closes with
-// everything already applied kept.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ControlsKey {
-    Abort,
-    Up,
-    Down,
-    /// Select the focused choice, toggle the focused checkbox, or open
-    /// the focused row's editor.
-    Toggle,
-    /// Apply the focused choice (if it is one) and close.
-    Done,
-    Close,
-}
-
-pub const CONTROLS_KEYS: &[KeyRow<ControlsKey>] = &[
-    alias(ctrl('c'), ControlsKey::Abort),
-    shown(key(KeyCode::Up), ControlsKey::Up, "↑", "move"),
-    alias(ch('k'), ControlsKey::Up),
-    shown(key(KeyCode::Down), ControlsKey::Down, "↓", "move"),
-    alias(ch('j'), ControlsKey::Down),
-    shown(ch(' '), ControlsKey::Toggle, "Space", "select/toggle"),
-    shown(
-        key(KeyCode::Enter),
-        ControlsKey::Done,
-        "Enter",
-        "apply & close",
-    ),
-    shown(key(KeyCode::Esc), ControlsKey::Close, "Esc", "close"),
-    KeyRow::Note("changes apply as you make them"),
-];
-
-// ---------------------------------------------------------------------
-// Multi-select sub-editor (Controls filters).
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MultiSelectKey {
-    Abort,
-    Up,
-    Down,
-    Toggle,
-    Confirm,
-    Cancel,
-}
-
-pub const MULTI_SELECT_KEYS: &[KeyRow<MultiSelectKey>] = &[
-    alias(ctrl('c'), MultiSelectKey::Abort),
-    alias(key(KeyCode::Up), MultiSelectKey::Up),
-    alias(ch('k'), MultiSelectKey::Up),
-    alias(key(KeyCode::Down), MultiSelectKey::Down),
-    alias(ch('j'), MultiSelectKey::Down),
-    shown(ch(' '), MultiSelectKey::Toggle, "Space", "toggle"),
-    shown(
-        key(KeyCode::Enter),
-        MultiSelectKey::Confirm,
-        "Enter",
-        "confirm",
-    ),
-    shown(key(KeyCode::Esc), MultiSelectKey::Cancel, "Esc", "cancel"),
-];
-
-// ---------------------------------------------------------------------
-// Single-line text input: rename, the max-age editor, form fields.
-// Unbound keys edit the text.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TextInputKey {
-    Abort,
-    Confirm,
-    Cancel,
-    /// Swallowed so it never reaches the line editor.
-    Tab,
-}
-
-pub const TEXT_INPUT_KEYS: &[KeyRow<TextInputKey>] = &[
-    alias(ctrl('c'), TextInputKey::Abort),
-    shown(
-        key(KeyCode::Enter),
-        TextInputKey::Confirm,
-        "Enter",
-        "confirm",
-    ),
-    shown(key(KeyCode::Esc), TextInputKey::Cancel, "Esc", "cancel"),
-    alias(key(KeyCode::Tab), TextInputKey::Tab),
-];
-
-// ---------------------------------------------------------------------
-// `n` new bare mux form. Unbound keys edit the focused field.
-// ---------------------------------------------------------------------
-
-pub const NEW_MUX_KEYS: &[KeyRow<FormKey>] = &[
-    alias(ctrl('c'), FormKey::Abort),
-    shown(key(KeyCode::Up), FormKey::Up, "↑", "move"),
-    shown(key(KeyCode::Down), FormKey::Down, "↓", "move"),
-    shown(key(KeyCode::Tab), FormKey::Tab, "Tab", "complete/next"),
-    shown(key(KeyCode::BackTab), FormKey::Back, "S-Tab", "back"),
-    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "next/commit"),
-    shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
-];
-
-// ---------------------------------------------------------------------
-// `/` search. Unbound keys, `j`/`k` included, edit the query.
+// Search: quick select and content search, two palettes; their options
+// pane takes `tuikit::keys::PALETTE_OPTION_KEYS`. Unbound keys, `j` and
+// `k` included, edit the query.
 // ---------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -354,6 +43,12 @@ pub enum SearchKey {
     Pick,
     Down,
     Up,
+    /// Move the cursor up by the rows the list shows, stopping at the
+    /// first result.
+    PageUp,
+    /// Move the cursor down by the rows the list shows, stopping at the
+    /// last result.
+    PageDown,
     /// Quick select: switch between the current view and everything.
     Scope,
     /// Contents scope: list sessions, or the matching messages.
@@ -371,356 +66,169 @@ pub enum SearchKey {
     NextQuery,
 }
 
-/// The picker shares the list-and-query keys but has no scopes.
-pub const PICKER_KEYS: &[KeyRow<SearchKey>] = &[
-    alias(ctrl('c'), SearchKey::Abort),
-    alias(key(KeyCode::Esc), SearchKey::Cancel),
-    alias(key(KeyCode::Enter), SearchKey::Pick),
-    alias(key(KeyCode::Down), SearchKey::Down),
-    alias(key(KeyCode::Up), SearchKey::Up),
-    alias(ctrl('n'), SearchKey::Down),
-    alias(ctrl('p'), SearchKey::Up),
-];
+impl KeyAction for SearchKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Abort => KeyRole::Abort,
+            Self::Cancel => KeyRole::Leave,
+            Self::Pick => KeyRole::Apply,
+            Self::Down | Self::Up => KeyRole::Move,
+            Self::PageUp | Self::PageDown => KeyRole::Page,
+            Self::Scope
+            | Self::Granularity
+            | Self::Options
+            | Self::ApplyFilter
+            | Self::Keep
+            | Self::PrevQuery
+            | Self::NextQuery => KeyRole::Other,
+        }
+    }
+}
 
 /// `/` quick select. Tab and Shift-Tab both switch the reach, which is
 /// only ever one of two (and the same in the contents modal).
 pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
-    shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
-    shown(key(KeyCode::Down), SearchKey::Down, "↓", "move"),
+    shown(key(KeyCode::Up), SearchKey::Up, marks::ARROW_UP, "move"),
+    shown(
+        key(KeyCode::Down),
+        SearchKey::Down,
+        marks::ARROW_DOWN,
+        "move",
+    ),
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
+    alias(key(KeyCode::PageUp), SearchKey::PageUp),
+    alias(key(KeyCode::PageDown), SearchKey::PageDown),
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "pick"),
-    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
-    shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "current/all"),
+    shown(
+        key(KeyCode::Tab),
+        SearchKey::Scope,
+        "Tab",
+        "search current/all",
+    ),
     alias(key(KeyCode::BackTab), SearchKey::Scope),
+    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
 ];
 
 /// Searching what was said in the sessions and in mux scrollback.
 pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
-    shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
-    shown(key(KeyCode::Down), SearchKey::Down, "↓", "move"),
+    shown(key(KeyCode::Up), SearchKey::Up, marks::ARROW_UP, "move"),
+    shown(
+        key(KeyCode::Down),
+        SearchKey::Down,
+        marks::ARROW_DOWN,
+        "move",
+    ),
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
+    alias(key(KeyCode::PageUp), SearchKey::PageUp),
+    alias(key(KeyCode::PageDown), SearchKey::PageDown),
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "open hit"),
-    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
-    shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "current/all"),
+    shown(
+        key(KeyCode::Tab),
+        SearchKey::Scope,
+        "Tab",
+        "search current/all",
+    ),
     shown(
         key(KeyCode::BackTab),
         SearchKey::Granularity,
         "S-Tab",
-        "sessions/messages",
+        "list sessions/messages",
     ),
-    shown(ctrl('r'), SearchKey::PrevQuery, "Ctrl-R", "earlier search"),
+    shown(ctrl('r'), SearchKey::PrevQuery, "Ctrl-R", "recall search"),
     alias(ctrl('t'), SearchKey::NextQuery),
-    shown(ctrl('o'), SearchKey::Options, "Ctrl-O", "options"),
+    shown(ctrl('o'), SearchKey::Options, "Ctrl-O", "set options"),
     shown(ctrl('f'), SearchKey::ApplyFilter, "Ctrl-F", "filter lists"),
-    shown(ctrl('s'), SearchKey::Keep, "Ctrl-S", "Search view"),
+    shown(ctrl('s'), SearchKey::Keep, "Ctrl-S", "open Search view"),
+    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
 ];
 
 // ---------------------------------------------------------------------
-// Scrolling pagers: the `?` help overlay and the `o` value modal.
+// Pagers: the `?` help page and the `o` value modal, each the standard
+// pager plus the key that opened it; the value modal also copies.
 // ---------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PagerKey {
-    Abort,
-    Close,
-    Down,
-    Up,
-    PageDown,
-    PageUp,
-    Top,
-    Bottom,
-    /// Copy the modal's text (a value modal only).
-    Copy,
-}
-
 pub const HELP_KEYS: &[KeyRow<PagerKey>] = &[
-    alias(ctrl('c'), PagerKey::Abort),
-    shown(ch('j'), PagerKey::Down, "j", "to scroll"),
-    alias(key(KeyCode::Down), PagerKey::Down),
-    shown(ch('k'), PagerKey::Up, "k", "to scroll"),
-    alias(key(KeyCode::Up), PagerKey::Up),
-    shown(
-        key(KeyCode::PageDown),
-        PagerKey::PageDown,
-        "PgDn",
-        "to scroll",
-    ),
-    alias(ch(' '), PagerKey::PageDown),
-    shown(key(KeyCode::PageUp), PagerKey::PageUp, "PgUp", "to scroll"),
-    alias(ch('g'), PagerKey::Top),
-    alias(key(KeyCode::Home), PagerKey::Top),
-    alias(ch('G'), PagerKey::Bottom),
-    alias(key(KeyCode::End), PagerKey::Bottom),
-    shown(key(KeyCode::Esc), PagerKey::Close, "Esc", "to close"),
-    shown(ch('q'), PagerKey::Close, "q", "to close"),
-    shown(ch('?'), PagerKey::Close, "?", "to close"),
+    include(PAGER_KEYS),
+    shown(ch('?'), PagerKey::Close, "?", "close"),
 ];
 
 pub const VALUE_MODAL_KEYS: &[KeyRow<PagerKey>] = &[
-    alias(ctrl('c'), PagerKey::Abort),
-    shown(ch('y'), PagerKey::Copy, "y", "to copy"),
-    shown(key(KeyCode::Esc), PagerKey::Close, "Esc", "to close"),
-    shown(ch('q'), PagerKey::Close, "q", "to close"),
-    shown(ch('o'), PagerKey::Close, "o", "to close"),
-    shown(ch('j'), PagerKey::Down, "j", "to scroll"),
-    alias(key(KeyCode::Down), PagerKey::Down),
-    shown(ch('k'), PagerKey::Up, "k", "to scroll"),
-    alias(key(KeyCode::Up), PagerKey::Up),
-    alias(key(KeyCode::PageDown), PagerKey::PageDown),
-    alias(ch(' '), PagerKey::PageDown),
-    alias(key(KeyCode::PageUp), PagerKey::PageUp),
-    alias(ch('g'), PagerKey::Top),
-    alias(key(KeyCode::Home), PagerKey::Top),
-    alias(ch('G'), PagerKey::Bottom),
-    alias(key(KeyCode::End), PagerKey::Bottom),
+    include(PAGER_KEYS),
+    shown(ch('o'), PagerKey::Close, "o", "close"),
+    shown(ch('y'), PagerKey::Copy, "y", "copy"),
 ];
 
 // ---------------------------------------------------------------------
-// `!` messages log.
+// `!` messages log: the framework's log list on its standard table, `y`
+// copying the selected entry, and `!` closing as it opened.
 // ---------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessagesKey {
-    Abort,
-    Close,
-    Next,
-    Prev,
-    First,
-    Last,
-    DetailDown,
-    DetailUp,
-    DetailPageDown,
-    DetailPageUp,
-    /// Copy the selected entry. The runtime performs it, because the
-    /// clipboard write is a side effect the widget does not own.
-    Copy,
-}
-
-pub const MESSAGES_KEYS: &[KeyRow<MessagesKey>] = &[
-    alias(ctrl('c'), MessagesKey::Abort),
-    shown(ch('j'), MessagesKey::Next, "j", "select"),
-    alias(key(KeyCode::Down), MessagesKey::Next),
-    shown(ch('k'), MessagesKey::Prev, "k", "select"),
-    alias(key(KeyCode::Up), MessagesKey::Prev),
-    alias(ch('g'), MessagesKey::First),
-    alias(key(KeyCode::Home), MessagesKey::First),
-    alias(ch('G'), MessagesKey::Last),
-    alias(key(KeyCode::End), MessagesKey::Last),
-    shown(ch('J'), MessagesKey::DetailDown, "J", "scroll detail"),
-    shown(ch('K'), MessagesKey::DetailUp, "K", "scroll detail"),
-    alias(key(KeyCode::PageDown), MessagesKey::DetailPageDown),
-    alias(ch(' '), MessagesKey::DetailPageDown),
-    alias(key(KeyCode::PageUp), MessagesKey::DetailPageUp),
-    shown(
-        KeyMatcher::AnyModExceptCtrl('y'),
-        MessagesKey::Copy,
-        "y",
-        "copy",
-    ),
-    shown(key(KeyCode::Esc), MessagesKey::Close, "Esc", "close"),
-    alias(ch('q'), MessagesKey::Close),
-    alias(ch('!'), MessagesKey::Close),
+pub const MESSAGES_KEYS: &[KeyRow<LogListKey>] = &[
+    include(LOG_LIST_KEYS),
+    shown(ch('y'), LogListKey::Copy, "y", "copy"),
+    alias(ch('!'), LogListKey::Close),
 ];
 
 // ---------------------------------------------------------------------
-// Yes/no confirmations (worktree remove, merge, prune).
+// Multi-field forms: the new bare mux form, the mux launch form, and the
+// pin edit form, on the standard form rows. Up and Down always move
+// between fields; Tab completes in a path field and moves on elsewhere;
+// Enter submits from any field, with the form's own verb. Option keys act
+// on the choice and toggle rows; on a text field they edit the text.
+// Unbound keys edit the focused field.
 // ---------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfirmKey {
-    Abort,
-    Yes,
-    No,
-}
-
-pub const CONFIRM_KEYS: &[KeyRow<ConfirmKey>] = &[
-    alias(ctrl('c'), ConfirmKey::Abort),
-    shown(key(KeyCode::Enter), ConfirmKey::Yes, "Enter", "to confirm"),
-    shown(ch('y'), ConfirmKey::Yes, "y", "to confirm"),
-    shown(key(KeyCode::Esc), ConfirmKey::No, "Esc", "to cancel"),
-    shown(ch('n'), ConfirmKey::No, "n", "to cancel"),
+pub const NEW_MUX_KEYS: &[KeyRow<FormKey>] = &[
+    include(FORM_KEYS),
+    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "create"),
+    shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];
-
-// ---------------------------------------------------------------------
-// Worktree close-down choice: merge or discard, then tear down.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CloseDownKey {
-    Abort,
-    Merge,
-    Discard,
-    Back,
-}
-
-pub const CLOSE_DOWN_KEYS: &[KeyRow<CloseDownKey>] = &[
-    alias(ctrl('c'), CloseDownKey::Abort),
-    shown(ch('m'), CloseDownKey::Merge, "m", "= merge & close"),
-    shown(ch('d'), CloseDownKey::Discard, "d", "= discard & close"),
-    shown(key(KeyCode::Esc), CloseDownKey::Back, "Esc", "cancel"),
-    alias(ch('q'), CloseDownKey::Back),
-];
-
-// ---------------------------------------------------------------------
-// Multi-field forms: the mux launch form, the new mux form, and the pin
-// edit form. Up and Down always move between fields; Tab completes in a
-// path field and moves on elsewhere. Option keys act on the choice and
-// toggle rows; on a text field they edit the text.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FormKey {
-    Abort,
-    Cancel,
-    Up,
-    Down,
-    Tab,
-    Back,
-    Submit,
-    OptionPrev,
-    OptionNext,
-    /// Drop the focused field's override and inherit its value again.
-    Inherit,
-}
 
 pub const MUX_LAUNCH_KEYS: &[KeyRow<FormKey>] = &[
-    alias(ctrl('c'), FormKey::Abort),
-    shown(key(KeyCode::Up), FormKey::Up, "↑", "move"),
-    shown(key(KeyCode::Down), FormKey::Down, "↓", "move"),
-    shown(key(KeyCode::Tab), FormKey::Tab, "Tab", "complete/next"),
-    shown(key(KeyCode::BackTab), FormKey::Back, "S-Tab", "back"),
-    shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "option"),
-    shown(key(KeyCode::Right), FormKey::OptionNext, "→", "option"),
-    shown(ch(' '), FormKey::OptionNext, "Space", "option"),
+    include(FORM_KEYS),
+    include(FORM_OPTION_KEYS),
     shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "launch"),
     shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];
 
 pub const PIN_EDIT_KEYS: &[KeyRow<FormKey>] = &[
-    alias(ctrl('c'), FormKey::Abort),
-    shown(key(KeyCode::Up), FormKey::Up, "↑", "move"),
-    shown(key(KeyCode::Down), FormKey::Down, "↓", "move"),
-    shown(key(KeyCode::Tab), FormKey::Tab, "Tab", "complete/next"),
-    shown(key(KeyCode::BackTab), FormKey::Back, "S-Tab", "back"),
-    shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "option"),
-    shown(key(KeyCode::Right), FormKey::OptionNext, "→", "option"),
-    shown(ch(' '), FormKey::OptionNext, "Space", "option"),
+    include(FORM_KEYS),
+    include(FORM_OPTION_KEYS),
     shown(ctrl('r'), FormKey::Inherit, "Ctrl-R", "follow again"),
     shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "save"),
     shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];
 
 // ---------------------------------------------------------------------
-// Path omnibox field. Unbound keys edit the path.
+// The pane viewer is the framework's pager (`tuikit::keys::READER_KEYS`);
+// these are its content's own keys, which the pager resolves after its
+// table. `a` is shown; the wrap chip in the footer names `w`. The
+// transcript viewer is the same pager; its content's keys (the toggles)
+// are the viewer's own (`crate::viewer::keys::TRANSCRIPT_KEYS`).
 // ---------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OmniboxKey {
-    Complete,
-}
-
-pub const OMNIBOX_KEYS: &[KeyRow<OmniboxKey>] = &[alias(key(KeyCode::Tab), OmniboxKey::Complete)];
-
-// ---------------------------------------------------------------------
-// Transcript viewer. The viewer draws its own footer from its toggle
-// state, behind the ADR 0052 extraction boundary, so these rows are
-// all aliases; the keys still resolve here.
-// ---------------------------------------------------------------------
-
-use crate::tui::widgets::pane_viewer::PaneViewerMsg;
-use crate::viewer::find::ViewerFindMsg;
-use crate::viewer::input::ViewerMsg;
-
-pub const PANE_VIEWER_KEYS: &[KeyRow<PaneViewerMsg>] = &[
-    alias(ctrl('c'), PaneViewerMsg::Quit),
-    alias(ctrl('d'), PaneViewerMsg::HalfPageDown),
-    alias(ctrl('u'), PaneViewerMsg::HalfPageUp),
-    alias(key(KeyCode::Esc), PaneViewerMsg::Close),
-    alias(ch('q'), PaneViewerMsg::Quit),
-    alias(ch('j'), PaneViewerMsg::ScrollDown),
-    alias(key(KeyCode::Down), PaneViewerMsg::ScrollDown),
-    alias(ch('k'), PaneViewerMsg::ScrollUp),
-    alias(key(KeyCode::Up), PaneViewerMsg::ScrollUp),
-    alias(key(KeyCode::PageDown), PaneViewerMsg::PageDown),
-    alias(ch(' '), PaneViewerMsg::PageDown),
-    alias(key(KeyCode::PageUp), PaneViewerMsg::PageUp),
-    alias(ch('g'), PaneViewerMsg::JumpToStart),
-    alias(key(KeyCode::Home), PaneViewerMsg::JumpToStart),
-    alias(KeyMatcher::UpperChar('G'), PaneViewerMsg::JumpToEnd),
-    alias(key(KeyCode::End), PaneViewerMsg::JumpToEnd),
-    alias(ch('/'), PaneViewerMsg::FindOpen),
-    alias(ch('n'), PaneViewerMsg::FindNext),
-    alias(KeyMatcher::UpperChar('N'), PaneViewerMsg::FindPrev),
-    alias(ch('a'), PaneViewerMsg::Attach),
-    alias(ch('?'), PaneViewerMsg::ToggleHelp),
-];
-
-pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
-    alias(ctrl('c'), ViewerMsg::Quit),
-    alias(ctrl('d'), ViewerMsg::HalfPageDown),
-    alias(ctrl('u'), ViewerMsg::HalfPageUp),
-    alias(key(KeyCode::Esc), ViewerMsg::Close),
-    alias(ch('q'), ViewerMsg::Quit),
-    alias(ch('j'), ViewerMsg::ScrollDown),
-    alias(key(KeyCode::Down), ViewerMsg::ScrollDown),
-    alias(ch('k'), ViewerMsg::ScrollUp),
-    alias(key(KeyCode::Up), ViewerMsg::ScrollUp),
-    alias(key(KeyCode::PageDown), ViewerMsg::PageDown),
-    alias(ch(' '), ViewerMsg::PageDown),
-    alias(key(KeyCode::PageUp), ViewerMsg::PageUp),
-    alias(ch('g'), ViewerMsg::JumpToStart),
-    alias(key(KeyCode::Home), ViewerMsg::JumpToStart),
-    alias(KeyMatcher::UpperChar('G'), ViewerMsg::JumpToEnd),
-    alias(key(KeyCode::End), ViewerMsg::JumpToEnd),
-    alias(ch('t'), ViewerMsg::CycleToolDetail),
-    alias(KeyMatcher::UpperChar('T'), ViewerMsg::ToggleThinking),
-    alias(KeyMatcher::UpperChar('I'), ViewerMsg::ToggleAborted),
-    alias(KeyMatcher::UpperChar('H'), ViewerMsg::ToggleHidden),
-    alias(ch('/'), ViewerMsg::FindOpen),
-    alias(ch('n'), ViewerMsg::FindNext),
-    alias(KeyMatcher::UpperChar('N'), ViewerMsg::FindPrev),
-    alias(ch('?'), ViewerMsg::ToggleHelp),
-];
-
-/// The find prompt inside the viewer. Keys no row binds type into the
-/// prompt (see [`typed_char`]).
-pub const VIEWER_FIND_KEYS: &[KeyRow<ViewerFindMsg>] = &[
-    alias(ctrl('c'), ViewerFindMsg::Cancel),
-    shown(key(KeyCode::Enter), ViewerFindMsg::Confirm, "Enter", "find"),
-    shown(key(KeyCode::Esc), ViewerFindMsg::Cancel, "Esc", "cancel"),
-    alias(key(KeyCode::Backspace), ViewerFindMsg::Backspace),
-    alias(key(KeyCode::Delete), ViewerFindMsg::Delete),
-    alias(key(KeyCode::Left), ViewerFindMsg::Left),
-    alias(key(KeyCode::Right), ViewerFindMsg::Right),
-    alias(key(KeyCode::Home), ViewerFindMsg::Home),
-    alias(key(KeyCode::End), ViewerFindMsg::End),
-    alias(ctrl('u'), ViewerFindMsg::ClearLine),
-];
-
-/// The character a key types into a text prompt, if it types one:
-/// a plain or shifted character with no Control or Alt.
-pub fn typed_char(event: KeyEvent) -> Option<char> {
-    match event.code {
-        KeyCode::Char(c)
-            if !event
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-        {
-            Some(c)
+impl KeyAction for PaneKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Attach | Self::Wrap => KeyRole::Other,
         }
-        _ => None,
     }
 }
+
+pub const PANE_KEYS: &[KeyRow<PaneKey>] = &[
+    shown(ch('a'), PaneKey::Attach, "a", "attach"),
+    alias(ch('w'), PaneKey::Wrap),
+];
 
 // ---------------------------------------------------------------------
 // The modal key convention. One set of meanings for Esc, Enter, and
 // Space across every modal; a modal that departs from it says why here,
 // and a consistency test checks each modal's real key tables against
-// this table.
+// this table by the role of each action (`tuikit::keys::Convention`).
 //
 //   Esc    leaves the modal without applying anything that is still
 //          pending. (Controls applies as you go, so what it already
@@ -731,55 +239,17 @@ pub fn typed_char(event: KeyEvent) -> Option<char> {
 //          option, selects a choice. In a text field it types a space.
 // ---------------------------------------------------------------------
 
-/// What Enter does in a modal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EnterMeans {
-    /// Applies or submits the whole modal.
-    Submits,
-    /// Activates the focused item (a menu entry, a search hit, a choice).
-    Activates,
-    /// Does nothing special: a viewer.
-    Nothing,
-}
-
-/// What Space does in a modal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SpaceMeans {
-    /// Toggles, steps, or selects the focused item.
-    Toggles,
-    /// Pages down, as in any pager.
-    Pages,
-    /// Not bound: it types into the focused text field, or does nothing
-    /// in a modal with none.
-    Types,
-}
-
-/// One modal's row of the convention.
-#[derive(Debug, Clone, Copy)]
-pub struct ModalConvention {
-    pub modal: &'static str,
-    pub enter: EnterMeans,
-    pub space: SpaceMeans,
-    /// Why the modal departs from the convention, if it does.
-    pub exception: &'static str,
-}
-
 const fn conv(
     modal: &'static str,
     enter: EnterMeans,
     space: SpaceMeans,
     exception: &'static str,
-) -> ModalConvention {
-    ModalConvention {
-        modal,
-        enter,
-        space,
-        exception,
-    }
+) -> Convention {
+    Convention::new(modal, enter, space, exception)
 }
 
 /// Every modal against the convention. Esc leaves every one of them.
-pub const MODAL_CONVENTION: &[ModalConvention] = &[
+pub const MODAL_CONVENTION: &[Convention] = &[
     conv(
         "Help",
         EnterMeans::Nothing,
@@ -793,6 +263,9 @@ pub const MODAL_CONVENTION: &[ModalConvention] = &[
         "changes apply as they are made, so Esc keeps them",
     ),
     conv("Rename", EnterMeans::Submits, SpaceMeans::Types, ""),
+    conv("Prompt", EnterMeans::Submits, SpaceMeans::Types, ""),
+    conv("Checklist", EnterMeans::Submits, SpaceMeans::Toggles, ""),
+    conv("Dialog", EnterMeans::Submits, SpaceMeans::Types, ""),
     conv("Search", EnterMeans::Activates, SpaceMeans::Types, ""),
     conv(
         "ValueModal",

@@ -4,6 +4,7 @@ title: 'Action registry: enumerate the command surface'
 status: To Do
 assignee: []
 created_date: '2026-06-05 18:40'
+updated_date: '2026-10-31 08:15'
 labels:
   - h-cmd
 milestone: m-17
@@ -39,3 +40,9 @@ ordinal: 516000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `H-CMD-002`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): re-scoped. The scoped keymap (CSP-760, ADR 0192) is most of this registry for the main screen: every binding has a stable id (`search.quick`), its keys, the program's action (`Command`), a verb, a help section (the category) and text, a status rank, and an optional `available_when` guard, and the keymap's build refuses duplicate ids and overlapping keys. `Keymap::bindings` enumerates it, and `keys::rows(table)` gives an overlay table's rows. What is left: the palette's row source over those bindings (plus any action reachable only from a menu, if CSP-390 includes them), tests that every described binding is listed and that availability dims or hides a row (shared with CSP-776), and no byte-for-byte parity with the Controls overlay's help text (the `?` page is generated from the keymap now). `src/tui/actions.rs` exists and holds the menu builders; the source needs no module of its own.
+<!-- SECTION:NOTES:END -->

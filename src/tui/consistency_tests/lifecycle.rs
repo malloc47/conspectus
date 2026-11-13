@@ -5,7 +5,7 @@
 use super::*;
 use crate::tui::Effect;
 use crate::tui::effect::{ExecSpec, StoreOp, lifecycle};
-use crate::tui::keybindings::KEYBINDINGS;
+use crate::tui::keybindings::keymap;
 use crate::tui::keymap::Action;
 
 /// Every key bound to a message runs on an executor that can run what
@@ -18,8 +18,8 @@ fn every_key_runs_on_an_executor_that_can_run_what_it_emits() {
     use crate::tui::runtime::{ExecutorKind, live_executor_for, pure_executor_runs};
     let mut checked = 0;
     let mut live_only = 0;
-    for binding in KEYBINDINGS {
-        let action = (binding.action)();
+    for binding in keymap().bindings() {
+        let action = binding.action().action();
         let Action::Msg(msg) = &action else {
             continue;
         };
@@ -35,8 +35,8 @@ fn every_key_runs_on_an_executor_that_can_run_what_it_emits() {
             assert_eq!(
                 live_executor_for(&action),
                 ExecutorKind::Live,
-                "{:?} emits {effect:?}, which only the live executor can run",
-                binding.key
+                "{} emits {effect:?}, which only the live executor can run",
+                binding.id()
             );
         }
     }
@@ -59,8 +59,14 @@ fn the_plain_executor_says_so_when_handed_what_it_cannot_run() {
         vec![Effect::WriteStore(StoreOp::PinNode { node })],
     );
     assert!(
-        app.toast().has_toast(),
+        !app.toasts().is_empty(),
         "dropping a gesture silently looks like it did nothing"
+    );
+    assert!(
+        app.toasts()
+            .iter()
+            .all(|toast| toast.severity.needs_attention()),
+        "a gesture that could not run does not look like a success"
     );
 }
 
@@ -180,7 +186,7 @@ fn returning_from_an_attach_freezes_every_row_that_shows_the_mux() {
         let mut app = app_in(view);
         app.update(Msg::HandoffReturned(mux.clone()));
         assert!(
-            app.take_handoff_refresh_request(),
+            app.take_handoff_refresh_request().is_some(),
             "{view:?} asks to refresh"
         );
         for id in rows_standing_for_mux(&app, "conspectus-main") {
@@ -220,7 +226,7 @@ fn a_store_write_refresh_keeps_the_pr_list() {
 fn an_effect_that_refreshes_asks_for_it_unless_a_handoff_refresh_is_on_its_way() {
     use crate::tui::runtime::wants_refresh_request;
     let write = Effect::WriteStore(StoreOp::Unpin { slot: "x".into() });
-    let toast = Effect::Toast("hi".into());
+    let toast = Effect::Toast(Feedback::info("hi"));
     let mut app = app_in(View::Mux);
     assert!(wants_refresh_request(&lifecycle(&write), &app));
     assert!(!wants_refresh_request(&lifecycle(&toast), &app));

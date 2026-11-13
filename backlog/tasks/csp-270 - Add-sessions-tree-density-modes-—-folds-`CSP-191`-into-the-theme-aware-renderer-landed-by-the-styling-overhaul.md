@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-25 02:00'
+updated_date: '2026-10-31 08:15'
 labels:
   - t8
 milestone: m-13
@@ -32,3 +33,9 @@ ordinal: 462000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `T8-024`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): re-scoped. The sessions rows come from `tuikit::columns::ColumnSchema` (ADR 0183, 0184) in a `tuikit::tree::TreeView` (ADR 0182), and the theme is `tuikit::theme` with host roles (ADR 0153). A density mode is now a choice of schema per mode (`compact` drops the same-line preview column and narrows the harness chip column; the schema's give-way rule already drops the preview when narrow) plus, where rows need spacing, the roadmap's Tier 2 `density` token on the theme. The `expanded` mode's "section-pane treatment for inline detail" is obsolete: the sectioned detail model was deleted (CSP-710; ADR 0033 is superseded), and CSP-212 (`tui-markdown`) has landed. The runtime toggle is a keymap binding (ADR 0192) or a Controls row (`SettingsPanel`, ADR 0176). CSP-191 is folded into this story.
+<!-- SECTION:NOTES:END -->

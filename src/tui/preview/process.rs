@@ -8,6 +8,7 @@ use std::path::Path;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use tuikit::glyphs::marks;
 
 use super::PreviewContent;
 
@@ -15,13 +16,14 @@ use super::PreviewContent;
 const MAX_PROCESSES: usize = 200;
 /// Levels below the root a tree descends.
 const MAX_DEPTH: usize = 16;
-/// Characters of a command line a tree shows, so one long command
-/// doesn't push its siblings out of view.
-const MAX_COMMAND_CHARS: usize = 200;
+/// Cells of a command line a tree shows, the ellipsis included, so one
+/// long command doesn't push its siblings out of view.
+const MAX_COMMAND_CELLS: usize = 201;
 
 /// The process tree rooted at `pid`, read from `proc_root` (`/proc` in
-/// the TUI).
-pub fn load_process_tree(proc_root: &Path, pid: i64) -> PreviewContent {
+/// the TUI). Working directories and notes take `muted`, the theme's
+/// muted modifier.
+pub fn load_process_tree(proc_root: &Path, pid: i64, muted: Modifier) -> PreviewContent {
     if !proc_root.is_dir() {
         return PreviewContent::Unavailable("process trees need /proc".to_string());
     }
@@ -34,11 +36,14 @@ pub fn load_process_tree(proc_root: &Path, pid: i64) -> PreviewContent {
     let mut stack = vec![(pid, 0usize)];
     while let Some((pid, depth)) = stack.pop() {
         if shown == MAX_PROCESSES {
-            lines.push(dim(format!("… more processes past {MAX_PROCESSES}")));
+            lines.push(dim(
+                format!("{} more processes past {MAX_PROCESSES}", marks::ELLIPSIS),
+                muted,
+            ));
             break;
         }
         shown += 1;
-        lines.extend(process_lines(proc_root, pid, depth));
+        lines.extend(process_lines(proc_root, pid, depth, muted));
         if depth < MAX_DEPTH
             && let Some(kids) = children.get(&pid)
         {
@@ -93,7 +98,7 @@ fn read_stat(proc_root: &Path, pid: i64) -> Option<Stat> {
     Some(Stat { comm, parent })
 }
 
-fn process_lines(proc_root: &Path, pid: i64, depth: usize) -> [Line<'static>; 2] {
+fn process_lines(proc_root: &Path, pid: i64, depth: usize, muted: Modifier) -> [Line<'static>; 2] {
     let dir = proc_root.join(pid.to_string());
     let command = fs::read(dir.join("cmdline"))
         .ok()
@@ -108,12 +113,7 @@ fn process_lines(proc_root: &Path, pid: i64, depth: usize) -> [Line<'static>; 2]
         // Kernel threads and zombies have no command line.
         .or_else(|| read_stat(proc_root, pid).map(|stat| format!("[{}]", stat.comm)))
         .unwrap_or_else(|| "(exited)".to_string());
-    let command = if command.chars().count() > MAX_COMMAND_CHARS {
-        let cut: String = command.chars().take(MAX_COMMAND_CHARS).collect();
-        format!("{cut}…")
-    } else {
-        command
-    };
+    let command = tuikit::text::truncate_end(&command, MAX_COMMAND_CELLS);
     let cwd = fs::read_link(dir.join("cwd")).map_or_else(
         |_| "(cwd unreadable)".to_string(),
         |path| path.display().to_string(),
@@ -125,12 +125,12 @@ fn process_lines(proc_root: &Path, pid: i64, depth: usize) -> [Line<'static>; 2]
             Span::styled(pid.to_string(), Style::new().add_modifier(Modifier::BOLD)),
             Span::raw(format!("  {command}")),
         ]),
-        dim(format!("{indent}  in {cwd}")),
+        dim(format!("{indent}  in {cwd}"), muted),
     ]
 }
 
-fn dim(text: String) -> Line<'static> {
-    Line::styled(text, Style::new().add_modifier(Modifier::DIM))
+fn dim(text: String, muted: Modifier) -> Line<'static> {
+    Line::styled(text, Style::new().add_modifier(muted))
 }
 
 #[cfg(test)]
@@ -170,7 +170,11 @@ mod tests {
         process(root.path(), 21, 10, &["zsh"], "/home/op");
         process(root.path(), 99, 1, &["unrelated"], "/");
         assert_eq!(
-            rows(load_process_tree(root.path(), 10)),
+            rows(load_process_tree(
+                root.path(),
+                10,
+                crate::tui::Theme::default().muted
+            )),
             [
                 "10  tmux",
                 "  in /",
@@ -188,7 +192,7 @@ mod tests {
     fn an_exited_process_is_no_longer_running() {
         let root = tempfile::tempdir().expect("proc root");
         assert_eq!(
-            load_process_tree(root.path(), 42),
+            load_process_tree(root.path(), 42, crate::tui::Theme::default().muted),
             PreviewContent::Unavailable("no longer running".to_string())
         );
     }
@@ -197,7 +201,11 @@ mod tests {
     fn no_proc_means_no_process_trees() {
         let root = tempfile::tempdir().expect("temp dir");
         assert_eq!(
-            load_process_tree(&root.path().join("proc"), 42),
+            load_process_tree(
+                &root.path().join("proc"),
+                42,
+                crate::tui::Theme::default().muted
+            ),
             PreviewContent::Unavailable("process trees need /proc".to_string())
         );
     }
@@ -206,7 +214,11 @@ mod tests {
     #[test]
     fn the_real_proc_shows_this_test_process() {
         let pid = i64::from(std::process::id());
-        let lines = rows(load_process_tree(Path::new("/proc"), pid));
+        let lines = rows(load_process_tree(
+            Path::new("/proc"),
+            pid,
+            crate::tui::Theme::default().muted,
+        ));
         assert!(lines[0].starts_with(&pid.to_string()), "{lines:?}");
     }
 }

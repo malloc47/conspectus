@@ -1,12 +1,8 @@
 use super::*;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-
-fn press(code: KeyCode, mods: KeyModifiers) -> Event {
-    let mut key = KeyEvent::new(code, mods);
-    key.kind = KeyEventKind::Press;
-    Event::Key(key)
-}
+use tuikit::explorer::ExplorerKey;
+use tuikit::testkit::keys::chord;
 
 fn msg(action: Option<Action>) -> Option<Msg> {
     // Action::Msg now boxes its payload (large enum variant);
@@ -20,7 +16,10 @@ fn msg(action: Option<Action>) -> Option<Msg> {
 #[test]
 fn translate_q_quits() {
     assert_eq!(
-        msg(translate(press(KeyCode::Char('q'), KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('q')
+        )))),
         Some(Msg::Quit)
     );
 }
@@ -28,10 +27,10 @@ fn translate_q_quits() {
 #[test]
 fn translate_ctrl_c_quits() {
     assert_eq!(
-        msg(translate(
-            press(KeyCode::Char('c'), KeyModifiers::CONTROL),
-            24
-        )),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::CONTROL,
+            KeyCode::Char('c')
+        )))),
         Some(Msg::Quit)
     );
 }
@@ -39,7 +38,7 @@ fn translate_ctrl_c_quits() {
 #[test]
 fn translate_r_requests_refresh() {
     assert_eq!(
-        translate(press(KeyCode::Char('r'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('r')))),
         Some(Action::Refresh)
     );
 }
@@ -47,11 +46,11 @@ fn translate_r_requests_refresh() {
 #[test]
 fn translate_shift_r_opens_rename_overlay() {
     assert_eq!(
-        translate(press(KeyCode::Char('R'), KeyModifiers::SHIFT), 24),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('R')))),
         Some(Action::OpenRename)
     );
     assert_eq!(
-        translate(press(KeyCode::Char('R'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('R')))),
         Some(Action::OpenRename)
     );
 }
@@ -59,7 +58,7 @@ fn translate_shift_r_opens_rename_overlay() {
 #[test]
 fn translate_lowercase_r_still_refreshes() {
     assert_eq!(
-        translate(press(KeyCode::Char('r'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('r')))),
         Some(Action::Refresh)
     );
 }
@@ -84,7 +83,7 @@ fn a_refresh_after_an_action_reads_the_daemons_snapshot() {
 #[test]
 fn translate_a_requests_attach() {
     assert_eq!(
-        translate(press(KeyCode::Char('a'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('a')))),
         Some(Action::Attach)
     );
 }
@@ -95,21 +94,78 @@ fn translate_i_requests_copy_session_id() {
     // full id and routes it through the OSC 52 clipboard
     // primitive (ADR 0056) at the main-loop boundary.
     assert_eq!(
-        translate(press(KeyCode::Char('i'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('i')))),
         Some(Action::CopySessionId)
     );
     // Ctrl-I is the terminal alias for Tab; the binding must not
     // claim it.
     assert_ne!(
-        translate(press(KeyCode::Char('i'), KeyModifiers::CONTROL), 24),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('i')))),
         Some(Action::CopySessionId)
+    );
+}
+
+#[test]
+fn copying_an_id_with_no_session_selected_names_the_key_from_its_binding() {
+    let mut app = App::new(RunConfig::defaults());
+    copy_session_id_action(&mut app);
+    assert_eq!(
+        app.status_message(),
+        Some(
+            format!(
+                "{}: select an agent or mux session row to copy its id",
+                crate::tui::keybindings::key_name("row.copy-id")
+            )
+            .as_str()
+        )
+    );
+}
+
+/// What `event` does with `focus` on that pane and no modal open, as every
+/// loop resolves it (`action_for_event`).
+fn resolved(focus: crate::tui::app::Focus, event: KeyEvent) -> Option<Action> {
+    let mut app = App::new(RunConfig::defaults());
+    if focus == crate::tui::app::Focus::Right {
+        app.update(Msg::CycleFocus);
+    }
+    action_for_event(&app, Event::Key(event))
+}
+
+/// The action of an explorer key.
+fn explorer(key: ExplorerKey) -> Action {
+    Action::Msg(Box::new(Msg::Explorer(key)))
+}
+
+/// A key action that sends `msg`.
+fn sends(msg: Msg) -> Action {
+    Action::Msg(Box::new(msg))
+}
+
+#[test]
+fn e_folds_the_explorer_other_zone_on_the_right_pane_only() {
+    use crate::tui::app::Focus;
+    let e = chord(KeyModifiers::NONE, KeyCode::Char('e'));
+    assert_eq!(
+        resolved(Focus::Right, e),
+        Some(explorer(ExplorerKey::ToggleSection)),
+        "`e` has one meaning: the explorer's Other zone"
+    );
+    assert_eq!(
+        resolved(Focus::Left, e),
+        None,
+        "the left tree has no Other zone, so the key does nothing there"
+    );
+    assert_eq!(
+        translate(Event::Key(e)),
+        None,
+        "only the right pane's table binds it"
     );
 }
 
 #[test]
 fn translate_v_opens_viewer() {
     assert_eq!(
-        translate(press(KeyCode::Char('v'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('v')))),
         Some(Action::View)
     );
 }
@@ -117,7 +173,7 @@ fn translate_v_opens_viewer() {
 #[test]
 fn translate_f_opens_controls_overlay() {
     assert_eq!(
-        translate(press(KeyCode::Char('f'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('f')))),
         Some(Action::OpenControls)
     );
 }
@@ -126,11 +182,11 @@ fn translate_f_opens_controls_overlay() {
 fn translate_upper_t_no_longer_bound_to_view() {
     // `v` owns View; `T` is unbound and falls through to None.
     assert_eq!(
-        translate(press(KeyCode::Char('T'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('T')))),
         None,
     );
     assert_eq!(
-        translate(press(KeyCode::Char('T'), KeyModifiers::SHIFT), 24),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('T')))),
         None,
     );
 }
@@ -141,11 +197,11 @@ fn translate_upper_t_no_longer_bound_to_view() {
 #[test]
 fn translate_shift_f_clears_filters() {
     assert_eq!(
-        translate(press(KeyCode::Char('F'), KeyModifiers::SHIFT), 24),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('F')))),
         Some(Action::ClearFilters)
     );
     assert_eq!(
-        translate(press(KeyCode::Char('F'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('F')))),
         Some(Action::ClearFilters)
     );
 }
@@ -156,11 +212,11 @@ fn translate_shift_e_toggles_edge_meta() {
     // Focus-agnostic — the binding is global so the operator
     // can flip it without first tabbing into the right pane.
     assert_eq!(
-        translate(press(KeyCode::Char('E'), KeyModifiers::SHIFT), 24),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('E')))),
         Some(Action::Msg(Box::new(Msg::ToggleEdgeMeta)))
     );
     assert_eq!(
-        translate(press(KeyCode::Char('E'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('E')))),
         Some(Action::Msg(Box::new(Msg::ToggleEdgeMeta)))
     );
 }
@@ -168,15 +224,14 @@ fn translate_shift_e_toggles_edge_meta() {
 #[test]
 fn translate_ctrl_g_cycles_grouping() {
     assert_eq!(
-        translate(press(KeyCode::Char('g'), KeyModifiers::CONTROL), 24),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('g')))),
         Some(Action::CycleGrouping(1))
     );
 }
 
 #[test]
 fn translate_digits_switch_views_directly() {
-    // Sessions, Mux, PRs, Pinned, History, and Search are surfaced in the UI; the
-    // hidden Union and Forks views have no digit accelerators.
+    // Sessions, Mux, PRs, Pinned, History, and Search each have a digit.
     let cases = [
         ('1', View::Sessions),
         ('2', View::Mux),
@@ -187,16 +242,16 @@ fn translate_digits_switch_views_directly() {
     ];
     for (ch, view) in cases {
         assert_eq!(
-            translate(press(KeyCode::Char(ch), KeyModifiers::NONE), 24),
+            translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char(ch)))),
             Some(Action::SwitchView(view)),
             "char {ch}"
         );
     }
     for ch in ['7', '8'] {
         assert_eq!(
-            translate(press(KeyCode::Char(ch), KeyModifiers::NONE), 24),
+            translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char(ch)))),
             None,
-            "hidden view char {ch}"
+            "no view on char {ch}"
         );
     }
 }
@@ -204,11 +259,11 @@ fn translate_digits_switch_views_directly() {
 #[test]
 fn translate_brackets_cycle_views() {
     assert_eq!(
-        translate(press(KeyCode::Char(']'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char(']')))),
         Some(Action::CycleView(1))
     );
     assert_eq!(
-        translate(press(KeyCode::Char('['), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('[')))),
         Some(Action::CycleView(-1))
     );
 }
@@ -230,7 +285,7 @@ fn cycle_view_wraps_in_both_directions() {
 #[test]
 fn translate_ignores_control_a() {
     assert_eq!(
-        translate(press(KeyCode::Char('a'), KeyModifiers::CONTROL), 24),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('a')))),
         None
     );
 }
@@ -238,11 +293,11 @@ fn translate_ignores_control_a() {
 #[test]
 fn control_r_is_a_hard_refresh_and_r_a_plain_one() {
     assert_eq!(
-        translate(press(KeyCode::Char('r'), KeyModifiers::CONTROL), 24),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('r')))),
         Some(Action::HardRefresh)
     );
     assert_eq!(
-        translate(press(KeyCode::Char('r'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('r')))),
         Some(Action::Refresh)
     );
 }
@@ -250,224 +305,473 @@ fn control_r_is_a_hard_refresh_and_r_a_plain_one() {
 #[test]
 fn translate_maps_navigation_keys() {
     assert_eq!(
-        msg(translate(press(KeyCode::Char('j'), KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('j')
+        )))),
         Some(Msg::NavDown)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Char('k'), KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('k')
+        )))),
         Some(Msg::NavUp)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Down, KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Down
+        )))),
         Some(Msg::NavDown)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Up, KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Up
+        )))),
         Some(Msg::NavUp)
     );
     // Enter no longer maps to a Msg directly. It is
     // resolved against the selected row's kind by the dispatcher
-    // at the call site (and remapped to ExplorerActivate when
-    // the right pane has focus).
+    // at the call site (and remapped to the explorer's `Activate`
+    // when the right pane has focus).
     assert_eq!(
-        translate(press(KeyCode::Enter, KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Enter))),
         Some(Action::DefaultAction)
     );
     // Vi-style tree fold keys: `l` / `→` expand, `h` / `←`
     // collapse the selected left-tree row.
     assert_eq!(
-        msg(translate(press(KeyCode::Char('l'), KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('l')
+        )))),
         Some(Msg::ExpandRow)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Right, KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Right
+        )))),
         Some(Msg::ExpandRow)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Char('h'), KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('h')
+        )))),
         Some(Msg::CollapseRow)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Left, KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Left
+        )))),
         Some(Msg::CollapseRow)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Tab, KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Tab
+        )))),
         Some(Msg::CycleFocus)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Char('g'), KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('g')
+        )))),
         Some(Msg::Home)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Char('G'), KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('G')
+        )))),
         Some(Msg::End)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::PageDown, KeyModifiers::NONE), 20)),
-        Some(Msg::PageDown(20))
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::PageDown
+        )))),
+        Some(Msg::PageDown)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::PageUp, KeyModifiers::NONE), 20)),
-        Some(Msg::PageUp(20))
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::PageUp
+        )))),
+        Some(Msg::PageUp)
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Char('J'), KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('J')
+        )))),
         Some(Msg::ScrollPreviewBy(1))
     );
     assert_eq!(
-        msg(translate(press(KeyCode::Char('K'), KeyModifiers::NONE), 24)),
+        msg(translate(Event::Key(chord(
+            KeyModifiers::NONE,
+            KeyCode::Char('K')
+        )))),
         Some(Msg::ScrollPreviewBy(-1))
     );
 }
 
 #[test]
-fn remap_for_focus_left_is_identity() {
+fn the_left_pane_keeps_the_program_wide_keymap() {
     use crate::tui::app::Focus;
-    let action = Action::Msg(Box::new(Msg::NavDown));
-    assert_eq!(remap_for_focus(action.clone(), Focus::Left), Some(action));
-    let action = Action::Msg(Box::new(Msg::PageDown(20)));
-    assert_eq!(remap_for_focus(action.clone(), Focus::Left), Some(action));
-}
-
-#[test]
-fn remap_for_focus_right_routes_nav_keys_into_the_explorer() {
-    use crate::tui::app::Focus;
-    // With the right pane focused, j/k and PageUp/Down
-    // move the explorer cursor instead of scrolling the preview.
-    // J/K (uppercase) keep their preview-scroll role via the
-    // standalone bindings in `translate`.
+    let key = |code| chord(KeyModifiers::NONE, code);
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::NavDown)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerNavDown)))
+        resolved(Focus::Left, key(KeyCode::Char('j'))),
+        Some(sends(Msg::NavDown))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::NavUp)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerNavUp)))
+        resolved(Focus::Left, key(KeyCode::PageDown)),
+        Some(sends(Msg::PageDown))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::PageDown(20))), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerNavDown)))
-    );
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::PageUp(20))), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerNavUp)))
-    );
-}
-
-#[test]
-fn remap_for_focus_right_routes_enter_and_e_to_the_explorer() {
-    use crate::tui::app::Focus;
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::CycleFocus)))
-    );
-    // Locked decision 8: Enter is the universal "do the obvious
-    // thing" key on the explorer cursor. The dispatch is
-    // App-aware (Node-zone fields copy; other rows drill/expand),
-    // so the remap produces [`Action::ExplorerEnter`], which the
-    // main loop
-    // resolves against [`App::explorer_copy_target`].
-    assert_eq!(
-        remap_for_focus(Action::DefaultAction, Focus::Right),
-        Some(Action::ExplorerEnter)
-    );
-    // Left-pane DefaultAction is left untouched here so the main
-    // loop can resolve it against the selected row.
-    assert_eq!(
-        remap_for_focus(Action::DefaultAction, Focus::Left),
+        resolved(Focus::Left, key(KeyCode::Enter)),
         Some(Action::DefaultAction)
     );
-    // `e` is the explicit expand/collapse accelerator.
     assert_eq!(
-        remap_for_focus(
-            Action::Msg(Box::new(Msg::ToggleLinkedDetails)),
-            Focus::Right
-        ),
-        Some(Action::Msg(Box::new(Msg::ExplorerToggleGroup)))
-    );
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::Quit)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::Quit)))
-    );
-    assert_eq!(
-        remap_for_focus(Action::Refresh, Focus::Right),
-        Some(Action::Refresh)
-    );
-    // F clears filters on the left tree but toggles the
-    // Expanded Node Detail view on the right pane.
-    assert_eq!(
-        remap_for_focus(Action::ClearFilters, Focus::Left),
+        resolved(Focus::Left, chord(KeyModifiers::SHIFT, KeyCode::Char('F'))),
         Some(Action::ClearFilters)
     );
     assert_eq!(
-        remap_for_focus(Action::ClearFilters, Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerToggleFullDetail)))
+        resolved(Focus::Left, key(KeyCode::Backspace)),
+        Some(sends(Msg::NavBack))
+    );
+    assert_eq!(
+        resolved(Focus::Left, key(KeyCode::Char('h'))),
+        Some(sends(Msg::CollapseRow))
+    );
+    assert_eq!(
+        resolved(Focus::Left, key(KeyCode::Esc)),
+        None,
+        "Esc means nothing here"
     );
 }
 
 #[test]
-fn remap_for_focus_right_suppresses_left_tree_expand_collapse_keys() {
-    // Regression: `h` / `l` / `←` / `→` are left-tree
-    // expand/collapse keys. When the right pane is focused they
-    // used to leak through and mutate the tree the operator
-    // wasn't driving. The focus remap drops them.
+fn the_right_pane_moves_and_pages_the_explorer() {
     use crate::tui::app::Focus;
+    // With the right pane focused, j/k and the arrows move the explorer
+    // cursor, and the page keys page it by the rows its zone shows (they
+    // moved one row). J/K (uppercase) keep their preview-scroll role.
+    let key = |code| resolved(Focus::Right, chord(KeyModifiers::NONE, code));
+    assert_eq!(key(KeyCode::Char('j')), Some(explorer(ExplorerKey::Down)));
+    assert_eq!(key(KeyCode::Down), Some(explorer(ExplorerKey::Down)));
+    assert_eq!(key(KeyCode::Char('k')), Some(explorer(ExplorerKey::Up)));
+    assert_eq!(key(KeyCode::Up), Some(explorer(ExplorerKey::Up)));
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::ExpandRow)), Focus::Right),
-        None
+        key(KeyCode::PageDown),
+        Some(explorer(ExplorerKey::PageDown))
     );
+    assert_eq!(key(KeyCode::PageUp), Some(explorer(ExplorerKey::PageUp)));
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CollapseRow)), Focus::Right),
-        None
-    );
-    // Left focus still routes them through unchanged.
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::ExpandRow)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::ExpandRow)))
-    );
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CollapseRow)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::CollapseRow)))
+        resolved(Focus::Right, chord(KeyModifiers::SHIFT, KeyCode::Char('J'))),
+        Some(sends(Msg::ScrollPreviewBy(1)))
     );
 }
 
 #[test]
-fn remap_for_focus_right_routes_home_and_end_into_the_explorer() {
-    // Paired with the h/l/Left/Right suppression above:
-    // `g`/`Home` and `G`/`End` snap the explorer
-    // cursor to its first / last row on right-pane focus
-    // instead of bleeding into the left tree's Home/End
-    // jumps. `Tab`/`CycleFocus` is intentionally left alone —
-    // it is the focus toggle and must stay useful regardless
-    // of which pane has focus.
+fn the_right_pane_takes_enter_f_and_backspace_and_leaves_the_rest_global() {
     use crate::tui::app::Focus;
+    let none = KeyModifiers::NONE;
+    // Locked decision 8: Enter is the universal "do the obvious thing"
+    // key on the explorer cursor. The explorer reads the row (Node-zone
+    // fields copy; other rows drill or fold), and the outcome says which.
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::Home)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerHome))),
+        resolved(Focus::Right, chord(none, KeyCode::Enter)),
+        Some(explorer(ExplorerKey::Activate))
+    );
+    // The reveal chords are not the explorer's Enter: they reach the
+    // program-wide keymap on either pane.
+    for modifiers in [KeyModifiers::SHIFT, KeyModifiers::ALT] {
+        assert_eq!(
+            resolved(Focus::Right, chord(modifiers, KeyCode::Enter)),
+            Some(sends(Msg::RevealSelected)),
+            "{modifiers:?}"
+        );
+    }
+    // F clears filters on the left tree but toggles the Expanded Node
+    // Detail view on the right pane.
+    assert_eq!(
+        resolved(Focus::Right, chord(KeyModifiers::SHIFT, KeyCode::Char('F'))),
+        Some(explorer(ExplorerKey::ToggleFull))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::End)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::ExplorerEnd))),
+        resolved(Focus::Right, chord(none, KeyCode::Backspace)),
+        Some(explorer(ExplorerKey::Back))
     );
-    // Left focus still drives the left tree.
+    // `o` opens the right pane's cursor value from either pane.
+    for focus in [Focus::Left, Focus::Right] {
+        assert_eq!(
+            resolved(focus, chord(none, KeyCode::Char('o'))),
+            Some(explorer(ExplorerKey::Inspect)),
+            "{focus:?}"
+        );
+    }
+    // Keys the right pane's table leaves alone mean what they mean
+    // everywhere.
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::Home)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::Home))),
+        resolved(Focus::Right, chord(none, KeyCode::Tab)),
+        Some(sends(Msg::CycleFocus))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::End)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::End))),
-    );
-    // Tab cycles focus on either side — never remapped.
-    assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Right),
-        Some(Action::Msg(Box::new(Msg::CycleFocus))),
+        resolved(Focus::Right, chord(none, KeyCode::Char('q'))),
+        Some(sends(Msg::Quit))
     );
     assert_eq!(
-        remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Left),
-        Some(Action::Msg(Box::new(Msg::CycleFocus))),
+        resolved(Focus::Right, chord(none, KeyCode::Char('r'))),
+        Some(Action::Refresh)
     );
+    assert_eq!(
+        resolved(Focus::Right, chord(KeyModifiers::SHIFT, KeyCode::Char('E'))),
+        Some(sends(Msg::ToggleEdgeMeta))
+    );
+    assert_eq!(
+        resolved(Focus::Right, chord(KeyModifiers::SHIFT, KeyCode::Char('O'))),
+        Some(sends(Msg::RevealSelected))
+    );
+}
+
+#[test]
+fn the_right_pane_folds_its_section_with_h_l_and_the_arrows() {
+    // `h` / `l` / `←` / `→` fold the left tree's row on the left pane.
+    // On the right pane they used to do nothing (the focus remap dropped
+    // them so they could not mutate the tree the operator wasn't
+    // driving); now they close and open the explorer's Other zone, the
+    // tree's fold gesture.
+    use crate::tui::app::Focus;
+    let key = |focus, code| resolved(focus, chord(KeyModifiers::NONE, code));
+    assert_eq!(
+        key(Focus::Right, KeyCode::Char('h')),
+        Some(explorer(ExplorerKey::CloseSection))
+    );
+    assert_eq!(
+        key(Focus::Right, KeyCode::Left),
+        Some(explorer(ExplorerKey::CloseSection))
+    );
+    assert_eq!(
+        key(Focus::Right, KeyCode::Char('l')),
+        Some(explorer(ExplorerKey::OpenSection))
+    );
+    assert_eq!(
+        key(Focus::Right, KeyCode::Right),
+        Some(explorer(ExplorerKey::OpenSection))
+    );
+    assert_eq!(
+        key(Focus::Left, KeyCode::Char('l')),
+        Some(sends(Msg::ExpandRow))
+    );
+    assert_eq!(
+        key(Focus::Left, KeyCode::Right),
+        Some(sends(Msg::ExpandRow))
+    );
+    assert_eq!(
+        key(Focus::Left, KeyCode::Char('h')),
+        Some(sends(Msg::CollapseRow))
+    );
+    assert_eq!(
+        key(Focus::Left, KeyCode::Left),
+        Some(sends(Msg::CollapseRow))
+    );
+}
+
+#[test]
+fn the_right_pane_goes_to_its_ends_and_steps_back_with_backspace_and_esc() {
+    // `g`/`Home` and `G`/`End` go to the explorer's first and last row on
+    // right-pane focus instead of bleeding into the left tree's ends.
+    // `Esc` steps back one level, as `Backspace` does. `Tab` is the focus
+    // toggle on either side.
+    use crate::tui::app::Focus;
+    let none = KeyModifiers::NONE;
+    let key = |focus, modifiers, code| resolved(focus, chord(modifiers, code));
+    assert_eq!(
+        key(Focus::Right, none, KeyCode::Home),
+        Some(explorer(ExplorerKey::First))
+    );
+    assert_eq!(
+        key(Focus::Right, none, KeyCode::Char('g')),
+        Some(explorer(ExplorerKey::First))
+    );
+    assert_eq!(
+        key(Focus::Right, none, KeyCode::End),
+        Some(explorer(ExplorerKey::Last))
+    );
+    assert_eq!(
+        key(Focus::Right, KeyModifiers::SHIFT, KeyCode::Char('G')),
+        Some(explorer(ExplorerKey::Last))
+    );
+    assert_eq!(
+        key(Focus::Right, none, KeyCode::Esc),
+        Some(explorer(ExplorerKey::Back))
+    );
+    assert_eq!(
+        key(Focus::Left, none, KeyCode::Home),
+        Some(sends(Msg::Home))
+    );
+    assert_eq!(key(Focus::Left, none, KeyCode::End), Some(sends(Msg::End)));
+    for focus in [Focus::Left, Focus::Right] {
+        assert_eq!(key(focus, none, KeyCode::Tab), Some(sends(Msg::CycleFocus)));
+    }
+}
+
+#[test]
+fn the_right_panes_table_declares_what_each_shared_key_means_on_either_pane() {
+    // The table on `RIGHT_PANE_KEYS`: the keys that mean one thing on the
+    // left pane (the program-wide keymap) and another on the right (the
+    // right pane's table).
+    use crate::tui::app::Focus;
+    let none = KeyModifiers::NONE;
+    let cases = [
+        (
+            chord(none, KeyCode::Enter),
+            Some(Action::DefaultAction),
+            Some(explorer(ExplorerKey::Activate)),
+        ),
+        (
+            chord(KeyModifiers::SHIFT, KeyCode::Char('F')),
+            Some(Action::ClearFilters),
+            Some(explorer(ExplorerKey::ToggleFull)),
+        ),
+        (
+            chord(none, KeyCode::Backspace),
+            Some(sends(Msg::NavBack)),
+            Some(explorer(ExplorerKey::Back)),
+        ),
+        (
+            chord(none, KeyCode::Char('h')),
+            Some(sends(Msg::CollapseRow)),
+            Some(explorer(ExplorerKey::CloseSection)),
+        ),
+        (
+            chord(none, KeyCode::Right),
+            Some(sends(Msg::ExpandRow)),
+            Some(explorer(ExplorerKey::OpenSection)),
+        ),
+        (
+            chord(none, KeyCode::PageDown),
+            Some(sends(Msg::PageDown)),
+            Some(explorer(ExplorerKey::PageDown)),
+        ),
+        (
+            chord(none, KeyCode::PageUp),
+            Some(sends(Msg::PageUp)),
+            Some(explorer(ExplorerKey::PageUp)),
+        ),
+        (
+            chord(none, KeyCode::Esc),
+            None,
+            Some(explorer(ExplorerKey::Back)),
+        ),
+        (
+            chord(none, KeyCode::Char('e')),
+            None,
+            Some(explorer(ExplorerKey::ToggleSection)),
+        ),
+        (
+            chord(none, KeyCode::Char('o')),
+            Some(explorer(ExplorerKey::Inspect)),
+            Some(explorer(ExplorerKey::Inspect)),
+        ),
+    ];
+    for (event, left, right) in cases {
+        assert_eq!(resolved(Focus::Left, event), left, "left {event:?}");
+        assert_eq!(resolved(Focus::Right, event), right, "right {event:?}");
+    }
+}
+
+#[test]
+fn the_inspect_key_the_cut_hint_names_is_the_right_panes_inspect_key() {
+    use crate::tui::keybindings::RIGHT_PANE_KEYS;
+    use crate::tui::keymap::INSPECT_KEY;
+    use tuikit::keys::{Hint, KeyRow, ch, rows};
+    let bound: Vec<_> = rows(RIGHT_PANE_KEYS)
+        .filter_map(|row| match row {
+            KeyRow::Bind {
+                key,
+                action: ExplorerKey::Inspect,
+                hint,
+                ..
+            } => Some((*key, *hint)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bound.len(), 1, "one inspect key");
+    let (key, hint) = bound[0];
+    assert_eq!(key, ch(INSPECT_KEY));
+    assert!(
+        matches!(hint, Hint::Shown { label, .. } if label == INSPECT_KEY.to_string()),
+        "{hint:?}"
+    );
+}
+
+#[test]
+fn chords_of_the_tree_keys_move_neither_pane() {
+    // The left pane's tree keys bind their characters as typed, as the
+    // right pane's table does, and they are the left pane's bindings, so
+    // these chords do nothing on either pane (`Alt-j` used to move the
+    // tree, and the explorer through the remap before that).
+    use crate::tui::app::Focus;
+    use crate::tui::keybindings::{Command, LEFT_PANE, keymap};
+    use tuikit::keys::{Binding, Scope};
+    for (modifiers, c) in [
+        (KeyModifiers::ALT, 'j'),
+        (KeyModifiers::ALT, 'k'),
+        (KeyModifiers::CONTROL, 'j'),
+        (KeyModifiers::CONTROL, 'k'),
+        (KeyModifiers::ALT, 'g'),
+        (KeyModifiers::ALT | KeyModifiers::SHIFT, 'G'),
+        (KeyModifiers::ALT, 'h'),
+        (KeyModifiers::ALT, 'l'),
+    ] {
+        let event = chord(modifiers, KeyCode::Char(c));
+        for focus in [Focus::Left, Focus::Right] {
+            assert_eq!(resolved(focus, event), None, "{focus:?} {modifiers:?} {c}");
+        }
+    }
+    // The tree's keys are the left pane's bindings, so none of them is
+    // looked up with the right pane focused; the program's are.
+    for command in [
+        Command::Default,
+        Command::ClearFilters,
+        Command::Down,
+        Command::Up,
+        Command::PageDown,
+        Command::PageUp,
+        Command::First,
+        Command::Last,
+        Command::Expand,
+        Command::Collapse,
+        Command::Back,
+    ] {
+        let scopes: Vec<Scope> = keymap()
+            .bindings()
+            .iter()
+            .filter(|binding| binding.action() == command)
+            .map(Binding::scope)
+            .collect();
+        assert_eq!(scopes, [LEFT_PANE], "{command:?}");
+    }
+    for command in [
+        Command::Refresh,
+        Command::Focus,
+        Command::Explorer(ExplorerKey::Inspect),
+    ] {
+        assert!(
+            keymap()
+                .bindings()
+                .iter()
+                .any(|binding| binding.action() == command && binding.scope() == Scope::Global),
+            "{command:?}"
+        );
+    }
 }
 
 mod selected_default_action_tests {
@@ -679,11 +983,11 @@ mod selected_default_action_tests {
 #[test]
 fn translate_ignores_unbound_keys() {
     assert_eq!(
-        translate(press(KeyCode::Char('z'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('z')))),
         None
     );
     assert_eq!(
-        translate(press(KeyCode::Char('a'), KeyModifiers::CONTROL), 24),
+        translate(Event::Key(chord(KeyModifiers::CONTROL, KeyCode::Char('a')))),
         None
     );
 }
@@ -692,7 +996,7 @@ fn translate_ignores_unbound_keys() {
 fn translate_ignores_release_kind_keys() {
     let mut key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
     key.kind = KeyEventKind::Release;
-    assert_eq!(translate(Event::Key(key), 24), None);
+    assert_eq!(translate(Event::Key(key)), None);
 }
 
 /// ADR 0085 contract 4: view / grouping / filter /
@@ -870,26 +1174,22 @@ mod mux_effect_executor {
     }
 }
 
-/// `overlay_key_from_event` centralizes the
-/// modal-stack-aware routing both event loops used to duplicate.
-/// These tests pin the routing: each open modal takes ownership
-/// of the next key press, and the fallback returns None when no
-/// modal is on top.
+/// `overlay_key_from_event` is the one place a key press reaches the
+/// modal stack: an open modal takes every key press, whatever its kind,
+/// and the fallback returns None when no modal is open.
 mod overlay_routing {
     use super::*;
     use ratatui::crossterm::event::KeyEvent;
-
-    fn press(code: KeyCode, mods: KeyModifiers) -> Event {
-        let mut key = KeyEvent::new(code, mods);
-        key.kind = KeyEventKind::Press;
-        Event::Key(key)
-    }
 
     #[test]
     fn empty_stack_returns_none() {
         let app = App::new(RunConfig::defaults());
         assert!(
-            overlay_key_from_event(&app, &press(KeyCode::Char('j'), KeyModifiers::NONE)).is_none()
+            overlay_key_from_event(
+                &app,
+                &Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('j')))
+            )
+            .is_none()
         );
     }
 
@@ -897,16 +1197,20 @@ mod overlay_routing {
     fn help_on_stack_routes_key_press() {
         let mut app = App::new(RunConfig::defaults());
         app.open_help_overlay();
-        let action = overlay_key_from_event(&app, &press(KeyCode::Char('j'), KeyModifiers::NONE));
-        assert!(matches!(action, Some(Action::HelpOverlayKey(_))));
+        let action = overlay_key_from_event(
+            &app,
+            &Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('j'))),
+        );
+        assert!(matches!(action, Some(Action::ModalKey(_))));
     }
 
     #[test]
     fn controls_on_stack_routes_key_press() {
         let mut app = App::new(RunConfig::defaults());
         app.open_controls_overlay();
-        let action = overlay_key_from_event(&app, &press(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(matches!(action, Some(Action::ControlsOverlayKey(_))));
+        let action =
+            overlay_key_from_event(&app, &Event::Key(chord(KeyModifiers::NONE, KeyCode::Enter)));
+        assert!(matches!(action, Some(Action::ModalKey(_))));
     }
 
     #[test]
@@ -916,8 +1220,11 @@ mod overlay_routing {
         let mut app = App::new(RunConfig::defaults());
         app.open_controls_overlay();
         app.open_help_overlay();
-        let action = overlay_key_from_event(&app, &press(KeyCode::Char('j'), KeyModifiers::NONE));
-        assert!(matches!(action, Some(Action::HelpOverlayKey(_))));
+        let action = overlay_key_from_event(
+            &app,
+            &Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('j'))),
+        );
+        assert!(matches!(action, Some(Action::ModalKey(_))));
     }
 
     #[test]
@@ -1022,14 +1329,15 @@ mod mux_launch_argv {
 #[test]
 fn translate_bang_opens_messages() {
     assert_eq!(
-        translate(press(KeyCode::Char('!'), KeyModifiers::SHIFT), 24),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('!')))),
         Some(Action::OpenMessages)
     );
 }
 
 #[test]
 fn launch_entry_level_follows_outcome_and_stderr() {
-    use crate::tui::messages::{CommandRecord, LogLevel, LogTarget};
+    use crate::tui::messages::{CommandRecord, LogTarget};
+    use tuikit::feedback::Severity;
     let summary = |success| LaunchSummary {
         success,
         message: "pin `w1` launched".to_string(),
@@ -1043,8 +1351,8 @@ fn launch_entry_level_follows_outcome_and_stderr() {
     let target = || LogTarget::Pin("w1".to_string());
 
     assert_eq!(
-        launch_entry(&summary(true), record(""), target()).level,
-        LogLevel::Info
+        launch_entry(&summary(true), record(""), target()).severity,
+        Severity::Success
     );
     assert_eq!(
         launch_entry(
@@ -1052,38 +1360,48 @@ fn launch_entry_level_follows_outcome_and_stderr() {
             record("resume failed; launched fresh"),
             target()
         )
-        .level,
-        LogLevel::Warning
+        .severity,
+        Severity::Warning
     );
     let failed = launch_entry(&summary(false), record("boom"), target());
-    assert_eq!(failed.level, LogLevel::Error);
-    assert_eq!(failed.command.map(|c| c.stderr), Some("boom".to_string()));
+    assert_eq!(failed.severity, Severity::Error);
+    assert_eq!(
+        failed.item.command.map(|c| c.stderr),
+        Some("boom".to_string())
+    );
 }
 
 mod worker_ledger {
     use super::*;
 
-    const APPLY: WorkerVerdict = WorkerVerdict {
-        apply: true,
-        settles_handoff: false,
-    };
-    const SETTLE: WorkerVerdict = WorkerVerdict {
-        apply: true,
-        settles_handoff: true,
-    };
-    const DROP: WorkerVerdict = WorkerVerdict {
-        apply: false,
-        settles_handoff: false,
-    };
+    fn mux(name: &str) -> MuxSessionId {
+        MuxSessionId::new(format!("tmux:{name}"))
+    }
+
+    fn verdict(apply: bool, released: &[&str], settles_handoff: bool) -> WorkerVerdict {
+        WorkerVerdict {
+            apply,
+            released: released.iter().map(|name| mux(name)).collect(),
+            settles_handoff,
+        }
+    }
+
+    fn applied() -> WorkerVerdict {
+        verdict(true, &[], false)
+    }
+
+    fn dropped() -> WorkerVerdict {
+        verdict(false, &[], false)
+    }
 
     #[test]
     fn older_result_landing_after_a_newer_one_is_dropped() {
         let mut ledger = WorkerLedger::default();
         let timer = ledger.start();
-        let handoff = ledger.start_for_handoff();
-        assert_eq!(ledger.finish(handoff), SETTLE);
+        let handoff = ledger.start_for_handoff([mux("a")]);
+        assert_eq!(ledger.finish(handoff), verdict(true, &["a"], true));
         assert!(!ledger.idle());
-        assert_eq!(ledger.finish(timer), DROP);
+        assert_eq!(ledger.finish(timer), dropped());
         assert!(ledger.idle());
     }
 
@@ -1091,28 +1409,83 @@ mod worker_ledger {
     fn worker_spawned_before_the_handoff_does_not_settle_it() {
         let mut ledger = WorkerLedger::default();
         let timer = ledger.start();
-        let handoff = ledger.start_for_handoff();
-        assert_eq!(ledger.finish(timer), APPLY);
-        assert_eq!(ledger.finish(handoff), SETTLE);
+        let handoff = ledger.start_for_handoff([mux("a")]);
+        assert_eq!(ledger.finish(timer), applied());
+        assert_eq!(ledger.finish(handoff), verdict(true, &["a"], true));
     }
 
     #[test]
-    fn a_later_handoff_moves_the_settle_point() {
+    fn each_mux_is_released_by_the_refresh_after_its_own_return() {
+        // Outside tmux, the return from B comes after A's refresh already
+        // finished: A's result waits in the channel while B's refresh
+        // starts, and the first drain releases A without waiting for B.
         let mut ledger = WorkerLedger::default();
-        let first = ledger.start_for_handoff();
-        let second = ledger.start_for_handoff();
-        assert_eq!(ledger.finish(first), APPLY);
-        assert_eq!(ledger.finish(second), SETTLE);
+        let first = ledger.start_for_handoff([mux("a")]);
+        let second = ledger.start_for_handoff([mux("b")]);
+        assert_eq!(ledger.finish(first), verdict(true, &["a"], false));
+        assert_eq!(ledger.finish(second), verdict(true, &["b"], true));
+    }
+
+    #[test]
+    fn a_refresh_after_a_return_releases_every_earlier_freeze() {
+        let mut ledger = WorkerLedger::default();
+        let first = ledger.start_for_handoff([mux("a")]);
+        let second = ledger.start_for_handoff([mux("b")]);
+        assert_eq!(ledger.finish(second), verdict(true, &["a", "b"], true));
+        assert_eq!(ledger.finish(first), dropped());
     }
 
     #[test]
     fn worker_spawned_after_the_handoff_settles_it() {
         let mut ledger = WorkerLedger::default();
-        let handoff = ledger.start_for_handoff();
+        let handoff = ledger.start_for_handoff([mux("a")]);
         let refresh = ledger.start();
-        assert_eq!(ledger.finish(refresh), SETTLE);
-        assert_eq!(ledger.finish(handoff), DROP);
+        assert_eq!(ledger.finish(refresh), verdict(true, &["a"], true));
+        assert_eq!(ledger.finish(handoff), dropped());
         assert!(ledger.idle());
+    }
+
+    #[test]
+    fn the_pane_coming_back_into_view_does_not_hold_an_earlier_freeze() {
+        // Inside tmux the attach returns at once and the pane's return
+        // starts another refresh; A still waits only for its own.
+        let mut ledger = WorkerLedger::default();
+        let attach_a = ledger.start_for_handoff([mux("a")]);
+        let attach_b = ledger.start_for_handoff([mux("b")]);
+        let regained = ledger.start_for_handoff([]);
+        assert_eq!(ledger.finish(attach_a), verdict(true, &["a"], false));
+        assert_eq!(ledger.finish(attach_b), verdict(true, &["b"], false));
+        assert_eq!(ledger.finish(regained), verdict(true, &[], true));
+    }
+
+    #[test]
+    fn a_confirmed_mux_is_released_before_its_refresh_lands() {
+        let mut ledger = WorkerLedger::default();
+        let handoff = ledger.start_for_handoff([mux("a")]);
+        assert!(ledger.confirm(&mux("a"), handoff));
+        assert!(
+            !ledger.confirm(&mux("a"), handoff),
+            "a mux is released once"
+        );
+        assert_eq!(
+            ledger.finish(handoff),
+            verdict(true, &[], true),
+            "the refresh still ends the hand-off"
+        );
+    }
+
+    #[test]
+    fn a_confirmation_for_an_earlier_return_does_not_release_a_later_one() {
+        let mut ledger = WorkerLedger::default();
+        let first = ledger.start_for_handoff([mux("a")]);
+        let second = ledger.start_for_handoff([mux("a")]);
+        assert!(!ledger.confirm(&mux("a"), first));
+        assert_eq!(
+            ledger.finish(first),
+            verdict(true, &[], false),
+            "the first refresh predates the second return"
+        );
+        assert!(ledger.confirm(&mux("a"), second));
     }
 }
 
@@ -1620,18 +1993,18 @@ fn keys_of_the_retired_pin_surfaces_are_unbound() {
         (KeyCode::Char('b'), KeyModifiers::NONE),
         (KeyCode::Delete, KeyModifiers::NONE),
     ] {
-        assert_eq!(translate(press(code, mods), 24), None, "{code:?}");
+        assert_eq!(translate(Event::Key(chord(mods, code))), None, "{code:?}");
     }
 }
 
 #[test]
 fn p_pins_and_capital_n_launches_with_a_worktree() {
     assert!(matches!(
-        translate(press(KeyCode::Char('p'), KeyModifiers::NONE), 24),
+        translate(Event::Key(chord(KeyModifiers::NONE, KeyCode::Char('p')))),
         Some(Action::Msg(msg)) if *msg == Msg::TogglePin
     ));
     assert!(matches!(
-        translate(press(KeyCode::Char('N'), KeyModifiers::SHIFT), 24),
+        translate(Event::Key(chord(KeyModifiers::SHIFT, KeyCode::Char('N')))),
         Some(Action::Msg(msg)) if *msg == Msg::OpenMuxLaunchForm
     ));
 }
@@ -1688,112 +2061,9 @@ fn saving_the_pin_edit_form_sets_and_drops_overrides_in_the_store() {
     assert!(!executor::apply_pin_overrides(&store, &none).unwrap());
 }
 
-mod settle {
-    use std::cell::RefCell;
-    use std::collections::BTreeSet;
-
-    use super::*;
-    use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId};
-
-    fn world(names: &[&str]) -> GraphSnapshot {
-        GraphSnapshot {
-            nodes: names
-                .iter()
-                .map(|name| {
-                    GraphNode::MuxSession(MuxSessionNode::new(
-                        MuxSessionId::new(format!("tmux:{name}")),
-                        "tmux",
-                        *name,
-                    ))
-                })
-                .collect(),
-            ..GraphSnapshot::empty()
-        }
-    }
-
-    fn ids(names: &[&str]) -> BTreeSet<NodeId> {
-        live_mux_ids(&world(names))
-    }
-
-    /// Probe results in order; the last repeats.
-    fn run(
-        before: Option<&BTreeSet<NodeId>>,
-        results: &[&[&str]],
-    ) -> (usize, usize, GraphSnapshot) {
-        let calls = RefCell::new(0usize);
-        let sleeps = RefCell::new(0usize);
-        let (snapshot, ()) = probe_until_changed(
-            before,
-            2,
-            Duration::from_millis(150),
-            |_| *sleeps.borrow_mut() += 1,
-            || {
-                let i = (*calls.borrow()).min(results.len() - 1);
-                *calls.borrow_mut() += 1;
-                (Ok(world(results[i])), ())
-            },
-        );
-        (calls.into_inner(), sleeps.into_inner(), snapshot.unwrap())
-    }
-
-    #[test]
-    fn a_changed_mux_set_is_taken_at_once() {
-        let before = ids(&["a"]);
-        let (calls, sleeps, snapshot) = run(Some(&before), &[&["a", "b"]]);
-        assert_eq!((calls, sleeps), (1, 0));
-        assert_eq!(live_mux_ids(&snapshot), ids(&["a", "b"]));
-    }
-
-    #[test]
-    fn an_unchanged_set_is_probed_again_until_it_changes() {
-        let before = ids(&["a", "b"]);
-        // The first probe still sees the session that just ended.
-        let (calls, sleeps, snapshot) = run(Some(&before), &[&["a", "b"], &["a"]]);
-        assert_eq!((calls, sleeps), (2, 1));
-        assert_eq!(live_mux_ids(&snapshot), ids(&["a"]));
-    }
-
-    #[test]
-    fn a_set_that_never_changes_stops_after_the_bounded_retries() {
-        let before = ids(&["a"]);
-        let (calls, sleeps, _) = run(Some(&before), &[&["a"]]);
-        assert_eq!((calls, sleeps), (3, 2));
-    }
-
-    #[test]
-    fn without_a_hand_off_set_it_probes_once() {
-        let (calls, sleeps, _) = run(None, &[&["a"]]);
-        assert_eq!((calls, sleeps), (1, 0));
-    }
-
-    #[test]
-    fn a_failed_probe_is_returned_without_retrying() {
-        let before = ids(&["a"]);
-        let calls = RefCell::new(0);
-        let (result, ()) = probe_until_changed(
-            Some(&before),
-            2,
-            Duration::ZERO,
-            |_| {},
-            || {
-                *calls.borrow_mut() += 1;
-                (Err(anyhow::anyhow!("boom")), ())
-            },
-        );
-        assert!(result.is_err());
-        assert_eq!(calls.into_inner(), 1);
-    }
-}
-
 mod viewer_find_prompt {
     use super::*;
     use crate::viewer::model::{TranscriptDocument, TranscriptTurn, TurnKind, TurnRole};
-    use crate::viewer::state::ViewerState;
-    use ratatui::crossterm::event::KeyEvent;
-
-    fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
-        KeyEvent::new(code, mods)
-    }
 
     fn app_with_viewer() -> App {
         let mut document = TranscriptDocument::default();
@@ -1808,59 +2078,62 @@ mod viewer_find_prompt {
             });
         }
         let mut app = App::new(RunConfig::defaults());
-        app.open_viewer_modal(ViewerState::new(document));
+        app.open_viewer_modal(crate::tui::viewer_bridge::viewer(document, None));
         app
     }
 
     fn type_text(app: &mut App, text: &str) {
         for c in text.chars() {
-            handle_viewer_overlay_key(app, key(KeyCode::Char(c), KeyModifiers::NONE));
+            modal_key_pure(app, chord(KeyModifiers::NONE, KeyCode::Char(c)));
         }
     }
 
     #[test]
     fn slash_opens_the_prompt_and_every_key_types_into_it() {
         let mut app = app_with_viewer();
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('/')));
         // `n`, `q`, and Space are viewer keys, but the prompt owns them now.
         type_text(&mut app, "n q");
-        let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
-        assert_eq!(prompt.map(|p| p.text.as_str()), Some("n q"));
+        let prompt = app.viewer_modal().and_then(|s| s.find().prompt());
+        assert_eq!(prompt.map(tuikit::text_edit::LineEdit::value), Some("n q"));
         assert!(app.viewer_modal().is_some(), "q did not close the viewer");
     }
 
     #[test]
     fn enter_runs_the_find_and_n_steps_afterwards() {
         let mut app = app_with_viewer();
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('/')));
         type_text(&mut app, "a");
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+        modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Enter));
         let state = app.viewer_modal().expect("viewer");
-        assert_eq!(state.find.matches, [0, 1, 2]);
-        assert!(state.find.prompt.is_none());
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('n'), KeyModifiers::NONE));
-        assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(1));
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('N'), KeyModifiers::SHIFT));
-        assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(0));
+        assert_eq!(state.find().matches(), [0, 1, 2]);
+        assert!(state.find().prompt().is_none());
+        modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('n')));
+        assert_eq!(app.viewer_modal().and_then(|s| s.find().current()), Some(1));
+        modal_key_pure(&mut app, chord(KeyModifiers::SHIFT, KeyCode::Char('N')));
+        assert_eq!(app.viewer_modal().and_then(|s| s.find().current()), Some(0));
     }
 
     #[test]
     fn escape_leaves_the_prompt_without_closing_the_viewer() {
         let mut app = app_with_viewer();
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('/')));
         type_text(&mut app, "x");
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(app.viewer_modal().is_some_and(|s| s.find.prompt.is_none()));
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+        modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Esc));
+        assert!(
+            app.viewer_modal()
+                .is_some_and(|s| s.find().prompt().is_none())
+        );
+        modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Esc));
         assert!(app.viewer_modal().is_none(), "a second Esc closes it");
     }
 
     #[test]
     fn control_chords_do_not_type() {
         let mut app = app_with_viewer();
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('a'), KeyModifiers::CONTROL));
-        let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
-        assert_eq!(prompt.map(|p| p.text.as_str()), Some(""));
+        modal_key_pure(&mut app, chord(KeyModifiers::NONE, KeyCode::Char('/')));
+        modal_key_pure(&mut app, chord(KeyModifiers::CONTROL, KeyCode::Char('a')));
+        let prompt = app.viewer_modal().and_then(|s| s.find().prompt());
+        assert_eq!(prompt.map(tuikit::text_edit::LineEdit::value), Some(""));
     }
 }

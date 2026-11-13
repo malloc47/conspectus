@@ -7,6 +7,27 @@ use crate::model::{
 };
 use crate::resolve::resolve_snapshot;
 use std::path::PathBuf;
+use tuikit::breadcrumb::Breadcrumb;
+use tuikit::explorer::{FrameView, Zone};
+
+/// The adapter's zones for `view`, its `Other` zone open or closed, the
+/// summary of fields shown, and no edge meta.
+fn zones_of(view: &NodeView, other_open: bool) -> Vec<Zone<Graph>> {
+    let mut frame = FrameView::default();
+    if other_open {
+        frame.open.push(ExplorerRowKey::OtherHeader);
+    }
+    source::zones(view, &frame, &Theme::default(), false)
+}
+
+/// The rows the explorer lists for `view`, zone by zone.
+fn listed(view: &NodeView, other_open: bool) -> Vec<ExplorerRow> {
+    zones_of(view, other_open)
+        .into_iter()
+        .flat_map(|zone| zone.entries)
+        .map(|entry| entry.host)
+        .collect()
+}
 
 #[test]
 fn directional_verb_catalog_is_exhaustive_and_disambiguates_inverses() {
@@ -48,7 +69,7 @@ fn directional_verb_catalog_is_exhaustive_and_disambiguates_inverses() {
 }
 
 #[test]
-fn flat_rows_splits_validated_and_other_zones() {
+fn zones_split_validated_and_other_rows() {
     // ADR 0074 §3: the validated zone holds every `Resolves` row
     // in a flat list; alternates, conflicts, and unresolved
     // stubs sit under one collapsible `Other` header below.
@@ -89,9 +110,47 @@ fn flat_rows_splits_validated_and_other_zones() {
         "non-winning candidate should land in the Other zone: {counts:?}"
     );
 
+    // The fields are a zone of their own, where a lost cursor does not
+    // land; the relationships sit under the `Related` rule, where it does.
+    let zones = zones_of(&view, false);
+    assert_eq!(zones.len(), 2);
+    assert!(zones[0].heading.is_none() && !zones[0].lands);
+    assert!(
+        zones[0]
+            .entries
+            .iter()
+            .all(|entry| matches!(entry.host, ExplorerRow::NodeField { .. }))
+    );
+    assert!(zones[1].heading.is_some() && zones[1].lands);
+    assert!(
+        zones[1]
+            .entries
+            .iter()
+            .all(|entry| !matches!(entry.host, ExplorerRow::NodeField { .. }))
+    );
+    // Every Other child sits under the header, which the fold keys
+    // close from inside.
+    for entry in zones_of(&view, true)
+        .into_iter()
+        .flat_map(|zone| zone.entries)
+    {
+        let child = matches!(
+            entry.host,
+            ExplorerRow::OtherLink { .. } | ExplorerRow::OtherUnresolved { .. }
+        );
+        assert_eq!(
+            entry.under.is_some(),
+            child,
+            "{:?} under {:?}",
+            entry.host,
+            entry.under
+        );
+        assert_eq!(entry.key, entry.host.key(&view));
+    }
+
     // Collapsed Other: only the validated rows + the header
     // appear; expanding adds the Other children.
-    let collapsed = view.flat_rows(false, false);
+    let collapsed = listed(&view, false);
     let validated_in_collapsed = collapsed
         .iter()
         .filter(|r| matches!(r, ExplorerRow::ValidatedLink { .. }))
@@ -116,7 +175,7 @@ fn flat_rows_splits_validated_and_other_zones() {
         "Other children should not appear while the zone is collapsed"
     );
 
-    let expanded = view.flat_rows(true, false);
+    let expanded = listed(&view, true);
     let other_children_in_expanded = expanded
         .iter()
         .filter(|r| {
@@ -455,8 +514,17 @@ fn agent_session_title_is_not_labeled_as_alias_in_core_fields() {
         .iter()
         .find(|f| f.label == "title")
         .expect("title field");
-    assert!(title.value.contains('…'));
-    assert_eq!(title.long_value.as_deref(), Some(long_title));
+    assert_eq!(title.value, long_title, "the field keeps the whole title");
+    assert_eq!(title.cut_at, Some(LONG_VALUE_CELLS));
+    let row = grid::field_row(title, &Theme::default());
+    assert!(row.shown().contains('…'), "the pane shows it cut");
+    assert_eq!(
+        row.inspect(),
+        Some(tuikit::property_grid::Intent::Inspect {
+            label: "title".into(),
+            text: long_title.into(),
+        })
+    );
 }
 
 #[test]
@@ -940,8 +1008,15 @@ fn long_command_truncates_with_full_value_available() {
         .iter()
         .find(|f| f.label == "command")
         .expect("command field");
-    assert!(command_field.value.contains('…'));
-    assert_eq!(command_field.long_value.as_deref(), Some(long_command));
+    assert_eq!(command_field.value, long_command);
+    let row = grid::field_row(command_field, &Theme::default());
+    assert!(row.shown().contains('…'));
+    assert!(row.is_cut());
+    assert_eq!(
+        row.text(),
+        long_command,
+        "the whole command is kept for `o`"
+    );
 }
 
 #[test]
@@ -1122,53 +1197,26 @@ fn short_node_label_renders_kind_short_tag_per_node() {
     );
 }
 
-#[test]
-fn render_breadcrumb_chain_joins_hops_with_separator() {
-    let theme = Theme::default();
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc-1")),
-        ),
-        breadcrumb_hop(
-            "mux:editor",
-            NodeId::MuxSession(MuxSessionId::new("editor")),
-        ),
-        breadcrumb_hop(
-            "proc:claude",
-            NodeId::RuntimeProcess(RuntimeProcessId::new("proc:1")),
-        ),
-    ];
-    let rendered = render_breadcrumb_chain(&hops, &theme, 80).expect("non-empty");
-    // Flatten the line back to plain text. Each hop renders as
-    // `<glyph> <tag>` (no `kind:` prefix; the glyph carries
-    // the kind identity now).
-    let plain = breadcrumb_plain(&rendered);
-    assert_eq!(
-        plain,
-        format!(
-            "{} abc › {} editor › {} claude",
-            NodeKind::AgentSession.default_glyph(),
-            NodeKind::MuxSession.default_glyph(),
-            NodeKind::RuntimeProcess.default_glyph(),
-        ),
-    );
-}
+// The breadcrumb's fit, join, and repeated-tag rules are the framework's
+// (`tuikit::breadcrumb`'s tests); these cover what the adapter supplies.
 
 #[test]
-fn render_breadcrumb_chain_uses_kind_color_per_glyph_span() {
+fn breadcrumb_hops_draw_each_glyph_in_its_kind_color() {
     let theme = Theme::default();
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc-1")),
-        ),
-        breadcrumb_hop(
-            "mux:editor",
-            NodeId::MuxSession(MuxSessionId::new("editor")),
-        ),
-    ];
-    let rendered = render_breadcrumb_chain(&hops, &theme, 80).expect("non-empty");
+    let hops = breadcrumb_hops(
+        &[
+            breadcrumb_hop(
+                "session:abc",
+                NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc-1")),
+            ),
+            breadcrumb_hop(
+                "mux:editor",
+                NodeId::MuxSession(MuxSessionId::new("editor")),
+            ),
+        ],
+        &theme,
+    );
+    let rendered = Breadcrumb::new(&hops, &theme).line(80).expect("non-empty");
     let session_glyph = NodeKind::AgentSession.default_glyph();
     let mux_glyph = NodeKind::MuxSession.default_glyph();
     let session_span = rendered
@@ -1181,117 +1229,145 @@ fn render_breadcrumb_chain_uses_kind_color_per_glyph_span() {
         .iter()
         .find(|s| s.content == mux_glyph)
         .expect("mux glyph span");
-    assert_eq!(session_span.style.fg, Some(theme.node_agent_session));
-    assert_eq!(mux_span.style.fg, Some(theme.node_mux_session));
+    assert_eq!(session_span.style.fg, Some(theme.node_agent_session()));
+    assert_eq!(mux_span.style.fg, Some(theme.node_mux_session()));
 }
 
 #[test]
-fn render_breadcrumb_chain_returns_none_when_empty() {
+fn breadcrumb_hops_tag_a_frame_by_its_short_label_and_suffix_it_by_its_id() {
     let theme = Theme::default();
-    assert!(render_breadcrumb_chain(&[], &theme, 80).is_none());
-}
-
-#[test]
-fn render_breadcrumb_chain_elides_middle_when_too_long() {
-    let theme = Theme::default();
-    // Four hops; budget only fits `first … last`.
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abcdefgh",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "agent-1")),
-        ),
-        breadcrumb_hop(
-            "mux:editor-east",
-            NodeId::MuxSession(MuxSessionId::new("editor-east")),
-        ),
-        breadcrumb_hop(
-            "proc:claude-helper",
-            NodeId::RuntimeProcess(RuntimeProcessId::new("proc:helper")),
-        ),
-        breadcrumb_hop(
-            "session:xyzlast",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "agent-2")),
-        ),
-    ];
-    let plain = breadcrumb_plain(&render_breadcrumb_chain(&hops, &theme, 40).expect("non-empty"));
-    let session_glyph = NodeKind::AgentSession.default_glyph();
-    assert!(
-        plain.starts_with(&format!("{session_glyph} abcdefgh")),
-        "expected leading first hop in {plain:?}",
+    let first = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "session-1234"));
+    let last = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "session-5678"));
+    let tail = |id: &NodeId| text::clip_start(&id.to_string(), 4);
+    let hops = breadcrumb_hops(
+        &[
+            breadcrumb_hop("session:abc", first.clone()),
+            breadcrumb_hop(
+                "mux:editor",
+                NodeId::MuxSession(MuxSessionId::new("editor")),
+            ),
+            breadcrumb_hop("session:abc", last.clone()),
+        ],
+        &theme,
     );
-    assert!(
-        plain.ends_with(&format!("{session_glyph} xyzlast")),
-        "expected trailing last hop in {plain:?}",
+    // The `kind:` prefix goes (the glyph carries the kind); the two
+    // frames with one tag carry the last four characters of their ids.
+    let plain = Breadcrumb::new(&hops, &theme)
+        .line(80)
+        .expect("non-empty")
+        .to_string();
+    let session = NodeKind::AgentSession.default_glyph();
+    let mux = NodeKind::MuxSession.default_glyph();
+    assert_eq!(
+        plain,
+        format!(
+            "{session} abc·{} › {mux} editor › {session} abc·{}",
+            tail(&first),
+            tail(&last)
+        ),
     );
-    assert!(plain.contains('…'), "expected elision marker in {plain:?}");
+    assert_ne!(tail(&first), tail(&last));
+}
+
+fn repo_at(common_dir: &str) -> GraphNode {
+    GraphNode::Repo(RepoNode {
+        id: RepoId::new(common_dir),
+        common_dir: common_dir.to_string(),
+        source_paths: vec![],
+        remotes: vec![],
+    })
+}
+
+/// The drill frame a repo leaves, tagged as the explorer tags it.
+fn repo_hop(common_dir: &str) -> Frame<Graph> {
+    let node = repo_at(common_dir);
+    breadcrumb_hop(&short_node_label(&node), node.id())
 }
 
 #[test]
-fn render_breadcrumb_chain_falls_back_to_last_hop_when_extremely_narrow() {
-    let theme = Theme::default();
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc-1")),
-        ),
-        breadcrumb_hop(
-            "mux:editor",
-            NodeId::MuxSession(MuxSessionId::new("editor")),
-        ),
-        breadcrumb_hop(
-            "proc:claude",
-            NodeId::RuntimeProcess(RuntimeProcessId::new("proc:1")),
-        ),
-    ];
-    // Budget only fits the last hop.
-    let plain = breadcrumb_plain(&render_breadcrumb_chain(&hops, &theme, 5).expect("non-empty"));
-    let proc_glyph = NodeKind::RuntimeProcess.default_glyph();
-    assert_eq!(plain, format!("{proc_glyph} claude"));
-}
-
-#[test]
-fn render_breadcrumb_chain_disambiguates_colliding_short_labels() {
-    let theme = Theme::default();
-    // Two `session:abc` hops should pick up a `·last4` tail
-    // so the operator can tell which is which.
-    let hops = vec![
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "session-1234")),
-        ),
-        breadcrumb_hop(
-            "mux:editor",
-            NodeId::MuxSession(MuxSessionId::new("editor")),
-        ),
-        breadcrumb_hop(
-            "session:abc",
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "session-5678")),
-        ),
-    ];
-    let plain = breadcrumb_plain(&render_breadcrumb_chain(&hops, &theme, 80).expect("non-empty"));
-    // Both colliding hops should carry a `·` disambiguator
-    // (`abc·1234`, `abc·5678`).
-    let session_segments: Vec<&str> = plain.split(" › ").filter(|s| s.contains("abc")).collect();
-    assert_eq!(session_segments.len(), 2);
-    assert!(
-        session_segments.iter().all(|s| s.contains('·')),
-        "colliding hops should be disambiguated: {plain}",
+fn a_repo_hop_is_named_by_its_directory_whether_bare_or_not() {
+    assert_eq!(
+        short_node_label(&repo_at("/home/op/repos/project/.git")),
+        "repo:project",
+        "a non-bare repo is its working directory, not `.git`"
+    );
+    assert_eq!(
+        short_node_label(&repo_at("/home/op/repos/project/.git/")),
+        "repo:project"
+    );
+    assert_eq!(
+        short_node_label(&repo_at("/srv/git/project.git")),
+        "repo:project.git",
+        "a bare repo keeps its own directory's name"
     );
 }
 
-fn breadcrumb_hop(short_label: &str, focused: NodeId) -> BreadcrumbHop {
-    BreadcrumbHop {
-        focused,
-        short_label: short_label.to_string(),
-        cursor_key: None,
-        other_expanded: false,
-        full_detail_expanded: false,
-        left_pane_selection: None,
+#[test]
+fn two_repos_with_one_directory_name_carry_suffixes_that_differ() {
+    let theme = Theme::default();
+    let (work, oss) = ("/home/op/work/project/.git", "/home/op/oss/project/.git");
+    let hops = breadcrumb_hops(
+        &[
+            repo_hop(work),
+            breadcrumb_hop(
+                "mux:editor",
+                NodeId::MuxSession(MuxSessionId::new("editor")),
+            ),
+            repo_hop(oss),
+        ],
+        &theme,
+    );
+    let plain = Breadcrumb::new(&hops, &theme)
+        .line(80)
+        .expect("non-empty")
+        .to_string();
+    // Each suffix is the start of the `id` row the right pane shows for
+    // that repo, so the two read apart and each matches its own pane.
+    let id_row = |dir: &str| node_short_id(&NodeId::Repo(RepoId::new(dir)));
+    let (first, last) = (id_row(work), id_row(oss));
+    let repo = NodeKind::Repo.default_glyph();
+    let mux = NodeKind::MuxSession.default_glyph();
+    assert_eq!(
+        plain,
+        format!(
+            "{repo} project·{} › {mux} editor › {repo} project·{}",
+            &first[..4],
+            &last[..4]
+        )
+    );
+    assert_ne!(first[..4], last[..4]);
+}
+
+#[test]
+fn a_repo_named_once_in_the_chain_shows_no_suffix() {
+    let theme = Theme::default();
+    let hops = breadcrumb_hops(
+        &[
+            repo_hop("/home/op/repos/project/.git"),
+            repo_hop("/srv/git/tools.git"),
+        ],
+        &theme,
+    );
+    let repo = NodeKind::Repo.default_glyph();
+    assert_eq!(
+        Breadcrumb::new(&hops, &theme)
+            .line(80)
+            .expect("non-empty")
+            .to_string(),
+        format!("{repo} project › {repo} tools.git")
+    );
+}
+
+/// A drill frame of the explorer, kept when it drilled away from
+/// `focused`, tagged `short_label`.
+fn breadcrumb_hop(short_label: &str, focused: NodeId) -> Frame<Graph> {
+    Frame {
+        id: focused,
+        tag: short_label.to_string(),
+        view: FrameView::default(),
+        cursor: None,
+        saved: None,
     }
-}
-
-fn breadcrumb_plain(line: &Line<'_>) -> String {
-    line.spans.iter().map(|s| s.content.as_ref()).collect()
 }
 
 #[test]
@@ -1459,10 +1535,9 @@ fn agreeing_producers_for_one_mux_render_one_validated_row_from_both_ends() {
             "agreeing evidence is not Other: {counts:?}"
         );
         assert!(
-            !view
-                .flat_rows(true, false)
+            !listed(&view, true)
                 .iter()
-                .any(ExplorerRow::is_other_header),
+                .any(|row| matches!(row, ExplorerRow::OtherHeader { .. })),
             "no Other header when every neighbor was picked"
         );
         let group = view
@@ -1561,8 +1636,7 @@ fn neighbor_row_key_survives_a_change_of_representative_link() {
     let key_and_link = |links: &[(&str, &str, Provenance, &str, Option<&str>)]| {
         let (snapshot, session_id) = session_mux_snapshot(links);
         let view = build(&snapshot, &session_id, Some(home().as_path()));
-        let row = view
-            .flat_rows(false, false)
+        let row = listed(&view, false)
             .into_iter()
             .find(|r| matches!(r, ExplorerRow::ValidatedLink { .. }))
             .expect("validated row");

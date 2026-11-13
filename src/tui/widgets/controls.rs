@@ -1,46 +1,43 @@
-//! Controls overlay (ADR 0031).
+//! Controls overlay (ADR 0031, ADR 0176).
 //!
 //! Single navigable modal that fronts view switching, per-view
-//! grouping, per-view filter editing, the global sort toggle, and the
-//! preview pane's wrap mode.
-//! The controls overlay is the discoverable surface; single-key
-//! accelerators (`v`, `1`–`5`, `]`/`[`, `f`, `F`, `G`) reach the
-//! same outcomes for muscle-memory operators.
+//! grouping, per-view filter editing, the global sort toggle, the
+//! preview pane's modes, and content search. `f` opens it on the active
+//! view's row. The controls overlay is the discoverable surface;
+//! single-key accelerators (`1`–`6`, `]`/`[`, `F`, `s`) reach the same
+//! outcomes for muscle-memory operators.
 //!
 //! ## Architecture
 //!
-//! The overlay holds **only** what is unique to its UI: a cursor
-//! pointing at the currently-highlighted row and an optional
-//! sub-editor (multi-select list for harness / mux-state, text
-//! input for max-age). Live state — the active view, grouping,
-//! filter, and sort — lives on [`crate::tui::app::App`]. Each
-//! [`ControlsOverlayState::handle_key`] call takes a
-//! [`ControlsContext`] borrowed from the app so the overlay always
-//! reflects the current world.
+//! The panel is the framework's settings panel
+//! ([`tuikit::settings_panel::SettingsPanel`]): it draws the sections,
+//! moves the cursor, scrolls, pages, generates the footer, and closes.
+//! This module is its adapter, and keeps what is Conspectus's:
 //!
-//! Key handling returns a [`ControlsOutcome`] describing what the
-//! caller should do: keep the overlay open, close it, or apply a
-//! [`crate::tui::Msg`] (and either close or stay open per the
-//! outcome). The reducer applies messages; the overlay never
-//! mutates the app directly.
+//! - [`ControlsContext`], the live settings the rows show, which the
+//!   panel reads from the App on every key and every frame
+//!   ([`crate::tui::App::controls_context`]), so it never holds a copy;
+//! - [`sections`], the rows each view shows and the [`Msg`] each one
+//!   reports, identified by [`ControlsCursor`];
+//! - the editors: an editor row reports [`Msg::OpenControlsEditor`], and
+//!   the reducer opens [`editor`] as a step over the panel. A checklist
+//!   or a prompt, its answer steps back to the panel with the filter it
+//!   sets, so the panel stays open showing it.
+//!
+//! Every change applies as it is made: the reducer applies the message a
+//! row reports while the panel stays open, and `Esc` keeps everything.
 
-use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::KeyEvent;
-use ratatui::layout::Rect;
-use ratatui::macros::{line, span};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
-use ratatui::widgets::{Paragraph, Widget};
-use tui_popup::KnownSize;
+use tuikit::checklist::{Checklist, Item};
+use tuikit::glyphs::marks;
+use tuikit::overlay::Outcome;
+use tuikit::settings_panel::{Row, Section, SettingsPanel};
+use tuikit::text_prompt::{PromptResult, TextPrompt};
 
 use crate::filter::{
     HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
     RowFilter,
 };
-use crate::tui::Theme;
-use crate::tui::widgets::input::{InputOutcome, TextInputState};
-use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState};
-use crate::tui::{Grouping, Sort, View};
+use crate::tui::{Grouping, Modal, Msg, Sort, View};
 
 /// Registered harness keys surfaced in the harness sub-editor.
 /// Derives from the adapter registry
@@ -50,25 +47,20 @@ pub fn harness_options() -> &'static [&'static str] {
     crate::discovery::harness::harness_keys()
 }
 
-/// Display order of the mux-state sub-editor entries.
 /// The PR states the PRs view's state filter offers (ADR 0134).
 pub const PR_STATE_OPTIONS: &[PrStateKey] = &PrStateKey::ALL;
 
+/// Display order of the mux-state sub-editor entries.
 pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
     MuxStateKey::Attached,
     MuxStateKey::Ambiguous,
     MuxStateKey::Unmuxed,
 ];
 
-/// All views displayed in the View section, in stable order.
-///
-/// Union and Forks are intentionally omitted: they were causing
-/// confusion and are hidden from the interactive UI until they mature
-/// (PRs came back with ADR 0114). This constant is the single source of
-/// truth for the controls-overlay View section, the left-pane tab
-/// strip, and the `[` / `]` view-cycle accelerator, so trimming it here
-/// hides those views everywhere without touching the `View` enum or the
-/// `conspectus table union|forks` CLI projections.
+/// All views displayed in the View section, in stable order. This
+/// constant is the single source of truth for the controls-overlay View
+/// section, the left-pane tab strip, and the `[` / `]` view-cycle
+/// accelerator. It lists every [`View`].
 pub const VIEW_OPTIONS: &[View] = &[
     View::Sessions,
     View::Mux,
@@ -81,9 +73,13 @@ pub const VIEW_OPTIONS: &[View] = &[
 /// Sort options surfaced in the Sort section, in stable order.
 pub const SORT_OPTIONS: &[Sort] = &[Sort::Hierarchy, Sort::Recency];
 
-/// Read-only snapshot of the live state the overlay renders against.
-/// The renderer and the key dispatcher both consume this so the
-/// overlay never holds a stale copy.
+/// The width of the name column of the editor and cycle rows, so their
+/// values line up in one column on every view.
+const NAME_WIDTH: usize = 12;
+
+/// Read-only view of the live state the panel renders against. The
+/// panel builds its rows from this on every key and every frame, so it
+/// never holds a stale copy.
 #[derive(Debug, Clone)]
 pub struct ControlsContext<'a> {
     pub view: View,
@@ -96,7 +92,7 @@ pub struct ControlsContext<'a> {
     pub mux_recency: crate::tui::MuxRecency,
     /// Preview-pane wrap mode, marked active in the Preview wrap
     /// section (ADR 0106).
-    pub preview_wrap: crate::tui::PreviewWrap,
+    pub preview_wrap: crate::tui::WrapMode,
     /// What the Preview shows for agent sessions in tmux, marked
     /// active in the Session preview section (ADR 0112).
     pub session_preview: crate::tui::SessionPreview,
@@ -111,8 +107,8 @@ pub struct ControlsContext<'a> {
     pub search_history: Option<(usize, usize)>,
 }
 
-/// One landable row in the controls overlay's flat list.
-/// Section headers are not landable — the cursor skips them.
+/// One row of the controls panel: the identity the panel's cursor keeps.
+/// Section headers are not rows; the cursor skips them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlsCursor {
     /// View option at index in [`VIEW_OPTIONS`].
@@ -156,422 +152,409 @@ pub enum ControlsCursor {
     /// Mux-view-only recency basis at index in
     /// [`crate::tui::MuxRecency::ALL`].
     MuxRecency(usize),
-    /// Preview wrap mode at index in [`crate::tui::PreviewWrap::ALL`].
+    /// Preview wrap mode at index in [`crate::tui::WrapMode::ALL`].
     PreviewWrap(usize),
     /// Session preview at index in [`crate::tui::SessionPreview::ALL`].
     SessionPreview(usize),
 }
 
-/// Sub-editor that owns key input while open. The host overlay
-/// suspends its own bindings until the sub-editor commits or
-/// cancels.
-#[derive(Debug, Clone)]
-pub enum SubEditor {
-    Harness(MultiSelectState),
-    MaxAge(TextInputState),
-    /// The content query text.
-    Content(TextInputState),
-    MuxState(MultiSelectState),
-    PrState(MultiSelectState),
+/// The editor a Controls editor row opens as a step over the panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlsEditor {
+    /// The harness filter's checklist.
+    Harness,
+    /// The max-age filter's prompt.
+    MaxAge,
+    /// The mux-state filter's checklist.
+    MuxState,
+    /// The content query's prompt.
+    Content,
+    /// The PR-state filter's checklist (PRs view).
+    PrState,
 }
 
-/// What the controls overlay returned from a single key event.
-/// Committed variants carry a [`crate::tui::Msg`] the runtime
-/// dispatches through the reducer (ADR 0085 contract 3).
-#[derive(Debug, Clone, PartialEq)]
-pub enum ControlsOutcome {
-    /// Nothing to do — overlay stays open, no app state change.
-    Continue,
-    /// Close the overlay without applying anything (Esc at top level).
-    Close,
-    /// Apply the message and leave the overlay open so the operator
-    /// can see chips update in place.
-    ApplyAndStay(crate::tui::Msg),
-    /// Apply the message and close (view switch is the canonical
-    /// case — operators expect the overlay to dismiss after picking
-    /// a view).
-    ApplyAndClose(crate::tui::Msg),
+/// The Controls panel as the App's modal stack holds it.
+pub type ControlsPanel = SettingsPanel<ControlsCursor, Msg, crate::tui::App>;
+
+/// The Controls panel over a context `Cx` that `context` reads the live
+/// settings from: the App in the TUI, a fixture in tests and previews.
+pub fn panel<Cx: ?Sized + 'static>(
+    context: impl Fn(&Cx) -> ControlsContext<'_> + Send + Sync + 'static,
+) -> SettingsPanel<ControlsCursor, Msg, Cx> {
+    SettingsPanel::new("Controls", move |cx: &Cx| sections(&context(cx))).name_width(NAME_WIDTH)
 }
 
-/// Pure state for the controls overlay: cursor position plus the
-/// active sub-editor (if any).
-#[derive(Debug, Clone)]
-pub struct ControlsOverlayState {
-    cursor: ControlsCursor,
-    sub_editor: Option<SubEditor>,
-}
-
-impl ControlsOverlayState {
-    /// Open at the top of the overlay. Operators most often want to
-    /// switch view, so the cursor lands on the active view row.
-    pub fn new(ctx: &ControlsContext<'_>) -> Self {
-        let active_view_idx = VIEW_OPTIONS
-            .iter()
-            .position(|v| *v == ctx.view)
-            .unwrap_or(0);
-        Self {
-            cursor: ControlsCursor::View(active_view_idx),
-            sub_editor: None,
-        }
-    }
-
-    /// Open with the cursor positioned on the Filters > Harness row.
-    /// Used by the `f` accelerator so jumping straight into
-    /// filters skips the navigation step.
-    pub fn new_at_filters(_ctx: &ControlsContext<'_>) -> Self {
-        Self {
-            cursor: ControlsCursor::FilterHarness,
-            sub_editor: None,
-        }
-    }
-
-    pub fn cursor(&self) -> ControlsCursor {
-        self.cursor
-    }
-
-    pub fn sub_editor(&self) -> Option<&SubEditor> {
-        self.sub_editor.as_ref()
-    }
-
-    /// Dispatch a crossterm key event. Returns the outcome the
-    /// caller should apply (or [`ControlsOutcome::Continue`] for
-    /// in-overlay navigation that didn't change anything).
-    pub fn handle_key(&mut self, ctx: &ControlsContext<'_>, event: KeyEvent) -> ControlsOutcome {
-        use crate::tui::keybindings::overlay::{CONTROLS_KEYS, ControlsKey, resolve};
-        let action = resolve(CONTROLS_KEYS, event);
-        if action == Some(ControlsKey::Abort) {
-            return ControlsOutcome::Close;
-        }
-
-        // While a sub-editor owns input, route every key through it
-        // and translate its outcome. We dispatch directly on the
-        // `Option<SubEditor>` slot so the helper can clear it on
-        // commit/cancel without taking a second mutable borrow.
-        if self.sub_editor.is_some() {
-            let outcome = Self::dispatch_sub_editor(&mut self.sub_editor, ctx, event);
-            return outcome;
-        }
-
-        match action {
-            Some(ControlsKey::Abort | ControlsKey::Close) => ControlsOutcome::Close,
-            Some(ControlsKey::Up) => {
-                self.cursor = move_cursor(self.cursor, ctx, -1);
-                ControlsOutcome::Continue
-            }
-            Some(ControlsKey::Down) => {
-                self.cursor = move_cursor(self.cursor, ctx, 1);
-                ControlsOutcome::Continue
-            }
-            Some(ControlsKey::Toggle) => self.activate(ctx),
-            Some(ControlsKey::Done) => self.done(ctx),
-            None => ControlsOutcome::Continue,
-        }
-    }
-
-    /// Enter: apply the focused choice and close; open an editor row's
-    /// editor or press a button; otherwise (checkboxes and cycles, which
-    /// Space changes and which are already applied) just close.
-    fn done(&mut self, ctx: &ControlsContext<'_>) -> ControlsOutcome {
-        let is_choice = matches!(
-            self.cursor,
-            ControlsCursor::View(_)
-                | ControlsCursor::Grouping(_)
-                | ControlsCursor::Sort(_)
-                | ControlsCursor::MuxRecency(_)
-                | ControlsCursor::PreviewWrap(_)
-                | ControlsCursor::SessionPreview(_)
-        );
-        // A button presses, and an editor row opens its editor, on Enter
-        // as on Space.
-        if matches!(
-            self.cursor,
-            ControlsCursor::FilterClear
-                | ControlsCursor::FilterHarness
-                | ControlsCursor::FilterMaxAge
-                | ControlsCursor::FilterMuxState
-                | ControlsCursor::FilterContent
-                | ControlsCursor::FilterPrState
-                | ControlsCursor::SearchHistory
-                | ControlsCursor::SearchContents
-                | ControlsCursor::SearchOptions
-        ) {
-            return self.activate(ctx);
-        }
-        if !is_choice {
-            return ControlsOutcome::Close;
-        }
-        match self.activate(ctx) {
-            ControlsOutcome::ApplyAndStay(msg) => ControlsOutcome::ApplyAndClose(msg),
-            _ => ControlsOutcome::Close,
-        }
-    }
-
-    fn activate(&mut self, ctx: &ControlsContext<'_>) -> ControlsOutcome {
-        match self.cursor {
-            ControlsCursor::View(idx) => {
-                let view = VIEW_OPTIONS[idx];
-                if view == ctx.view {
-                    ControlsOutcome::Continue
-                } else {
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SwitchView(view))
-                }
-            }
-            ControlsCursor::Grouping(idx) => {
-                let options = Grouping::values_for(ctx.view);
-                let chosen = options.get(idx).copied().unwrap_or(ctx.grouping);
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetGrouping(chosen))
-            }
-            ControlsCursor::FilterHarness => {
-                self.sub_editor = Some(SubEditor::Harness(build_harness_editor(ctx.filter)));
-                ControlsOutcome::Continue
-            }
-            ControlsCursor::FilterMaxAge => {
-                self.sub_editor = Some(SubEditor::MaxAge(build_max_age_editor(ctx.filter)));
-                ControlsOutcome::Continue
-            }
-            ControlsCursor::FilterMuxState => {
-                self.sub_editor = Some(SubEditor::MuxState(build_mux_state_editor(ctx.filter)));
-                ControlsOutcome::Continue
-            }
-            ControlsCursor::FilterContent => {
-                let initial = ctx.content.map(|(text, ..)| text).unwrap_or_default();
-                self.sub_editor = Some(SubEditor::Content(TextInputState::new(
-                    " contains ",
-                    initial.to_string(),
-                )));
-                ControlsOutcome::Continue
-            }
-            ControlsCursor::ContentGroup => {
-                use crate::viewer::search::Grouping as Content;
-                let next = match ctx.content_group.granularity() {
-                    Content::Session => Content::Flat,
-                    _ => Content::Session,
-                };
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetContentGroup(next))
-            }
-            ControlsCursor::SearchHistory => {
-                ControlsOutcome::ApplyAndClose(crate::tui::Msg::OpenSearchHistory)
-            }
-            ControlsCursor::SearchOptions => {
-                ControlsOutcome::ApplyAndClose(crate::tui::Msg::OpenSearchOptions)
-            }
-            ControlsCursor::SearchContents => {
-                ControlsOutcome::ApplyAndClose(crate::tui::Msg::OpenContentSearchModal)
-            }
-            ControlsCursor::FilterFloatMuxedSessions => {
-                let mut new_filter = ctx.filter.clone();
-                new_filter.float_muxed_sessions_top = !new_filter.float_muxed_sessions_top;
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-            }
-            ControlsCursor::FilterFloatAttachedMuxes => {
-                let mut new_filter = ctx.filter.clone();
-                new_filter.float_attached_muxes_top = !new_filter.float_attached_muxes_top;
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-            }
-            ControlsCursor::FilterShowStoppedMuxes => {
-                let mut new_filter = ctx.filter.clone();
-                new_filter.show_stopped_muxes = !new_filter.show_stopped_muxes;
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-            }
-            ControlsCursor::FilterPinnedOnly => {
-                let mut new_filter = ctx.filter.clone();
-                new_filter.pinned_only = !new_filter.pinned_only;
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-            }
-            ControlsCursor::FilterHistoryUnpinnedOnly => {
-                let mut new_filter = ctx.filter.clone();
-                new_filter.show_pinned_history = !new_filter.show_pinned_history;
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-            }
-            ControlsCursor::FilterPrState => {
-                self.sub_editor = Some(SubEditor::PrState(build_pr_state_editor(ctx.filter)));
-                ControlsOutcome::Continue
-            }
-            ControlsCursor::FilterPrBranch => {
-                let mut new_filter = ctx.filter.clone();
-                new_filter.pr_branch = PrBranchFilter::cycle(new_filter.pr_branch);
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-            }
-            ControlsCursor::FilterFloatTrackedPrs => {
-                let mut new_filter = ctx.filter.clone();
-                new_filter.float_tracked_prs_top = !new_filter.float_tracked_prs_top;
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-            }
-            ControlsCursor::FilterClear => {
-                if ctx.filter.is_empty() && ctx.content.is_none() {
-                    // Nothing to clear; keep the overlay open silently.
-                    ControlsOutcome::Continue
-                } else {
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::ClearFilters)
-                }
-            }
-            ControlsCursor::Sort(idx) => {
-                let sort = SORT_OPTIONS.get(idx).copied().unwrap_or(ctx.sort);
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetSort(sort))
-            }
-            ControlsCursor::MuxRecency(idx) => {
-                let basis = crate::tui::MuxRecency::ALL
-                    .get(idx)
-                    .copied()
-                    .unwrap_or(ctx.mux_recency);
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetMuxRecency(basis))
-            }
-            ControlsCursor::PreviewWrap(idx) => {
-                let wrap = crate::tui::PreviewWrap::ALL
-                    .get(idx)
-                    .copied()
-                    .unwrap_or(ctx.preview_wrap);
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetPreviewWrap(wrap))
-            }
-            ControlsCursor::SessionPreview(idx) => {
-                let choice = crate::tui::SessionPreview::ALL
-                    .get(idx)
-                    .copied()
-                    .unwrap_or(ctx.session_preview);
-                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetSessionPreview(choice))
-            }
-        }
-    }
-
-    fn dispatch_sub_editor(
-        slot: &mut Option<SubEditor>,
-        ctx: &ControlsContext<'_>,
-        event: KeyEvent,
-    ) -> ControlsOutcome {
-        let editor = slot
-            .as_mut()
-            .expect("dispatch called with no sub-editor open");
-        match editor {
-            SubEditor::Harness(state) => match state.handle_key(event) {
-                MultiSelectOutcome::Continue => ControlsOutcome::Continue,
-                MultiSelectOutcome::Cancel => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                MultiSelectOutcome::Confirm(indices) => {
-                    *slot = None;
-                    let new_filter =
-                        with_harness(ctx.filter.clone(), indices_to_harness_values(&indices));
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-                }
-            },
-            SubEditor::MuxState(state) => match state.handle_key(event) {
-                MultiSelectOutcome::Continue => ControlsOutcome::Continue,
-                MultiSelectOutcome::Cancel => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                MultiSelectOutcome::Confirm(indices) => {
-                    *slot = None;
-                    let new_filter =
-                        with_mux_state(ctx.filter.clone(), indices_to_mux_states(&indices));
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-                }
-            },
-            SubEditor::PrState(state) => match state.handle_key(event) {
-                MultiSelectOutcome::Continue => ControlsOutcome::Continue,
-                MultiSelectOutcome::Cancel => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                MultiSelectOutcome::Confirm(indices) => {
-                    *slot = None;
-                    let new_filter =
-                        with_pr_state(ctx.filter.clone(), indices_to_pr_states(&indices));
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-                }
-            },
-            SubEditor::Content(state) => match state.handle_key(event) {
-                InputOutcome::Continue => ControlsOutcome::Continue,
-                InputOutcome::Cancel => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                InputOutcome::Confirm(value) => {
-                    *slot = None;
-                    let text = value.trim().to_string();
-                    if text.is_empty() {
-                        ControlsOutcome::ApplyAndStay(crate::tui::Msg::ClearContentSearch)
-                    } else {
-                        ControlsOutcome::ApplyAndStay(crate::tui::Msg::StartContentSearch {
-                            text,
-                            kinds: ctx.search_kinds,
-                        })
-                    }
-                }
-            },
-            SubEditor::MaxAge(state) => match state.handle_key(event) {
-                InputOutcome::Continue => ControlsOutcome::Continue,
-                InputOutcome::Cancel => {
-                    *slot = None;
-                    ControlsOutcome::Continue
-                }
-                InputOutcome::Confirm(value) => {
-                    let trimmed = value.trim();
-                    let parsed = if trimmed.is_empty() {
-                        Ok(None)
-                    } else {
-                        parse_max_age(trimmed).map(Some)
-                    };
-                    match parsed {
-                        Ok(max_age) => {
-                            *slot = None;
-                            let new_filter = with_max_age(ctx.filter.clone(), max_age);
-                            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
-                        }
-                        Err(_) => {
-                            // Reject the commit and keep the editor open
-                            // so the operator can fix the value.
-                            ControlsOutcome::Continue
-                        }
-                    }
-                }
-            },
-        }
-    }
-}
-
-fn build_harness_editor(filter: &RowFilter) -> MultiSelectState {
-    let selected: Vec<usize> = match &filter.harness {
-        Some(HarnessFilter::Any(values)) => harness_options()
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, opt)| values.iter().any(|v| v == opt).then_some(idx))
-            .collect(),
-        None => Vec::new(),
-    };
-    MultiSelectState::new(" harness ", harness_options().len(), &selected)
-}
-
-fn build_mux_state_editor(filter: &RowFilter) -> MultiSelectState {
-    let selected: Vec<usize> = match &filter.mux_state {
-        Some(MuxStateFilter::Any(values)) => MUX_STATE_OPTIONS
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, opt)| values.contains(opt).then_some(idx))
-            .collect(),
-        None => Vec::new(),
-    };
-    MultiSelectState::new(" mux state ", MUX_STATE_OPTIONS.len(), &selected)
-}
-
-fn build_pr_state_editor(filter: &RowFilter) -> MultiSelectState {
-    let selected: Vec<usize> = match &filter.pr_state {
-        Some(PrStateFilter::Any(values)) => PR_STATE_OPTIONS
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, opt)| values.contains(opt).then_some(idx))
-            .collect(),
-        None => Vec::new(),
-    };
-    MultiSelectState::new(" PR state ", PR_STATE_OPTIONS.len(), &selected)
-}
-
-fn indices_to_pr_states(indices: &[usize]) -> Vec<PrStateKey> {
-    indices
+/// Where the panel opens: the active view's row, since operators most
+/// often open it to switch view.
+pub fn opening_row(ctx: &ControlsContext<'_>) -> ControlsCursor {
+    let index = VIEW_OPTIONS
         .iter()
-        .filter_map(|idx| PR_STATE_OPTIONS.get(*idx).copied())
+        .position(|view| *view == ctx.view)
+        .unwrap_or(0);
+    ControlsCursor::View(index)
+}
+
+/// Every row in display order, for checks that ask which rows a view
+/// offers.
+#[cfg(test)]
+pub(crate) fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
+    sections(ctx)
+        .into_iter()
+        .flat_map(|section| section.rows)
+        .map(|row| row.id)
         .collect()
+}
+
+/// The panel's sections for the settings in `ctx`, each row with the
+/// message acting on it reports.
+pub fn sections(ctx: &ControlsContext<'_>) -> Vec<Section<ControlsCursor, Msg>> {
+    let mut sections = vec![
+        view_section(ctx),
+        Section::new(
+            format!("Grouping ({})", view_label(ctx.view)),
+            Grouping::values_for(ctx.view)
+                .iter()
+                .enumerate()
+                .map(|(index, grouping)| {
+                    Row::choice(
+                        ControlsCursor::Grouping(index),
+                        grouping.as_str(),
+                        *grouping == ctx.grouping,
+                        Some(Msg::SetGrouping(*grouping)),
+                    )
+                })
+                .collect(),
+        ),
+    ];
+    if matches!(ctx.view, View::Search) {
+        sections.push(results_section(ctx));
+    }
+    sections.push(Section::new(
+        "Search",
+        vec![
+            Row::editor(
+                ControlsCursor::SearchContents,
+                "contents",
+                "Enter searches",
+                Msg::OpenContentSearchModal,
+            )
+            .leaves(),
+            Row::editor(
+                ControlsCursor::SearchOptions,
+                "options",
+                "Enter opens",
+                Msg::OpenSearchOptions,
+            )
+            .leaves(),
+        ],
+    ));
+    sections.push(filters_section(ctx));
+    sections.push(Section::new(
+        "Sort",
+        SORT_OPTIONS
+            .iter()
+            .enumerate()
+            .map(|(index, sort)| {
+                Row::choice(
+                    ControlsCursor::Sort(index),
+                    sort_label(*sort),
+                    *sort == ctx.sort,
+                    Some(Msg::SetSort(*sort)),
+                )
+            })
+            .collect(),
+    ));
+    // Mux-only recency basis: which signal the Recency sort orders the
+    // mux tree by. Only meaningful, and only shown, for the mux view.
+    if matches!(ctx.view, View::Mux) {
+        sections.push(Section::new(
+            "Recency by (Mux)",
+            crate::tui::MuxRecency::ALL
+                .iter()
+                .enumerate()
+                .map(|(index, basis)| {
+                    Row::choice(
+                        ControlsCursor::MuxRecency(index),
+                        basis.label(),
+                        *basis == ctx.mux_recency,
+                        Some(Msg::SetMuxRecency(*basis)),
+                    )
+                })
+                .collect(),
+        ));
+    }
+    sections.push(Section::new(
+        "Preview wrap",
+        crate::tui::WrapMode::ALL
+            .iter()
+            .enumerate()
+            .map(|(index, wrap)| {
+                Row::choice(
+                    ControlsCursor::PreviewWrap(index),
+                    crate::tui::preview_wrap::label(*wrap),
+                    *wrap == ctx.preview_wrap,
+                    Some(Msg::SetPreviewWrap(*wrap)),
+                )
+            })
+            .collect(),
+    ));
+    sections.push(Section::new(
+        "Session preview",
+        crate::tui::SessionPreview::ALL
+            .iter()
+            .enumerate()
+            .map(|(index, choice)| {
+                Row::choice(
+                    ControlsCursor::SessionPreview(index),
+                    choice.label(),
+                    *choice == ctx.session_preview,
+                    Some(Msg::SetSessionPreview(*choice)),
+                )
+            })
+            .collect(),
+    ));
+    sections
+}
+
+/// The views, each with the digit that switches to it outside the panel;
+/// choosing the view in force changes nothing.
+fn view_section(ctx: &ControlsContext<'_>) -> Section<ControlsCursor, Msg> {
+    let rows = VIEW_OPTIONS
+        .iter()
+        .enumerate()
+        .map(|(index, view)| {
+            let active = *view == ctx.view;
+            Row::choice(
+                ControlsCursor::View(index),
+                format!("{} [{}]", view_label(*view), index + 1),
+                active,
+                (!active).then_some(Msg::SwitchView(*view)),
+            )
+        })
+        .collect();
+    Section::new("View", rows)
+}
+
+/// The Search view's own rows: how results are listed, and which
+/// remembered search it shows.
+fn results_section(ctx: &ControlsContext<'_>) -> Section<ControlsCursor, Msg> {
+    use crate::viewer::search::Grouping as Content;
+    let next = match ctx.content_group.granularity() {
+        Content::Session => Content::Flat,
+        _ => Content::Session,
+    };
+    let searches = match ctx.search_history {
+        Some((position, total)) => format!("{position} of {total}"),
+        None => "none yet".to_string(),
+    };
+    Section::new(
+        "Results",
+        vec![
+            Row::cycle(
+                ControlsCursor::ContentGroup,
+                "listed as",
+                crate::tui::app::grouping_description(ctx.content_group),
+                Msg::SetContentGroup(next),
+            ),
+            Row::editor(
+                ControlsCursor::SearchHistory,
+                "searches",
+                searches,
+                Msg::OpenSearchHistory,
+            )
+            .leaves(),
+        ],
+    )
+}
+
+/// The view's filters: the editors, the view's own checkboxes and PR
+/// rows, and the button that clears them all.
+fn filters_section(ctx: &ControlsContext<'_>) -> Section<ControlsCursor, Msg> {
+    let filter = ctx.filter;
+    let toggle = |flip: fn(&mut RowFilter)| {
+        let mut next = filter.clone();
+        flip(&mut next);
+        Msg::SetFilter(next)
+    };
+    let mut rows = vec![
+        Row::editor(
+            ControlsCursor::FilterHarness,
+            "harness",
+            harness_value(filter),
+            Msg::OpenControlsEditor(ControlsEditor::Harness),
+        ),
+        Row::editor(
+            ControlsCursor::FilterMaxAge,
+            "max age",
+            max_age_value(filter),
+            Msg::OpenControlsEditor(ControlsEditor::MaxAge),
+        ),
+        Row::editor(
+            ControlsCursor::FilterMuxState,
+            "mux state",
+            mux_state_value(filter),
+            Msg::OpenControlsEditor(ControlsEditor::MuxState),
+        ),
+    ];
+    if matches!(
+        ctx.view,
+        View::Sessions | View::Mux | View::Prs | View::Search
+    ) {
+        rows.push(Row::editor(
+            ControlsCursor::FilterContent,
+            "contains",
+            content_value(ctx.content),
+            Msg::OpenControlsEditor(ControlsEditor::Content),
+        ));
+    }
+    if matches!(ctx.view, View::Sessions) {
+        rows.push(Row::checkbox(
+            ControlsCursor::FilterFloatMuxedSessions,
+            "Float muxed sessions to top",
+            filter.float_muxed_sessions_top,
+            toggle(|f| f.float_muxed_sessions_top = !f.float_muxed_sessions_top),
+        ));
+    }
+    if matches!(ctx.view, View::Mux) {
+        rows.push(Row::checkbox(
+            ControlsCursor::FilterFloatAttachedMuxes,
+            "Float attached muxes to top",
+            filter.float_attached_muxes_top,
+            toggle(|f| f.float_attached_muxes_top = !f.float_attached_muxes_top),
+        ));
+        rows.push(Row::checkbox(
+            ControlsCursor::FilterShowStoppedMuxes,
+            "Show all stopped muxes",
+            filter.show_stopped_muxes,
+            toggle(|f| f.show_stopped_muxes = !f.show_stopped_muxes),
+        ));
+    }
+    if matches!(ctx.view, View::Prs) {
+        rows.push(Row::editor(
+            ControlsCursor::FilterPrState,
+            "PR state",
+            pr_state_value(filter),
+            Msg::OpenControlsEditor(ControlsEditor::PrState),
+        ));
+        rows.push(Row::cycle(
+            ControlsCursor::FilterPrBranch,
+            "local branch",
+            pr_branch_value(filter),
+            toggle(|f| f.pr_branch = PrBranchFilter::cycle(f.pr_branch)),
+        ));
+        rows.push(Row::checkbox(
+            ControlsCursor::FilterFloatTrackedPrs,
+            "Float PRs with a local branch to top",
+            filter.float_tracked_prs_top,
+            toggle(|f| f.float_tracked_prs_top = !f.float_tracked_prs_top),
+        ));
+    }
+    if matches!(ctx.view, View::Sessions | View::Mux | View::Prs) {
+        rows.push(Row::checkbox(
+            ControlsCursor::FilterPinnedOnly,
+            "Pinned only",
+            filter.pinned_only,
+            toggle(|f| f.pinned_only = !f.pinned_only),
+        ));
+    }
+    if matches!(ctx.view, View::History) {
+        rows.push(Row::checkbox(
+            ControlsCursor::FilterHistoryUnpinnedOnly,
+            "Unpinned only",
+            !filter.show_pinned_history,
+            toggle(|f| f.show_pinned_history = !f.show_pinned_history),
+        ));
+    }
+    // With nothing to clear the button does nothing, silently.
+    let clear = (!filter.is_empty() || ctx.content.is_some()).then_some(Msg::ClearFilters);
+    rows.push(Row::button(
+        ControlsCursor::FilterClear,
+        "Clear all filters",
+        clear,
+    ));
+    Section::new(format!("Filters ({})", view_label(ctx.view)), rows)
+}
+
+/// The editor `which` names, seeded from the settings in `ctx`, as the
+/// step the reducer opens over the panel. Its answer steps back to the
+/// panel with the message that sets what it edited.
+pub fn editor(which: ControlsEditor, ctx: &ControlsContext<'_>) -> Modal {
+    let filter = ctx.filter.clone();
+    match which {
+        ControlsEditor::Harness => {
+            let values = match &filter.harness {
+                Some(HarnessFilter::Any(values)) => values.clone(),
+                None => Vec::new(),
+            };
+            let list = checklist_of(
+                "harness",
+                harness_options(),
+                |key| key,
+                |key| values.iter().any(|value| value == key),
+                move |keys| {
+                    let values = keys.into_iter().map(str::to_string).collect();
+                    Msg::SetFilter(with_harness(filter.clone(), values))
+                },
+            );
+            Modal::Checklist(Box::new(list))
+        }
+        ControlsEditor::MuxState => {
+            let values = match &filter.mux_state {
+                Some(MuxStateFilter::Any(values)) => values.clone(),
+                None => Vec::new(),
+            };
+            let list = checklist_of(
+                "mux state",
+                MUX_STATE_OPTIONS,
+                |key| key.as_str(),
+                |key| values.contains(key),
+                move |values| Msg::SetFilter(with_mux_state(filter.clone(), values)),
+            );
+            Modal::Checklist(Box::new(list))
+        }
+        ControlsEditor::PrState => {
+            let values = match &filter.pr_state {
+                Some(PrStateFilter::Any(values)) => values.clone(),
+                None => Vec::new(),
+            };
+            let list = checklist_of(
+                "PR state",
+                PR_STATE_OPTIONS,
+                |key| key.as_str(),
+                |key| values.contains(key),
+                move |values| Msg::SetFilter(with_pr_state(filter.clone(), values)),
+            );
+            Modal::Checklist(Box::new(list))
+        }
+        ControlsEditor::MaxAge => Modal::Prompt(max_age_editor(filter)),
+        ControlsEditor::Content => {
+            let initial = ctx.content.map(|(text, ..)| text).unwrap_or_default();
+            Modal::Prompt(content_editor(initial, ctx.search_kinds))
+        }
+    }
+}
+
+/// A checklist over `options`, each labeled by `label` and checked when
+/// `checked` says so, whose confirm steps back to the panel with the
+/// message `apply` builds from the checked options.
+fn checklist_of<T: Clone + Send + Sync + 'static>(
+    title: &str,
+    options: &'static [T],
+    label: impl Fn(&T) -> &str,
+    checked: impl Fn(&T) -> bool,
+    apply: impl Fn(Vec<T>) -> Msg + Send + Sync + 'static,
+) -> Checklist<Msg> {
+    let items = options
+        .iter()
+        .map(|option| Item::new(label(option)).checked(checked(option)))
+        .collect();
+    Checklist::new(title, items, move |indices: Vec<usize>| {
+        let values = indices
+            .into_iter()
+            .filter_map(|index| options.get(index).cloned())
+            .collect();
+        Outcome::Back(apply(values))
+    })
 }
 
 fn with_pr_state(mut filter: RowFilter, values: Vec<PrStateKey>) -> RowFilter {
@@ -583,30 +566,42 @@ fn with_pr_state(mut filter: RowFilter, values: Vec<PrStateKey>) -> RowFilter {
     filter
 }
 
-fn build_max_age_editor(filter: &RowFilter) -> TextInputState {
+/// The max-age editor, seeded with the filter's age. Blank text clears
+/// the filter; text [`parse_max_age`] refuses keeps the editor open with
+/// the reason.
+fn max_age_editor(filter: RowFilter) -> TextPrompt<Msg> {
     let initial = filter
         .max_age
         .map(format_duration_for_input)
         .unwrap_or_default();
-    TextInputState::new(" max age ", initial)
+    TextPrompt::new("max age", initial, move |text: &str| {
+        let trimmed = text.trim();
+        let max_age = if trimmed.is_empty() {
+            None
+        } else {
+            match parse_max_age(trimmed) {
+                Ok(max_age) => Some(max_age),
+                Err(why) => return PromptResult::Reject(format!("max age: {why}")),
+            }
+        };
+        PromptResult::Back(Msg::SetFilter(with_max_age(filter.clone(), max_age)))
+    })
 }
 
-fn indices_to_harness_values(indices: &[usize]) -> Vec<String> {
-    indices
-        .iter()
-        .filter_map(|idx| {
-            harness_options()
-                .get(*idx)
-                .map(std::string::ToString::to_string)
+/// The contents editor, seeded with the current query. Blank text
+/// clears the content search; other text starts one over `kinds`.
+fn content_editor(initial: &str, kinds: crate::viewer::search::ContentKinds) -> TextPrompt<Msg> {
+    TextPrompt::new("contains", initial, move |text: &str| {
+        let text = text.trim();
+        PromptResult::Back(if text.is_empty() {
+            Msg::ClearContentSearch
+        } else {
+            Msg::StartContentSearch {
+                text: text.to_string(),
+                kinds,
+            }
         })
-        .collect()
-}
-
-fn indices_to_mux_states(indices: &[usize]) -> Vec<MuxStateKey> {
-    indices
-        .iter()
-        .filter_map(|idx| MUX_STATE_OPTIONS.get(*idx).copied())
-        .collect()
+    })
 }
 
 fn with_harness(mut filter: RowFilter, values: Vec<String>) -> RowFilter {
@@ -679,492 +674,6 @@ pub fn parse_max_age(raw: &str) -> Result<std::time::Duration, String> {
     Ok(std::time::Duration::from_secs(secs))
 }
 
-/// Move the cursor by `delta` rows across the section-skipping flat
-/// list. Wraps top-to-bottom and bottom-to-top so j/k keep moving
-/// off either edge.
-fn move_cursor(cursor: ControlsCursor, ctx: &ControlsContext<'_>, delta: i32) -> ControlsCursor {
-    let list = flatten_rows(ctx);
-    if list.is_empty() {
-        return cursor;
-    }
-    let idx = list.iter().position(|c| *c == cursor).unwrap_or(0);
-    list[crate::tui::cursor::wrap_step(idx, list.len(), delta)]
-}
-
-/// All actionable rows in display order. Section headers are
-/// implicit (they live in the renderer) so the cursor only needs to
-/// know about the rows it can land on.
-pub(crate) fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
-    let mut rows: Vec<ControlsCursor> = Vec::new();
-    for idx in 0..VIEW_OPTIONS.len() {
-        rows.push(ControlsCursor::View(idx));
-    }
-    for idx in 0..Grouping::values_for(ctx.view).len() {
-        rows.push(ControlsCursor::Grouping(idx));
-    }
-    if matches!(ctx.view, View::Search) {
-        rows.push(ControlsCursor::ContentGroup);
-        rows.push(ControlsCursor::SearchHistory);
-    }
-    rows.push(ControlsCursor::SearchContents);
-    rows.push(ControlsCursor::SearchOptions);
-    rows.push(ControlsCursor::FilterHarness);
-    rows.push(ControlsCursor::FilterMaxAge);
-    rows.push(ControlsCursor::FilterMuxState);
-    if matches!(
-        ctx.view,
-        View::Sessions | View::Mux | View::Prs | View::Search
-    ) {
-        rows.push(ControlsCursor::FilterContent);
-    }
-    if matches!(ctx.view, View::Sessions) {
-        rows.push(ControlsCursor::FilterFloatMuxedSessions);
-    }
-    if matches!(ctx.view, View::Mux) {
-        rows.push(ControlsCursor::FilterFloatAttachedMuxes);
-        rows.push(ControlsCursor::FilterShowStoppedMuxes);
-    }
-    if matches!(ctx.view, View::Prs) {
-        rows.push(ControlsCursor::FilterPrState);
-        rows.push(ControlsCursor::FilterPrBranch);
-        rows.push(ControlsCursor::FilterFloatTrackedPrs);
-    }
-    if matches!(ctx.view, View::Sessions | View::Mux | View::Prs) {
-        rows.push(ControlsCursor::FilterPinnedOnly);
-    }
-    if matches!(ctx.view, View::History) {
-        rows.push(ControlsCursor::FilterHistoryUnpinnedOnly);
-    }
-    rows.push(ControlsCursor::FilterClear);
-    for idx in 0..SORT_OPTIONS.len() {
-        rows.push(ControlsCursor::Sort(idx));
-    }
-    // Mux-only recency basis: which signal
-    // `Sort::Recency` orders the mux tree by.
-    if matches!(ctx.view, View::Mux) {
-        for idx in 0..crate::tui::MuxRecency::ALL.len() {
-            rows.push(ControlsCursor::MuxRecency(idx));
-        }
-    }
-    for idx in 0..crate::tui::PreviewWrap::ALL.len() {
-        rows.push(ControlsCursor::PreviewWrap(idx));
-    }
-    for idx in 0..crate::tui::SessionPreview::ALL.len() {
-        rows.push(ControlsCursor::SessionPreview(idx));
-    }
-    rows
-}
-
-// ---------------------------------------------------------------------------
-// Renderer
-// ---------------------------------------------------------------------------
-
-/// Centered modal widget for the controls overlay. Borrows the
-/// state plus a live context so the rendered values never lag
-/// behind the app.
-pub struct ControlsOverlayWidget<'a> {
-    state: &'a ControlsOverlayState,
-    ctx: ControlsContext<'a>,
-    theme: &'a Theme,
-}
-
-impl<'a> ControlsOverlayWidget<'a> {
-    pub fn new(
-        state: &'a ControlsOverlayState,
-        ctx: ControlsContext<'a>,
-        theme: &'a Theme,
-    ) -> Self {
-        Self { state, ctx, theme }
-    }
-}
-
-impl Widget for ControlsOverlayWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        // Framing through `tui_popup::Popup`; the body
-        // wrapper reports the same cap dims `centered_modal_rect`
-        // produces so auto-sizing reproduces the legacy rect.
-        let mut lines = self.body_lines();
-        lines.push(Line::default());
-        // The footer wraps to the modal's inner width (one column is the
-        // scrollbar's) so no hint runs past the frame.
-        let footer_width =
-            usize::from(centered_modal_rect_for_content(area, 0).width).saturating_sub(3);
-        let footer = crate::tui::keybindings::overlay::footer(
-            crate::tui::keybindings::overlay::CONTROLS_KEYS,
-        );
-        for chunk in crate::tui::widgets::popup_frame::wrapped_lines(&footer, 0, footer_width) {
-            lines.push(Line::from(span!(Modifier::DIM; "{chunk}")));
-        }
-        let modal = centered_modal_rect_for_content(area, lines.len());
-        let inner_height = modal.height.saturating_sub(2) as usize;
-        let scroll_offset =
-            scroll_offset_for_cursor(self.cursor_line_index(), inner_height, lines.len());
-
-        let sub_editor_to_render = self.state.sub_editor();
-        let theme = self.theme;
-        let body = ControlsBody {
-            lines,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height,
-            scroll_offset,
-        };
-        let popup =
-            crate::tui::widgets::popup_frame::themed_popup(body, line![" Controls "], theme);
-        popup.render(area, buf);
-
-        // If a sub-editor is open, render it on top of the overlay.
-        if let Some(editor) = sub_editor_to_render {
-            render_sub_editor(editor, area, buf, theme);
-        }
-    }
-}
-
-fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &Theme) {
-    match editor {
-        SubEditor::Harness(state) => {
-            use crate::tui::widgets::multi_select::MultiSelectWidget;
-            MultiSelectWidget::new(state, harness_options())
-                .theme(theme)
-                .render(area, buf);
-        }
-        SubEditor::MuxState(state) => {
-            use crate::tui::widgets::multi_select::MultiSelectWidget;
-            let labels: Vec<&'static str> = MUX_STATE_OPTIONS.iter().map(|k| k.as_str()).collect();
-            // The MultiSelectWidget requires a slice that owns the
-            // items by reference; since `as_str` returns &'static
-            // str the temporary Vec is fine.
-            MultiSelectWidget::new(state, &labels)
-                .theme(theme)
-                .render(area, buf);
-        }
-        SubEditor::PrState(state) => {
-            use crate::tui::widgets::multi_select::MultiSelectWidget;
-            let labels: Vec<&'static str> = PR_STATE_OPTIONS.iter().map(|k| k.as_str()).collect();
-            MultiSelectWidget::new(state, &labels)
-                .theme(theme)
-                .render(area, buf);
-        }
-        SubEditor::MaxAge(state) | SubEditor::Content(state) => {
-            use crate::tui::widgets::input::TextInputWidget;
-            TextInputWidget::new(state).theme(theme).render(area, buf);
-        }
-    }
-}
-
-impl ControlsOverlayWidget<'_> {
-    fn body_lines(&self) -> Vec<Line<'static>> {
-        self.body().0
-    }
-
-    fn cursor_line_index(&self) -> Option<usize> {
-        self.body().1
-    }
-
-    /// The overlay body and the index of the line the cursor is on,
-    /// recorded as rows are pushed so the two can't drift apart.
-    fn body(&self) -> (Vec<Line<'static>>, Option<usize>) {
-        let cursor = self.state.cursor();
-        let mut body = Body::default();
-
-        body.push(section_header("View"));
-        for (idx, view) in VIEW_OPTIONS.iter().enumerate() {
-            let row = ControlsCursor::View(idx);
-            let active = *view == self.ctx.view;
-            let label = format!("{} [{}]", view_label(*view), idx + 1);
-            body.push_row(row_line(label, active, cursor == row), cursor == row);
-        }
-        body.push(line![""]);
-
-        body.push(section_header(&format!(
-            "Grouping ({})",
-            view_label(self.ctx.view)
-        )));
-        for (idx, grouping) in Grouping::values_for(self.ctx.view).iter().enumerate() {
-            let row = ControlsCursor::Grouping(idx);
-            let active = *grouping == self.ctx.grouping;
-            let label = grouping.as_str().to_string();
-            body.push_row(row_line(label, active, cursor == row), cursor == row);
-        }
-        body.push(line![""]);
-
-        if matches!(self.ctx.view, View::Search) {
-            body.push(section_header("Results"));
-            let here = cursor == ControlsCursor::ContentGroup;
-            let value = crate::tui::app::grouping_description(self.ctx.content_group);
-            body.push_row(cycle_row("listed as", value.to_string(), here), here);
-            let here = cursor == ControlsCursor::SearchHistory;
-            let value = match self.ctx.search_history {
-                Some((position, total)) => format!("{position} of {total}"),
-                None => "none yet".to_string(),
-            };
-            body.push_row(filter_row("searches", value, here), here);
-            body.push(line![""]);
-        }
-
-        body.push(section_header("Search"));
-        let here = cursor == ControlsCursor::SearchContents;
-        body.push_row(
-            filter_row("contents", "Enter searches".to_string(), here),
-            here,
-        );
-        let here = cursor == ControlsCursor::SearchOptions;
-        body.push_row(filter_row("options", "Enter opens".to_string(), here), here);
-        body.push(line![""]);
-
-        body.push(section_header(&format!(
-            "Filters ({})",
-            view_label(self.ctx.view)
-        )));
-        let here = cursor == ControlsCursor::FilterHarness;
-        body.push_row(
-            filter_row("harness", harness_value(self.ctx.filter), here),
-            here,
-        );
-        let here = cursor == ControlsCursor::FilterMaxAge;
-        body.push_row(
-            filter_row("max age", max_age_value(self.ctx.filter), here),
-            here,
-        );
-        let here = cursor == ControlsCursor::FilterMuxState;
-        body.push_row(
-            filter_row("mux state", mux_state_value(self.ctx.filter), here),
-            here,
-        );
-        if matches!(
-            self.ctx.view,
-            View::Sessions | View::Mux | View::Prs | View::Search
-        ) {
-            let here = cursor == ControlsCursor::FilterContent;
-            body.push_row(
-                filter_row("contains", content_value(self.ctx.content), here),
-                here,
-            );
-        }
-        if matches!(self.ctx.view, View::Sessions) {
-            let here = cursor == ControlsCursor::FilterFloatMuxedSessions;
-            body.push_row(
-                checkbox_row(
-                    "Float muxed sessions to top",
-                    self.ctx.filter.float_muxed_sessions_top,
-                    here,
-                ),
-                here,
-            );
-        }
-        if matches!(self.ctx.view, View::Mux) {
-            let here = cursor == ControlsCursor::FilterFloatAttachedMuxes;
-            body.push_row(
-                checkbox_row(
-                    "Float attached muxes to top",
-                    self.ctx.filter.float_attached_muxes_top,
-                    here,
-                ),
-                here,
-            );
-            let here = cursor == ControlsCursor::FilterShowStoppedMuxes;
-            body.push_row(
-                checkbox_row(
-                    "Show all stopped muxes",
-                    self.ctx.filter.show_stopped_muxes,
-                    here,
-                ),
-                here,
-            );
-        }
-        if matches!(self.ctx.view, View::Prs) {
-            let here = cursor == ControlsCursor::FilterPrState;
-            body.push_row(
-                filter_row("PR state", pr_state_value(self.ctx.filter), here),
-                here,
-            );
-            let here = cursor == ControlsCursor::FilterPrBranch;
-            body.push_row(
-                cycle_row("local branch", pr_branch_value(self.ctx.filter), here),
-                here,
-            );
-            let here = cursor == ControlsCursor::FilterFloatTrackedPrs;
-            body.push_row(
-                checkbox_row(
-                    "Float PRs with a local branch to top",
-                    self.ctx.filter.float_tracked_prs_top,
-                    here,
-                ),
-                here,
-            );
-        }
-        if matches!(self.ctx.view, View::Sessions | View::Mux | View::Prs) {
-            let here = cursor == ControlsCursor::FilterPinnedOnly;
-            body.push_row(
-                checkbox_row("Pinned only", self.ctx.filter.pinned_only, here),
-                here,
-            );
-        }
-        if matches!(self.ctx.view, View::History) {
-            let here = cursor == ControlsCursor::FilterHistoryUnpinnedOnly;
-            body.push_row(
-                checkbox_row("Unpinned only", !self.ctx.filter.show_pinned_history, here),
-                here,
-            );
-        }
-        let here = cursor == ControlsCursor::FilterClear;
-        body.push_row(row_line("Clear all filters".to_string(), false, here), here);
-        body.push(line![""]);
-
-        body.push(section_header("Sort"));
-        for (idx, sort) in SORT_OPTIONS.iter().enumerate() {
-            let row = ControlsCursor::Sort(idx);
-            let active = *sort == self.ctx.sort;
-            body.push_row(
-                row_line(sort_label(*sort).to_string(), active, cursor == row),
-                cursor == row,
-            );
-        }
-
-        // Mux-only recency basis: which signal the
-        // Recency sort orders by. Only meaningful — and only shown —
-        // for the mux view.
-        if matches!(self.ctx.view, View::Mux) {
-            body.push(line![""]);
-            body.push(section_header("Recency by (Mux)"));
-            for (idx, basis) in crate::tui::MuxRecency::ALL.iter().enumerate() {
-                let row = ControlsCursor::MuxRecency(idx);
-                let active = *basis == self.ctx.mux_recency;
-                body.push_row(
-                    row_line(basis.label().to_string(), active, cursor == row),
-                    cursor == row,
-                );
-            }
-        }
-
-        body.push(line![""]);
-        body.push(section_header("Preview wrap"));
-        for (idx, wrap) in crate::tui::PreviewWrap::ALL.iter().enumerate() {
-            let row = ControlsCursor::PreviewWrap(idx);
-            let active = *wrap == self.ctx.preview_wrap;
-            body.push_row(
-                row_line(wrap.label().to_string(), active, cursor == row),
-                cursor == row,
-            );
-        }
-
-        body.push(line![""]);
-        body.push(section_header("Session preview"));
-        for (idx, choice) in crate::tui::SessionPreview::ALL.iter().enumerate() {
-            let row = ControlsCursor::SessionPreview(idx);
-            let active = *choice == self.ctx.session_preview;
-            body.push_row(
-                row_line(choice.label().to_string(), active, cursor == row),
-                cursor == row,
-            );
-        }
-        (body.lines, body.cursor_line)
-    }
-}
-
-/// Overlay lines under construction, plus where the cursor row landed.
-#[derive(Default)]
-struct Body {
-    lines: Vec<Line<'static>>,
-    cursor_line: Option<usize>,
-}
-
-impl Body {
-    fn push(&mut self, line: Line<'static>) {
-        self.lines.push(line);
-    }
-
-    fn push_row(&mut self, line: Line<'static>, cursored: bool) {
-        if cursored {
-            self.cursor_line = Some(self.lines.len());
-        }
-        self.lines.push(line);
-    }
-}
-
-struct ControlsBody {
-    lines: Vec<Line<'static>>,
-    inner_width: usize,
-    inner_height: usize,
-    scroll_offset: u16,
-}
-
-impl KnownSize for ControlsBody {
-    fn width(&self) -> usize {
-        self.inner_width
-    }
-
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for ControlsBody {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new(self.lines)
-            .scroll((self.scroll_offset, 0))
-            .render(area, buf);
-    }
-}
-
-fn scroll_offset_for_cursor(
-    cursor_line: Option<usize>,
-    inner_height: usize,
-    content_height: usize,
-) -> u16 {
-    let Some(cursor_line) = cursor_line else {
-        return 0;
-    };
-    if inner_height == 0 || cursor_line < inner_height {
-        return 0;
-    }
-    let max_scroll = content_height.saturating_sub(inner_height);
-    let offset = cursor_line
-        .saturating_sub(inner_height.saturating_sub(1))
-        .min(max_scroll);
-    u16::try_from(offset).unwrap_or(u16::MAX)
-}
-
-fn section_header(label: &str) -> Line<'static> {
-    line![span!(Modifier::BOLD; "{label}")]
-}
-
-fn row_line(label: String, active: bool, cursored: bool) -> Line<'static> {
-    let marker = if cursored { "> " } else { "  " };
-    // REVERSED (not a fixed bg color) so the cursor row stays
-    // readable on both light and dark terminal themes.
-    let mut style = Style::default();
-    if cursored {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    if active {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    let active_tag = if active { "  active" } else { "" };
-    line![span!(style; "{marker}{label}{active_tag}")]
-}
-
-fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
-    let marker = if cursored { "> " } else { "  " };
-    let style = if cursored {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    };
-    line![span!(style; "{marker}{name:12} {value}  [ Edit ]")]
-}
-
-/// A filter row whose value Space steps to the next choice rather
-/// than opening an editor.
-fn cycle_row(name: &str, value: String, cursored: bool) -> Line<'static> {
-    let marker = if cursored { "> " } else { "  " };
-    let style = if cursored {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    };
-    line![span!(style; "{marker}{name:12} {value}  [ Cycle ]")]
-}
-
 fn pr_state_value(filter: &RowFilter) -> String {
     match &filter.pr_state {
         Some(PrStateFilter::Any(values)) if !values.is_empty() => values
@@ -1172,7 +681,7 @@ fn pr_state_value(filter: &RowFilter) -> String {
             .map(|k| k.as_str())
             .collect::<Vec<_>>()
             .join(", "),
-        _ => "—".to_string(),
+        _ => marks::NO_VALUE.to_string(),
     }
 }
 
@@ -1182,30 +691,17 @@ fn pr_branch_value(filter: &RowFilter) -> String {
         .map_or_else(|| "any".to_string(), |value| value.as_str().to_string())
 }
 
-fn checkbox_row(label: &str, checked: bool, cursored: bool) -> Line<'static> {
-    let marker = if cursored { "> " } else { "  " };
-    let mut style = Style::default();
-    if cursored {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    if checked {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    let box_glyph = if checked { "[x]" } else { "[ ]" };
-    line![span!(style; "{marker}{box_glyph} {label}")]
-}
-
 fn harness_value(filter: &RowFilter) -> String {
     match &filter.harness {
         Some(HarnessFilter::Any(values)) if !values.is_empty() => values.join(", "),
-        _ => "—".to_string(),
+        _ => marks::NO_VALUE.to_string(),
     }
 }
 
 /// How the Content row reads: the query and where its scan is.
 fn content_value(content: Option<(&str, crate::tui::ContentStatus, usize)>) -> String {
     match content {
-        None => "—".to_string(),
+        None => marks::NO_VALUE.to_string(),
         Some((text, crate::tui::ContentStatus::Running(progress), _)) => {
             format!(
                 "\"{text}\" searching {}/{}",
@@ -1224,7 +720,7 @@ fn content_value(content: Option<(&str, crate::tui::ContentStatus, usize)>) -> S
 fn max_age_value(filter: &RowFilter) -> String {
     filter
         .max_age
-        .map_or_else(|| "—".to_string(), format_duration_for_input)
+        .map_or_else(|| marks::NO_VALUE.to_string(), format_duration_for_input)
 }
 
 fn mux_state_value(filter: &RowFilter) -> String {
@@ -1234,7 +730,7 @@ fn mux_state_value(filter: &RowFilter) -> String {
             .map(|k| k.as_str())
             .collect::<Vec<_>>()
             .join(", "),
-        _ => "—".to_string(),
+        _ => marks::NO_VALUE.to_string(),
     }
 }
 
@@ -1242,9 +738,7 @@ pub(crate) fn view_label(view: View) -> &'static str {
     match view {
         View::Sessions => "Sessions",
         View::Mux => "Mux",
-        View::Union => "Union",
         View::Prs => "PRs",
-        View::Forks => "Forks",
         View::Pinned => "Pinned",
         View::History => "History",
         View::Search => "Search",
@@ -1255,87 +749,6 @@ fn sort_label(sort: Sort) -> &'static str {
     match sort {
         Sort::Hierarchy => "Hierarchy",
         Sort::Recency => "Recency",
-    }
-}
-
-/// 60-column centered modal sized to its content. When the terminal
-/// is too short for every row, the body scrolls enough to keep the
-/// selected row visible.
-pub fn centered_modal_rect(area: Rect) -> Rect {
-    centered_modal_rect_for_content(area, max_controls_content_lines())
-}
-
-fn centered_modal_rect_for_content(area: Rect, content_lines: usize) -> Rect {
-    let width = std::cmp::min(64, area.width.saturating_sub(4)).max(40);
-    let max_height = area.height;
-    let desired = u16::try_from(content_lines.saturating_add(2)).unwrap_or(u16::MAX);
-    let height = desired.clamp(8, max_height.max(8));
-    super::popup_frame::centered_rect(area, width, height)
-}
-
-fn max_controls_content_lines() -> usize {
-    VIEW_OPTIONS
-        .iter()
-        .map(|view| {
-            let filter_rows = match *view {
-                // The content row and the pinned-only checkbox join each
-                // native view's filters.
-                View::Sessions => 7,
-                // Mux adds the hide-gone-muxes checkbox.
-                View::Mux => 8,
-                // The state row, the local-branch row, and the float
-                // checkbox.
-                View::Prs => 9,
-                _ => 4,
-            };
-            // Mux view appends a "Recency by" section: blank + header
-            // + one row per basis.
-            let mux_recency_rows = if matches!(*view, View::Mux) {
-                1 + 1 + crate::tui::MuxRecency::ALL.len()
-            } else {
-                0
-            };
-            // Every view ends with the Preview wrap and Session
-            // preview sections: blank + header + one row per choice.
-            let preview_wrap_rows = 1 + 1 + crate::tui::PreviewWrap::ALL.len();
-            let session_preview_rows = 1 + 1 + crate::tui::SessionPreview::ALL.len();
-            let body_lines = 1
-                + VIEW_OPTIONS.len()
-                + 1
-                + 1
-                + Grouping::values_for(*view).len()
-                // The Search section: header, the contents and options
-                // rows, blank.
-                + 4
-                + 1
-                + 1
-                + filter_rows
-                + 1
-                + 1
-                + SORT_OPTIONS.len()
-                + mux_recency_rows
-                + preview_wrap_rows
-                + session_preview_rows;
-            body_lines + 2
-        })
-        .max()
-        .unwrap_or(0)
-}
-
-impl crate::tui::Overlay for ControlsOverlayState {
-    type Ctx<'a> = &'a ControlsContext<'a>;
-
-    fn handle(&mut self, ctx: &ControlsContext<'_>, key: KeyEvent) -> crate::tui::OverlayOutcome {
-        match self.handle_key(ctx, key) {
-            ControlsOutcome::Continue => crate::tui::OverlayOutcome::Consumed,
-            ControlsOutcome::Close => crate::tui::OverlayOutcome::Close,
-            ControlsOutcome::ApplyAndStay(msg) => {
-                crate::tui::OverlayOutcome::CommitAndStay(Box::new(msg))
-            }
-            ControlsOutcome::ApplyAndClose(msg) => {
-                crate::tui::OverlayOutcome::Commit(Box::new(msg))
-            }
-        }
     }
 }
 

@@ -7,13 +7,13 @@
 //! Locked decisions reflected here:
 //!
 //! - `~`-shortened paths are produced upstream in the row tree and
-//!   detail view-models; the renderer just lays them out.
+//!   explorer view model; the renderer just lays them out.
 //! - Mux glyphs `◉` / `◯` with color carrying the primary signal
 //!   (green attached / dim not attached); mux ambiguity surfaces as
 //!   `▲` on group rows and the header.
 //! - Header reports `updated Ns ago · N agents · M mux`; the
-//!   freshness slot uses [`format_recency`] over
-//!   `App::loaded_at_epoch`.
+//!   freshness slot is the age of `App::loaded_at_epoch` on the
+//!   framework's ladder (`tuikit::age`).
 //! - Sessions use spare horizontal space after the mux indicator
 //!   for a dim one-line last-message preview.
 //! - Body switches from side-by-side to a vertical stack when the
@@ -24,259 +24,143 @@
 //! - Empty/loading frames render minimal copy when no row tree is
 //!   loaded yet.
 
-use ansi_to_tui::IntoText;
 use ratatui::Frame;
-use ratatui::layout::{Margin, Rect};
-use ratatui::macros::{horizontal, span, vertical};
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::macros::span;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{
-    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
-};
-use unicode_width::UnicodeWidthStr;
+use ratatui::widgets::{Paragraph, Widget};
+use tuikit::age::Age;
+use tuikit::app_frame::{AppFrame, Screen};
+use tuikit::chip::{StatusChip, Tone};
+use tuikit::frame::{PaneFrame, SplitPane};
+use tuikit::glyphs::marks;
+use tuikit::scroll::{Anchor, ScrollRegion, ScrollWindow, rows_under};
+use tuikit::text;
 
 use crate::model::{MuxSessionId, NodeId};
-use crate::tui::Msg;
-use crate::tui::SessionsGrouping;
 use crate::tui::Theme;
 use crate::tui::View;
-use crate::tui::actions::{attach_disabled_reason, resolve_attach_target};
-use crate::tui::app::{App, Focus, SnapshotHandle};
-use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
+use crate::tui::actions::resolve_attach_target;
+use crate::tui::app::{App, Focus, SnapshotHandle, ViewportReport};
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, PrRow, RowId, RowKind, format_recency,
-    recency_bucket,
+    AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, PrRow, PrStatus, RowId, RowKind,
 };
 
-mod detail_header;
+mod compact;
 mod header;
 mod left_panel;
 mod preview_pane;
 mod right_panel;
-mod text;
 
-use detail_header::*;
+use compact::*;
+// The consistency suite checks every key the status bar names.
+#[cfg(test)]
+pub(crate) use header::status_hints;
 use header::*;
 use left_panel::*;
 use preview_pane::*;
 use right_panel::*;
-use text::*;
 
-/// Render one frame.
+/// Render one frame and report the window each scrolled pane drew.
 ///
-/// Takes `&mut App` because the draw path dispatches
-/// [`Msg::LeftViewportChanged`] / [`Msg::ExplorerViewportChanged`]
-/// mid-frame so the reducer can reconcile scroll offsets. The
-/// reconciliation math itself lives in the
-/// reducer; draw only measures viewport height + the post-wrap
-/// explorer cursor row span and dispatches those measurements as
-/// Msgs. A strict `&App → buffer` shape would require restructuring
-/// draw into separate measure + render passes so the runtime can
-/// dispatch the Msgs upstream — that's an ADR 0085 contract-5
-/// optional cleanup, not a correctness need. The mutation surface
-/// today is bounded to those two Msg dispatches; every subsequent
-/// draw helper (`draw_header` / `draw_status_bar` / overlays /
-/// toast) takes `&App` and is byte-identical over the same App
-/// state.
-pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
+/// The screen is the framework's [`AppFrame`]: the header, the panes, and
+/// the status bar draw first, unless an open modal fills the screen (a
+/// full-screen viewer), which hides them. Every open modal then draws over
+/// them, bottom to top (ADR 0161): each clears what it covers, so a modal
+/// opened over another shows the lower one around its frame. A toast
+/// draws last, over everything.
+///
+/// The tree, the explorer, and the Preview each work their window out
+/// from the App (the window kept from the last frame and the cursor) and
+/// the area the layout gave them, draw it, and return it. The caller
+/// hands the [`ViewportReport`] to [`App::keep_viewports`] after the
+/// frame, so the next page key moves by the rows on screen and an offset
+/// past the end stays taken back. A scrolled modal (help, the value
+/// modal, Messages) keeps the window it drew itself. Nothing is
+/// dispatched from inside the draw.
+///
+/// `app` is borrowed mutably for two things: the right pane warms the
+/// transcript preview's wrapped lines for the width it measured
+/// (`App::prepare_preview`), and the modals keep the windows they drew.
+pub fn draw(app: &mut App, frame: &mut Frame<'_>) -> ViewportReport {
     let area = frame.area();
-    let layout = vertical![==1, >=3, ==1].split(area);
-
-    draw_header(app, frame, layout[0]);
-    draw_body(app, frame, layout[1]);
-    draw_status_bar(app, frame, layout[2]);
-    draw_controls_overlay(app, frame, area);
-    draw_search_overlay(app, frame, area);
-    draw_help_overlay(app, frame, area);
-    draw_rename_overlay(app, frame, area);
-    draw_worktree_menu(app, frame, area);
-    draw_new_mux_form(app, frame, area);
-    draw_mux_menu(app, frame, area);
-    draw_row_menu(app, frame, area);
-    draw_clean_up(app, frame, area);
-    draw_picker(app, frame, area);
-    draw_mux_launch_form(app, frame, area);
-    draw_pin_edit_form(app, frame, area);
-    draw_value_modal(app, frame, area);
-    draw_messages_overlay(app, frame, area);
-    draw_toast(app, frame, area);
+    SCREEN.render(area, frame.buffer_mut(), &mut MainScreen(app))
 }
 
-fn draw_mux_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::mux_menu::MuxMenuWidget;
+/// The main screen's frame: a header row, the panes, and the status bar.
+const SCREEN: AppFrame = AppFrame::new();
 
-    let Some(state) = app.mux_menu() else {
-        return;
-    };
-    frame.render_widget(MuxMenuWidget::new(state, app.theme()), area);
-}
+/// What the main screen draws in each part of [`SCREEN`], over the App.
+struct MainScreen<'a>(&'a mut App);
 
-fn draw_row_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::row_menu::RowMenuWidget;
+impl Screen for MainScreen<'_> {
+    type Report = ViewportReport;
 
-    let Some(state) = app.row_menu() else {
-        return;
-    };
-    frame.render_widget(RowMenuWidget::new(state, app.theme()), area);
-}
-
-fn draw_picker(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::picker::PickerWidget;
-
-    let Some(state) = app.picker() else {
-        return;
-    };
-    frame.render_widget(PickerWidget::new(state, app.theme()), area);
-}
-
-fn draw_clean_up(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::clean_up::CleanUpWidget;
-
-    let Some(state) = app.clean_up() else {
-        return;
-    };
-    frame.render_widget(CleanUpWidget::new(state, app.theme()), area);
-}
-
-fn draw_mux_launch_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::mux_launch::MuxLaunchFormWidget;
-
-    let Some(state) = app.mux_launch_form() else {
-        return;
-    };
-    frame.render_widget(MuxLaunchFormWidget::new(state, app.theme()), area);
-}
-
-fn draw_pin_edit_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::pin_edit::PinEditFormWidget;
-
-    let Some(state) = app.pin_edit_form() else {
-        return;
-    };
-    frame.render_widget(PinEditFormWidget::new(state, app.theme()), area);
-}
-
-fn draw_worktree_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::worktree_menu::WorktreeMenuWidget;
-
-    let Some(state) = app.worktree_menu() else {
-        return;
-    };
-    frame.render_widget(WorktreeMenuWidget::new(state, app.theme()), area);
-}
-
-fn draw_new_mux_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::new_mux::NewMuxFormWidget;
-
-    let Some(state) = app.new_mux_form() else {
-        return;
-    };
-    frame.render_widget(NewMuxFormWidget::new(state, app.theme()), area);
-}
-
-fn draw_toast(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    if !app.toast().has_toast() {
-        return;
+    fn header(&mut self, area: Rect, buf: &mut Buffer) {
+        draw_header(self.0, buf, area);
     }
-    // The upstream engine impls `Widget for &ToastEngine`, so we
-    // render through the shared borrow without any wrapper widget.
-    // `set_area` + `tick` already ran via `prepare_toast_for_render`
-    // before `terminal.draw` was called.
-    frame.render_widget(app.toast(), area);
-}
 
-fn draw_value_modal(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::value_modal::ValueModalWidget;
-
-    let Some(state) = app.value_modal() else {
-        return;
-    };
-    frame.render_widget(ValueModalWidget::new(state, app.theme()), area);
-}
-
-fn draw_messages_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::messages::MessagesWidget;
-
-    let Some(state) = app.messages_overlay() else {
-        return;
-    };
-    frame.render_widget(
-        MessagesWidget::new(
-            state,
-            app.messages(),
-            app.theme(),
-            crate::discovery::current_epoch(),
-        ),
-        area,
-    );
-}
-
-fn draw_help_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::help::HelpOverlayWidget;
-
-    let Some(state) = app.help_overlay() else {
-        return;
-    };
-    frame.render_widget(HelpOverlayWidget::new(state, app.theme()), area);
-}
-
-fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::search::items_from_rows;
-    use crate::tui::widgets::search::{Reach, SearchMode, SearchOverlayWidget};
-
-    let Some(state) = app.search_overlay() else {
-        return;
-    };
-    // Recompute items from the live row tree each frame so the
-    // overlay's label lookup never lags behind a refresh. Building
-    // them copies a few strings per row, so only the scope that lists
-    // rows pays for it.
-    let rows_scope = state.mode() == SearchMode::Quick && state.reach() == Reach::Current;
-    let items = if rows_scope {
-        items_from_rows(&app.tree().rows)
-    } else {
-        Vec::new()
-    };
-    let view = (state.mode() == SearchMode::Content).then(|| app.content_view());
-    // Outcome words for the wider reach: one walk out from the focus,
-    // then a lookup per row the list actually draws.
-    let reach = (state.reach() == Reach::All && state.mode() == SearchMode::Quick)
-        .then(|| app.search_reachability())
-        .flatten();
-    let outcome = |node: &crate::model::NodeId| app.open_plan(reach.as_ref(), node).word();
-    let mut widget = SearchOverlayWidget::new(state, &items, app.theme()).with_outcomes(&outcome);
-    if let Some(view) = &view {
-        widget = widget.with_content(view);
+    fn body(&mut self, area: Rect, buf: &mut Buffer) -> ViewportReport {
+        draw_body(self.0, buf, area)
     }
-    frame.render_widget(widget, area);
+
+    fn footer(&mut self, area: Rect, buf: &mut Buffer) {
+        draw_status_bar(self.0, buf, area);
+    }
+
+    fn overlays_fill_screen(&self) -> bool {
+        self.0.modals_fill_screen()
+    }
+
+    fn overlays(&mut self, area: Rect, buf: &mut Buffer) {
+        self.0.draw_modals(area, buf);
+    }
+
+    /// The toast on screen, over everything else. An expired one was
+    /// retired by `prepare_toast_for_render` before the draw.
+    fn toasts(&mut self, area: Rect, buf: &mut Buffer) {
+        self.0.toasts().render(area, buf, self.0.theme());
+    }
 }
 
-fn draw_rename_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::input::TextInputWidget;
-
-    let Some(state) = app.rename_overlay() else {
-        return;
-    };
-    let widget = TextInputWidget::new(state).theme(app.theme());
-    frame.render_widget(widget, area);
+/// Where the main screen's parts go in `area`: the header row, the two
+/// panes, and the status bar.
+#[cfg(any(test, feature = "snapshot"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScreenAreas {
+    pub header: Rect,
+    /// The tree's pane: on the left, or on top when the panes stack.
+    pub left: Rect,
+    /// The right pane: on the right, or below when the panes stack.
+    pub right: Rect,
+    pub status: Rect,
 }
 
-fn draw_controls_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::controls::ControlsOverlayWidget;
-
-    let Some(state) = app.controls_overlay() else {
-        return;
-    };
-    let widget = ControlsOverlayWidget::new(state, app.controls_context(), app.theme());
-    frame.render_widget(widget, area);
+/// The main screen's layout in `area` with the panes stacking below
+/// `narrow_layout_threshold` columns: [`SCREEN`]'s rows and the body's
+/// [`SplitPane`], as the draw places them. `--snapshot-pane` and the tests
+/// find a pane's cells through this, so nothing keeps a copy of the
+/// layout.
+#[cfg(any(test, feature = "snapshot"))]
+pub(crate) fn screen_areas(area: Rect, narrow_layout_threshold: u16) -> ScreenAreas {
+    let chrome = SCREEN.areas(area);
+    let [left, right] = SplitPane::new(narrow_layout_threshold).areas(chrome.body);
+    ScreenAreas {
+        header: chrome.header,
+        left,
+        right,
+        status: chrome.footer,
+    }
 }
 
 // Render clock: wall time in production, a settable clock in tests.
 
 #[cfg(not(test))]
-fn current_unix_epoch_for_render() -> i64 {
+pub(crate) fn current_unix_epoch_for_render() -> i64 {
     // The clock the row builders age against, so an age's text and its
     // recency color agree; snapshot mode freezes it.
     crate::tui::rows::tree_current_unix_epoch()
@@ -285,7 +169,7 @@ fn current_unix_epoch_for_render() -> i64 {
 /// Test override: a fixed clock so snapshot tests stay
 /// deterministic without monkey-patching the system clock.
 #[cfg(test)]
-fn current_unix_epoch_for_render() -> i64 {
+pub(crate) fn current_unix_epoch_for_render() -> i64 {
     test_clock::now()
 }
 
@@ -309,49 +193,17 @@ pub(crate) mod test_clock {
 // Body: left tree + right detail
 // -----------------------------------------------------------------------------
 
-fn draw_body(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
-    let threshold = app.config().narrow_layout_threshold;
-    let split = if area.width < threshold {
-        vertical![==50%, ==50%].split(area)
-    } else {
-        horizontal![==50%, ==50%].split(area)
-    };
-    draw_left_panel(app, frame, split[0]);
-    draw_right_panel(app, frame, split[1]);
-}
-
-fn focus_marker_width(app: &App, focus: Focus) -> usize {
-    focus_marker_span(app, focus).content.chars().count()
-}
-
-/// `► ` when the given panel has focus, two-space pad otherwise.
-/// Keeps title widths consistent across focus states so the tab
-/// strip and right-pane label sit at the same offset before and
-/// after `Tab`.
-fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
-    let focused = app.focus() == panel;
-    let glyph = if focused { "► " } else { "  " };
-    span!(Style::default().fg(app.theme().panel_focus_accent); "{glyph}")
-}
-
-/// Sum of post-wrap terminal rows the given lines occupy when
-/// rendered into a paragraph `width` wide. Mirrors the per-line
-/// count used by the explorer header budget — used here to drive
-/// scrollbar `content_length` (ADR 0076).
-fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
-    let pane_width = width.max(1) as usize;
-    lines
-        .iter()
-        .map(|line| {
-            let line_width = line
-                .spans
-                .iter()
-                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
-                .sum::<usize>()
-                .max(1);
-            line_width.div_ceil(pane_width).max(1)
-        })
-        .sum()
+/// The two panes, side by side or stacked by the configured threshold,
+/// each in a [`PaneFrame`] that shows whether it has focus.
+fn draw_body(app: &mut App, buf: &mut Buffer, area: Rect) -> ViewportReport {
+    let [left, right] = SplitPane::new(app.config().narrow_layout_threshold).areas(area);
+    let tree = draw_left_panel(app, buf, left);
+    let (explorer, preview) = draw_right_panel(app, buf, right);
+    ViewportReport {
+        tree,
+        explorer,
+        preview,
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -359,18 +211,15 @@ fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
 // -----------------------------------------------------------------------------
 
 /// Render the entire UI for `app` into a fresh `Buffer` at the given
-/// terminal area. Exposed for snapshot tests so they can assert on
-/// the rendered shape without a real TTY.
+/// terminal area, with the framework's one-frame driver. Exposed for
+/// snapshot tests so they can assert on the rendered shape without a real
+/// TTY.
 #[cfg(test)]
 pub fn render_to_buffer(app: &mut App, area: Rect) -> ratatui::buffer::Buffer {
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-    let mut terminal =
-        Terminal::new(TestBackend::new(area.width, area.height)).expect("test terminal");
-    terminal
-        .draw(|frame| draw(app, frame))
-        .expect("draw on test backend");
-    terminal.backend().buffer().clone()
+    tuikit::testkit::render::render(area.width, area.height, |frame| {
+        let report = draw(app, frame);
+        app.keep_viewports(report);
+    })
 }
 
 /// Convert a buffer to a newline-joined string. Used by snapshot
@@ -378,18 +227,13 @@ pub fn render_to_buffer(app: &mut App, area: Rect) -> ratatui::buffer::Buffer {
 /// the operator would see.
 #[cfg(test)]
 pub fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
-    let width = buffer.area.width as usize;
-    let mut out = String::with_capacity((width + 1) * buffer.area.height as usize);
-    for y in 0..buffer.area.height {
-        for x in 0..buffer.area.width {
-            let cell = &buffer[(x, y)];
-            out.push_str(cell.symbol());
-        }
-        out.push('\n');
-    }
-    out
+    tuikit::testkit::buffer::text(buffer)
 }
 
 #[cfg(test)]
 #[path = "ui_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ui/hint_keys_tests.rs"]
+mod hint_keys_tests;

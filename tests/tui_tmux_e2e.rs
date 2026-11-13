@@ -813,13 +813,13 @@ fn quick_select_cursor_follows_repeated_arrow_keys() {
     world.keys(&["pager"]);
     wait_screen(&world, "all seven matches", |screen| screen.contains("(7)"));
     world.keys(&["Down", "Down", "Down", "Down", "Down"]);
+    // The list's cursor mark, inside the modal's frame.
+    let marked = |line: &&str| line.contains("│► ") && line.contains("mux:pager-");
     wait_screen(&world, "the marker on the sixth match", |screen| {
-        screen
-            .lines()
-            .any(|line| line.contains("> ") && line.contains("mux:pager-"))
+        screen.lines().any(|line| marked(&line))
             && screen
                 .lines()
-                .filter(|line| line.contains("> ") && line.contains("mux:pager-"))
+                .filter(marked)
                 .all(|line| !line.contains("mux:pager-1 ") && !line.contains("mux:pager-2 "))
     });
 }
@@ -1155,7 +1155,7 @@ fn the_search_options_pane_opens_and_goes_back() {
 
     world.keys(&["1", "s"]);
     wait_screen(&world, "the modal", |screen| {
-        screen.contains("/ search contents") && screen.contains("Ctrl-O options")
+        screen.contains("/ search contents") && screen.contains("Ctrl-O set options")
     });
     assert!(
         !world.screen().contains("Ctrl-T") && !world.screen().contains("Ctrl-Y"),
@@ -1354,10 +1354,10 @@ fn the_pane_viewer_is_full_screen_and_a_attaches() {
     world.keys(&["Enter"]);
     wait_screen(
         &world,
-        "the full-screen viewer with an attach chip",
+        "the full-screen viewer with its attach key",
         |screen| {
             screen.contains("shell 0.0 scrollback")
-                && screen.contains("(a) attach")
+                && screen.contains("a attach")
                 && !screen.contains("search contents")
         },
     );

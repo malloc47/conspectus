@@ -2,29 +2,22 @@
 //! the accelerators that add state take it away again on the same key.
 
 use ratatui::style::Modifier;
+use tuikit::testkit::buffer::find_in;
 
 use super::*;
 use crate::tui::Effect;
 use crate::tui::effect::StoreOp;
 
-/// Whether the first cell of `label` in the left half of the frame has
-/// the ghost look (the theme's ghost color, in italics).
+/// Whether the first cell of `label` in the left pane has the ghost look
+/// (the theme's `inert` color, in italics).
 fn label_wears_ghost_style(app: &mut App, label: &str, width: u16) -> bool {
     let buffer = buffer_of(app, width, 40);
     let theme = crate::tui::Theme::default();
-    for y in 0..buffer.area.height {
-        let cells: Vec<String> = (0..width / 2)
-            .map(|x| buffer[(x, y)].symbol().to_string())
-            .collect();
-        let line = cells.concat();
-        let Some(byte) = line.find(label) else {
-            continue;
-        };
-        let x = u16::try_from(line[..byte].chars().count()).expect("column");
-        let cell = &buffer[(x, y)];
-        return cell.fg == theme.ghost && cell.modifier.contains(Modifier::ITALIC);
-    }
-    panic!("no row for {label} in:\n{}", buffer_to_string(&buffer));
+    let left = panes(width, 40).left;
+    let at = find_in(&buffer, left, label)
+        .unwrap_or_else(|| panic!("no row for {label} in:\n{}", buffer_to_string(&buffer)));
+    let cell = &buffer[(at.x, at.y)];
+    cell.fg == theme.inert && cell.modifier.contains(Modifier::ITALIC)
 }
 
 pub(super) fn all_stopped_muxes() -> RowFilter {
@@ -73,22 +66,13 @@ fn a_pin_that_is_not_running_wears_the_hollow_glyph_in_the_ghost_color() {
     let mut app = app_in(View::Pinned);
     let buffer = buffer_of(&mut app, 200, 40);
     let theme = crate::tui::Theme::default();
+    let left = Rect::new(0, 0, 100, buffer.area.height);
     for label in ["config-agent3", "nightly", "ledger-worktree"] {
-        let mut found = false;
-        for y in 0..buffer.area.height {
-            let line: String = (0..100)
-                .map(|x| buffer[(x, y)].symbol().to_string())
-                .collect();
-            if !line.contains(label) {
-                continue;
-            }
-            let glyph_x = (0..100u16).find(|x| buffer[(*x, y)].symbol() == "◎");
-            let x = glyph_x.unwrap_or_else(|| panic!("no hollow glyph before {label}: {line}"));
-            assert_eq!(buffer[(x, y)].fg, theme.ghost, "{label}");
-            found = true;
-            break;
-        }
-        assert!(found, "no row for {label}");
+        let at = find_in(&buffer, left, label).unwrap_or_else(|| panic!("no row for {label}"));
+        let row = Rect::new(0, at.y, 100, 1);
+        let glyph =
+            find_in(&buffer, row, "◎").unwrap_or_else(|| panic!("no hollow glyph before {label}"));
+        assert_eq!(buffer[(glyph.x, glyph.y)].fg, theme.inert, "{label}");
     }
 }
 

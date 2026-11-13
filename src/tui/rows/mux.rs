@@ -9,6 +9,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use tuikit::age::Age;
+
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::workspace_paths::WorkspacePaths;
 use crate::model::{
@@ -18,9 +20,9 @@ use crate::model::{
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone,
-    MuxSessionRow, PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
-    harness_label, mux_process_harnesses, mux_program, mux_program_harness, shorten_home,
+    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedRow, MixedTone, MuxSessionRow,
+    PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, harness_label, mux_process_harnesses,
+    mux_program, mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -154,7 +156,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             client_attached: mux.node.client_attached,
             cwd_display: cwd.as_deref().map(|cwd| shorten_home(cwd, inputs.home)),
             attached_count,
-            recency: format_recency(now, activity_epoch),
+            recency: Age::of(activity_epoch, now).map(Age::label),
             activity_epoch,
             created_epoch: mux.node.created_epoch,
             last_attached_epoch: mux.node.last_attached_epoch,
@@ -357,11 +359,7 @@ fn push_ungrouped(
         id: RowId::Synthetic("ungrouped"),
         depth: 0,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: "Ungrouped".to_string(),
-            primary_node: None,
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::named("Ungrouped", None)),
     });
     push_bucket_members(tree, ungrouped, inputs, short_ids, now);
 }
@@ -429,21 +427,19 @@ fn emit_workspace_grouped(
     for (_, header, groups) in headers {
         match header {
             GroupHeader::Workspace(id) => {
-                let display_path = crate::tui::rows::workspace_header_label(
-                    inputs.snapshot,
-                    &id.root,
-                    inputs.home,
-                );
+                let root = id.root.clone();
                 let node_id = NodeId::Workspace(id);
+                let header = crate::tui::rows::workspace_header(
+                    inputs.snapshot,
+                    &root,
+                    inputs.home,
+                    node_id.clone(),
+                );
                 tree.rows.push(Row {
-                    id: RowId::Group(node_id.clone()),
+                    id: RowId::Group(node_id),
                     depth: 0,
                     expandable: true,
-                    kind: RowKind::Group(GroupRow {
-                        display_path,
-                        primary_node: Some(node_id),
-                        is_launch_context: false,
-                    }),
+                    kind: RowKind::Group(header),
                 });
             }
             GroupHeader::Repo(key) => {
@@ -553,11 +549,10 @@ fn push_repo_header(
         id: RowId::Group(node_id.clone()),
         depth,
         expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: shorten_home(display_path, home),
-            primary_node: Some(node_id),
-            is_launch_context: false,
-        }),
+        kind: RowKind::Group(GroupRow::at_path(
+            &shorten_home(display_path, home),
+            Some(node_id),
+        )),
     });
 }
 
@@ -733,15 +728,14 @@ fn collect_ghosts(
                 label: mux.session_name().to_string(),
                 status: status.to_string(),
                 tone: MixedTone::Dim,
-                age: format_recency(now, Some(last_seen)),
+                age: Age::of(Some(last_seen), now).map(Age::label),
                 age_epoch: Some(last_seen),
                 state: Some(state),
                 chip,
                 content,
                 primary_node: id.clone(),
-                pr_state: None,
+                pr_status: None,
                 marker: PinMarker::None,
-                grid: MixedGrid::Mux,
             };
             Some(MuxGroup {
                 parent_row: MuxSessionRow {
@@ -878,7 +872,7 @@ fn agent_row(
             harness_label: harness_label(&agent.id.harness_key),
             cwd_display: agent.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
             project_display: None,
-            recency: format_recency(now, agent.last_active_epoch),
+            recency: Age::of(agent.last_active_epoch, now).map(Age::label),
             activity_epoch: agent.last_active_epoch,
             mux_state: super::mux_indicator(agent.candidate_count),
             preview: agent.preview.clone(),

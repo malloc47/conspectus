@@ -4,6 +4,7 @@ title: Per-message selection + clipboard copy
 status: To Do
 assignee: []
 created_date: '2026-06-03 13:09'
+updated_date: '2026-10-31 08:15'
 labels:
   - h-viewer-native
 milestone: m-11
@@ -45,3 +46,9 @@ ordinal: 220000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `H-VIEWER-NATIVE-015`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TUI framework update (2026-10-31, CSP-766): `ViewerState` is gone; selection state goes on the `Transcript<M>` content (`src/viewer/state.rs`, ADR 0180) inside the framework's `Pager`, whose content keys are `TRANSCRIPT_KEYS`. Copy goes through the host's OSC 52 sink (`src/tui/clipboard.rs`, over `tuikit::feedback`'s clipboard writer, ADR 0163), so no `arboard` or other dependency is needed. `yy` is a two-key chord the key model does not have (ADR 0160): pick one key, and check it and `J`/`K` against the pager's and the transcript's tables.
+<!-- SECTION:NOTES:END -->

@@ -192,7 +192,7 @@ fn closing_the_modal_on_a_search_equal_to_an_earlier_one_keeps_one_entry() {
 #[test]
 fn a_content_search_opens_on_all_unless_it_opens_onto_a_search() {
     use crate::tui::Modal;
-    let reach = |app: &App| match app.modal_stack().last() {
+    let reach = |app: &App| match app.modal_stack().top() {
         Some(Modal::Search(state)) => state.reach(),
         _ => panic!("no search modal"),
     };
@@ -427,7 +427,19 @@ fn applying_outside_the_search_view_only_explains() {
     });
     app.update(Msg::ClearContentSearch);
     let effects = app.update(Msg::ApplySearchEntry);
-    assert!(matches!(effects.as_slice(), [Effect::Toast(_)]));
+    let [Effect::Toast(toast)] = effects.as_slice() else {
+        panic!("one toast: {effects:?}");
+    };
+    // It names the key it was pressed with and the Search view's key,
+    // from their bindings.
+    assert_eq!(
+        toast.text,
+        format!(
+            "{} filters by the search the Search view shows ({})",
+            crate::tui::keybindings::key_name("search.keep"),
+            crate::tui::keybindings::key_name("view.search")
+        )
+    );
     assert!(app.content().is_none());
 }
 
@@ -611,22 +623,22 @@ fn opening_a_pane_hit_reveals_the_mux_and_asks_for_the_scrollback() {
 
 #[test]
 fn the_three_ctrl_slash_forms_open_the_contents_search_and_plain_slash_does_not() {
-    use crate::tui::keybindings::translate_via_table;
-    use crate::tui::keymap::Action;
-    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+    use crate::tui::keymap::{Action, translate};
+    use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let keymap_action = |modifiers, code| translate(Event::Key(KeyEvent::new(code, modifiers)));
     for code in ['/', '7', '_'] {
         assert_eq!(
-            translate_via_table(KeyModifiers::CONTROL, KeyCode::Char(code)),
+            keymap_action(KeyModifiers::CONTROL, KeyCode::Char(code)),
             Some(Action::OpenContentSearch),
             "Ctrl-{code}"
         );
     }
     assert_eq!(
-        translate_via_table(KeyModifiers::NONE, KeyCode::Char('/')),
+        keymap_action(KeyModifiers::NONE, KeyCode::Char('/')),
         Some(Action::OpenSearch)
     );
     assert_eq!(
-        translate_via_table(KeyModifiers::NONE, KeyCode::Char('s')),
+        keymap_action(KeyModifiers::NONE, KeyCode::Char('s')),
         Some(Action::OpenContentSearch)
     );
 }

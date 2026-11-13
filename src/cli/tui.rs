@@ -26,11 +26,11 @@ pub(super) struct TuiArgs {
     /// `[tui].default_view`, then `sessions`.
     #[arg(long, value_enum)]
     view: Option<ViewFlag>,
-    /// Don't restore or remember the last-used view for this run.
-    /// The session still uses the standard precedence
-    /// (`--view` > config default > `sessions`) for its starting
-    /// view but does not write the sidecar on view switches.
-    /// `--snapshot` implies this automatically.
+    /// Don't reopen the last-used view, or the rows each view last had
+    /// expanded and selected, for this run. The starting view follows
+    /// `--view`, then the config default, then `sessions`, and each
+    /// view opens on its default folds. `--snapshot` implies this
+    /// automatically.
     #[arg(long = "no-resume-view")]
     no_resume_view: bool,
     /// Deprecated alias for `--grouping` when `--view sessions` is
@@ -149,6 +149,28 @@ pub(super) struct TuiArgs {
     #[arg(long = "snapshot-now", value_name = "EPOCH")]
     snapshot_now: Option<i64>,
 
+    /// Put an entry in the Messages log before the keys run, so the
+    /// log can be drawn with something in it. Repeat for more entries;
+    /// the last one given is the newest. A leading `info:`, `warning:`,
+    /// or `error:` sets the entry's severity; it is a success otherwise.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-message", value_name = "[SEVERITY:]TEXT")]
+    snapshot_messages: Vec<String>,
+
+    /// Post a toast after the keys run, so the frame shows it. A leading
+    /// `info:`, `warning:`, or `error:` sets its severity; it is a
+    /// success otherwise.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-toast", value_name = "[SEVERITY:]TEXT")]
+    snapshot_toast: Option<String>,
+
+    /// Show a message on the status line after the keys run. A leading
+    /// `success:`, `warning:`, or `error:` sets its severity; it is a
+    /// note (info) otherwise.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-status", value_name = "[SEVERITY:]TEXT")]
+    snapshot_status: Option<String>,
+
     /// Launch the interactive TUI against a fixture JSON instead
     /// of running live discovery. Bypasses scan-root
     /// discovery entirely; the `r` accelerator re-reads the
@@ -219,6 +241,12 @@ impl Default for TuiArgs {
             #[cfg(feature = "snapshot")]
             snapshot_now: None,
             #[cfg(feature = "snapshot")]
+            snapshot_messages: Vec::new(),
+            #[cfg(feature = "snapshot")]
+            snapshot_toast: None,
+            #[cfg(feature = "snapshot")]
+            snapshot_status: None,
+            #[cfg(feature = "snapshot")]
             fixture: None,
         }
     }
@@ -253,9 +281,7 @@ pub(super) fn view_flag_label(view: crate::tui::View) -> &'static str {
     match view {
         crate::tui::View::Sessions => "sessions",
         crate::tui::View::Mux => "mux",
-        crate::tui::View::Union => "union",
         crate::tui::View::Prs => "prs",
-        crate::tui::View::Forks => "forks",
         crate::tui::View::Pinned => "pinned",
         crate::tui::View::History => "history",
         crate::tui::View::Search => "search",
@@ -315,8 +341,9 @@ impl TuiArgs {
         //      `$XDG_STATE_HOME/conspectus/tui-state.json`.
         //   3. otherwise fall back to `[tui].default_view` /
         //      `View::Sessions`.
-        // `--no-resume-view` and `--snapshot` both skip step 2 so the
-        // start view stays deterministic for scripts and the
+        // `--no-resume-view` and `--snapshot` both skip step 2, and the
+        // TUI then reopens no view's expanded and selected rows either,
+        // so the start stays deterministic for scripts and the
         // snapshot fixture path.
         #[cfg(feature = "snapshot")]
         let suppress_resume = self.no_resume_view || self.snapshot;
@@ -415,6 +442,7 @@ impl TuiArgs {
             explicit_sort,
             explicit_grouping: self.filter_args.grouping.is_some()
                 || self.sessions_grouping.is_some(),
+            resume_view: !suppress_resume,
             refresh_interval,
             mux_preview_interval,
             live_preview_enabled: !self.no_live_preview,
@@ -459,6 +487,9 @@ impl TuiArgs {
                     export_fixture: self.snapshot_export_fixture,
                     fixture_root: self.snapshot_fixture_root,
                     now: self.snapshot_now,
+                    messages: self.snapshot_messages,
+                    toast: self.snapshot_toast,
+                    status: self.snapshot_status,
                 },
             );
         }

@@ -1,6 +1,6 @@
 //! TUI state file — persists the last-active view, sort
-//! order, and per-view filter/grouping state across `conspectus tui`
-//! restarts.
+//! order, and per-view filter, grouping, expanded rows, and selected
+//! row across `conspectus tui` restarts.
 //!
 //! Lives at `$XDG_STATE_HOME/conspectus/tui-state.json` (sibling to
 //! the hook state-root at `$XDG_STATE_HOME/conspectus/hooks/`). The
@@ -16,10 +16,16 @@
 //!   "schema_version": 1,
 //!   "last_view": "sessions",
 //!   "sort": "recency",
+//!   "row_keys": 1,
 //!   "view_states": {
 //!     "sessions": {
 //!       "filter": { "harness": { "any": ["claude-code"] } },
-//!       "grouping": { "Sessions": "workspace" }
+//!       "grouping": { "Sessions": "workspace" },
+//!       "expanded": ["group:workspace:/home/me/src"],
+//!       "selected": {
+//!         "row": "session:agent_session:claude-code:/state:4f1c",
+//!         "path": ["group:workspace:/home/me/src"]
+//!       }
 //!     },
 //!     "mux": {
 //!       "filter": {},
@@ -29,10 +35,21 @@
 //! }
 //! ```
 //!
+//! A view's `expanded` rows and `selected` row are named by row keys
+//! ([`row_key`]), whose encoding `row_keys` names; the selection carries
+//! the keys of the rows above it, top-level first, so a restart whose
+//! tree no longer lists the row can land on the nearest one that is
+//! still there. The Search view keeps neither: its rows answer a query
+//! that is not restored.
+//!
 //! Forward-compat rule: read parses into a struct with a flattened
 //! `extra` map so unknown fields round-trip through a write
-//! unchanged. Missing `sort` / `view_states` keys on old files
-//! default to `None` / empty so v1 schema files remain readable.
+//! unchanged, at the top level and in each view. Missing `sort` /
+//! `view_states` keys on old files default to `None` / empty so v1
+//! schema files remain readable. A value of the wrong shape costs only
+//! that setting; a row key that is not a string costs only that entry;
+//! a file whose `row_keys` is missing or another encoding keeps
+//! everything but the expanded and selected rows.
 //!
 //! Write semantics: skip-on-unchanged via parse-and-compare so quiet
 //! `conspectus tui` runs that never change state produce no mtime
@@ -44,7 +61,7 @@
 //! `pin *`) must leave it byte-identical. Enforced by
 //! `tests/cli_tui_state_invariants.rs`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -53,11 +70,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::declared::write_atomic;
 use crate::filter::RowFilter;
+use crate::model::NodeId;
+use crate::tui::rows::RowId;
 use crate::tui::{Grouping, Sort, View};
 
 /// Schema version baked into every write. Forward-compat reads
 /// accept any value but only act on the values they understand.
 pub const SCHEMA_VERSION: u32 = 1;
+
+/// The encoding of the row keys in the views' `expanded` and `selected`
+/// ([`row_key`]), written as `row_keys`. A build that changes how a row
+/// is named writes another number, and a build reading a number it does
+/// not know drops those two fields rather than match rows by keys that
+/// mean something else.
+pub const ROW_KEY_VERSION: u32 = 1;
 
 /// One JSON record on disk. `extra` holds any fields the current
 /// schema does not recognize so a future schema bump that adds
@@ -75,7 +101,7 @@ struct RawState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mux_recency: Option<String>,
     /// Preview-pane wrap mode (ADR 0106). Token from
-    /// [`crate::tui::PreviewWrap::as_str`]; absent or unknown falls
+    /// [`crate::tui::preview_wrap::token`]; absent or unknown falls
     /// back to the configured default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preview_wrap: Option<String>,
@@ -84,16 +110,23 @@ struct RawState {
     /// back to the configured default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_preview: Option<String>,
+    /// The encoding of every view's row keys ([`ROW_KEY_VERSION`]),
+    /// written while some view remembers rows.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
+    row_keys: Option<u32>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     view_states: BTreeMap<String, ViewStateRaw>,
     #[serde(flatten)]
     extra: BTreeMap<String, serde_json::Value>,
 }
 
-/// Per-view persisted state: filter and grouping. Expanded-set,
-/// selection, and scroll are intentionally not persisted — they
-/// reference per-session graph structure and are meaningless after
-/// a restart.
+/// Per-view persisted state: filter, grouping, and the tree's expanded
+/// rows and selected row by row key. The scroll offset is not kept: the
+/// pane scrolls to the selection. Unknown fields round-trip in `extra`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct ViewStateRaw {
     #[serde(
@@ -104,6 +137,29 @@ struct ViewStateRaw {
     filter: RowFilter,
     #[serde(default, deserialize_with = "lenient")]
     grouping: Option<Grouping>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_keys"
+    )]
+    expanded: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_selected"
+    )]
+    selected: Option<SelectedRaw>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// A view's selected row on disk: its key and the keys of the rows above
+/// it, top-level first.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct SelectedRaw {
+    row: String,
+    #[serde(default, deserialize_with = "lenient_path")]
+    path: Vec<String>,
 }
 
 /// Deserialize a field that a different build may have written in a
@@ -118,6 +174,51 @@ where
     Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
+/// Deserialize a list of row keys, skipping each entry that is not a
+/// string: one bad entry costs that entry. A value that is not a list at
+/// all reads as no list.
+fn lenient_keys<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let serde_json::Value::Array(entries) = value else {
+        return Ok(None);
+    };
+    Ok(Some(
+        entries
+            .into_iter()
+            .filter_map(|entry| match entry {
+                serde_json::Value::String(key) => Some(key),
+                _ => None,
+            })
+            .collect(),
+    ))
+}
+
+/// Deserialize a view's selection: an object with a string `row`, or
+/// none. A list is not taken for one, though serde would read it as the
+/// fields in order.
+fn lenient_selected<'de, D>(deserializer: D) -> Result<Option<SelectedRaw>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if !value.is_object() {
+        return Ok(None);
+    }
+    Ok(serde_json::from_value(value).ok())
+}
+
+/// [`lenient_keys`] for a selection's path, where no list is an empty
+/// one: the row is still restored, with nothing to fall back to.
+fn lenient_path<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(lenient_keys(deserializer)?.unwrap_or_default())
+}
+
 /// Snapshot of the full TUI state suitable for serialisation.
 /// Carried from `App` → write, and deserialised → `App` on restart.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -125,18 +226,86 @@ pub struct PersistedState {
     pub last_view: Option<View>,
     pub sort: Option<Sort>,
     pub mux_recency: Option<crate::tui::MuxRecency>,
-    pub preview_wrap: Option<crate::tui::PreviewWrap>,
+    pub preview_wrap: Option<crate::tui::WrapMode>,
     pub session_preview: Option<crate::tui::SessionPreview>,
     pub view_states: BTreeMap<View, PersistedViewSlot>,
 }
 
-/// Per-view saved filter and grouping recovered from the state file.
-/// Expanded-set, selection, and scroll are intentionally not persisted
-/// — they reference per-session graph structure.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Per-view saved filter, grouping, and tree recovered from the state
+/// file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PersistedViewSlot {
     pub filter: RowFilter,
     pub grouping: Option<Grouping>,
+    pub tree: PersistedTree,
+}
+
+/// A view's tree as the last run left it, by row key ([`row_key`]). The
+/// keys may name rows that are gone by the time it is applied: the TUI
+/// matches them against the rows it lists then.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PersistedTree {
+    /// The expanded rows. `None` when the file has no list for the view
+    /// (a file from an earlier build), so the view opens on its default
+    /// folds; an empty set is a view with every row collapsed.
+    pub expanded: Option<BTreeSet<String>>,
+    /// The selected row, `None` when the file has none for the view.
+    pub selected: Option<PersistedSelection>,
+}
+
+impl PersistedTree {
+    /// Whether the file remembers nothing of the view's tree.
+    pub fn is_empty(&self) -> bool {
+        self.expanded.is_none() && self.selected.is_none()
+    }
+}
+
+/// A view's selected row and the rows above it, by row key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistedSelection {
+    pub row: String,
+    /// The keys of the rows that hold it, the top-level one first; rows
+    /// the file cannot name are left out.
+    pub path: Vec<String>,
+}
+
+/// The key a row is remembered by in the state file: its kind, a colon,
+/// and what names it within the kind (a node id in its text form, a
+/// History record's or a pin's id, a bucket's label, a forge repo's
+/// slug). Keys are compared as text against the rows a later run lists,
+/// so two rows never share one: a node id whose text reads back as
+/// another id ([`NodeId::parse`]) gets no key, and a pin id, which is one
+/// line, ends at the line break that starts a nested row's node.
+///
+/// `None` for the Search view's turn, pane, and line rows, whose
+/// identities belong to a query that is not restored, and for an id that
+/// cannot be named alone. The encoding is [`ROW_KEY_VERSION`].
+pub fn row_key(id: &RowId) -> Option<String> {
+    fn node(kind: &str, node: &NodeId) -> Option<String> {
+        node_text(node).map(|text| format!("{kind}:{text}"))
+    }
+    match id {
+        RowId::Group(id) => node("group", id),
+        RowId::AgentSession(id) => node("session", id),
+        RowId::MuxSession(id) => node("mux", id),
+        RowId::Pr(id) => node("pr", id),
+        RowId::History { record_id } => Some(format!("history:{record_id}")),
+        RowId::Pin { pin_id } => Some(format!("pin:{pin_id}")),
+        RowId::Nested { pin_id, node } => {
+            let text = node_text(node).filter(|_| !pin_id.contains('\n'))?;
+            Some(format!("nested:{pin_id}\n{text}"))
+        }
+        RowId::Bucket(label) => Some(format!("bucket:{label}")),
+        RowId::Remote(slug) => Some(format!("remote:{slug}")),
+        RowId::Synthetic(name) => Some(format!("synthetic:{name}")),
+        RowId::Hit { .. } | RowId::Pane { .. } | RowId::PaneHit { .. } => None,
+    }
+}
+
+/// A node id's text, when it reads back as that id and no other.
+fn node_text(node: &NodeId) -> Option<String> {
+    let text = node.to_string();
+    (NodeId::parse(&text).as_ref() == Some(node)).then_some(text)
 }
 
 /// Resolver for the `tui-state.json` file path. Mirrors the
@@ -216,6 +385,12 @@ fn restorable(view: Option<View>) -> Option<View> {
     view.filter(|view| *view != View::Search)
 }
 
+/// Whether the file keeps `view`'s expanded and selected rows: every
+/// view but Search, for the same reason.
+pub fn remembers_rows(view: View) -> bool {
+    view != View::Search
+}
+
 /// Best-effort read of the full TUI state from disk. Returns `None`
 /// when the file is absent or malformed. Individual fields that are
 /// unknown to this build (future sort/view names) silently default.
@@ -235,22 +410,35 @@ pub fn read_tui_state(cache: &TuiStateCache) -> Option<PersistedState> {
     let preview_wrap = raw
         .preview_wrap
         .as_deref()
-        .and_then(crate::tui::PreviewWrap::parse);
+        .and_then(crate::tui::preview_wrap::parse);
     let session_preview = raw
         .session_preview
         .as_deref()
         .and_then(crate::tui::SessionPreview::parse);
+    let rows_known = raw.row_keys == Some(ROW_KEY_VERSION);
     let mut view_states = BTreeMap::new();
     for (view_name, vs_raw) in raw.view_states {
         if let Some(view) = view_from_snake_case(&view_name) {
             let grouping = vs_raw
                 .grouping
                 .or_else(|| Some(Grouping::default_for(view)));
+            let tree = if rows_known && remembers_rows(view) {
+                PersistedTree {
+                    expanded: vs_raw.expanded.map(|keys| keys.into_iter().collect()),
+                    selected: vs_raw.selected.map(|selected| PersistedSelection {
+                        row: selected.row,
+                        path: selected.path,
+                    }),
+                }
+            } else {
+                PersistedTree::default()
+            };
             view_states.insert(
                 view,
                 PersistedViewSlot {
                     filter: vs_raw.filter,
                     grouping,
+                    tree,
                 },
             );
         }
@@ -279,26 +467,49 @@ pub fn write_last_view(cache: &TuiStateCache, view: View) -> io::Result<()> {
 }
 
 /// Best-effort write of the full TUI state: last view, sort, and
-/// per-view filter/grouping. Skip-on-unchanged so quiet runs do not
-/// churn mtime; atomic via tempfile + rename.
+/// per-view filter, grouping, expanded rows, and selected row. A view's
+/// fields this build does not know are kept. Skip-on-unchanged so quiet
+/// runs do not churn mtime; atomic via tempfile + rename.
 pub fn write_tui_state(cache: &TuiStateCache, state: &PersistedState) -> io::Result<()> {
     let mut raw = load_raw_state(cache)?;
     raw.schema_version = SCHEMA_VERSION;
     raw.last_view = state.last_view.map(|v| view_to_snake_case(v).to_string());
     raw.sort = state.sort.map(|s| sort_to_str(s).to_string());
     raw.mux_recency = state.mux_recency.map(|b| b.as_str().to_string());
-    raw.preview_wrap = state.preview_wrap.map(|w| w.as_str().to_string());
+    raw.preview_wrap = state
+        .preview_wrap
+        .map(|w| crate::tui::preview_wrap::token(w).to_string());
     raw.session_preview = state.session_preview.map(|p| p.as_str().to_string());
-    raw.view_states.clear();
+    let mut previous = std::mem::take(&mut raw.view_states);
     for (view, slot) in &state.view_states {
+        let name = view_to_snake_case(*view);
+        let tree = if remembers_rows(*view) {
+            slot.tree.clone()
+        } else {
+            PersistedTree::default()
+        };
         raw.view_states.insert(
-            view_to_snake_case(*view).to_string(),
+            name.to_string(),
             ViewStateRaw {
                 filter: slot.filter.clone(),
                 grouping: slot.grouping,
+                expanded: tree.expanded.map(|keys| keys.into_iter().collect()),
+                selected: tree.selected.map(|selected| SelectedRaw {
+                    row: selected.row,
+                    path: selected.path,
+                }),
+                extra: previous
+                    .remove(name)
+                    .map(|view| view.extra)
+                    .unwrap_or_default(),
             },
         );
     }
+    let remembers = raw
+        .view_states
+        .values()
+        .any(|view| view.expanded.is_some() || view.selected.is_some());
+    raw.row_keys = remembers.then_some(ROW_KEY_VERSION);
 
     write_raw_state(cache, &raw)
 }
@@ -346,6 +557,7 @@ impl Default for RawState {
             mux_recency: None,
             preview_wrap: None,
             session_preview: None,
+            row_keys: None,
             view_states: BTreeMap::new(),
             extra: BTreeMap::new(),
         }
@@ -356,9 +568,7 @@ fn view_to_snake_case(view: View) -> &'static str {
     match view {
         View::Sessions => "sessions",
         View::Mux => "mux",
-        View::Union => "union",
         View::Prs => "prs",
-        View::Forks => "forks",
         View::Pinned => "pinned",
         View::History => "history",
         View::Search => "search",
@@ -369,9 +579,7 @@ fn view_from_snake_case(value: &str) -> Option<View> {
     match value {
         "sessions" => Some(View::Sessions),
         "mux" => Some(View::Mux),
-        "union" => Some(View::Union),
         "prs" => Some(View::Prs),
-        "forks" => Some(View::Forks),
         "pinned" => Some(View::Pinned),
         "history" => Some(View::History),
         "search" => Some(View::Search),

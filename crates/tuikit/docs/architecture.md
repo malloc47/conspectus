@@ -1,0 +1,283 @@
+# Architecture
+
+This guide explains how the framework is layered, where each module sits, and
+the rules that keep it independent from the application that hosts it. Read it
+before adding a control; [contributing.md](contributing.md) turns these rules
+into a checklist.
+
+## Layers
+
+```text
+host application
+└─ adapters       row builders · theme registrations · message mapping · domain copy
+        │  depends on (one way)
+        ▼
+tuikit
+├─ foundations    theme · glyphs · text · scroll · chip · age · frame · selection
+├─ controls       text entry · choice and command · reading · data display · chrome · feedback
+├─ conventions    keys · overlay · help · feedback · testkit
+└─ (feature) richtext    markdown · tables · syntax
+        │  depends on
+        ▼
+ratatui (with its crossterm backend) · unicode-width · tui-input   (+ optional rich-text crates)
+```
+
+The framework covers two of three layers.
+
+- **Layer 1, components and design tokens.** Foundations (the theme, glyphs,
+  text and scroll helpers, chips, ages, frames, selection looks) and the
+  controls built on them.
+- **Layer 2, interaction conventions.** Key tables that generate footers,
+  hints, and help; the overlay contract and a host-owned modal stack; focus
+  rules; a feedback model; and a test kit that checks controls against the
+  house rules.
+- **Layer 3, the application runtime**, is not in this crate: the event loop,
+  the effect lifecycle, undo, and suspending the terminal to hand it to a
+  child process belong to the host. A host runs its own loop and calls into
+  the controls; the framework never calls out to run anything.
+
+## Module map
+
+The map lists every public module. A row's status is **planned** until the
+module lands and **landed** after; the change that adds a module adds its row
+and its page under [controls/](controls/_template.md) in the same change, and
+`tests/doc_sync.rs` fails until it does. Foundations and conventions are
+modules; controls are types, and the page for each names its module path. The
+[usage guide](guide.md) shows how a program puts them together.
+
+### Foundations (layer 1)
+
+| Module | Provides | Status |
+| --- | --- | --- |
+| `theme` | Generic role tokens (accent and focus cue, muted, inert, selection, success, warning, error, info, link, match highlight, badge, recency scale, surface, input fields); a registry of named styles for roles only the host knows; alias keys; the style-spec grammar; applying overrides from a config table the host supplies. Page: [controls/theme.md](controls/theme.md) | landed |
+| `glyphs` | The vetted glyph table with host registration; shared marks (pointer, back, disclosure and the one rule that picks its arrow, ok, fail, warning, bullet, ellipsis, no-value, rule, derived corner, separator, crumb, spinner), the line-end mark ` …`, and the option boxes built from them (checkbox `[x]`/`[ ]`, one-of-N `(•)`/`( )`); cell-width and emoji-risk checks; the source scanner that finds unvetted glyphs. Page: [controls/glyphs.md](controls/glyphs.md) | landed |
+| `text` | Cell-width measuring; end and middle truncation; padding; fitting spans; word, character, and separator wrapping; snippet fitting; the one rule for the pieces of a line that give way (kept by rank, a piece's own gap in place of the separator, one mark for each run that gave way, in its gap or at the end, the last piece that cannot give way cut last) and its second pass that fills the room back for a line whose pieces stand alone; ASCII case-folding find; the match painter. Page: [controls/text.md](controls/text.md) | landed |
+| `scroll` | Wrap-or-clamp cursor stepping; the minimal-motion follow rule; the clamping scroll window a renderer returns to its owner; the fade-on-fit scrollbar gutter and the one scrollbar look; wrapped rows counted from the rows drawn (under a hanging indent, or cut at the edge, with each row's line); the scroll region, a cursorless window whose offset counts from the top, the bottom, or a row the content marks, which steps, clamps, draws lines or rows its host cut under a banner, and is kept by value. Page: [controls/scroll.md](controls/scroll.md) | landed |
+| `chip` | The fixed-width filled chip and its one width rule (`badge_width` in cells, cut with the ellipsis mark, padding that carries the fill); toggle chips that keep their width; the segmented title; the `[ n/m ]` position chip; status chips in a tone, with a mark or a busy spinner frame. Page: [controls/chip.md](controls/chip.md) | landed |
+| `age` | Ages from two Unix times; the unit ladder (days by default, weeks on request, or a host's units) and the one prose suffix; recency steps with injectable bounds and their theme tint; the fixed-width age cell. Page: [controls/age.md](controls/age.md) | landed |
+| `frame` | The modal frame: named sizing policies from a share, a cap, a minimum, and a margin per direction; one cleared, accent-bordered frame with one title form and optional padding; bodies measured once at the width the policy gives. The pane frame: a bordered pane with its title in the same form after a lead that holds the focus marker, whose border and marker take the focus accent while it has focus. The split pane: two panes in halves, side by side at or above a width threshold and stacked below it. The section rule: a muted rule, the section's label as a chip in the accent under the badge look, an optional summary before or after it, and a two-cell closing rule, so the labels down a pane line up. Page: [controls/frame.md](controls/frame.md) | landed |
+| `selection` | The list cursor: the pointer marker in a 2-cell gutter; the full-row highlight from the theme's selection pair, active while the list has focus and inactive while it does not, with filled spans kept; the ghost and pending row looks; the wrap-or-clamp rule for stepping a cursor by the kind of list. Page: [controls/selection.md](controls/selection.md) | landed |
+
+### Controls (layer 1)
+
+| Family | Controls | Status |
+| --- | --- | --- |
+| Text entry | `LineEdit` and `TextField` (module `text_edit`): the one line editor, which wraps `tui-input` and binds the shared editing keys, and the one inline renderer, which windows a line in cells around its caret. Page: [controls/text_edit.md](controls/text_edit.md) | landed |
+| Text entry | `TextPrompt<M>` and `PromptResult<M>` (module `text_prompt`): the one prompt for one line of text, an overlay for any context whose `Enter` asks the host's `on_confirm` to commit, step back with a message, refuse with a reason, or stay; a refusal shows one error line until the next edit, `Esc` and `Ctrl-C` close it silently, and its footer is generated on the compact frame's bottom border. Page: [controls/text_prompt.md](controls/text_prompt.md) | landed |
+| Text entry | `PathField`, `PathSource`, `PathKind`, and `PathFieldView` (module `path_field`): the one path field, a line editor that asks for a directory or a file, completes with the host's known paths ahead of what a read-only source the host supplies lists, adds the best remainder on `Tab`, marks a path advisory when it is missing or the other kind, expands `~` on commit, and looks at its source only when its text changes, so drawing does no I/O; one hint rule. Page: [controls/path_field.md](controls/path_field.md) | landed |
+| Text entry | `Form<M>`, `Field`, `FieldKind`, `Submit<M>`, and `FormBody` (module `form`): the one multi-field form, an overlay for any context over an ordered list of fields (text with a check, a path, a choice of chips with an optional custom value, a toggle, a check group, a one-of-N row drawn `(•)`, read-only notes, derived lines, and warnings) shown by conditions over its values; override rows (`OverrideRow`) that follow an inherited value until edited, go back on the reset key the form's own table binds, and end in a source column saying where their value stands; an intro paragraph and a band of detail lines that explain the focused field; one ring of stops, `Enter` submits from any field through the host's `on_submit`, one error line in the footer slot until the next edit, a footer generated from its key table that stays in view while the rows scroll, and one label grid; plus the row kit a host form draws its own rows with. Page: [controls/form.md](controls/form.md) | landed |
+| Choice and command | `ActionMenu<M>`, `Entry<M>`, and `Confirm` (module `action_menu`): the one action menu, an overlay for any context over entries that are data (a label, a detail, a shortcut shown in a key column, whether it can run, an inline second-`Enter` confirmation that says what `Enter` will do, and the host's message); the shared cursor look, wrapping and stepping over entries that cannot run; keys and footer from the standard menu table; a fixed footer under entries that scroll in a window the menu keeps, with the shared scrollbar, in the menu-sized frame. Page: [controls/action_menu.md](controls/action_menu.md) | landed |
+| Choice and command | `Dialog<M>`, `Kind<M>`, `Verb<M>`, and `Warning` (module `dialog`): the one dialog, an overlay for any context in three forms (a confirmation that commits the host's message, a choice whose named verbs on their own keys each commit one, and a notice that commits nothing), with a body, an optional warning list under a heading in the theme's `warning`, keys from the one standard dialog table, a footer generated from it (and the verbs), and a body that scrolls under that fixed footer on a short screen, in the menu-sized frame; a menu's entry opens one as a step of the menu. Page: [controls/dialog.md](controls/dialog.md) | landed |
+| Choice and command | `Checklist<M>` and `Item` (module `checklist`): the one checklist, an overlay for any context over items that are data (a label, a detail, whether it is checked, and whether it can change), whose `Enter` hands the checked indices to the host's `on_confirm`; `Space` checks the cursor's item and `a` and `n` every item that can change; the shared cursor look, wrapping and stepping over items that cannot change, paging and ends keys that stop; the checked count on the bottom border; a fixed footer from the standard checklist table under items that scroll in a window the checklist keeps, with the shared scrollbar, in the compact frame. Page: [controls/checklist.md](controls/checklist.md) | landed |
+| Choice and command | `Palette<R, M, A>`, `PaletteRow`, `RowContext`, `Item<T>`, `every_word`, `Options`, `Debounce`, `Count`, and `PaletteAction` (module `palette`): the one palette, an overlay for any context with a query line (the one line editor and text field, with its caret), a title with scope strips (the first switched by the scope key) and a count, results ranked by the host (a ranker over its candidates, the built-in every-word filter, or batches a provider sends), rows the host lays out at the width it is told and the palette draws through the shared cursor look, wrapping, paging, and an edit that puts the cursor on the best result; a status row, notes for an empty list, an options pane of named on/off settings with its own table, a debounce a slow provider's host polls, and a footer generated from the standard palette table or a host table over its own actions, under results that scroll in a window the palette keeps, with the shared scrollbar, in the palette frame; `Enter` asks the host's `on_pick`. Filter pickers, quick select, content search, and a command palette are instances. Page: [controls/palette.md](controls/palette.md) | landed |
+| Choice and command | `SettingsPanel<Id, M, Cx>`, `Section`, `Row`, and `Kind` (module `settings_panel`): the one settings panel, an overlay over titled sections of rows the host's row model builds from its context on every key and every draw, in five kinds (a choice, a checkbox, an editor that opens its editor as a step over the panel, a cycle, a button), each a host message reported as soon as the row is acted on, so changes apply as they are made and `Esc` keeps them; a cursor over the rows that skips the headings and keeps the host's row id, wrapping, paging and ends keys that stop, and the inactive look under an editor; a fixed footer from the standard settings table under sections that scroll in a window the panel keeps, with the shared scrollbar, in the menu-sized frame. Page: [controls/settings_panel.md](controls/settings_panel.md) | landed |
+| Reading | `Pager<C>`, `PagerContent`, `PagerEffect`, `PagerMode`, `Find`, and `NoKeys` (module `pager`): the one reader, over content the host lays out for a width (rows, the units a find matches, a header, chips, keys of its own and their help, an `apply` that relays out, closes, or asks the host, and a copy hook); three modes (full screen with a header, rules, and the `[ n/m ]` chip; a named modal frame with a scrollbar and its footer kept down, whose first rows scroll with the body when it does not fit; embedded, the body and a scrollbar); one window clamped on every draw, paging by the rows shown, half pages, the ends, and a sticky end that follows the content as it grows; a find on the one line editor that always scrolls to its match, steps with `n`/`N` wrapping with a note, and draws the current match in the selection look; `Esc` stepping back (help, prompt, find, leave) and `q` leaving; a help page generated from the pager's table and the content's, read in a pager of its own; and a footer generated from them that keeps the keys that leave when narrow. An overlay for any context. Page: [controls/pager.md](controls/pager.md) | landed |
+| Reading | `LogList<R, M, Cx>` (module `log_list`): the reader of a log, an overlay over the host's `feedback::Log<R>` read from its context through a closure on every key and every draw, with ages against the host's clock; one row per entry, newest first (the severity's mark in its color, the age, the summary with its repeat count), through the shared cursor look, cut with `…`, in a window the list keeps with the shared scrollbar, the selection stopping at the newest and the oldest; the selected entry's detail (the host's text) in an embedded `Pager` that wraps, scrolls a row or a page of the rows it shows, clamps, and goes back to its top when the selection moves; a footer generated from the standard log list table or a host table that includes it, whose last rows stay and whose first rows scroll after the detail on a short frame; a copy hook and the unseen-count hook `mark_seen`; in the reader frame. Page: [controls/log_list.md](controls/log_list.md) | landed |
+| Reading | `richtext` (module `richtext`, behind the cargo feature of the same name): rich content as styled lines at a width the host gives; ANSI text, or its characters alone when the host draws without color; a terminal's captured screen fitted to a narrower area in one of three wrap modes (wrap everything, wrap content but cut or squeeze rules, borders, and padding, or keep the source's own layout and clip), trailing blank rows dropped; Markdown with GFM pipe tables laid out to the width with receding borders and fenced code highlighted by its language; and highlighted code outside Markdown. Page: [controls/richtext.md](controls/richtext.md) | landed |
+| Reading | `HelpPage` (in the `help` convention module, below), a pager's content | landed |
+| Data display | `TreeView<R>`, `TreeState<Id>`, `TreeRow`, `Row<Id, R>`, `RowCtx`, `RowState`, `RowMark`, and `Rebuild<Id>` (module `tree`): the tree over rows nested by depth that its host owns and rebuilds; a state kept apart from them (the selection by identity with the position it showed at, so the cursor stays on the copy it was on when an identity is listed twice, the expanded rows, and the window the last frame drew), cursor moves that stop at the ends and page by the rows shown, folds of the selected row, revealing a row's ancestors, and one rebuild routine (the same identity, else the same position, else a first-load hint, else the first row); the pane with a title on its border, a header line, a footer banner, and a placeholder, drawing the showing rows from the host's producer (only those its window shows) with the pending, ghost, and selection looks, each after the cursor gutter that marks the one cursor row, and the shared scrollbar, and returning the window it drew; `RowColumns` and `TreeColumns`, a producer that lays each row out from the column schema its host names for it, every row measured once, after the cursor gutter and the row's indent. Page: [controls/tree_view.md](controls/tree_view.md) | landed |
+| Data display | `ColumnSchema`, `Column`, `Width`, `Align`, `Cell`, `Cut`, `Cells`, `Measure`, and `Layout` (module `columns`): a row of several cells declared once (keyed columns that are fixed, capped at the widest cell in the list, stepped by the room or by the whole row, a share of the whole row, hugging their own cell, or filling the rest with a minimum of their own; an edge to keep to; a gap after; a priority to drop or narrow at; a room below which to leave), typed cells that each cut one way (text at its end, in the middle, or clipped, with a tail kept whole; spans and chips; a chip list with a count of the rest; the age cell; a snippet that keeps its match), one measure pass over every row of a list, and one narrow-width policy: columns give way in ascending priority until the row fits, the lined-up ones by the widths of the whole list so every row loses the same ones, the fill takes the rest and shows only with its minimum (`MIN_FILL` unless told), and a row still too wide is cut at its edge with `…`. Page: [controls/columns.md](controls/columns.md) | landed |
+| Data display | `PropertyGrid`, `PropertyRow`, `LinkRow`, `Tone`, `Tones`, `DisclosureRow`, `Row`, `Intent`, and `GridLines` (module `property_grid`): the rows a detail pane lists about one thing, in one layout with lines that are no row (a rule, a heading) between them; a property (a bold label in a fixed label column that keeps a blank cell before its value, a glyph, the value as text or the host's spans, cut in cells at its end or in its middle with a hint naming the host's inspect key, a placeholder that recedes, a hint, an annotation in `warning`); a link (an indent, a verb in a fixed verb column, a glyph or the no-value mark, the far end's label cut in the middle to the room left so the row never wraps, meta the label leaves room for down to its minimum, and a tone: primary, quiet, alert led by the warning mark, or inert, each a theme token or a host role); a section header (the disclosure mark in the tree's look, a label, a count, and tallies of marked rows); every row through the shared cursor look, whole, focused or not; and the intents a row reports for `Enter` and the inspect key (copy the whole value, inspect it, toggle a section, follow a link), which the host carries out. Page: [controls/property_grid.md](controls/property_grid.md) | landed |
+| Data display | `Explorer<M>`, `ExplorerModel`, `ExplorerSource`, `Zone`, `Entry`, `FrameView`, `Frame`, `Outcome`, `Refusal`, `Refreshed`, `ExplorerKey`, `EXPLORER_KEYS`, and `hint` (module `explorer`): a cursor over zones of property grid rows that the host's source lays out for each call (nothing cached, the explorer holding owned values only, so it lives in the host's model), kept by index and by row key, stopping at the ends and paging by the rows shown, and reseated after every rebuild on the same key, else on the first row of the first zone that may take it, else on the first row; sections that fold by their header's key from the header or from inside; an every-property switch; a drill stack whose frames keep what was shown, how, where the cursor stood, and what the host saved, with a `Back` that skips a frame whose thing is gone and, with no frame left, arms and then leaves; a refresh that keeps the drill; every key answered with an outcome (copy, inspect, toggle, drill, follow, back, armed, leave, none, or a refusal for the host to word), the host doing every effect; one key table whose `Enter` takes no modifier, a help page from it, and a status hint whose `Enter` verb follows the cursor's row; the zones drawn in the source's grid with headings as lines that are no row, and the window kept between frames. Page: [controls/explorer.md](controls/explorer.md) | landed |
+| Feedback | `Toasts` (in the `feedback` convention module, below) | landed |
+| Chrome | `Breadcrumb` and `Hop` (module `breadcrumb`): the steps that led to what a pane shows, as one line in the room a title leaves; each hop a glyph in the host's style, a tag, and a suffix shown only when two hops have one tag, joined by the crumb mark; it gives way by the text module's one rule, the oldest middle hops first, then the first, one `…` for each run that gave way, and the last hop cut with `…` only when it alone does not fit, never wider than its room. Page: [controls/breadcrumb.md](controls/breadcrumb.md) | landed |
+| Chrome | `StackedMasterDetail` and `Stacked` (module `master_detail`): a list zone over a one-row divider over a detail area in one pane; the list as tall as its rows wrap to, within a minimum and the room a minimum detail area leaves (the detail's minimum giving way first on a short pane), wrapped at the full width while it fits and one column narrower when it scrolls, drawn in a window the host keeps that follows every row of the cursor's line, with the shared scrollbar; a layout width one column narrower than the pane so a rule cannot wrap when the bar appears; the window and the three areas returned, the detail left for the host. Page: [controls/master_detail.md](controls/master_detail.md) | landed |
+| Chrome | `AppFrame`, `AppAreas`, and `Screen` (module `app_frame`): the layers a screen is drawn in, from the parts its host supplies: a header row, the body, and a footer row (the chrome, skipped while an overlay fills the screen), then the overlays from the bottom of the host's modal stack to its top, then the toasts; the layout as areas for anything that needs a part's cells again; the body's report handed back, nothing sent from the draw. Page: [controls/app_frame.md](controls/app_frame.md) | landed |
+| Chrome | `TabBar` (module `tab_bar`): the names of the views a pane can show, one of them active in the accent and bold and the rest receding, joined by the separator mark, as one line in the room a title leaves; it gives way by the text module's one rule, the inactive tabs from the end of the bar and the active one never, a shortened bar ending in ` …` with a blank cell after it, and the active tab cut with `…` only when it alone does not fit. Page: [controls/tab_bar.md](controls/tab_bar.md) | landed |
+| Chrome | `PriorityLine` and `Segment` (module `priority_line`): a line of segments (styled spans, a status chip among them) each with a rank or none, joined by a separator or a gap of the segment's own, that fits a room by the text module's rule filled back: the lowest ranks give way first, a narrower segment returns where a wider one of higher rank did not fit, segments of one rank keep their order, the line ends in ` …` when something went, and the last segment that never gives way is cut last. Page: [controls/priority_line.md](controls/priority_line.md) | landed |
+| Chrome | `EmptyState` and `Align` (module `empty_state`): what a slot says when it has nothing to show, a message and an optional hint on rows of its own, wrapped at word edges in the muted look, left-aligned from the slot's corner or centered across and down it; drawn in an area or returned as lines for a region that lays out its own; the tree's placeholder. Page: [controls/empty_state.md](controls/empty_state.md) | landed |
+| Chrome | `StatusBar`, `KeyHintBar`, `KeyHint`, and `Annotation` (module `status_bar`): the bottom row of a screen, a message in its severity's style cut with `…`, or the host's segments and the keys that act now on one priority line in the cells the host's fixed spans leave (a lead in both modes, a scope tag and marks with the keys, chips at the end); the keys generated from key tables and the scoped keymap in their order, labels that share their words joined, each hint with its row's rank or the one the host gives its table, and the host's annotations per row for what a key does here (another verb, a detail, a reason it cannot act, drawn dimmed, another rank, or nothing), or an overlay's own footer whole. Page: [controls/status_bar.md](controls/status_bar.md) | landed |
+
+### Conventions (layer 2)
+
+| Module | Provides | Status |
+| --- | --- | --- |
+| `keys` | The key-table model: matchers with one rule for characters, rows that can include another table and carry availability, hints, resolving a key against a table, footers in one grammar (dimming what cannot act now), one key-label notation, the `KeyRole` classifier and the modal key convention checked by it, and checks for mislabeled, shadowed, and loosely bound rows; standard tables and action enums for menus, dialogs (one table for every form), pagers (the scroll rows, a reader's find and help keys, the help level, and the find prompt), text input, checklists, log lists, palettes and their options pane, settings panels, and forms; footers that show only some of a table's actions or take a control's own segments; and the scoped keymap a program's own keys live in: bindings in scopes (the program, a pane with focus, an overlay mode) with stable ids, keys, an action, a verb, help, a status rank, and an availability predicate, looked up most particular scope first, a control's table taken in as a pane's scope, and built only when no two keys of a scope can match one key event. Page: [controls/keys.md](controls/keys.md) | landed |
+| `overlay` | The `Overlay<M, Cx>` contract (`handle` and `render`, how an overlay draws under a step of its own, and whether it fills the screen), `Outcome<M>` (consumed, close, dismiss, commit, step back with a message, stay), and `ModalStack<E>` over the host's entry type, which the host owns and passes its state to as `&Cx`, which routes a key to the top entry, opens an entry as a step of the one under it, closes the top for a close or a step back and its whole flow of steps for a dismissal or a commit, and draws every entry from bottom to top. Page: [controls/overlay.md](controls/overlay.md) | landed |
+| `help` | `HelpPage`, the one help page and a pager's content: bold headings, keys in an accent column with descriptions wrapped beside them, and legend rows for marks, read in a `Pager` framed at the reader size (`HelpPage::pager`), which scrolls it, draws its scrollbar, and generates its footer from the key table that scrolls and closes it; `sections_for`, which generates a page from a key table and a `HelpAction` description per action, and `undescribed`, which finds a key the page would leave out; `keymap_sections`, which generates a program's page from its scoped keymap, with `HelpAnnotation`s for what a binding cannot say and `unanchored` to find one whose binding is gone. Page: [controls/help.md](controls/help.md) | landed |
+| `feedback` | `Severity` (info, success, warning, error: each with its theme color, chip tone, mark, and toast lifetime) and one `Feedback { severity, text, ttl }` type feeding three channels: the status line (`Feedback::span`), `Toasts` (bottom-centered boxes bordered in the severity's color, replaced or stacked, each gone after its lifetime, errors last longest), and `Log<T>` (bounded, newest-last, repeat-collapsing, counting unseen warnings and errors, over the host's payload `T`, an entry's summary read with its repeat count, and read back in a `LogList`); `clipboard::copy`, which writes OSC 52 to a sink the host supplies. Page: [controls/feedback.md](controls/feedback.md) | landed |
+| `testkit` | Behind the `testkit` feature. The key-script notation (`j<Tab><C-r>`) and press constructors; `FrameDriver`, the one-frame driver over the host's draw callback; buffer probes (text, token columns, the style under a piece of text, a modal's frame rectangle and the text inside it); the ANSI writer and `strip_ansi`; style-aware goldens that keep every color, checked against files and accepted through an environment variable; the conformance suite, `assert_conventions` over a host's `Registry` of modals and its `Rig` (a level's tables include parts consulted after its first); the source-scan helpers (the crate's lexer, word-start matching, a read-only walk); and `MemoryPaths`, an in-memory file system for path fields that counts the questions asked of it. Page: [controls/testkit.md](controls/testkit.md) | landed |
+
+### Focus
+
+Focus has no module of its own. Its rules live with the pieces that carry
+them: the pane focus cue is `frame::PaneFrame`'s (house rule 9); the modal
+focus lock is the overlay contract's, since an open overlay owns every key and
+`ModalStack::route` gives each to the top entry; the keys of the pane with
+focus are a scope of the keymap (`keys::Scope::Pane`, looked up through
+`keys::ActiveScopes`); and a list without focus draws its cursor inactive
+(`selection::Cursor`, house rule 10). Which pane has focus, and what `Tab`
+moves it to, is the host's state. A declared focus cycle is on the
+[roadmap](roadmap.md).
+
+## The one-way dependency rule
+
+Dependencies run in one direction only: the host depends on `tuikit`, and
+`tuikit` depends on third-party crates and on nothing from the host.
+
+- The manifest names no host crate, and its dependency set is an allowlist.
+  A new third-party crate needs a decision record first (see
+  [decisions/README.md](decisions/README.md)).
+- Source, documentation, tests, and manifest use none of the host's domain
+  vocabulary. The compiler enforces the type side (a control that wants the
+  host's message type must be generic over it), and a guard test enforces the
+  vocabulary side.
+- Host meaning enters the framework in exactly five ways: a type parameter
+  (`M`, `Cx`, `Id`, `R`), a closure, a trait the host implements, an entry in
+  the named-style registry, or a sink or source the host supplies.
+
+The guards, and what to do when one fails, are in
+[contributing.md](contributing.md#independence-guards).
+
+## The host message type `M` and the context type `Cx`
+
+A control is generic over what the host needs to say and know, never over a
+concrete host type.
+
+- **`M` is the host's message type.** A control that commits something (a
+  confirmed prompt, a submitted form, a chosen menu entry) builds an `M` with
+  a closure or a mapping the host supplies, and reports it in its outcome. The
+  control never names, matches, or inspects a concrete message type.
+- **`Cx` is the host's context type.** When a control needs host data to
+  handle a key or to render (the names a path field may complete, the labels a
+  list shows), the host passes a borrowed `&Cx` into `handle` and `render`.
+  The control holds no copy of host state and reads no global state.
+- **`Id` and `R` follow the same idea.** `Id` is the host's stable identity for
+  a row, so a cursor can survive a rebuild of the rows. `R` is the host's row
+  or result type, which the control stores and hands back to host closures
+  without looking inside.
+- **`&Theme` is the third input.** Every control takes the theme explicitly.
+  Styles for roles only the host knows are registered by name, and a control
+  looks them up by name.
+
+A control takes only the parameters it needs. Its page lists them, and
+anything it cannot be made generic over is a sign the control is still
+carrying host meaning that belongs in an adapter.
+
+## Intent outcomes instead of effects
+
+A control never acts on the world. Handling a key returns an **outcome**: a
+value that says what the user meant, which the host interprets in its own
+runtime.
+
+```rust
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tuikit::overlay::{ModalStack, Outcome, Overlay};
+use tuikit::text_prompt::{PromptResult, TextPrompt};
+
+/// The host's message: what a confirmed prompt asks the host to do.
+#[derive(Debug, PartialEq)]
+enum Msg {
+    Rename(String),
+}
+
+let rename = || {
+    TextPrompt::new("Rename", "draft", |text: &str| {
+        PromptResult::Commit(Msg::Rename(text.trim().to_string()))
+    })
+};
+let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+
+// A host that holds one control matches the outcome itself
+// (`tuikit::overlay::Outcome`; a control that is no overlay reports a
+// result type of its own the same way).
+let mut prompt = rename();
+match Overlay::<Msg, ()>::handle(&mut prompt, enter, &()) {
+    Outcome::Commit(message) | Outcome::Back(message) => {
+        // Close the prompt, then do what `message` asks.
+        assert_eq!(message, Msg::Rename("draft".into()));
+    }
+    Outcome::Stay(_message) => {} // do what it asks; the prompt stays open
+    Outcome::Close | Outcome::Dismiss => {} // close it, saying nothing
+    Outcome::Consumed => {}
+}
+
+// A host with a modal stack lets the stack do its part.
+let mut stack = ModalStack::new();
+stack.push(rename());
+let outcome = stack.route(enter, &()).expect("a prompt has the key");
+let settled = stack.settle(outcome);
+assert_eq!(settled.message, Some(Msg::Rename("draft".into())));
+assert!(stack.is_empty());
+```
+
+- A commit carries the host's `M`. What a commit does (rename something, start
+  a task, save a setting) is the host's effect system, not the control's.
+- Dismissal is an outcome too, so the host's stack can decide what to do
+  next. Going back a level inside an overlay is the overlay's own business
+  (it stays open), a step that applies its answer and returns to the
+  overlay under it says so (`Back`), and an open overlay owns every key, so
+  no outcome says "this key is not mine".
+- Where a control needs an external capability, the host supplies it: the
+  clipboard takes a `Write` sink, and path completion takes a source trait.
+  The framework starts no process and writes no file itself.
+
+This keeps controls testable with nothing but a key and a buffer, and it
+keeps the effect lifecycle (queuing, undo, retries, hand-off to child
+processes) in one place, the host runtime.
+
+## What the framework never does
+
+- Import anything from its host, or name the host's domain words.
+- Start a process, open a socket, install a signal handler, or write, rename,
+  or delete a file. Read-only filesystem access is allowed where a control
+  needs it (completion, for example), behind a source the host can replace.
+- Read global state. A control gets what it needs through its parameters, so
+  two instances never share hidden state. (The test kit's golden check reads
+  one environment variable, the switch that accepts new goldens; it is no
+  control, and production builds leave it out.)
+- Own the event loop, terminal setup and teardown, the effect lifecycle, or
+  undo.
+- Use raw colors. Every control takes `&Theme`.
+- Silently reject input. A rejected confirm sets an error line (house rule 7).
+- Promise API stability to outside users: the crate is for internal reuse.
+
+## Features and dependencies
+
+| Dependency | Why | Reach |
+| --- | --- | --- |
+| `ratatui` | Rendering library every control draws with; its crossterm backend's key event types (`ratatui::crossterm::event`) are the keys every control handles | always |
+| `unicode-width` | Display-width arithmetic for truncation, padding, wrapping | always |
+| `tui-input` | The single-line edit engine behind the text-entry controls | always |
+| `ansi-to-tui`, `tui-markdown`, `comfy-table` | ANSI text, Markdown with syntax highlighting, and tables as styled lines | `richtext` feature only |
+
+The `richtext` feature turns on the `richtext` module and the three crates
+in its row above (the Markdown crate brings its syntax highlighter with
+it). A host that shows no rich content leaves it off and builds none of
+them; `cargo test -p tuikit` runs without it and
+`cargo test -p tuikit --features richtext` with it.
+
+The `testkit` feature adds no dependency: it turns on the `testkit` module,
+which a host's tests and dev tools use and its production build leaves out.
+The crate depends on itself by path in its dev-dependencies so its own
+integration tests and doctests have the module.
+
+The crate names no `crossterm` dependency of its own: it reaches the event
+types through ratatui's re-export, so the two cannot disagree on a version.
+The allowlist still names `crossterm`, so a direct dependency on it would need
+no new decision. The complete allowlist, with the reason for each entry, is in
+the independence guard (`tests/independence.rs`); a dependency that is not
+listed there fails the guard.
+
+## Layout of the crate
+
+```text
+tuikit/
+├─ Cargo.toml
+├─ README.md             crate summary; also the crate-level API documentation
+├─ src/                  the library (documentation is mandatory)
+├─ scripts/              glyph-widths.py, which measures glyphs in common fonts
+├─ tests/                independence guards, documentation checks, integration tests
+└─ docs/
+   ├─ architecture.md    this guide
+   ├─ guide.md           building a program on the framework
+   ├─ house-rules.md     the design rules every control follows, and why
+   ├─ contributing.md    independence rules, adding a control, testing
+   ├─ roadmap.md         controls and capabilities that may come later
+   ├─ controls/          one page per public module, from _template.md
+   └─ decisions/         framework-scoped decision records
+```
+
+Every `rust` code block in these pages compiles and runs as a doctest
+(`src/doc_pages.rs` includes them), and `tests/doc_sync.rs` holds the pages
+to the modules, the template, and their links.

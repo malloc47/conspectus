@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use assert_cmd::Command;
+use tuikit::testkit::strip_ansi;
 
 /// `SHOWCASE_NOW_EPOCH` in `src/dev_scenarios.rs`.
 const SHOWCASE_NOW: &str = "1790769600";
@@ -59,23 +60,6 @@ fn frame_with(scratch: &Path, keys: &str, extra: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     strip_ansi(&String::from_utf8_lossy(&output.stdout))
-}
-
-fn strip_ansi(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            for next in chars.by_ref() {
-                if next.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
 }
 
 #[test]
@@ -232,7 +216,7 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     assert!(quick.contains("/ quick select"), "{quick}");
     assert!(quick.contains("[ Current ] All"), "{quick}");
     assert!(!quick.contains("/ search contents"), "{quick}");
-    assert!(quick.contains("Tab current/all"), "{quick}");
+    assert!(quick.contains("Tab search current/all"), "{quick}");
     let wide = frame(scratch.path(), "/<Tab>");
     assert!(wide.contains("Current [ All ]"), "{wide}");
 
@@ -243,7 +227,7 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     assert!(contents.contains("2 hits"), "{contents}");
     // The footer wraps, so look for the keys rather than whole phrases.
     assert!(contents.contains("Ctrl-F filter"), "{contents}");
-    assert!(contents.contains("Ctrl-S Search"), "{contents}");
+    assert!(contents.contains("Ctrl-S open Search"), "{contents}");
     assert!(
         contents.contains("sessions and panes searched"),
         "{contents}"
@@ -338,12 +322,14 @@ fn content_search_reads_pane_scrollback_and_tab_widens_it() {
     );
     assert!(all.contains("sessions and panes searched"), "{all}");
 
-    // The Search view lists the pane as a row of its own.
+    // The Search view lists the pane as a row of its own, named by its mux
+    // and its place. (What the pane runs is the first cell to give way, and
+    // this pane is a cell too narrow to keep it.)
     let view = frame(scratch.path(), "2<C-/>feature<C-s>");
     assert!(view.contains("search 1/1 \"feature\""), "{view}");
     assert!(
         view.lines()
-            .any(|l| l.contains("project") && l.contains("0.0") && l.contains("zsh")),
+            .any(|l| l.contains('▣') && l.contains("project 0.0") && l.contains("4 hits")),
         "{view}"
     );
 }

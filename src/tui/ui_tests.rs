@@ -7,10 +7,30 @@ use crate::model::{
 use crate::resolve::resolve_snapshot;
 use crate::tui::SessionsGrouping;
 use crate::tui::app::Msg;
+use crate::tui::explorer::grid::{field_row, kind_chip_span, other_row, validated_row};
 use crate::tui::preview::PreviewSource;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, View};
-use ratatui::layout::{Constraint, Direction, Layout};
+use tuikit::explorer::ExplorerKey;
+
+/// Where the main screen puts its parts on `area` at the default
+/// threshold: the layout the draw uses.
+fn panes(area: Rect) -> ScreenAreas {
+    screen_areas(area, crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD)
+}
+
+/// One explorer row drawn alone, as the pane draws it, with no cursor.
+fn explorer_line(
+    row: impl Into<tuikit::property_grid::Row>,
+    width: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    crate::tui::explorer::grid::grid(theme)
+        .row(row)
+        .lines(width, None, false, theme)
+        .lines
+        .remove(0)
+}
 
 fn seeded_app() -> App {
     let mut snapshot = GraphSnapshot::empty();
@@ -59,7 +79,7 @@ fn seeded_app() -> App {
     app
 }
 
-fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
+pub(super) fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
     muxed_app_with_links(native_id, capture, Vec::new())
 }
 
@@ -188,7 +208,7 @@ fn ingest_slot(target: Option<NodeId>) -> crate::model::PinSlot {
     }
 }
 
-fn pinned_app(target: Option<NodeId>) -> App {
+pub(super) fn pinned_app(target: Option<NodeId>) -> App {
     pinned_app_with(target, |_| {})
 }
 
@@ -229,23 +249,26 @@ fn pinned_app_with(target: Option<NodeId>, extend: impl FnOnce(&mut GraphSnapsho
 #[test]
 fn status_hint_for_a_planned_pin_points_at_rebuild() {
     let app = pinned_app(None);
-    let hint = default_action_status_hint(&app);
+    let hint = status_hints(&app).text();
     assert!(
-        hint.contains("rebuild ingest") && hint.contains("isn't built yet"),
+        hint.starts_with("Enter rebuild · "),
         "unexpected hint for planned pin: {hint}"
     );
 }
 
 #[test]
-fn status_hint_for_a_pin_with_a_missing_target_names_the_fixes() {
+fn status_hint_for_a_pin_with_a_missing_target_points_at_rebuild() {
     let app = pinned_app(Some(NodeId::MuxSession(crate::model::MuxSessionId::new(
         "tmux:gone",
     ))));
-    let hint = default_action_status_hint(&app);
+    let hint = status_hints(&app).text();
     assert!(
-        hint.contains("target not found") && hint.contains("pin retarget ingest"),
+        hint.starts_with("Enter rebuild · "),
         "unexpected hint for missing target: {hint}"
     );
+    // The Preview keeps the pin's own words, with the fixes.
+    let preview = preview_text_for_selection(&app, 120, 10).to_string();
+    assert!(preview.contains("pin retarget ingest"), "{preview}");
 }
 
 #[test]
@@ -314,7 +337,7 @@ fn render_at_default_size_shows_header_tree_and_detail() {
         "session harness label missing: {text}"
     );
     assert!(
-        text.contains("could you give me a"),
+        text.contains("could you give me"),
         "same-line preview missing: {text}"
     );
     assert!(
@@ -402,6 +425,37 @@ fn header_shows_harness_chips_when_opt_in_is_set() {
     );
 }
 
+/// On a narrow screen the opt-in harness chips are the first to go, each
+/// whole: the header never shows part of a chip, and ends with `…` once
+/// a chip is left out.
+#[test]
+fn header_drops_harness_chips_whole_when_narrow() {
+    let mut app = seeded_app_with_harness_chips();
+    let header = |app: &mut App, width: u16| -> String {
+        let text = buffer_to_string(&render_to_buffer(app, Rect::new(0, 0, width, 24)));
+        text.lines()
+            .next()
+            .expect("header line")
+            .trim_end()
+            .to_string()
+    };
+    let full = header(&mut app, 200);
+    assert!(full.contains("  ·  ") && full.contains("codex"), "{full}");
+    for width in 20..=80 {
+        let shown = header(&mut app, width);
+        assert!(tuikit::text::width(&shown) <= usize::from(width), "{shown}");
+        if shown == full {
+            continue;
+        }
+        assert!(
+            shown.ends_with(marks::MORE),
+            "a header that leaves the chip out says so at {width}: {shown}"
+        );
+        assert!(!shown.contains("codex"), "a cut chip at {width}: {shown}");
+        assert!(shown.contains(" sessions"), "{shown}");
+    }
+}
+
 /// Seed a test App with `[tui] show_harness_chips = true`.
 fn seeded_app_with_harness_chips() -> App {
     // Reproduce the seeded_app data path but flip the opt-in.
@@ -454,30 +508,41 @@ fn seeded_app_with_harness_chips() -> App {
 
 #[test]
 fn left_panel_title_renders_a_view_tab_strip() {
-    // The left pane title lists the surfaced views as a tab strip
-    // with the active one accented. Only Sessions and Mux are
-    // surfaced (Union/PRs/Forks are hidden), so the
-    // strip carries exactly those two.
+    // The left pane title lists the views as a tab strip with the
+    // active one accented.
     let mut app = seeded_app();
     let area = Rect::new(0, 0, 160, 24);
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     let title_line = text
         .lines()
-        .find(|l| l.contains("sessions") && l.contains("mux"))
+        .find(|l| l.contains("sessions · mux"))
         .expect("left pane tab strip line present");
-    for label in ["sessions", "mux"] {
+    for label in ["sessions", "mux", "prs", "pinned", "history", "search"] {
         assert!(
             title_line.contains(label),
             "tab strip missing `{label}`: {title_line}",
         );
     }
-    for label in ["union", "prs", "forks"] {
-        assert!(
-            !title_line.contains(label),
-            "tab strip should not list hidden view `{label}`: {title_line}",
-        );
+}
+
+/// The left pane's title at the widths around the side-by-side split,
+/// where the panes are narrowest, in every view: whole names, the
+/// active one kept, `…` where views are left out.
+#[test]
+fn left_panel_tab_strip_at_the_split_widths() {
+    let mut out = String::new();
+    for width in [90u16, 100, 104, 107, 120] {
+        for view in crate::tui::widgets::controls::VIEW_OPTIONS {
+            let mut app = seeded_app();
+            app.update(Msg::SwitchView(*view));
+            let text = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, width, 8)));
+            let line = text.lines().nth(1).expect("the panes' top border");
+            let title: String = line.chars().take_while(|c| *c != '┐').collect();
+            out.push_str(&format!("{width:>3} {:<8} {title}┐\n", view_label(*view)));
+        }
     }
+    insta::assert_snapshot!("left_panel_tab_strip_at_the_split_widths", out);
 }
 
 #[test]
@@ -504,19 +569,21 @@ fn right_panel_title_names_the_selected_node_kind() {
 
 #[test]
 fn focus_marker_prefixes_only_the_active_pane_title() {
-    // Phase 9 refinement: focus is signaled by a `► ` glyph on
-    // the active pane's title rather than by holistically
-    // styling the panel. The inactive pane gets two-space
-    // padding so titles align column-wise and content colors
-    // stay untouched between focus states. The right-pane label
-    // varies by selection kind (Phase 11) so the assertion is
-    // on the *count* of `►` markers, not on a specific suffix.
+    // The focused pane's title starts with a `► ` marker (its border
+    // takes the focus accent too; `consistency_tests::chrome` checks
+    // the colors). The other pane has a two-cell blank there, so titles
+    // keep their columns between focus states. The right-pane label
+    // varies by selection kind, so the assertion is on the *count* of
+    // `►` markers, not on a specific suffix.
     let area = Rect::new(0, 0, 160, 24);
     let mut app = seeded_app();
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
+    // The pane titles share one line; the explorer's cursor row below
+    // carries the same mark as a list cursor, so count the titles only.
+    let titles = |text: &str| text.lines().nth(1).unwrap_or("").matches('►').count();
     assert_eq!(
-        text.matches('►').count(),
+        titles(&text),
         1,
         "exactly one focus marker should be visible: {text}",
     );
@@ -536,7 +603,7 @@ fn focus_marker_prefixes_only_the_active_pane_title() {
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert_eq!(
-        text.matches('►').count(),
+        titles(&text),
         1,
         "exactly one focus marker should still be visible after CycleFocus: {text}",
     );
@@ -617,8 +684,8 @@ fn group_row_summary_chips_align_across_visible_groups() {
         .lines()
         .find(|l| l.contains("~/src/very-long-project-name"))
         .expect("long-named group row present");
-    let short_col = short_line.find("(1)").expect("short row has count chip");
-    let long_col = long_line.find("(1)").expect("long row has count chip");
+    let short_col = cell_column(short_line, "(1)").expect("short row has count chip");
+    let long_col = cell_column(long_line, "(1)").expect("long row has count chip");
     assert_eq!(
         short_col, long_col,
         "(N) chips should start at the same column across group rows:\n  short: {short_line}\n  long:  {long_line}",
@@ -644,15 +711,260 @@ fn group_row_secondary_column_starts_at_same_column_across_groups() {
         .lines()
         .find(|l| l.contains("~/src/very-long-project-name"))
         .expect("long-named group row present");
-    let short_col = short_line
-        .find("~/src/x")
-        .expect("short row secondary segment present");
-    let long_col = long_line
-        .find("~/src/very-long-project-name")
+    let short_col =
+        cell_column(short_line, "~/src/x").expect("short row secondary segment present");
+    let long_col = cell_column(long_line, "~/src/very-long-project-name")
         .expect("long row secondary segment present");
     assert_eq!(
         short_col, long_col,
         "secondary segment should start at the same column across group rows:\n  short: {short_line}\n  long:  {long_line}",
+    );
+}
+
+/// Repos `x` (one checkout) and `y` (its main checkout and a worktree
+/// with a long name), a session in each checkout, and a session with no
+/// directory, which belongs to no group. `pin_x` pins the session in
+/// `x`, so the tree reserves the pin marker cell.
+fn nested_groups_world(pin_x: bool) -> GraphSnapshot {
+    let mut snapshot = GraphSnapshot::empty();
+    for name in ["x", "y"] {
+        let repo = RepoId::new(format!("/home/op/src/{name}"));
+        snapshot.nodes.push(GraphNode::Repo(RepoNode::new(repo)));
+    }
+    let checkouts = [
+        ("x", "/home/op/src/x"),
+        ("y", "/home/op/src/y"),
+        ("y", "/home/op/src/y-with-a-much-longer-worktree-name"),
+    ];
+    for (index, (repo, root)) in checkouts.into_iter().enumerate() {
+        let repo = RepoId::new(format!("/home/op/src/{repo}"));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode::new(
+            CheckoutId::new(repo, root),
+            root,
+        )));
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", format!("s{index}")),
+                "codex".to_string(),
+            )
+            .with_cwd(root),
+        ));
+    }
+    snapshot
+        .nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "loose"),
+            "codex".to_string(),
+        )));
+    if pin_x {
+        use crate::model::{PinKind, PinSlot, SlotFields};
+        let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "s0"));
+        snapshot.pins.push(PinSlot {
+            id: "x-session".to_string(),
+            kind: PinKind::Session,
+            target: Some(session.to_string()),
+            pinned_at: None,
+            overrides: SlotFields::new(),
+            snapshot: SlotFields::new(),
+            order: 0,
+            legacy: false,
+        });
+    }
+    snapshot
+}
+
+/// The Sessions view over `snapshot`, grouped by `grouping`.
+fn sessions_app_over(snapshot: GraphSnapshot, grouping: SessionsGrouping) -> App {
+    let snapshot = resolve_snapshot(snapshot);
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Sessions;
+    config.sessions_grouping = grouping;
+    let mut app = App::new(config);
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+        &snapshot, &app,
+    ));
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app
+}
+
+/// The left pane's rows, as text, from a 160 x 24 frame.
+fn left_rows(app: &mut App) -> Vec<String> {
+    let buffer = render_to_buffer(app, Rect::new(0, 0, 160, 24));
+    buffer_to_string(&buffer)
+        .lines()
+        .map(|line| line.chars().take(80).collect())
+        .collect()
+}
+
+/// The cell column `needle` starts at in `line`.
+fn cell_column(line: &str, needle: &str) -> Option<usize> {
+    line.find(needle).map(|byte| line[..byte].chars().count())
+}
+
+/// The cell column of a group header's `(N)` count.
+fn count_column(line: &str) -> Option<usize> {
+    let chars: Vec<char> = line.chars().collect();
+    (0..chars.len().saturating_sub(1))
+        .rev()
+        .find(|&index| chars[index] == '(' && chars[index + 1].is_ascii_digit())
+}
+
+/// The cell column of a row's first letter or digit: a group header's
+/// label.
+fn label_column(line: &str) -> Option<usize> {
+    line.chars().position(char::is_alphanumeric)
+}
+
+#[test]
+fn group_columns_hold_still_when_another_group_folds() {
+    // The label, path, and count columns are measured over the whole
+    // tree, so unfolding `y` (whose worktree has a long name) leaves
+    // the columns of `x` where they were.
+    let mut app = sessions_app_over(nested_groups_world(false), SessionsGrouping::Checkout);
+    let x_header = |rows: &[String]| {
+        rows.iter()
+            .find(|row| row.contains('◆') && row.contains("/home/op/src/x"))
+            .cloned()
+            .unwrap_or_else(|| panic!("no header for x:\n{}", rows.join("\n")))
+    };
+    let folded = left_rows(&mut app);
+    let y = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| {
+            matches!(&row.kind, RowKind::Group(group)
+                if row.depth == 0 && group.detail.ends_with("/y"))
+        })
+        .map(|row| row.id.clone())
+        .expect("a header for y");
+    assert!(!app.is_expanded(&y), "y starts folded");
+    app.set_selection(y);
+    app.update(Msg::ToggleExpand);
+    let unfolded = left_rows(&mut app);
+    assert!(
+        unfolded
+            .iter()
+            .any(|row| row.contains("y-with-a-much-longer")),
+        "unfolding y shows its worktree:\n{}",
+        unfolded.join("\n")
+    );
+    let (before, after) = (x_header(&folded), x_header(&unfolded));
+    assert_eq!(
+        cell_column(&before, "/home/op/src/x"),
+        cell_column(&after, "/home/op/src/x"),
+        "the path column moved:\n{before}\n{after}"
+    );
+    assert_eq!(
+        count_column(&before),
+        count_column(&after),
+        "the count column moved:\n{before}\n{after}"
+    );
+}
+
+#[test]
+fn a_header_for_no_entity_starts_its_label_in_the_column_of_its_siblings() {
+    // `Ungrouped` has no kind glyph; its glyph cell is left blank so
+    // its label lines up with the repo headers' labels.
+    let mut app = sessions_app_over(nested_groups_world(false), SessionsGrouping::Graph);
+    let rows = left_rows(&mut app);
+    let repo = rows
+        .iter()
+        .find(|row| row.contains('◆') && row.contains("/home/op/src/x"))
+        .expect("a header for x");
+    let ungrouped = rows
+        .iter()
+        .find(|row| row.contains("Ungrouped"))
+        .expect("the Ungrouped header");
+    assert_eq!(
+        label_column(repo),
+        label_column(ungrouped),
+        "\n{repo}\n{ungrouped}"
+    );
+    assert_eq!(count_column(repo), count_column(ungrouped));
+}
+
+#[test]
+fn nested_group_headers_line_their_paths_and_counts_up_with_their_parents() {
+    // A repo header, a checkout under it with a longer name, and a deeper
+    // header under that: each label ends in one column whatever its
+    // indent, so the paths after them start in one column and the counts
+    // end in one, at every depth and in a narrow pane too.
+    let theme = Theme::default();
+    let header = |depth: u8, path: &str| crate::tui::rows::Row {
+        depth,
+        ..group_header(path)
+    };
+    let session = |depth: u8, key: &str| crate::tui::rows::Row {
+        depth,
+        ..session_under_group(key)
+    };
+    let rows = vec![
+        header(0, "~/src/project"),
+        header(1, "~/src/project-with-a-long-worktree-name"),
+        session(2, "a"),
+        header(2, "~/src/deep"),
+        session(3, "b"),
+        header(0, "~/src/other"),
+        session(1, "c"),
+    ];
+    let headers = [0, 1, 3, 5];
+    for width in [160, 110, 80, 60] {
+        let lines: Vec<String> = lay_out(&rows, &theme, 0, width, None)
+            .iter()
+            .map(line_text)
+            .collect();
+        let path: Vec<Option<usize>> = headers
+            .iter()
+            .map(|&at| cell_column(&lines[at], "~/src/"))
+            .collect();
+        let count: Vec<Option<usize>> =
+            headers.iter().map(|&at| count_column(&lines[at])).collect();
+        let shown = || {
+            headers
+                .iter()
+                .map(|&at| lines[at].as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert!(path.iter().all(Option::is_some), "at {width}:\n{}", shown());
+        assert!(
+            path.windows(2).all(|pair| pair[0] == pair[1]),
+            "at {width}, the paths start in different columns: {path:?}\n{}",
+            shown()
+        );
+        assert!(
+            count.windows(2).all(|pair| pair[0] == pair[1]),
+            "at {width}, the counts end in different columns: {count:?}\n{}",
+            shown()
+        );
+    }
+}
+
+#[test]
+fn group_counts_line_up_when_the_pin_marker_cell_is_reserved() {
+    let mut app = sessions_app_over(nested_groups_world(true), SessionsGrouping::Graph);
+    let rows = left_rows(&mut app);
+    assert!(
+        rows.iter().any(|row| row.contains('◉')),
+        "the pinned session is marked:\n{}",
+        rows.join("\n")
+    );
+    let headers: Vec<&String> = rows
+        .iter()
+        .filter(|row| count_column(row).is_some() && !row.contains('●'))
+        .collect();
+    assert!(headers.len() >= 3, "{}", rows.join("\n"));
+    let columns: Vec<_> = headers.iter().map(|row| count_column(row)).collect();
+    assert!(
+        columns.windows(2).all(|pair| pair[0] == pair[1]),
+        "the counts don't line up:\n{}",
+        rows.join("\n")
     );
 }
 
@@ -683,25 +995,7 @@ fn group_rows_carry_session_count_chip_only_when_no_ambiguity() {
 }
 
 #[test]
-fn truncate_to_width_middle_collapses_to_inline_ellipsis() {
-    // Fits unchanged.
-    assert_eq!(
-        truncate_to_width_middle("/fixture/repos/project", 30),
-        "/fixture/repos/project"
-    );
-    // Drops the middle and keeps both ends visible.
-    let collapsed = truncate_to_width_middle("/fixture/atelier-demo/repo-a", 15);
-    assert!(collapsed.contains('…'), "{collapsed}");
-    assert!(collapsed.starts_with('/'), "{collapsed}");
-    assert!(collapsed.ends_with("repo-a"), "{collapsed}");
-    assert_eq!(UnicodeWidthStr::width(collapsed.as_str()), 15);
-    // Degenerate widths render the ellipsis alone or nothing.
-    assert_eq!(truncate_to_width_middle("abc", 1), "…");
-    assert_eq!(truncate_to_width_middle("abc", 0), "");
-}
-
-#[test]
-fn render_node_field_line_places_kind_chip_before_value() {
+fn a_field_row_places_its_kind_chip_before_the_value() {
     // ADR 0073 §3 amendment: the cwd kind-chip glyph should sit
     // beside the label so the chip stays attached when the value
     // wraps onto a new terminal row. The pre-fix render emitted
@@ -713,11 +1007,11 @@ fn render_node_field_line_places_kind_chip_before_value() {
         value: "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef".to_string(),
         placeholder: false,
         annotation: None,
-        long_value: None,
+        cut_at: None,
         kind_chip: Some(crate::model::NodeKind::Workspace),
         preview: None,
     };
-    let line = render_node_field_line(&field, false, &theme);
+    let line = explorer_line(field_row(&field, &theme), 80, &theme);
     let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     let label_idx = rendered.find("cwd").expect("label present");
     let chip_idx = rendered.find('▦').expect("workspace chip present");
@@ -733,27 +1027,140 @@ fn group_body_secondary_truncates_mid_string_to_preserve_summary() {
     // visible in narrow panes. Before this, long fixture paths
     // pushed the summary chip off the right edge.
     let theme = Theme::default();
-    let group = crate::tui::rows::GroupRow {
-        display_path: "/fixture/atelier-demo/repo-a".to_string(),
-        primary_node: None,
-        is_launch_context: false,
-    };
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    append_group_body_spans(&mut spans, &group, &theme, 12, Some(14));
-    let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    let rows = vec![
+        group_header("/fixture/atelier-demo/repo-a"),
+        session_under_group("abc"),
+    ];
+    // The prefix (4) and the label (6) leave the path and the count
+    // block 30 cells: the path is cut in the middle to fit beside it.
+    let narrow = lay_out(&rows, &theme, 0, 40, None);
+    let rendered = line_text(&narrow[0]);
     assert!(rendered.contains('…'), "{rendered}");
     assert!(rendered.contains("repo-a"), "tail preserved: {rendered}");
     assert!(rendered.contains("/fixtur"), "head preserved: {rendered}");
+    assert!(
+        rendered.trim_end().ends_with("(1)"),
+        "the count stays: {rendered}"
+    );
 
-    // Wide budget leaves the path untouched.
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    append_group_body_spans(&mut spans, &group, &theme, 12, Some(200));
-    let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    // A wide row leaves the path untouched.
+    let wide = lay_out(&rows, &theme, 0, 200, None);
+    let rendered = line_text(&wide[0]);
     assert!(
         rendered.contains("/fixture/atelier-demo/repo-a"),
         "wide budget keeps full path: {rendered}"
     );
     assert!(!rendered.contains('…'), "{rendered}");
+}
+
+/// A group header for `path`, standing for no entity.
+fn group_header(path: &str) -> crate::tui::rows::Row {
+    crate::tui::rows::Row {
+        id: RowId::Bucket(path.to_string()),
+        depth: 0,
+        expandable: true,
+        kind: RowKind::Group(crate::tui::rows::GroupRow::at_path(path, None)),
+    }
+}
+
+/// A session row under a group header, its mux link as `mux_state`.
+fn session_under_group_with(key: &str, mux_state: MuxIndicator) -> crate::tui::rows::Row {
+    let id = AgentSessionId::new("claude-code", "/state", key);
+    crate::tui::rows::Row {
+        id: RowId::AgentSession(NodeId::AgentSession(id.clone())),
+        depth: 1,
+        expandable: false,
+        kind: RowKind::AgentSession(crate::tui::rows::AgentSessionRow {
+            session: id.clone(),
+            short_id: key.into(),
+            harness_label: "claude".into(),
+            cwd_display: None,
+            project_display: None,
+            recency: None,
+            activity_epoch: None,
+            mux_state,
+            preview: None,
+            title: None,
+            alias: None,
+            title_disambiguates: false,
+            mux_host: None,
+            primary_node: NodeId::AgentSession(id),
+            pin_id: None,
+            content_hit: None,
+        }),
+    }
+}
+
+fn session_under_group(key: &str) -> crate::tui::rows::Row {
+    session_under_group_with(key, MuxIndicator::Unmuxed)
+}
+
+/// A laid-out line's text.
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
+/// The spans of `session`'s row after its prefix (the blank disclosure
+/// and the session glyph; an unpinned row reserves no marker), as the
+/// left pane lays it out alone at `width`.
+fn session_spans_at(
+    session: &crate::tui::rows::AgentSessionRow,
+    theme: &Theme,
+    now: i64,
+    width: usize,
+) -> Vec<Span<'static>> {
+    let row = crate::tui::rows::Row {
+        id: RowId::AgentSession(NodeId::AgentSession(session.session.clone())),
+        depth: 0,
+        expandable: false,
+        kind: RowKind::AgentSession(session.clone()),
+    };
+    without_prefix(lay_out(&[row], theme, now, width, None).remove(0).spans)
+}
+
+/// `spans` after a row's prefix: the blank disclosure and the kind glyph
+/// (an unpinned row reserves no marker).
+fn without_prefix(mut spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
+    let mut prefix = 4;
+    while prefix > 0 && !spans.is_empty() {
+        prefix -= tuikit::text::width(&spans.remove(0).content);
+    }
+    spans
+}
+
+/// The spans of `mux`'s row after its prefix, as the left pane lays it
+/// out alone with `room` cells after the prefix; with a `spinner`, the
+/// row awaits the hand-off.
+fn mux_spans_in(
+    mux: &MuxSessionRow,
+    theme: &Theme,
+    now: i64,
+    room: usize,
+    spinner: Option<&'static str>,
+) -> Vec<Span<'static>> {
+    let row = crate::tui::rows::Row {
+        id: RowId::MuxSession(NodeId::MuxSession(mux.mux.clone())),
+        depth: 0,
+        expandable: false,
+        kind: RowKind::MuxSession(mux.clone()),
+    };
+    without_prefix(
+        lay_out(&[row], theme, now, room + 4, spinner)
+            .remove(0)
+            .spans,
+    )
+}
+
+/// [`session_spans_at`] in a wide pane.
+fn session_spans(
+    session: &crate::tui::rows::AgentSessionRow,
+    theme: &Theme,
+    now: i64,
+) -> Vec<Span<'static>> {
+    session_spans_at(session, theme, now, 200)
 }
 
 #[test]
@@ -764,15 +1171,13 @@ fn group_rows_show_warning_glyph_when_descendant_is_ambiguous() {
     // ambiguous muxes lives on the group's detail pane
     // (ADR 0071); the row glyph is just the flag.
     let theme = Theme::default();
-    let summary = GroupSummary {
-        agents: 2,
-        attached: 0,
-        ambiguous: 2,
-        unmuxed: 0,
-    };
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    append_group_summary_spans(&mut spans, summary, &theme, 3);
-    let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    let ambiguous = MuxIndicator::Ambiguous { candidate_count: 2 };
+    let rows = vec![
+        group_header("~/src/project"),
+        session_under_group_with("a", ambiguous),
+        session_under_group_with("b", ambiguous),
+    ];
+    let rendered = line_text(&lay_out(&rows, &theme, 0, 120, None)[0]);
 
     assert!(rendered.contains("(2)"), "count chip missing: {rendered}");
     assert!(rendered.contains('▲'), "warning glyph missing: {rendered}");
@@ -782,15 +1187,14 @@ fn group_rows_show_warning_glyph_when_descendant_is_ambiguous() {
     );
 
     // The unambiguous case omits the warning glyph entirely.
-    let clean_summary = GroupSummary {
-        agents: 2,
-        attached: 2,
-        ambiguous: 0,
-        unmuxed: 0,
-    };
-    let mut clean_spans: Vec<Span<'static>> = Vec::new();
-    append_group_summary_spans(&mut clean_spans, clean_summary, &theme, 3);
-    let clean_rendered: String = clean_spans.iter().map(|s| s.content.as_ref()).collect();
+    let attached = MuxIndicator::Attached;
+    let clean = vec![
+        group_header("~/src/project"),
+        session_under_group_with("a", attached),
+        session_under_group_with("b", attached),
+    ];
+    let clean_rendered = line_text(&lay_out(&clean, &theme, 0, 120, None)[0]);
+    assert!(clean_rendered.contains("(2)"), "{clean_rendered}");
     assert!(
         !clean_rendered.contains('▲'),
         "warning should be hidden when no descendant is ambiguous: {clean_rendered}",
@@ -875,10 +1279,10 @@ fn kind_chip_span_renders_per_kind_glyph_in_node_kind_color() {
     // without misleading the operator.
     let theme = Theme::default();
     let cases = [
-        (NodeKind::Workspace, "▦", theme.node_workspace),
-        (NodeKind::MuxSession, "▣", theme.node_mux_session),
-        (NodeKind::Fork, "⋎", theme.node_fork),
-        (NodeKind::Checkout, "◇", theme.node_checkout),
+        (NodeKind::Workspace, "▦", theme.node_workspace()),
+        (NodeKind::MuxSession, "▣", theme.node_mux_session()),
+        (NodeKind::Fork, "⋎", theme.node_fork()),
+        (NodeKind::Checkout, "◇", theme.node_checkout()),
     ];
     for (tag, glyph, expected_color) in cases {
         let span = kind_chip_span(Some(tag), &theme);
@@ -893,11 +1297,11 @@ fn kind_chip_span_renders_per_kind_glyph_in_node_kind_color() {
     // because the chip layer doesn't carry PR state.
     let pr = kind_chip_span(Some(NodeKind::ForgePr), &theme);
     assert_eq!(pr.content.as_ref(), "⇄");
-    assert_eq!(pr.style.fg, Some(theme.pr_open));
+    assert_eq!(pr.style.fg, Some(theme.pr_open()));
     // Missing kind → dim `?` fallback.
     let unknown = kind_chip_span(None, &theme);
     assert_eq!(unknown.content.as_ref(), "?");
-    assert!(unknown.style.add_modifier.contains(theme.placeholder));
+    assert!(unknown.style.add_modifier.contains(theme.muted));
 }
 
 #[test]
@@ -952,7 +1356,7 @@ fn other_link_line_dispatches_per_edge_state() {
     // (quiet) from Conflict (loud + `▲`) so an operator
     // skimming the zone reads the resolver state at a glance.
     // Test the three shapes by constructing fake links and
-    // rendering directly through `render_other_link_line` — no
+    // drawing the Other-zone row the explorer builds for each — no
     // App needed.
     use crate::model::{Confidence, NodeId, Provenance, RelationKind};
     use crate::tui::explorer::{
@@ -984,13 +1388,10 @@ fn other_link_line_dispatches_per_edge_state() {
     };
 
     // Conflict: prefix `▲`, label color = edge_conflict, BOLD.
-    let conflict_line = render_other_link_line(
-        &group,
-        &link(EdgeStateLabel::Conflict),
-        false,
-        &theme,
-        false,
+    let conflict_line = explorer_line(
+        other_row(&group, &link(EdgeStateLabel::Conflict), &theme, false),
         200,
+        &theme,
     );
     let text: String = conflict_line
         .spans
@@ -999,25 +1400,28 @@ fn other_link_line_dispatches_per_edge_state() {
         .collect::<Vec<_>>()
         .join("");
     assert!(
-        text.starts_with("▲ "),
-        "Conflict rows must lead with the `▲ ` prefix (NO_COLOR-safe signal): `{text}`",
+        text.starts_with("  ▲ "),
+        "Conflict rows must lead with the `▲ ` prefix after the cursor gutter \
+         (NO_COLOR-safe signal): `{text}`",
     );
     let label_span = conflict_line
         .spans
         .iter()
         .find(|s| s.content.contains("tmux:x"))
         .expect("neighbor-label span present on conflict row");
-    assert_eq!(label_span.style.fg, Some(theme.edge_conflict));
+    assert_eq!(label_span.style.fg, Some(theme.edge_conflict()));
     assert!(label_span.style.add_modifier.contains(Modifier::BOLD));
 
     // AltOf: no prefix, label color = edge_alt_of, no BOLD.
-    let alt_line = render_other_link_line(
-        &group,
-        &link(EdgeStateLabel::AltOf(RelationKind::LinkedToMux)),
-        false,
-        &theme,
-        false,
+    let alt_line = explorer_line(
+        other_row(
+            &group,
+            &link(EdgeStateLabel::AltOf(RelationKind::LinkedToMux)),
+            &theme,
+            false,
+        ),
         200,
+        &theme,
     );
     let alt_text: String = alt_line
         .spans
@@ -1026,7 +1430,7 @@ fn other_link_line_dispatches_per_edge_state() {
         .collect::<Vec<_>>()
         .join("");
     assert!(
-        !alt_text.starts_with("▲ "),
+        !alt_text.contains("▲ "),
         "AltOf rows should not carry the conflict prefix: `{alt_text}`",
     );
     let alt_label = alt_line
@@ -1034,7 +1438,7 @@ fn other_link_line_dispatches_per_edge_state() {
         .iter()
         .find(|s| s.content.contains("tmux:x"))
         .expect("neighbor-label span present on alt row");
-    assert_eq!(alt_label.style.fg, Some(theme.edge_alt_of));
+    assert_eq!(alt_label.style.fg, Some(theme.edge_alt_of()));
     assert!(!alt_label.style.add_modifier.contains(Modifier::BOLD));
 }
 
@@ -1043,9 +1447,8 @@ fn validated_link_line_drops_the_legacy_winner_star() {
     // ADR 0075: the validated zone never carries `★` — every
     // row there is a resolver winner, so the marker no longer
     // earns its column. The same fact also gets enforced
-    // structurally by `render_related_row`'s removal of the
-    // `resolved_winner` branch, but the buffer-level assertion
-    // pins it from the operator-visible angle.
+    // structurally (no link row reads `resolved_winner`), but the
+    // drawn-row assertion pins it from the operator-visible angle.
     use crate::model::{Confidence, NodeId, Provenance, RelationKind};
     use crate::tui::explorer::{
         CoreField, Direction, EdgeStateLabel, LinkStateLabel, RelationshipGroup, RelationshipLink,
@@ -1074,7 +1477,7 @@ fn validated_link_line_drops_the_legacy_winner_star() {
         preview: Vec::<CoreField>::new(),
         evidence: Vec::new(),
     };
-    let line = render_validated_link_line(&group, &link, false, &theme, true, 200);
+    let line = explorer_line(validated_row(&group, &link, &theme, true), 200, &theme);
     let text: String = line
         .spans
         .iter()
@@ -1122,10 +1525,10 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
         evidence: Vec::new(),
     };
     let width = 56;
-    let line = render_validated_link_line(&group, &link, false, &theme, false, width);
+    let line = explorer_line(validated_row(&group, &link, &theme, false), width, &theme);
     let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        UnicodeWidthStr::width(text.as_str()) <= width,
+        text::width(&text) <= width,
         "row must fit the pane so it never wraps: `{text}`"
     );
     assert!(
@@ -1137,7 +1540,7 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
         "truncation keeps the basename: `{text}`"
     );
 
-    let wide = render_validated_link_line(&group, &link, false, &theme, false, 200);
+    let wide = explorer_line(validated_row(&group, &link, &theme, false), 200, &theme);
     let wide_text: String = wide.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(wide_text.ends_with(path), "no truncation when it fits");
 }
@@ -1185,9 +1588,7 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
     app.update(Msg::CycleFocus);
     // Walk the cursor onto the link row, then activate.
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1197,9 +1598,9 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     let drilled = buffer_to_string(&render_to_buffer(&mut app, area));
     assert!(
         drilled.contains("backend") && drilled.contains("tmux"),
@@ -1224,6 +1625,64 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
         drilled.contains("depth 1"),
         "breadcrumb title should carry the depth marker: {drilled}"
     );
+}
+
+#[test]
+fn a_drilled_title_fits_inside_its_corners_and_cuts_the_chain_last() {
+    use crate::tui::explorer::ExplorerRow;
+
+    let mut app = muxed_app("editor", None);
+    app.update(Msg::CycleFocus);
+    let link_idx = app
+        .explorer_rows()
+        .iter()
+        .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
+        .expect("link row");
+    for _ in 0..link_idx {
+        app.update(Msg::Explorer(ExplorerKey::Down));
+    }
+    app.update(Msg::Explorer(ExplorerKey::Activate));
+
+    // The title is as wide as its room allows: the fixed parts, with the
+    // chain in what they leave, never wider.
+    let full = right_panel_title(&app, 200);
+    let fixed = right_panel_title(&app, 0).width();
+    assert!(full.to_string().ends_with(" · depth 1"), "{full}");
+    assert!(!full.to_string().contains(marks::ELLIPSIS), "{full}");
+    for width in fixed..=full.width() + 2 {
+        let title = right_panel_title(&app, width);
+        assert!(title.width() <= width, "{width}: {title}");
+        assert!(title.to_string().contains(" · depth 1"), "{width}: {title}");
+    }
+    // A cell short, the chain is cut.
+    let cut = right_panel_title(&app, full.width() - 1).to_string();
+    assert!(cut.contains(marks::ELLIPSIS), "{cut}");
+    assert!(cut.ends_with(" · depth 1"), "{cut}");
+
+    // Drawn in a pane (the panes stack on a screen this narrow) exactly
+    // as wide as the title, the frame's lead, and its corners, the
+    // closing space gives way; a cell wider it is drawn; a cell narrower
+    // the chain is cut, and the corner clips nothing of the depth.
+    let exact = full.width() + PaneFrame::LEAD + 2;
+    let title_row = |app: &mut App, width: usize| {
+        let width = u16::try_from(width).expect("a narrow screen");
+        let text = buffer_to_string(&render_to_buffer(app, Rect::new(0, 0, width, 24)));
+        let row = text
+            .lines()
+            .find(|line| line.contains(marks::BACK))
+            .expect("the drilled title")
+            .to_string();
+        (row, text)
+    };
+    let (row, text) = title_row(&mut app, exact + 1);
+    assert!(row.ends_with(" · depth 1 ┐"), "{text}");
+    assert!(!row.contains(marks::ELLIPSIS), "{text}");
+    let (row, text) = title_row(&mut app, exact);
+    assert!(row.ends_with(" · depth 1┐"), "{text}");
+    assert!(!row.contains(marks::ELLIPSIS), "{text}");
+    let (row, text) = title_row(&mut app, exact - 1);
+    assert!(row.ends_with(" · depth 1┐"), "{text}");
+    assert!(row.contains(marks::ELLIPSIS), "{text}");
 }
 
 #[test]
@@ -1269,14 +1728,12 @@ fn agreeing_mux_evidence_renders_as_one_row_with_preview_evidence_list() {
 
     app.update(Msg::CycleFocus);
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
         .expect("validated row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     let focused = buffer_to_string(&render_to_buffer(&mut app, area));
     assert!(
@@ -1294,103 +1751,90 @@ fn agreeing_mux_evidence_renders_as_one_row_with_preview_evidence_list() {
 }
 
 #[test]
-fn header_field_line_count_grows_with_value_wrap() {
-    // Reproduces the "Session section vanishes" bug: the right
-    // pane's `name` field for a mux with a very long native_id
-    // wraps onto multiple terminal rows. Pre-fix the budget
-    // counted it as a single row and clipped the Session section
-    // below.
-    let short = HeaderField {
-        label: "name",
-        value: "editor".to_string(),
-        placeholder: false,
-        annotation: None,
-        target: None,
-        expanded_kind: None,
-        expanded_fields: Vec::new(),
+fn enter_on_unresolved_evidence_points_at_the_preview_that_shows_it() {
+    use crate::model::{
+        AgentSessionId, Confidence, GraphLink, LinkEndpoint, LinkState, Metadata, NodeId,
+        Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
     };
-    let long = HeaderField {
-        label: "name",
-        value: "a".repeat(120),
-        placeholder: false,
-        annotation: None,
-        target: None,
-        expanded_kind: None,
-        expanded_fields: Vec::new(),
-    };
-    // 40-cell-wide panel: short value fits on one row, long
-    // value wraps onto multiple rows once the 10-cell label
-    // column is added.
-    assert_eq!(header_field_line_count(&short, 40, 0), 1);
-    assert!(header_field_line_count(&long, 40, 0) >= 3);
-    // The panel-width=0 edge case shouldn't divide by zero or
-    // claim zero lines — fall back to a single row.
-    assert_eq!(header_field_line_count(&long, 0, 0), 1);
-    // An indent shrinks the effective width: a value that fits at
-    // indent=0 should report more lines once it's nested.
-    let just_fits = HeaderField {
-        label: "name",
-        value: "a".repeat(28),
-        placeholder: false,
-        annotation: None,
-        target: None,
-        expanded_kind: None,
-        expanded_fields: Vec::new(),
-    };
-    assert_eq!(header_field_line_count(&just_fits, 40, 0), 1);
-    assert!(header_field_line_count(&just_fits, 40, 4) >= 2);
-}
+    use crate::tui::explorer::ExplorerRow;
 
-#[test]
-fn header_zone_height_accounts_for_wrapped_field_values() {
-    use crate::tui::detail::SectionKind;
-
-    let mux_field = |value: &str| HeaderField {
-        label: "name",
-        value: value.to_string(),
-        placeholder: false,
-        annotation: None,
-        target: None,
-        expanded_kind: None,
-        expanded_fields: Vec::new(),
+    let unresolved = GraphLink {
+        id: "parent-unresolved".to_string(),
+        source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+        target: LinkEndpoint::Unresolved {
+            evidence: UnresolvedEndpoint {
+                node_type: "agent_session".to_string(),
+                harness_key: Some("codex".to_string()),
+                native_id: Some("9a1f".to_string()),
+                state_scope: None,
+                path: Some("/state/rollout-9a1f.jsonl".to_string()),
+                metadata: Metadata::default(),
+            },
+        },
+        relation: RelationKind::ParentSession,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::Low,
+        freshness: crate::model::Freshness::Fresh,
+        source_metadata: SourceMetadata::default(),
+        state: LinkState::Active,
     };
-    let session_field = HeaderField {
-        label: "session",
-        value: "codex:abc".to_string(),
-        placeholder: false,
-        annotation: None,
-        target: Some(NodeId::AgentSession(AgentSessionId::new(
-            "codex", "/state", "abc",
-        ))),
-        expanded_kind: None,
-        expanded_fields: Vec::new(),
+    let mut app = muxed_app_with_links("editor", None, vec![unresolved]);
+    app.update(Msg::CycleFocus);
+    let walk_to = |app: &mut App, wanted: fn(&ExplorerRow) -> bool| {
+        let at = app
+            .explorer_rows()
+            .iter()
+            .position(wanted)
+            .expect("the row is listed");
+        app.update(Msg::Explorer(ExplorerKey::First));
+        for _ in 0..at {
+            app.update(Msg::Explorer(ExplorerKey::Down));
+        }
     };
+    walk_to(&mut app, |row| {
+        matches!(row, ExplorerRow::OtherHeader { .. })
+    });
+    app.update(Msg::Explorer(ExplorerKey::Activate));
+    walk_to(&mut app, |row| {
+        matches!(row, ExplorerRow::OtherUnresolved { .. })
+    });
 
-    let with_value = |value: &str| NodeDetail {
-        kind: crate::model::NodeKind::MuxSession,
-        title_line: "tmux:editor".to_string(),
-        short_id: "deadbeef".to_string(),
-        full_id: NodeId::MuxSession(MuxSessionId::new("editor")),
-        header_fields: vec![mux_field(value), session_field.clone()],
-        outgoing_links: Vec::new(),
-        incoming_links: Vec::new(),
-        resolved: Vec::new(),
-        diagnostics: Vec::new(),
-    };
+    // Enter has nothing to follow; the hint names the Preview and no key.
+    app.update(Msg::Explorer(ExplorerKey::Activate));
+    let hint = app.status_message().expect("Enter says why").to_string();
+    assert_eq!(
+        hint,
+        "explorer: evidence names no node — the Preview shows it"
+    );
+    assert!(!hint.contains('`'), "the hint names no key: {hint}");
 
-    // Sanity: each detail has both a Mux and a Session section.
-    let detail = with_value("short");
-    let sections = detail.sections();
-    assert_eq!(sections.len(), 2);
-    assert_eq!(sections[0].kind, SectionKind::Mux);
-    assert_eq!(sections[1].kind, SectionKind::Session);
+    // The Preview shows what the evidence records while the cursor is on
+    // the row.
+    let area = Rect::new(0, 0, 140, 40);
+    let text = buffer_to_string(&render_to_buffer(&mut app, area));
+    let preview = text
+        .lines()
+        .skip_while(|line| !line.contains(" Preview "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for shown in [
+        "unresolved",
+        "agent_session",
+        "harness_key",
+        "codex",
+        "native_id",
+        "9a1f",
+        "/state/rollout-9a1f.jsonl",
+    ] {
+        assert!(preview.contains(shown), "the Preview shows {shown}: {text}");
+    }
 
-    let short_height = header_zone_height(&with_value("short"), false, &[], 40, 80);
-    let long_height = header_zone_height(&with_value(&"x".repeat(200)), false, &[], 40, 80);
-    assert!(
-        long_height > short_height,
-        "long field value should grow the budget so the Session \
-             section below stays visible (short={short_height}, long={long_height})"
+    // `o`, which the hint used to name, opens nothing on the row.
+    app.update(Msg::Explorer(ExplorerKey::Inspect));
+    assert!(app.value_modal().is_none());
+    assert_eq!(
+        app.status_message(),
+        Some("explorer: row has no truncated value to open")
     );
 }
 
@@ -1588,9 +2032,7 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
     // Walk the cursor onto the upstream `linked_to_mux` row,
     // then activate to drill into the linked session.
     let link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .position(|row| {
             matches!(
@@ -1600,9 +2042,9 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
         })
         .expect("link row");
     for _ in 0..link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
 
     let area = Rect::new(0, 0, 120, 40);
     let drilled = buffer_to_string(&render_to_buffer(&mut app, area));
@@ -1665,7 +2107,7 @@ fn session_harness_span_renders_as_filled_badge() {
         pin_id: None,
         content_hit: None,
     };
-    let spans = render_session_spans(&row, &theme, now, None);
+    let spans = session_spans(&row, &theme, now);
     let badge = spans
         .iter()
         .find(|s| s.content.trim() == "codex")
@@ -1685,71 +2127,71 @@ fn node_kind_glyph_span_uses_slate_glyph_and_theme_color() {
     let theme = Theme::default();
     let span = node_kind_glyph_span(NodeKind::Repo, &theme);
     assert_eq!(span.content, "◆ ");
-    assert_eq!(span.style.fg, Some(theme.node_repo));
+    assert_eq!(span.style.fg, Some(theme.node_repo()));
     let workspace = node_kind_glyph_span(NodeKind::Workspace, &theme);
     assert_eq!(workspace.content, "▦ ");
-    assert_eq!(workspace.style.fg, Some(theme.node_workspace));
+    assert_eq!(workspace.style.fg, Some(theme.node_workspace()));
 }
 
 #[test]
-fn forge_pr_glyph_span_picks_color_from_pr_state() {
-    // The PR glyph color follows `theme.pr_*` based on PR state
-    // (ADR 0073 §2). Draft overrides state.
-    use crate::tui::rows::PrRow;
+fn a_pinned_pr_draws_its_kind_glyph_and_word_in_one_style() {
+    // The Pinned and History rows spell the state as a word; the kind
+    // glyph and the word take the state glyph's style, so they agree
+    // with the PRs view for every state crossed with draft.
+    use crate::tui::rows::{MixedRow, MixedTone, PinMarker, PrStatus};
     let theme = Theme::default();
-    let base = PrRow {
-        pr_number: 1,
-        repo_display: "owner/repo".into(),
-        label: "owner/repo".into(),
-        state: Some("open".into()),
-        is_draft: false,
-        branch_name: None,
-        tracked: false,
-        title: None,
-        updated_recency: None,
-        updated_epoch: None,
-        url: None,
+    let pr_row = |status: Option<PrStatus>| MixedRow {
+        node_kind: crate::model::NodeKind::ForgePr,
+        label: "pr".into(),
+        status: status.map_or("live", PrStatus::word).into(),
+        tone: MixedTone::Normal,
+        age: None,
+        age_epoch: None,
+        state: None,
+        chip: None,
+        content: String::new(),
         primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
             "github",
             "github.com",
-            "owner",
-            "repo",
+            "o",
+            "r",
             1,
         )),
+        pr_status: status,
+        marker: PinMarker::None,
     };
-    assert_eq!(
-        forge_pr_glyph_span(&base, &theme).style.fg,
-        Some(theme.pr_open)
-    );
-    let closed = PrRow {
-        state: Some("closed".into()),
-        ..base.clone()
-    };
-    assert_eq!(
-        forge_pr_glyph_span(&closed, &theme).style.fg,
-        Some(theme.pr_closed)
-    );
-    let merged = PrRow {
-        state: Some("merged".into()),
-        ..base.clone()
-    };
-    assert_eq!(
-        forge_pr_glyph_span(&merged, &theme).style.fg,
-        Some(theme.pr_merged)
-    );
-    let draft = PrRow {
-        is_draft: true,
-        state: Some("open".into()),
-        ..base.clone()
-    };
-    assert_eq!(
-        forge_pr_glyph_span(&draft, &theme).style.fg,
-        Some(theme.pr_draft),
-        "draft overrides state-based color",
-    );
-    // Glyph itself stays the `NodeKind::ForgePr` slate glyph
-    // regardless of color.
-    assert_eq!(forge_pr_glyph_span(&base, &theme).content, "⇄ ");
+    let mut wrong = Vec::new();
+    for (state, draft, _, word, style) in pr_state_cases(&theme) {
+        let row = pr_row(Some(PrStatus::of(state, draft)));
+        let kind = row_kind_glyph_span(&RowKind::Mixed(row.clone()), &theme).expect("a glyph");
+        let laid = crate::tui::rows::Row {
+            id: RowId::Pin {
+                pin_id: "pr".into(),
+            },
+            depth: 0,
+            expandable: false,
+            kind: RowKind::Mixed(row),
+        };
+        let spans = lay_out(&[laid], &theme, 0, 80, None).remove(0).spans;
+        // The word after the label, padded in its own style.
+        let status = spans
+            .iter()
+            .find(|span| span.content.trim() == word)
+            .map(|span| span.style);
+        if status != Some(style) || kind.style != style {
+            wrong.push(format!(
+                "state {state:?}, draft {draft}: {} {:?} beside {word} {status:?}, want {style:?}",
+                kind.content, kind.style
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+
+    // A pin whose PR isn't listed has no state on hand: the glyph keeps
+    // the open hue every stateless PR glyph uses.
+    let kind = row_kind_glyph_span(&RowKind::Mixed(pr_row(None)), &theme).expect("a glyph");
+    assert_eq!(kind.content, "⇄ ");
+    assert_eq!(kind.style, Style::default().fg(theme.pr_open()));
 }
 
 #[test]
@@ -1762,7 +2204,7 @@ fn pr_tracking_span_tells_a_local_branch_from_none() {
     let untracked = PrRow {
         pr_number: 1,
         repo_display: "owner/repo#1".into(),
-        label: "#1".into(),
+        forge_repo: None,
         state: Some("open".into()),
         is_draft: false,
         branch_name: None,
@@ -1787,26 +2229,25 @@ fn pr_tracking_span_tells_a_local_branch_from_none() {
 
     let none = pr_tracking_span(&untracked, &theme);
     assert_eq!(none.content, "◌");
-    assert!(none.style.add_modifier.contains(theme.placeholder));
+    assert!(none.style.add_modifier.contains(theme.muted));
 
     let some = pr_tracking_span(&tracked, &theme);
     assert_eq!(some.content, "⌥");
-    assert_eq!(some.style.fg, Some(theme.node_branch));
+    assert_eq!(some.style.fg, Some(theme.node_branch()));
     assert_eq!(some.width(), none.width());
 }
 
 #[test]
 fn row_kind_glyph_span_dispatches_per_row_kind() {
-    use crate::tui::rows::{ForkRow, GroupRow};
+    use crate::tui::rows::GroupRow;
     let theme = Theme::default();
 
     // Group rows derive their kind from `primary_node`; synthetic
     // group buckets without a backing node skip the glyph.
-    let workspace_group = RowKind::Group(GroupRow {
-        display_path: "/ws".into(),
-        primary_node: Some(NodeId::Workspace(crate::model::WorkspaceId::new("/ws"))),
-        is_launch_context: false,
-    });
+    let workspace_group = RowKind::Group(GroupRow::at_path(
+        "/ws",
+        Some(NodeId::Workspace(crate::model::WorkspaceId::new("/ws"))),
+    ));
     assert_eq!(
         row_kind_glyph_span(&workspace_group, &theme)
             .map(|s| s.content.to_string())
@@ -1814,11 +2255,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         Some("▦ "),
     );
 
-    let synthetic_group = RowKind::Group(GroupRow {
-        display_path: "(ungrouped)".into(),
-        primary_node: None,
-        is_launch_context: false,
-    });
+    let synthetic_group = RowKind::Group(GroupRow::named("(ungrouped)", None));
     assert!(
         row_kind_glyph_span(&synthetic_group, &theme).is_none(),
         "synthetic group buckets have no NodeKind",
@@ -1877,18 +2314,6 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
             .as_deref(),
         Some("▣ "),
     );
-    // Fork rows get `⋎`.
-    let fork = RowKind::Fork(ForkRow {
-        fork_label: "alpha".into(),
-        provider: "github".into(),
-        scope: None,
-        parent_label: None,
-        child_count: 0,
-        primary_node: NodeId::Fork(crate::model::ForkId::new("alpha")),
-    });
-    let fork_glyph = row_kind_glyph_span(&fork, &theme).unwrap();
-    assert_eq!(fork_glyph.content, "⋎ ");
-    assert_eq!(fork_glyph.style.fg, Some(theme.node_fork));
 }
 
 #[test]
@@ -1915,7 +2340,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
         content_hit: None,
     };
 
-    let spans = render_session_spans(&row, &theme, now, None);
+    let spans = session_spans(&row, &theme, now);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
         rendered.contains("∘  ingest-refactor"),
@@ -1957,7 +2382,7 @@ fn a_session_last_hosted_by_a_gone_mux_carries_a_was_in_chip() {
         content_hit: None,
     };
     let text = |row: &AgentSessionRow| -> String {
-        render_session_spans(row, &theme, now, None)
+        session_spans(row, &theme, now)
             .iter()
             .map(|span| span.content.as_ref())
             .collect()
@@ -2019,7 +2444,7 @@ fn session_id_is_strictly_truncated_in_left_row() {
         content_hit: None,
     };
 
-    let spans = render_session_spans(&row, &theme, now, None);
+    let spans = session_spans(&row, &theme, now);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
         rendered.starts_with("ffffffff  "),
@@ -2058,7 +2483,7 @@ fn session_display_label_is_truncated_in_left_row() {
         content_hit: None,
     };
 
-    let spans = render_session_spans(&row, &theme, now, None);
+    let spans = session_spans(&row, &theme, now);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     let label = spans
         .iter()
@@ -2099,11 +2524,11 @@ fn mux_session_row_mirrors_session_column_order() {
         content_hit: None,
     };
 
-    let spans = render_mux_session_spans(&row, &theme, now, 100, None);
+    let spans = mux_spans_in(&row, &theme, now, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(
-        UnicodeWidthStr::width(rendered.as_str()) <= 100,
+        text::width(&rendered) <= 100,
         "mux row should fit the given width: {rendered:?}"
     );
     assert!(
@@ -2171,8 +2596,7 @@ fn session_project_column_renders_before_inline_preview() {
         content_hit: None,
     };
 
-    let mut spans = render_session_spans(&row, &theme, now, None);
-    append_session_preview(&mut spans, &row, 120, &theme);
+    let spans = session_spans_at(&row, &theme, now, 120);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     let project_idx = rendered.find("conspectus").expect("project rendered");
     let preview_idx = rendered
@@ -2199,8 +2623,8 @@ fn session_recency_span_picks_bucket_style_from_theme() {
 
     // Build a minimal AgentSessionRow directly so we can pin the
     // activity_epoch and assert the recency span's style without
-    // staging a full snapshot. The render_session_spans helper is
-    // intentionally cheap to call from the test module.
+    // staging a full snapshot. Laying one row out is
+    // cheap to do from the test module.
     use crate::tui::rows::{AgentSessionRow, MuxIndicator};
     let theme = Theme::default();
     let now: i64 = 1_700_000_000;
@@ -2225,7 +2649,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
     };
 
     let fresh = make_row(Some("1m"), Some(now - 60));
-    let spans = render_session_spans(&fresh, &theme, now, None);
+    let spans = session_spans(&fresh, &theme, now);
     assert_eq!(
         recency_span(&spans, "1m").style,
         theme.recency_fresh.into_style(),
@@ -2233,17 +2657,17 @@ fn session_recency_span_picks_bucket_style_from_theme() {
     );
 
     let cold = make_row(Some("3d"), Some(now - 3 * 24 * 60 * 60));
-    let spans = render_session_spans(&cold, &theme, now, None);
+    let spans = session_spans(&cold, &theme, now);
     assert_eq!(
         recency_span(&spans, "3d").style,
         theme.recency_cold.into_style(),
     );
 
     let unknown = make_row(None, None);
-    let spans = render_session_spans(&unknown, &theme, now, None);
+    let spans = session_spans(&unknown, &theme, now);
     assert_eq!(
         recency_span(&spans, "—").style,
-        Style::default().add_modifier(theme.placeholder),
+        Style::default().add_modifier(theme.muted),
         "missing activity_epoch falls back to placeholder dimming",
     );
 }
@@ -2391,9 +2815,9 @@ fn right_focus_keeps_selected_row_highlighted_and_changes_status_scope() {
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert!(
-        // Right-focus hint now describes the explorer
-        // cursor instead of preview scroll.
-        text.contains("j/k cursor"),
+        // The right-focus hint is the right pane's table's: the
+        // explorer cursor, not the preview scroll.
+        text.contains("↑/↓ move · Enter"),
         "right focus status hint missing: {text}"
     );
     assert!(
@@ -2405,7 +2829,7 @@ fn right_focus_keeps_selected_row_highlighted_and_changes_status_scope() {
     // indicator (BOLD without REVERSED) in the left pane while
     // focus is on the right pane.
     let selected_carries_inactive_indicator = (0..buffer.area.height).any(|y| {
-        let left_width = buffer.area.width / 2;
+        let left_width = panes(buffer.area).left.width;
         let any_bold =
             (0..left_width).any(|x| buffer[(x, y)].style().add_modifier.contains(Modifier::BOLD));
         let any_reversed = (0..left_width).any(|x| {
@@ -2634,8 +3058,8 @@ fn contextual_status_offers_ambiguous_attach_hint_with_inspect_affordance() {
 
 #[test]
 fn contextual_status_for_group_row_advertises_expand_collapse_folding() {
-    // A group-row selection should surface the
-    // expand/collapse fold bindings, not an attach hint.
+    // A group-row selection should surface the fold keys, `Enter` among
+    // them, not an attach hint.
     let mut app = seeded_app();
     // Auto-selection lands on the project group row, which is
     // exactly what we want to assert against.
@@ -2643,13 +3067,10 @@ fn contextual_status_for_group_row_advertises_expand_collapse_folding() {
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert!(
-        text.contains("Enter/l expand"),
-        "group row should advertise expand: {text}"
+        text.contains("Enter/←/→ fold"),
+        "group row should advertise folding: {text}"
     );
-    assert!(
-        text.contains("h collapse"),
-        "group row should advertise collapse: {text}"
-    );
+    assert!(!text.contains("attach"), "{text}");
 }
 
 #[test]
@@ -2770,13 +3191,18 @@ fn contextual_status_surfaces_disabled_attach_reason_for_current_tmux_session() 
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert!(
-        text.contains("refusing to attach current tmux session `editor`"),
+        text.contains("Enter/a attach: refusing to attach current tmux session `editor`"),
         "current-tmux row should surface the disabled-attach reason: {text}"
     );
-    assert!(
-        !text.contains("Enter/a attach"),
-        "Enter/a attach hint must not render when attach is disabled: {text}"
-    );
+    // The keys are named with why they cannot attach, dimmed: never as
+    // a hint that attaches.
+    let hints = status_hints(&app);
+    let attach = hints
+        .hints()
+        .iter()
+        .find(|hint| hint.text().starts_with("Enter/a attach"))
+        .expect("the attach keys are named");
+    assert!(!attach.is_available(), "{}", attach.text());
 }
 
 #[test]
@@ -2820,41 +3246,6 @@ fn mux_preview_renders_compact_header_and_bottom_cropped_capture() {
 }
 
 #[test]
-fn compact_path_helpers_keep_primary_label_short() {
-    assert_eq!(compact_path_label("~/src/conspectus"), "conspectus");
-    assert_eq!(
-        compact_path_secondary("~/src/conspectus"),
-        "~/src/conspectus"
-    );
-    assert_eq!(compact_path_label("Ungrouped"), "Ungrouped");
-    assert_eq!(compact_path_secondary("Ungrouped"), "");
-}
-
-#[test]
-fn compact_path_helpers_split_workspace_display_at_double_space() {
-    // `format_workspace_display` joins label, members, and
-    // provider with `  ` separators. The renderer bolds the
-    // label and renders the rest with `theme.placeholder`, so
-    // the helpers must split there to keep the member list and
-    // provider chip out of the bold span — parallel to how a
-    // repo header bolds the basename and leaves the CWD path
-    // non-bold.
-    let display = "nix-config  config+personal+work-config  (agent-deck)";
-    assert_eq!(compact_path_label(display), "nix-config");
-    assert_eq!(
-        compact_path_secondary(display),
-        "config+personal+work-config  (agent-deck)"
-    );
-
-    // Workspace with no members still splits cleanly because
-    // `format_workspace_display` keeps the `  (<provider>)`
-    // separator.
-    let display = "nix-config  (agent-deck)";
-    assert_eq!(compact_path_label(display), "nix-config");
-    assert_eq!(compact_path_secondary(display), "(agent-deck)");
-}
-
-#[test]
 fn mux_preview_skips_the_blank_rows_below_a_quiet_panes_output() {
     // A server pane: a few lines of output, then the rest of the screen
     // blank. The bottom rows are the output, not the empty screen.
@@ -2892,7 +3283,7 @@ fn mux_preview_follows_the_wrap_mode() {
             .collect()
     };
     assert_eq!(rows(&app), ["─".repeat(20), "> prompt".to_string()]);
-    app.update(Msg::SetPreviewWrap(crate::tui::PreviewWrap::Plain));
+    app.update(Msg::SetPreviewWrap(crate::tui::WrapMode::Plain));
     assert_eq!(rows(&app).len(), 4, "the rule wraps onto three rows");
 }
 
@@ -2901,62 +3292,6 @@ fn mux_preview_of_an_all_blank_pane_says_empty() {
     let app = muxed_app("idle", Some("\n\n   \n"));
     let preview = preview_text_for_selection(&app, 80, 5).to_string();
     assert_eq!(preview, "(empty pane)");
-}
-
-#[test]
-fn render_captured_pane_with_color_parses_ansi_into_styled_spans() {
-    // ESC[31m makes "red", ESC[0m resets.
-    let raw = "\x1b[31mred\x1b[0m  plain";
-    let text = render_captured_pane(raw, true);
-    // Flattened content matches the visible characters.
-    assert_eq!(text.to_string(), "red  plain");
-    // The first line's first span carries red foreground style.
-    let first_line = text.lines.first().expect("at least one line");
-    let first_span = first_line.spans.first().expect("at least one span");
-    assert_eq!(first_span.content, "red");
-    assert_eq!(
-        first_span.style.fg,
-        Some(ratatui::style::Color::Red),
-        "expected red fg on the red span"
-    );
-}
-
-#[test]
-fn render_captured_pane_without_color_strips_styling() {
-    let raw = "\x1b[31mred\x1b[0m  plain";
-    let text = render_captured_pane(raw, false);
-    assert_eq!(text.to_string(), "red  plain");
-    // With colour disabled every span should land styled
-    // identically to a plain `Text::raw` — i.e. default fg.
-    for line in &text.lines {
-        for span in &line.spans {
-            assert_eq!(
-                span.style.fg, None,
-                "expected colour to be stripped, got span={span:?}"
-            );
-        }
-    }
-}
-
-#[test]
-fn render_captured_pane_falls_back_to_plain_text_on_malformed_input() {
-    // Lone ESC byte — ansi-to-tui should either parse harmlessly
-    // or fail; either way `render_captured_pane` returns
-    // something printable rather than panicking.
-    let raw = "before\x1bafter";
-    let text = render_captured_pane(raw, true);
-    let flattened = text.to_string();
-    // The visible characters either side of the rogue ESC
-    // must survive — operators don't lose pane content to a
-    // single bad byte.
-    assert!(
-        flattened.contains("before"),
-        "expected 'before' in output, got: {flattened:?}"
-    );
-    assert!(
-        flattened.contains("after"),
-        "expected 'after' in output, got: {flattened:?}"
-    );
 }
 
 #[test]
@@ -3143,7 +3478,7 @@ fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
     // Walk down a few rows from the top of the explorer. The
     // top validated rows should remain in view.
     for _ in 0..3 {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
     let initial = buffer_to_string(&render_to_buffer(&mut app, area));
     assert!(
@@ -3152,9 +3487,7 @@ fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
     );
 
     let last_link_idx = app
-        .explorer()
-        .expect("state")
-        .rows()
+        .explorer_rows()
         .iter()
         .enumerate()
         .filter_map(|(idx, row)| match row {
@@ -3163,9 +3496,9 @@ fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
         })
         .next_back()
         .expect("at least one validated link row");
-    let current = app.explorer().expect("state").cursor;
+    let current = app.explorer().expect("state").cursor().expect("a cursor");
     for _ in current..last_link_idx {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
     }
 
     let buffer = render_to_buffer(&mut app, area);
@@ -3188,7 +3521,7 @@ fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
     // (`Related N validated · M other`) is sized to the
     // paragraph's render width. Pre-fix, the divider's width
     // was computed against the full inner width; once
-    // `scrollbar_layout` reserved a gutter, the paragraph
+    // the scrollbar gutter took a column, the paragraph
     // rendered at one less column and the divider wrapped a
     // few characters onto a second row. Every cursor row
     // below the divider then landed one row lower than the
@@ -3331,11 +3664,7 @@ fn left_pane_renders_scrollbar_when_content_exceeds_viewport() {
     // rightmost inner column.
     let area = Rect::new(0, 0, 120, 24);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let left_pane = split[0];
+    let left_pane = panes(area).left;
     let bar_col = rightmost_inner_column(left_pane);
     let column = buffer_column(&buffer, bar_col);
     assert!(
@@ -3354,11 +3683,7 @@ fn left_pane_hides_scrollbar_when_content_fits() {
     let mut app = seeded_app();
     let area = Rect::new(0, 0, 120, 24);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let left_pane = split[0];
+    let left_pane = panes(area).left;
     let bar_col = rightmost_inner_column(left_pane);
     let column = buffer_column(&buffer, bar_col);
     for glyph in SCROLLBAR_GLYPHS {
@@ -3380,11 +3705,7 @@ fn right_pane_explorer_renders_scrollbar_when_related_list_overflows() {
     app.update(Msg::CycleFocus);
     let area = Rect::new(0, 0, 120, 20);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let right_pane = split[1];
+    let right_pane = panes(area).right;
     let bar_col = rightmost_inner_column(right_pane);
     let column = buffer_column(&buffer, bar_col);
     assert!(
@@ -3448,11 +3769,7 @@ fn left_pane_scrollbar_thumb_reaches_bottom_at_max_scroll() {
 
     let area = Rect::new(0, 0, 120, 24);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let left_pane = split[0];
+    let left_pane = panes(area).left;
     let bar_col = rightmost_inner_column(left_pane);
 
     // Find the rows occupied by the thumb glyph (the solid
@@ -3538,17 +3855,13 @@ fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
 
     let area = Rect::new(0, 0, 120, 24);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let left_pane = split[0];
+    let left_pane = panes(area).left;
     let bar_col = rightmost_inner_column(left_pane);
     // Borders use box-drawing characters. Allow them through.
     let border_glyphs = ["─", "│", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼"];
 
     let mut scrollbar_glyph_rows = 0;
-    for y in 0..buffer.area.height {
+    for y in left_pane.y..left_pane.bottom() {
         let symbol = buffer[(bar_col, y)].symbol();
         if symbol.is_empty()
             || symbol == " "
@@ -3573,6 +3886,85 @@ fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
 }
 
 #[test]
+fn an_explorer_that_shrinks_leaves_no_blank_rows_below_it() {
+    // The explorer scrolled to its end, then lost half its rows: the
+    // window comes back inside them instead of keeping its old offset
+    // and showing the last row alone with blank rows below it.
+    let mut app = workspace_app_with_repos(20);
+    app.update(Msg::CycleFocus);
+    if !app.edge_meta_visible() {
+        app.update(Msg::ToggleEdgeMeta);
+    }
+    app.update(Msg::Explorer(ExplorerKey::Last));
+    let area = Rect::new(0, 0, 100, 20);
+    render_to_buffer(&mut app, area);
+    let tall = app.explorer_window();
+    assert!(
+        tall.offset() > 0,
+        "the explorer scrolled to its end: {tall:?}"
+    );
+
+    app.update(Msg::ToggleEdgeMeta);
+    render_to_buffer(&mut app, area);
+    let short = app.explorer_window();
+    assert!(
+        short.content() < tall.content(),
+        "hiding the meta lines shrank the explorer: {tall:?} -> {short:?}"
+    );
+    assert_eq!(
+        short.visible().len(),
+        short.viewport(),
+        "the zone is full: {short:?}"
+    );
+    assert_eq!(short.offset(), short.last_offset());
+}
+
+#[test]
+fn scrolling_a_preview_past_its_end_is_taken_back_at_once() {
+    // `K` far past a transcript's oldest turn: the frame keeps the
+    // offset at the oldest turn, so the first `J` moves the Preview.
+    let mut app = unmuxed_session_app(|_| {});
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: transcript_content(30),
+    });
+    let area = Rect::new(0, 0, 120, 30);
+    render_to_buffer(&mut app, area);
+    for _ in 0..500 {
+        app.update(Msg::ScrollPreviewBy(-1));
+    }
+    let oldest = buffer_to_string(&render_to_buffer(&mut app, area));
+    assert!(
+        app.preview_scroll() < 500,
+        "the frame took the offset back ({})",
+        app.preview_scroll()
+    );
+    app.update(Msg::ScrollPreviewBy(1));
+    let next = buffer_to_string(&render_to_buffer(&mut app, area));
+    assert_ne!(oldest, next, "J moved the Preview at once");
+}
+
+#[test]
+fn a_preview_still_loading_keeps_its_offset() {
+    // Keys pressed while the Preview shows its placeholder are not lost:
+    // the first frame that shows the content scrolls by them.
+    let mut app = unmuxed_session_app(|_| {});
+    let area = Rect::new(0, 0, 120, 30);
+    render_to_buffer(&mut app, area);
+    for _ in 0..3 {
+        app.update(Msg::ScrollPreviewBy(-1));
+        render_to_buffer(&mut app, area);
+    }
+    assert_eq!(app.preview_scroll(), 3, "the placeholder took nothing back");
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: transcript_content(30),
+    });
+    render_to_buffer(&mut app, area);
+    assert_eq!(app.preview_scroll(), 3, "the transcript has room for it");
+}
+
+#[test]
 fn right_pane_explorer_hides_scrollbar_when_related_list_fits() {
     // A workspace with two repos has only two validated rows;
     // the explorer header comfortably fits in any non-tiny
@@ -3580,11 +3972,7 @@ fn right_pane_explorer_hides_scrollbar_when_related_list_fits() {
     let mut app = workspace_app_with_repos(2);
     let area = Rect::new(0, 0, 120, 30);
     let buffer = render_to_buffer(&mut app, area);
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
-    let right_pane = split[1];
+    let right_pane = panes(area).right;
     let bar_col = rightmost_inner_column(right_pane);
     let column = buffer_column(&buffer, bar_col);
     for glyph in SCROLLBAR_GLYPHS {
@@ -3681,7 +4069,7 @@ fn mux_view_header_counts_sessions_in_visible_muxes() {
 
 #[test]
 fn reported_failure_leads_the_rows_preview_until_a_later_success() {
-    use crate::tui::messages::{CommandRecord, LogEntry, LogTarget};
+    use crate::tui::messages::{CommandRecord, LogEntry, LogEntryExt, LogTarget};
     let mut app = pinned_app(None);
     app.report(
         LogEntry::error("pin `ingest` launch failed: exited with status 1")
@@ -3710,7 +4098,8 @@ fn reported_failure_leads_the_rows_preview_until_a_later_success() {
     );
 
     app.report(
-        LogEntry::info("pin `ingest` launched").with_target(LogTarget::Pin("ingest".to_string())),
+        LogEntry::success("pin `ingest` launched")
+            .with_target(LogTarget::Pin("ingest".to_string())),
     );
     let preview = preview_text_for_selection(&app, 80, 20).to_string();
     assert!(!preview.contains("launch failed"), "{preview}");
@@ -3718,7 +4107,7 @@ fn reported_failure_leads_the_rows_preview_until_a_later_success() {
 
 #[test]
 fn unseen_failures_keep_a_status_bar_chip_until_the_log_is_opened() {
-    use crate::tui::messages::LogEntry;
+    use crate::tui::messages::{LogEntry, LogEntryExt};
     let mut app = pinned_app(None);
     app.report(LogEntry::error("mux `w1` attach failed"));
     assert_eq!(
@@ -3739,12 +4128,153 @@ fn unseen_failures_keep_a_status_bar_chip_until_the_log_is_opened() {
 }
 
 #[test]
-fn info_report_sets_a_plain_status_message() {
+fn success_report_sets_a_plain_status_message() {
+    use crate::tui::messages::{LogEntry, LogEntryExt};
     let mut app = pinned_app(None);
-    app.report(crate::tui::messages::LogEntry::info("renamed: w1"));
+    app.report(LogEntry::success("renamed: w1"));
     assert_eq!(app.status_message(), Some("renamed: w1"));
+    assert_eq!(
+        app.status().map(|status| status.severity),
+        Some(tuikit::feedback::Severity::Success)
+    );
     assert_eq!(app.messages().unseen(), 0);
     assert_eq!(app.messages().len(), 1);
+}
+
+/// The text of `row` laid out alone in `width` cells, its prefix (the
+/// disclosure and the kind glyph) included.
+fn row_text_at(row: &crate::tui::rows::Row, width: usize) -> String {
+    line_text(&lay_out(std::slice::from_ref(row), &Theme::default(), 0, width, None)[0])
+}
+
+#[test]
+fn a_narrow_session_row_gives_way_key_first_and_keeps_its_state() {
+    // A session's lined-up cells (key, chip, age, state) give way key
+    // first, then the chip, then the age; the state glyph stays. The
+    // label after them narrows with `…`, and leaves once it cannot keep
+    // eight cells.
+    let mut session = session_under_group("0199a3f2-ab");
+    session.depth = 0;
+    if let RowKind::AgentSession(row) = &mut session.kind {
+        row.alias = Some("a label of some length".into());
+    }
+    // The prefix is 4 cells; the lined-up cells take 29 more.
+    let wide = row_text_at(&session, 60);
+    assert!(
+        wide.contains("0199a3f2  ") && wide.contains("a label of some length"),
+        "{wide}"
+    );
+    let cut = row_text_at(&session, 4 + 29 + 2 + 10);
+    assert!(
+        cut.ends_with("a label o…"),
+        "the label narrows with the mark: {cut:?}"
+    );
+    let gone = row_text_at(&session, 4 + 29 + 2 + 7);
+    assert!(
+        !gone.contains("label"),
+        "a label under eight cells leaves: {gone:?}"
+    );
+    assert!(
+        gone.contains("0199a3f2"),
+        "the key stays while the rest fits: {gone:?}"
+    );
+    let keyless = row_text_at(&session, 30);
+    assert!(
+        !keyless.contains("0199a3f2") && keyless.contains("claude"),
+        "{keyless:?}"
+    );
+    assert!(
+        keyless
+            .trim_end()
+            .ends_with(crate::tui::icons::state::UNLINKED),
+        "{keyless:?}"
+    );
+    let ageless = row_text_at(&session, 12);
+    assert!(
+        !ageless.contains("claude"),
+        "the chip leaves before the age: {ageless:?}"
+    );
+    assert!(
+        ageless
+            .trim_end()
+            .ends_with(crate::tui::icons::state::UNLINKED),
+        "{ageless:?}"
+    );
+}
+
+#[test]
+fn a_narrow_mux_row_narrows_its_chips_and_name_before_its_age_leaves() {
+    let mux = MuxSessionRow {
+        native_id: "a-rather-long-mux-name".into(),
+        agent_labels: vec!["claude".into(), "codex".into(), "pi".into()],
+        recency: Some("2m".into()),
+        ..agentless_mux_row(None)
+    };
+    let text = |room: usize| -> String {
+        mux_spans_in(&mux, &Theme::default(), 0, room, None)
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    };
+    // Room for the name's step (20 from 39 cells), two chips and a count
+    // (24), the age, and the state.
+    let wide = text(80);
+    assert!(
+        wide.contains("claude") && wide.contains("codex") && wide.contains("+1"),
+        "{wide}"
+    );
+    // Then one chip and a count of the rest.
+    let one = text(50);
+    assert!(
+        one.contains("claude") && one.contains("+2") && !one.contains("codex"),
+        "{one}"
+    );
+    assert!(one.contains("2m"), "{one}");
+    // Then the name narrows, cut with the mark, and the age stays.
+    let narrow = text(36);
+    assert!(
+        narrow.contains('…') && narrow.contains("2m") && narrow.contains("claude"),
+        "{narrow}"
+    );
+    // Then the age leaves, then the chips; the name and the state stay.
+    let ageless = text(29);
+    assert!(
+        !ageless.contains("2m") && ageless.contains("claude"),
+        "{ageless}"
+    );
+    let bare = text(16);
+    assert!(
+        !bare.contains("claude") && bare.starts_with("a-rather"),
+        "{bare}"
+    );
+    assert!(
+        bare.trim_end()
+            .ends_with(crate::tui::icons::state::UNLINKED),
+        "{bare}"
+    );
+}
+
+#[test]
+fn a_narrow_group_header_narrows_its_path_and_keeps_its_count() {
+    let rows = vec![
+        group_header("/fixture/atelier-demo/a-long-repository-name"),
+        session_under_group("abc"),
+    ];
+    let header = |width: usize| line_text(&lay_out(&rows, &Theme::default(), 0, width, None)[0]);
+    let wide = header(120);
+    assert!(
+        wide.contains("/fixture/atelier-demo/a-long-repository-name"),
+        "{wide}"
+    );
+    let cut = header(60);
+    assert!(
+        cut.contains('…') && cut.trim_end().ends_with("(1)"),
+        "{cut}"
+    );
+    // A path that cannot keep eight cells leaves; the count stays.
+    let bare = header(4 + 23 + 2 + 7 + 2 + 3);
+    assert!(!bare.contains("/fixture"), "{bare}");
+    assert!(bare.trim_end().ends_with("(1)"), "{bare}");
 }
 
 fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
@@ -3772,7 +4302,7 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
 #[test]
 fn agentless_mux_row_labels_itself_with_the_pane_command() {
     let theme = Theme::default();
-    let spans = render_mux_session_spans(&agentless_mux_row(Some("npm")), &theme, 0, 100, None);
+    let spans = mux_spans_in(&agentless_mux_row(Some("npm")), &theme, 0, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(rendered.contains(" npm "), "pane command chip: {rendered}");
@@ -3781,13 +4311,13 @@ fn agentless_mux_row_labels_itself_with_the_pane_command() {
         .iter()
         .find(|span| span.content.contains("npm"))
         .expect("chip span");
-    assert_eq!(chip.style.bg, Some(theme.command_badge));
+    assert_eq!(chip.style.bg, Some(theme.command_badge()));
 }
 
 #[test]
 fn agentless_mux_row_without_a_pane_command_says_no_agent() {
     let theme = Theme::default();
-    let spans = render_mux_session_spans(&agentless_mux_row(None), &theme, 0, 100, None);
+    let spans = mux_spans_in(&agentless_mux_row(None), &theme, 0, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(rendered.contains("no agent"), "placeholder: {rendered}");
@@ -3801,13 +4331,13 @@ fn agentless_mux_row_running_a_harness_uses_the_harness_badge() {
             program_harness: Some(label.to_string()),
             ..agentless_mux_row(Some(program))
         };
-        let spans = render_mux_session_spans(&row, &theme, 0, 100, None);
+        let spans = mux_spans_in(&row, &theme, 0, 100, None);
         let chip = spans
             .iter()
             .find(|span| span.content.trim() == label)
             .unwrap_or_else(|| panic!("{label} chip for {program}: {spans:?}"));
         assert_eq!(chip.style.fg, Some(theme.harness_color(label)), "{program}");
-        assert_ne!(chip.style.bg, Some(theme.command_badge), "{program}");
+        assert_ne!(chip.style.bg, Some(theme.command_badge()), "{program}");
     }
 }
 
@@ -3821,17 +4351,7 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
         .find(|row| matches!(row.kind, RowKind::AgentSession(_)))
         .map(|row| (*row).clone())
         .expect("session row");
-    let render = |app: &App| {
-        render_left_row(
-            &session_row,
-            app,
-            false,
-            100,
-            1_700_000_000,
-            None,
-            GroupAlign::default(),
-        )
-    };
+    let render = |app: &App| render_left_row(&session_row, app, false, 100);
 
     let before = render(&app);
     let text: String = before.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -3848,16 +4368,19 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
         "spinner replaces the attach glyph: {text}"
     );
     assert!(
-        SPINNER_FRAMES.iter().any(|frame| text.contains(frame)),
+        tuikit::glyphs::marks::SPINNER
+            .iter()
+            .any(|frame| text.contains(frame)),
         "pending row shows a spinner frame: {text}"
     );
-    let dim = app.theme().placeholder;
+    let dim = app.theme().muted;
     assert!(
         pending
             .spans
             .iter()
+            .skip(1)
             .all(|s| s.style.add_modifier.contains(dim)),
-        "every span of a pending row is dimmed"
+        "every span of a pending row after its cursor gutter is dimmed"
     );
 
     app.update(Msg::HandoffSettled);
@@ -3891,11 +4414,11 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
         content_hit: None,
     };
-    let settled: String = render_mux_session_spans(&row, &theme, 0, 100, None)
+    let settled: String = mux_spans_in(&row, &theme, 0, 100, None)
         .iter()
         .map(|s| s.content.to_string())
         .collect();
-    let pending: String = render_mux_session_spans(&row, &theme, 0, 100, Some("⠋"))
+    let pending: String = mux_spans_in(&row, &theme, 0, 100, Some("⠋"))
         .iter()
         .map(|s| s.content.to_string())
         .collect();
@@ -3936,7 +4459,7 @@ fn codex_transcript() -> PreviewSource {
 }
 
 fn transcript_content(turns: usize) -> PreviewContent {
-    PreviewContent::Transcript(Box::new(crate::viewer::state::ViewerState::new(
+    PreviewContent::Transcript(Box::new(crate::tui::preview::TranscriptPreview::new(
         transcript_document(turns),
     )))
 }
@@ -4174,7 +4697,7 @@ fn the_right_panel_draws_a_transcript_inside_its_gutter() {
 /// other than the selection, and return that node.
 fn walk_to_related_row(app: &mut App) -> NodeId {
     for _ in 0..12 {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
         if let crate::tui::preview::PreviewSubject::Node(node) =
             crate::tui::preview::preview_subject(app)
         {
@@ -4221,7 +4744,7 @@ fn drilling_into_a_neighbor_previews_that_node() {
         crate::tui::SessionPreview::Transcript,
     );
     walk_to_related_row(&mut app);
-    app.update(Msg::ExplorerActivate);
+    app.update(Msg::Explorer(ExplorerKey::Activate));
     let mux = NodeId::MuxSession(MuxSessionId::new("editor"));
     assert_eq!(
         crate::tui::preview::preview_subject(&app),
@@ -4266,7 +4789,7 @@ fn walk_to_field_value(
     wanted: impl Fn(&crate::tui::explorer::FieldValue) -> bool,
 ) -> crate::tui::explorer::FieldValue {
     for _ in 0..12 {
-        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::Explorer(ExplorerKey::Down));
         if let crate::tui::preview::PreviewSubject::Field(value) =
             crate::tui::preview::preview_subject(app)
             && wanted(&value)
@@ -4697,11 +5220,15 @@ fn an_empty_prs_view_points_at_the_hard_refresh() {
     });
     let frame = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 200, 30)));
     assert!(frame.contains("No pull requests discovered."), "{frame}");
+    let hard_refresh = crate::tui::keybindings::key_name("refresh.hard");
     assert!(
-        frame.contains("Press `Ctrl-R` to ask the forges again"),
+        frame.contains(&format!("Press `{hard_refresh}` to ask the forges again")),
         "{frame}"
     );
-    assert!(frame.contains("^R forges"), "{frame}");
+    assert!(
+        frame.contains(&format!("{hard_refresh} hard refresh")),
+        "{frame}"
+    );
 }
 
 /// Select PR `#number` and render the frame.
@@ -4734,7 +5261,10 @@ fn fetched_pr(state: &str, draft: bool, checks: &str, review: &str) -> PreviewCo
             "isDraft":{draft},"reviewDecision":"{review}","statusCheckRollup":{checks},
             "latestReviews":[],"headRefName":"feature/notes","baseRefName":"main"}}"#
     );
-    PreviewContent::Lines(crate::tui::preview::forge::render_pr(&json, None).expect("renders"))
+    PreviewContent::Lines(
+        crate::tui::preview::forge::render_pr(&json, None, Theme::default().muted)
+            .expect("renders"),
+    )
 }
 
 const PASSING_CHECKS: &str = r#"[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]"#;
@@ -4802,7 +5332,7 @@ fn mux_rows_keep_pin_and_preview_columns_aligned_across_attach_states() {
             single_session_preview: Some("pushed to main".into()),
             ..agentless_mux_row(None)
         };
-        render_mux_session_spans(&row, &theme, 0, 100, None)
+        mux_spans_in(&row, &theme, 0, 100, None)
             .iter()
             .map(|s| s.content.to_string())
             .collect()
@@ -4861,7 +5391,9 @@ fn launch_chip_shows_alongside_a_status_message() {
         kind: crate::tui::app::InFlightKind::Launch,
         label: "Launching dek-serve".to_string(),
     });
-    app.update(Msg::SetStatus(Some("pin `dek-serve` queued".to_string())));
+    app.update(Msg::SetStatus(Some(tuikit::feedback::Feedback::info(
+        "pin `dek-serve` queued",
+    ))));
     let buffer = render_to_buffer(&mut app, Rect::new(0, 0, 100, 24));
     let text = buffer_to_string(&buffer);
     let status_line = text.lines().last().unwrap_or("");
@@ -4871,11 +5403,11 @@ fn launch_chip_shows_alongside_a_status_message() {
     );
 }
 
-fn pr_row_for_layout(label: &str, state: &str, age: Option<&str>) -> crate::tui::rows::PrRow {
+fn pr_row_for_layout(number: u64, state: &str, age: Option<&str>) -> crate::tui::rows::PrRow {
     crate::tui::rows::PrRow {
-        pr_number: 1,
-        repo_display: format!("o/r{label}"),
-        label: label.into(),
+        pr_number: number,
+        repo_display: format!("o/r#{number}"),
+        forge_repo: None,
         state: Some(state.into()),
         is_draft: false,
         branch_name: None,
@@ -4889,48 +5421,64 @@ fn pr_row_for_layout(label: &str, state: &str, age: Option<&str>) -> crate::tui:
             "github.com",
             "o",
             "r",
-            1,
+            number,
         )),
     }
+}
+
+/// The PR rows of a tree of only `prs`, each at depth 1 as the PRs view
+/// lists them, laid out by the left pane in `room` cells after their
+/// indent and prefix (the blank disclosure and the kind glyph; an
+/// unpinned tree reserves no marker), as text.
+fn pr_texts(prs: &[crate::tui::rows::PrRow], room: usize) -> Vec<String> {
+    pr_lines(prs, room)
+        .iter()
+        .map(|spans| pr_text(spans))
+        .collect()
+}
+
+/// [`pr_texts`] as spans.
+fn pr_lines(prs: &[crate::tui::rows::PrRow], room: usize) -> Vec<Vec<Span<'static>>> {
+    let rows: Vec<crate::tui::rows::Row> = prs
+        .iter()
+        .map(|pr| crate::tui::rows::Row {
+            id: RowId::Pr(pr.primary_node.clone()),
+            depth: 1,
+            expandable: false,
+            kind: RowKind::Pr(pr.clone()),
+        })
+        .collect();
+    lay_out(&rows, &Theme::default(), 0, room + 6, None)
+        .into_iter()
+        .map(|line| {
+            let mut spans = line.spans;
+            // The indent, then the prefix.
+            spans.remove(0);
+            without_prefix(spans)
+        })
+        .collect()
 }
 
 fn pr_text(spans: &[ratatui::text::Span<'_>]) -> String {
     spans.iter().map(|span| span.content.as_ref()).collect()
 }
 
-fn pr_tree(rows: Vec<crate::tui::rows::PrRow>) -> crate::tui::rows::RowTree {
-    crate::tui::rows::RowTree {
-        rows: rows
-            .into_iter()
-            .map(|pr| crate::tui::rows::Row {
-                id: RowId::Pr(pr.primary_node.clone()),
-                depth: 1,
-                expandable: false,
-                kind: RowKind::Pr(pr),
-            })
-            .collect(),
-        view: crate::tui::rows::ViewLabel::Prs,
-    }
-}
-
 #[test]
 fn pr_columns_align_to_the_widest_value_in_the_tree() {
     // The number pads to the widest across the tree, so rows from
     // different groups line up; age and state have fixed cells.
-    let theme = Theme::default();
-    let mut long = pr_row_for_layout("#1234", "merged", Some("120d"));
+    let mut long = pr_row_for_layout(1234, "merged", Some("120d"));
     long.title = Some("long one".into());
-    let mut short = pr_row_for_layout("#7", "open", Some("2h"));
+    let mut short = pr_row_for_layout(7, "open", Some("2h"));
     short.title = Some("short one".into());
-    let align = PrAlign::of_tree(&pr_tree(vec![long.clone(), short.clone()]));
 
-    let long_text = pr_text(&render_pr_spans(&long, &theme, align, 80, 0));
-    let short_text = pr_text(&render_pr_spans(&short, &theme, align, 80, 0));
+    let texts = pr_texts(&[long, short], 80);
+    let (long_text, short_text) = (&texts[0], &texts[1]);
 
     assert_eq!(long_text, "#1234 ◌  120d  ⊕  long one");
     assert_eq!(short_text, "#7    ◌    2h  ○  short one");
     let column = |text: &str, needle: &str| text.find(needle).expect("needle");
-    assert_eq!(column(&long_text, "◌"), column(&short_text, "◌"));
+    assert_eq!(column(long_text, "◌"), column(short_text, "◌"));
     assert_eq!(
         unicode_width::UnicodeWidthStr::width(&long_text[..long_text.find("long").unwrap()]),
         unicode_width::UnicodeWidthStr::width(&short_text[..short_text.find("short").unwrap()]),
@@ -4941,58 +5489,47 @@ fn pr_columns_align_to_the_widest_value_in_the_tree() {
 #[test]
 fn pr_title_takes_the_remaining_width_and_is_cut_with_an_ellipsis() {
     let theme = Theme::default();
-    let mut pr = pr_row_for_layout("#9", "open", Some("1d"));
+    let mut pr = pr_row_for_layout(9, "open", Some("1d"));
     pr.title = Some("A rather long pull request title".into());
-    let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
 
-    let spans = render_pr_spans(&pr, &theme, align, 30, 0);
+    let spans = pr_lines(std::slice::from_ref(&pr), 30).remove(0);
     let text = pr_text(&spans);
 
     assert!(text.ends_with('…'), "{text:?}");
     assert_eq!(unicode_width::UnicodeWidthStr::width(text.as_str()), 30);
     let title = spans.last().expect("title span");
-    assert_eq!(title.style.fg, Some(theme.secondary_text));
+    assert_eq!(title.style.fg, Some(theme.inert));
 
-    // No room for even a sliver of title: it is left out, not wrapped.
-    let tight = pr_text(&render_pr_spans(&pr, &theme, align, 14, 0));
+    // No room for the title's fewest cells: it is left out, not wrapped.
+    let tight = pr_texts(&[pr], 14).remove(0);
     assert_eq!(tight, "#9 ◌    1d  ○");
 }
 
 #[test]
 fn pr_row_without_a_title_or_age_still_pads_its_columns() {
-    let theme = Theme::default();
-    let aged = pr_row_for_layout("#10", "open", Some("3d"));
-    let bare = pr_row_for_layout("#2", "closed", None);
-    let align = PrAlign::of_tree(&pr_tree(vec![aged, bare.clone()]));
+    let aged = pr_row_for_layout(10, "open", Some("3d"));
+    let bare = pr_row_for_layout(2, "closed", None);
 
-    let text = pr_text(&render_pr_spans(&bare, &theme, align, 80, 0));
+    let text = pr_texts(&[aged, bare], 80).remove(1);
 
     assert_eq!(text, "#2  ◌     —  ⊗");
 }
 
 #[test]
 fn an_open_draft_shows_the_draft_glyph_and_the_local_branch_leads_the_title() {
-    let theme = Theme::default();
-    let mut pr = pr_row_for_layout("#5", "open", Some("4h"));
+    let mut pr = pr_row_for_layout(5, "open", Some("4h"));
     pr.is_draft = true;
     pr.tracked = true;
     pr.branch_name = Some("feature/login".into());
     pr.title = Some("Add login".into());
-    let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
 
-    let text = pr_text(&render_pr_spans(&pr, &theme, align, 80, 0));
+    let text = pr_texts(std::slice::from_ref(&pr), 80).remove(0);
 
     assert_eq!(text, "#5 ⌥    4h  ◐  feature/login  Add login");
     // A draft that was already merged keeps its real state.
     let mut merged = pr;
     merged.state = Some("merged".into());
-    let merged_text = pr_text(&render_pr_spans(
-        &merged,
-        &theme,
-        PrAlign::of_tree(&pr_tree(vec![merged.clone()])),
-        80,
-        0,
-    ));
+    let merged_text = pr_texts(&[merged], 80).remove(0);
     assert!(
         merged_text.contains('⊕') && !merged_text.contains('◐'),
         "{merged_text:?}"
@@ -5001,17 +5538,71 @@ fn an_open_draft_shows_the_draft_glyph_and_the_local_branch_leads_the_title() {
 
 #[test]
 fn a_long_local_branch_is_capped_so_it_cannot_crowd_out_the_title() {
-    let theme = Theme::default();
-    let mut pr = pr_row_for_layout("#5", "open", None);
+    let mut pr = pr_row_for_layout(5, "open", None);
     pr.tracked = true;
     pr.branch_name = Some("a".repeat(60));
     pr.title = Some("Title".into());
-    let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
 
-    let text = pr_text(&render_pr_spans(&pr, &theme, align, 100, 0));
+    let text = pr_texts(&[pr], 100).remove(0);
 
     assert!(text.contains(&format!("{}…", "a".repeat(23))), "{text:?}");
     assert!(text.ends_with("  Title"), "{text:?}");
+}
+
+#[test]
+fn a_pr_row_names_its_forge_repo_unless_its_group_does() {
+    // A row under a group with several forge repos leads with its own;
+    // its number is in one column with the `#N` of a row whose group
+    // names the repo.
+    let mut named = pr_row_for_layout(12, "open", Some("1h"));
+    named.forge_repo = Some("owner/repo".into());
+    let short = pr_row_for_layout(7, "open", Some("2h"));
+    let texts = pr_texts(&[named, short], 80);
+    assert_eq!(texts[0], "owner/repo#12 ◌    1h  ○");
+    assert_eq!(texts[1], "#7            ◌    2h  ○");
+}
+
+#[test]
+fn a_narrow_pr_row_gives_way_in_one_order_and_keeps_its_number_and_state() {
+    // The title leaves, then the branch narrows and leaves; then the
+    // forge repo narrows while the number stays whole, the age leaves,
+    // and the tracking mark leaves. The state glyph stays.
+    let mut pr = pr_row_for_layout(42, "merged", Some("3d"));
+    pr.forge_repo = Some("someone/a-long-repository".into());
+    pr.tracked = true;
+    pr.branch_name = Some("feature/narrow-panes".into());
+    pr.title = Some("Lay the rows out by one rule".into());
+    let at = |room: usize| pr_texts(std::slice::from_ref(&pr), room).remove(0);
+    assert_eq!(
+        at(120),
+        "someone/a-long-repository#42 ⌥    3d  ⊕  feature/narrow-panes  Lay the rows out by one rule"
+    );
+    // The title takes what is left while it gets 7 cells.
+    assert_eq!(
+        at(72),
+        "someone/a-long-repository#42 ⌥    3d  ⊕  feature/narrow-panes  Lay the …"
+    );
+    assert_eq!(
+        at(64),
+        "someone/a-long-repository#42 ⌥    3d  ⊕  feature/narrow-panes"
+    );
+    assert_eq!(at(50), "someone/a-long-repository#42 ⌥    3d  ⊕  feature/…");
+    assert_eq!(at(45), "someone/a-long-repository#42 ⌥    3d  ⊕");
+    // Then the lined-up cells: the label narrows (the number stays),
+    // then the age and the tracking mark leave.
+    assert_eq!(at(30), "someone/a-long-…#42 ⌥    3d  ⊕");
+    assert_eq!(at(20), "someo…#42 ⌥    3d  ⊕");
+    assert_eq!(at(14), "someo…#42 ⌥  ⊕");
+    // The label's own one-cell gap is all that is left before the state.
+    assert_eq!(at(12), "someon…#42 ⊕");
+    for room in [12, 14, 20, 30, 45, 50, 64, 72, 120] {
+        let text = at(room);
+        assert!(
+            text.contains("#42") && text.contains('⊕'),
+            "{room}: {text:?}"
+        );
+        assert!(unicode_width::UnicodeWidthStr::width(text.as_str()) <= room);
+    }
 }
 
 #[test]
@@ -5239,6 +5830,151 @@ fn folding_a_group_does_not_shift_the_columns_of_the_rows_left() {
     );
 }
 
+/// A Pinned row of `kind` at `depth`, unpinned, with a claude chip.
+fn mixed_row_for_layout(
+    depth: u8,
+    label: &str,
+    status: &str,
+    age: &str,
+    content: &str,
+    tone: crate::tui::rows::MixedTone,
+) -> crate::tui::rows::Row {
+    use crate::tui::rows::{MixedChip, MixedRow, PinMarker};
+    crate::tui::rows::Row {
+        id: RowId::Pin {
+            pin_id: label.into(),
+        },
+        depth,
+        expandable: false,
+        kind: RowKind::Mixed(MixedRow {
+            node_kind: crate::model::NodeKind::MuxSession,
+            label: label.into(),
+            status: status.into(),
+            tone,
+            age: Some(age.into()),
+            age_epoch: None,
+            state: None,
+            chip: Some(MixedChip::agent("claude")),
+            content: content.into(),
+            primary_node: NodeId::MuxSession(MuxSessionId::new(format!("tmux:{label}"))),
+            pr_status: None,
+            marker: PinMarker::None,
+        }),
+    }
+}
+
+#[test]
+fn a_narrow_pinned_row_gives_way_in_one_order_and_keeps_its_state_word() {
+    // The chip leaves first, then the content; then the label narrows
+    // and the age leaves. The state word stays, and it starts in one
+    // column at every depth and every width.
+    use crate::tui::rows::MixedTone;
+    let rows = [
+        mixed_row_for_layout(
+            0,
+            "project-main",
+            "live",
+            "5m",
+            "~/repos/project",
+            MixedTone::Normal,
+        ),
+        mixed_row_for_layout(
+            1,
+            "nested-session",
+            "in mux",
+            "1h",
+            "~/x",
+            MixedTone::Normal,
+        ),
+    ];
+    let at = |width: usize| -> Vec<String> {
+        lay_out(&rows, &Theme::default(), 0, width, None)
+            .iter()
+            .map(line_text)
+            .collect()
+    };
+    let wide = at(90);
+    assert_eq!(
+        wide[0],
+        "  ▣ project-main      live      5m   claude     ~/repos/project"
+    );
+    assert_eq!(
+        wide[1],
+        "    ▣ nested-session  in mux    1h   claude     ~/x"
+    );
+    assert_eq!(
+        at(54)[0],
+        "  ▣ project-main      live      5m  ~/repos/project"
+    );
+    assert_eq!(at(42)[0], "  ▣ project-main      live      5m");
+    assert_eq!(at(30)[0], "  ▣ project-main  live      5m");
+    assert_eq!(at(30)[1], "    ▣ nested-se…  in mux    1h");
+    assert_eq!(at(26)[0], "  ▣ project…  live      5m");
+    assert_eq!(at(26)[1], "    ▣ neste…  in mux    1h");
+    // Once the label is down to 8 cells the age leaves, and the label
+    // takes back what the age freed.
+    assert_eq!(at(24)[0], "  ▣ project-main  live  ");
+    assert_eq!(at(24)[1], "    ▣ nested-se…  in mux");
+    for width in [24, 26, 28, 30, 42, 54, 90] {
+        let lines = at(width);
+        let status = |line: &str, word: &str| {
+            let at = line.find(word).expect("the state word");
+            line[..at].chars().count()
+        };
+        assert_eq!(
+            status(&lines[0], "live"),
+            status(&lines[1], "in mux"),
+            "at {width}:\n{}\n{}",
+            lines[0],
+            lines[1]
+        );
+        assert!(lines.iter().all(|line| text::width(line) <= width));
+    }
+}
+
+#[test]
+fn a_dimmed_pinned_row_keeps_its_kind_glyph_and_dims_the_rest() {
+    // In a list of mixed kinds the glyph is the only sign of a row's
+    // kind, so it keeps its color; every cell after it, and the gaps
+    // between them, take the ghost look.
+    use crate::tui::rows::MixedTone;
+    let theme = Theme::default();
+    let row = mixed_row_for_layout(
+        0,
+        "nightly",
+        "stopped",
+        "2d",
+        "~/repos/project",
+        MixedTone::Dim,
+    );
+    let spans = lay_out(&[row], &theme, 0, 90, None).remove(0).spans;
+    let glyph = spans
+        .iter()
+        .position(|span| span.content.starts_with('▣'))
+        .expect("the kind glyph");
+    assert_eq!(spans[glyph].style.fg, Some(theme.node_mux_session()));
+    let ghost = ghost_style(&theme);
+    for span in &spans[glyph + 1..] {
+        if span.style.bg.is_some() || span.style.add_modifier.contains(Modifier::REVERSED) {
+            // A chip keeps its fill and recedes.
+            assert!(
+                span.style.add_modifier.contains(Modifier::ITALIC),
+                "{span:?}"
+            );
+            continue;
+        }
+        assert_eq!(span.style.fg, ghost.fg, "{span:?}");
+        assert!(
+            span.style.add_modifier.contains(Modifier::ITALIC),
+            "{span:?}"
+        );
+        assert!(
+            !span.style.add_modifier.contains(Modifier::BOLD),
+            "{span:?}"
+        );
+    }
+}
+
 #[test]
 fn the_pinned_view_points_at_pin_migrate_while_legacy_pins_remain() {
     let mut app = slots_app(crate::tui::PinnedGrouping::None);
@@ -5264,7 +6000,7 @@ fn gone_and_planned_rows_render_dimmed_and_live_rows_do_not() {
             };
             let x = u16::try_from(line[..byte].chars().count()).unwrap();
             let style = buffer[(x, y)].style();
-            style.fg == Some(Theme::default().ghost)
+            style.fg == Some(Theme::default().inert)
                 && style.add_modifier.contains(Modifier::ITALIC)
         })
     };
@@ -5317,7 +6053,7 @@ fn enter_on_a_gone_slot_rebuilds_it_and_on_a_live_mux_slot_attaches() {
     });
     let effects = app.update(Msg::AttachSelected);
     assert!(
-        matches!(effects.as_slice(), [Effect::Toast(text)] if text.contains("ledger-pr")),
+        matches!(effects.as_slice(), [Effect::Toast(note)] if note.text.contains("ledger-pr")),
         "{effects:?}"
     );
 }
@@ -5342,7 +6078,7 @@ fn the_detail_pane_shows_where_each_slot_field_came_from() {
 /// and a gone worktree among its records), grouped as asked.
 ///
 /// [`fixture_world`]: crate::tui::rows::pinned::fixture_world
-fn history_app_over(
+pub(super) fn history_app_over(
     snapshot: &GraphSnapshot,
     grouping: crate::tui::HistoryGrouping,
     config: RunConfig,
@@ -5434,6 +6170,9 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
     assert!(app.update(Msg::OpenRowMenu).is_empty());
     let menu = app.row_menu().expect("the menu opened");
     let labels: Vec<&str> = menu.entries().iter().map(|e| e.label.as_str()).collect();
+    // No Reveal: with no tmux probe this world's Mux view lists no ghost,
+    // so the gone mux's pin has no row to reveal (the menus check holds
+    // the entry to where a reveal lands).
     assert_eq!(
         labels,
         [
@@ -5443,7 +6182,6 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
             "Rename…",
             "Retarget…",
             "Refresh snapshot",
-            "Reveal in its view",
             "Unpin config-agent3",
             "Forget",
             "Clean up…"
@@ -5455,15 +6193,31 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
             .find(|entry| entry.label == label)
             .unwrap_or_else(|| panic!("no `{label}` entry"))
     };
-    assert!(entry("Forget").confirm, "forget asks twice");
+    assert_eq!(
+        entry("Forget").confirm,
+        tuikit::action_menu::Confirm::Inline,
+        "forget asks twice"
+    );
     // The pinned record offers to unpin its pin, also behind a confirm.
-    assert!(
-        !entry("Unpin config-agent3").confirm,
+    assert_eq!(
+        entry("Unpin config-agent3").confirm,
+        tuikit::action_menu::Confirm::None,
         "unpin acts at once, like p"
     );
     assert_eq!(
-        entry("Unpin config-agent3").msg,
+        entry("Unpin config-agent3").outcome,
         Msg::Unpin("config-agent3".into())
+    );
+    // Rebuild names the row's own key, which rebuilds and attaches.
+    assert_eq!(
+        entry("Rebuild").detail.as_deref(),
+        Some(
+            format!(
+                "bring it back without attaching ({} also attaches)",
+                crate::tui::keybindings::key_name("row.default")
+            )
+            .as_str()
+        )
     );
     insta::assert_snapshot!("history_row_menu", trimmed(pinned_frame(&mut app, 100)));
 }
@@ -5478,7 +6232,7 @@ fn the_history_view_menu_works_with_nothing_selected() {
     app.update(Msg::OpenRowMenu);
     let menu = app.row_menu().expect("the menu opened");
     assert_eq!(menu.entries().len(), 1);
-    assert_eq!(menu.entries()[0].msg, Msg::OpenCleanUp);
+    assert_eq!(menu.entries()[0].outcome, Msg::OpenCleanUp);
 }
 
 #[test]
@@ -5550,13 +6304,18 @@ fn clean_up_lists_what_has_aged_out_and_nothing_pinned() {
     let mut app = history_app_over(&snapshot, crate::tui::HistoryGrouping::None, config.clone());
     app.update(Msg::OpenCleanUp);
     let clean_up = app.clean_up().expect("the modal opened");
-    let ids: Vec<&str> = clean_up
-        .candidates()
-        .iter()
-        .map(|c| c.id.as_str())
-        .collect();
-    assert_eq!(ids, ["h_agent", "h_wt"], "oldest sighting first");
     assert_eq!(clean_up.selected(), [0, 1], "all preselected");
+    // Confirming as it opened forgets both, oldest sighting first.
+    let confirmed = tuikit::overlay::Overlay::<Msg, ()>::handle(
+        &mut clean_up.clone(),
+        tuikit::testkit::keys::press(ratatui::crossterm::event::KeyCode::Enter),
+        &(),
+    );
+    assert_eq!(
+        confirmed,
+        tuikit::overlay::Outcome::Commit(Msg::ReapRecords(vec!["h_agent".into(), "h_wt".into()])),
+        "oldest sighting first"
+    );
     let frame = pinned_frame(&mut app, 100);
     assert!(frame.contains("Clean up: forget these records"), "{frame}");
     assert!(frame.contains("config-agent3"), "{frame}");
@@ -5570,9 +6329,18 @@ fn clean_up_lists_what_has_aged_out_and_nothing_pinned() {
     let snapshot = crate::tui::rows::pinned::fixture_world();
     let mut app = history_app_over(&snapshot, crate::tui::HistoryGrouping::None, config);
     app.update(Msg::OpenCleanUp);
-    assert!(app.clean_up().expect("modal").is_empty());
+    assert!(
+        app.clean_up().is_none(),
+        "no checklist with nothing to list"
+    );
+    assert_eq!(
+        app.dialog().map(tuikit::dialog::Dialog::title),
+        Some("Clean up"),
+        "a notice says why"
+    );
     let frame = pinned_frame(&mut app, 100);
     assert!(frame.contains("Nothing to clean up"), "{frame}");
+    assert!(frame.contains("Enter/Esc close"), "{frame}");
 }
 
 // ----- Ghost muxes in the Mux view -----------------------------------
@@ -5703,7 +6471,7 @@ fn actions_on_a_ghost_mux_rebuild_or_refuse_instead_of_erroring() {
     app.update(Msg::OpenRowMenu);
     let menu = app.row_menu().expect("menu");
     assert_eq!(
-        menu.entries()[0].msg,
+        menu.entries()[0].outcome,
         Msg::RebuildReference("config-agent3".into())
     );
     // Attach refuses by name, never reaching tmux.
@@ -5859,7 +6627,7 @@ fn the_row_menu_of_a_native_row_offers_pin_or_unpin() {
     let menu = app.row_menu().expect("menu");
     let labels: Vec<&str> = menu.entries().iter().map(|e| e.label.as_str()).collect();
     assert_eq!(labels, ["Pin", "Show rebuild plan"]);
-    assert!(matches!(menu.entries()[0].msg, Msg::PinNode(_)));
+    assert!(matches!(menu.entries()[0].outcome, Msg::PinNode(_)));
     app.close_row_menu();
 
     app.set_selection(mux_row("conspectus-main"));
@@ -5894,7 +6662,7 @@ fn a_row_with_no_pinnable_entity_says_why() {
     app.set_selection(first_bucket(&app));
     let effects = app.update(Msg::TogglePin);
     assert!(
-        matches!(effects.as_slice(), [Effect::Toast(text)] if text.starts_with("pin:")),
+        matches!(effects.as_slice(), [Effect::Toast(note)] if note.text.starts_with("pin:")),
         "{effects:?}"
     );
 }
@@ -5921,8 +6689,30 @@ fn the_slot_menu_offers_every_gesture() {
         ],
         "a running mux has nothing to rebuild"
     );
-    assert!(!menu.entries()[6].confirm, "unpin acts at once");
+    assert_eq!(
+        menu.entries()[6].confirm,
+        tuikit::action_menu::Confirm::None,
+        "unpin acts at once"
+    );
     insta::assert_snapshot!("slot_row_menu", trimmed(pinned_frame(&mut app, 100)));
+}
+
+/// Replace the text of the prompt on top, press Enter, and return what
+/// the reducer makes of what the prompt commits: nothing when it refuses.
+fn confirm_prompt(app: &mut App, text: &str) -> Vec<crate::tui::Effect> {
+    use ratatui::crossterm::event::KeyCode;
+    use tuikit::testkit::keys::{ctrl, press};
+    let _ = app.press_modal_key(ctrl('u'));
+    for c in text.chars() {
+        let _ = app.press_modal_key(press(KeyCode::Char(c)));
+    }
+    let settled = app
+        .press_modal_key(press(KeyCode::Enter))
+        .expect("a prompt is open");
+    settled
+        .message
+        .map(|msg| app.update(msg))
+        .unwrap_or_default()
 }
 
 #[test]
@@ -5937,11 +6727,11 @@ fn slot_prompts_commit_to_their_own_store_write() {
     app.update(Msg::OpenSlotRename("conspectus-main".into()));
     assert_eq!(
         app.rename_overlay()
-            .map(crate::tui::widgets::input::TextInputState::value),
+            .map(tuikit::text_prompt::TextPrompt::value),
         Some("conspectus-main")
     );
     assert_eq!(
-        app.update(Msg::CommitRename("renamed".into())),
+        confirm_prompt(&mut app, "renamed"),
         vec![Effect::WriteStore(StoreOp::RenameSlot {
             slot: "conspectus-main".into(),
             new_name: "renamed".into(),
@@ -5965,29 +6755,34 @@ fn slot_prompts_commit_to_their_own_store_write() {
             target: "other".into(),
         })]
     );
+    // A blank name is refused in the prompt, which stays open and says
+    // why; nothing is written and no toast is posted.
     app.update(Msg::OpenSlotRename("conspectus-main".into()));
-    assert!(matches!(
-        app.update(Msg::CommitRename("   ".into())).as_slice(),
-        [Effect::Toast(_)]
-    ));
+    assert_eq!(confirm_prompt(&mut app, "   "), Vec::new());
+    assert_eq!(
+        app.rename_overlay()
+            .and_then(tuikit::text_prompt::TextPrompt::error),
+        Some("pin: nothing entered")
+    );
 }
 
 #[test]
 fn a_cancelled_slot_prompt_does_not_capture_the_next_rename() {
     use crate::tui::Effect;
     use crate::tui::effect::StoreOp;
+    use tuikit::text_prompt::{PromptResult, TextPrompt};
     let mut app = native_app(View::Mux, RowFilter::default());
     app.update(Msg::OpenSlotRename("conspectus-main".into()));
     app.close_rename_overlay();
 
-    // A later rename of the selected mux opens its own overlay, which
-    // forgets the abandoned slot prompt.
+    // A later rename of the selected mux opens its own prompt, whose
+    // confirm says what it renames; the abandoned pin prompt left
+    // nothing behind to redirect it.
     app.set_selection(mux_row("scratch"));
-    app.open_rename_overlay(crate::tui::widgets::input::TextInputState::new(
-        "Rename mux",
-        "scratch",
-    ));
-    let effects = app.update(Msg::CommitRename("renamed".into()));
+    app.open_rename_overlay(TextPrompt::new("rename mux", "scratch", |text: &str| {
+        PromptResult::Commit(Msg::CommitRename(text.to_string()))
+    }));
+    let effects = confirm_prompt(&mut app, "renamed");
     assert!(
         matches!(
             effects.as_slice(),
@@ -6026,7 +6821,7 @@ fn backspace_on_the_left_pane_returns_to_where_a_reveal_started() {
     assert_eq!(app.active_view(), View::Mux);
     assert!(app.can_nav_back());
 
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::NavBack);
     assert_eq!(app.active_view(), View::Pinned);
     assert_eq!(app.selection().cloned(), before);
     assert!(!app.can_nav_back());
@@ -6042,7 +6837,7 @@ fn backspace_on_the_right_pane_leaves_the_back_stack_alone() {
     app.update(Msg::RevealSelected);
 
     app.update(Msg::CycleFocus);
-    app.update(Msg::ExplorerBack);
+    app.update(Msg::Explorer(ExplorerKey::Back));
 
     assert_eq!(app.active_view(), View::Mux);
     assert!(app.can_nav_back());
@@ -6059,7 +6854,7 @@ fn the_back_stack_keeps_only_the_newest_twenty_jumps() {
     }
     let mut popped = 0;
     while app.can_nav_back() {
-        app.update(Msg::ExplorerBack);
+        app.update(Msg::NavBack);
         popped += 1;
     }
     assert_eq!(popped, 20);
@@ -6075,11 +6870,11 @@ fn going_back_to_a_row_that_vanished_says_so() {
             pin_id: "no-longer-there".into(),
         }),
     });
-    let effects = app.update(Msg::ExplorerBack);
+    let effects = app.update(Msg::NavBack);
     assert!(
         effects
             .iter()
-            .any(|e| matches!(e, Effect::Toast(t) if t == "that row is gone")),
+            .any(|e| matches!(e, Effect::Toast(t) if t.text == "that row is gone")),
         "{effects:?}"
     );
     assert_eq!(app.active_view(), View::Pinned);
@@ -6087,20 +6882,21 @@ fn going_back_to_a_row_that_vanished_says_so() {
 
 #[test]
 fn the_mux_launch_form_opens_with_defaults_and_the_worktree_toggle_off() {
+    use crate::tui::widgets::mux_launch::{HARNESS, REPO, WORKTREE};
     let mut app = native_app(View::Mux, RowFilter::default());
     app.update(Msg::OpenMuxLaunchForm);
-    let Some(crate::tui::Modal::MuxLaunch(form)) = app.modal_stack().last() else {
+    let Some(crate::tui::Modal::MuxLaunch(form)) = app.modal_stack().top() else {
         panic!("the launch form is on top");
     };
     assert!(
-        !form.spec().worktree_enabled(),
+        !form.values().is_on(WORKTREE),
         "a worktree is something the operator opts into"
     );
     assert!(
-        !form.worktree_repo_value().is_empty(),
+        !form.values().text(REPO).is_empty(),
         "the repo is seeded so switching the toggle on starts from the launch directory"
     );
-    assert!(form.default_hint().is_some() || form.spec().harness().value().is_empty());
+    assert!(form.default_hint().is_some() || form.values().text(HARNESS).is_empty());
 }
 
 // ----- Gone nodes in previews, reveal, and hints --------------------
@@ -6237,7 +7033,6 @@ fn the_status_hint_for_a_live_repo_slot_matches_what_enter_does() {
 
 #[test]
 fn clean_up_shows_a_deselected_record_unticked() {
-    use crate::tui::modal::Overlay;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let mut config = RunConfig::defaults();
     let zero = Some(std::time::Duration::from_secs(0));
@@ -6256,8 +7051,8 @@ fn clean_up_shows_a_deselected_record_unticked() {
     {
         let state = app.clean_up_mut().expect("the modal opened");
         let press = |code| KeyEvent::new(code, KeyModifiers::NONE);
-        state.handle((), press(KeyCode::Down));
-        state.handle((), press(KeyCode::Char(' ')));
+        tuikit::overlay::Overlay::<Msg, ()>::handle(state, press(KeyCode::Down), &());
+        tuikit::overlay::Overlay::<Msg, ()>::handle(state, press(KeyCode::Char(' ')), &());
         assert_eq!(state.selected(), [0], "the second record was deselected");
     }
     let frame = pinned_frame(&mut app, 100);
@@ -6280,7 +7075,8 @@ fn opening_edit_builds_the_form_from_the_pin_and_saving_emits_one_store_write() 
     let labels = form.row_labels();
     assert_eq!(&labels[..2], ["pin name", "label"]);
     for field in crate::model::PinKind::Mux.overridable_fields() {
-        assert!(labels.contains(field), "{field} missing from {labels:?}");
+        let label = crate::tui::widgets::pin_edit::label_for(field);
+        assert!(labels.contains(&label), "{label} missing from {labels:?}");
     }
     assert_eq!(form.name_text(), "conspectus-main");
 
@@ -6317,7 +7113,7 @@ fn the_edit_form_shows_inherited_values_without_the_pins_overrides() {
 #[test]
 fn every_value_of_a_state_has_its_own_glyph() {
     use crate::tui::icons::state;
-    use crate::tui::rows::{EntityState, MixedGrid, MixedRow, MixedTone, PinMarker};
+    use crate::tui::rows::{EntityState, MixedRow, MixedTone, PinMarker};
     let theme = Theme::default();
     let text = |span: &ratatui::text::Span<'_>| span.content.to_string();
 
@@ -6359,9 +7155,8 @@ fn every_value_of_a_state_has_its_own_glyph() {
         chip: None,
         content: String::new(),
         primary_node: NodeId::MuxSession(MuxSessionId::new("m")),
-        pr_state: None,
+        pr_status: None,
         marker: PinMarker::None,
-        grid: MixedGrid::Mux,
     };
     let mut drawn = Vec::new();
     for entity in [
@@ -6376,15 +7171,15 @@ fn every_value_of_a_state_has_its_own_glyph() {
             | EntityState::Stopped
             | EntityState::Unknown => {}
         }
-        let spans = render_mixed_spans(
-            &mux_row(entity),
-            &theme,
-            MixedAlign::default(),
-            4,
-            80,
-            0,
-            None,
-        );
+        // A stopped mux is drawn in the running muxes' columns, its state
+        // the last cell when it has no directory.
+        let row = crate::tui::rows::Row {
+            id: RowId::MuxSession(NodeId::MuxSession(MuxSessionId::new("m"))),
+            depth: 0,
+            expandable: false,
+            kind: RowKind::Mixed(mux_row(entity)),
+        };
+        let spans = lay_out(&[row], &theme, 0, 80, None).remove(0).spans;
         drawn.push(spans.last().map(text).expect("a state cell"));
     }
     assert_eq!(
@@ -6398,19 +7193,7 @@ fn every_value_of_a_state_has_its_own_glyph() {
     );
 
     // Pull requests: one shape per state.
-    let mut pr_glyphs = Vec::new();
-    for (state_name, draft) in [
-        (Some("open"), false),
-        (Some("open"), true),
-        (Some("merged"), false),
-        (Some("closed"), false),
-        (None, false),
-    ] {
-        let mut pr = pr_row_for_layout("#1", "open", None);
-        pr.state = state_name.map(str::to_string);
-        pr.is_draft = draft;
-        pr_glyphs.push(text(&pr_state_span(&pr, &theme)));
-    }
+    let pr_glyphs = crate::tui::rows::PrStatus::ALL.map(|status| status.mark(&theme).0);
     assert_eq!(
         pr_glyphs,
         [
@@ -6429,4 +7212,300 @@ fn every_value_of_a_state_has_its_own_glyph() {
         .map(|marker| text(&pin_marker_span(*marker, &theme)))
         .collect();
     assert_eq!(drawn, ["  ", "◉ ", "◎ "]);
+}
+
+/// One forge state and draft flag, and the state glyph, status word,
+/// and style every PR cell must draw for it.
+type PrStateCase = (
+    Option<&'static str>,
+    bool,
+    &'static str,
+    &'static str,
+    Style,
+);
+
+/// Every forge state a PR can carry, crossed with the draft flag: state
+/// beats draft, so only an open PR reads as a draft, and a PR with no
+/// state (or one the forge invented) reads as unknown either way.
+fn pr_state_cases(theme: &Theme) -> Vec<PrStateCase> {
+    use crate::tui::icons::state;
+    let fg = |color| Style::default().fg(color);
+    let dim = Style::default().add_modifier(theme.muted);
+    let (open, draft, merged, closed) = (
+        fg(theme.pr_open()),
+        fg(theme.pr_draft()),
+        fg(theme.pr_merged()),
+        fg(theme.pr_closed()),
+    );
+    vec![
+        (Some("open"), false, state::PR_OPEN, "open", open),
+        (Some("open"), true, state::PR_DRAFT, "draft", draft),
+        (Some("OPEN"), true, state::PR_DRAFT, "draft", draft),
+        (Some("merged"), false, state::PR_MERGED, "merged", merged),
+        (Some("merged"), true, state::PR_MERGED, "merged", merged),
+        (Some("closed"), false, state::PR_CLOSED, "closed", closed),
+        (Some("closed"), true, state::PR_CLOSED, "closed", closed),
+        (Some("CLOSED"), false, state::PR_CLOSED, "closed", closed),
+        (Some("CLOSED"), true, state::PR_CLOSED, "closed", closed),
+        (None, false, state::UNKNOWN, "unknown", dim),
+        (None, true, state::UNKNOWN, "unknown", dim),
+        (Some(""), true, state::UNKNOWN, "unknown", dim),
+        (Some("locked"), false, state::UNKNOWN, "unknown", dim),
+    ]
+}
+
+#[test]
+fn a_pr_row_draws_its_kind_glyph_in_the_hue_of_its_state_glyph() {
+    // Both cells follow one rule, so a closed draft can't draw a
+    // draft-yellow kind glyph beside its red closed glyph.
+    let theme = Theme::default();
+    let mut wrong = Vec::new();
+    for (state, draft, glyph, _, style) in pr_state_cases(&theme) {
+        let mut pr = pr_row_for_layout(1, "open", None);
+        pr.state = state.map(str::to_string);
+        pr.is_draft = draft;
+        let kind = row_kind_glyph_span(&RowKind::Pr(pr.clone()), &theme).expect("a kind glyph");
+        let spans = pr_lines(&[pr], 80).remove(0);
+        let cell = spans.last().expect("the state cell");
+        if cell.content != glyph || cell.style != style || kind.style != style {
+            wrong.push(format!(
+                "state {state:?}, draft {draft}: {} {:?} beside {} {:?}, want {glyph} {style:?}",
+                kind.content, kind.style, cell.content, cell.style
+            ));
+        }
+        assert_eq!(kind.content, "⇄ ");
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+#[test]
+fn a_chip_keeps_its_look_on_the_selected_row() {
+    // The highlight reverses the rest of the row and leaves a filled
+    // chip, harness or program, live or ghost, as it is on every other
+    // row, so it still reads as a chip.
+    use crate::tui::rows::{MixedChip, MixedRow, MixedTone, PinMarker};
+    use ratatui::buffer::Buffer;
+    use ratatui::widgets::Widget;
+    let app = seeded_app();
+    let theme = app.theme().clone();
+    let chips = [MixedChip::agent("claude"), MixedChip::program("npm")];
+    for (chip, tone) in chips
+        .iter()
+        .flat_map(|chip| [(chip, MixedTone::Normal), (chip, MixedTone::Dim)])
+    {
+        let row = crate::tui::rows::Row {
+            id: RowId::Pin { pin_id: "p".into() },
+            depth: 0,
+            expandable: false,
+            kind: RowKind::Mixed(MixedRow {
+                node_kind: crate::model::NodeKind::MuxSession,
+                label: "main".into(),
+                status: "live".into(),
+                tone,
+                age: None,
+                age_epoch: None,
+                state: None,
+                chip: Some(chip.clone()),
+                content: "~/src".into(),
+                primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:main")),
+                pr_status: None,
+                marker: PinMarker::None,
+            }),
+        };
+        let draw = |selected: bool| {
+            let line = render_left_row(&row, &app, selected, 60);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 60, 1));
+            Paragraph::new(line).render(buffer.area, &mut buffer);
+            buffer
+        };
+        let (plain, selected) = (draw(false), draw(true));
+        let text: String = (0..60)
+            .map(|x| plain[(x, 0)].symbol().to_string())
+            .collect();
+        let case = format!("{chip:?}, {tone:?}: {text}");
+        let start = cell_column(&text, &format!(" {} ", chip.label)).expect("the chip");
+        let reversed =
+            |buffer: &Buffer, x: u16| buffer[(x, 0)].modifier.contains(Modifier::REVERSED);
+        let label = cell_column(&text, "main").expect("the label");
+        assert!(
+            reversed(&selected, u16::try_from(label).unwrap()),
+            "{case}: the row is highlighted"
+        );
+        for x in start..start + theme.badge_width + 2 {
+            let x = u16::try_from(x).unwrap();
+            let (before, after) = (&plain[(x, 0)], &selected[(x, 0)]);
+            assert_eq!(
+                (before.fg, before.bg, reversed(&plain, x)),
+                (after.fg, after.bg, reversed(&selected, x)),
+                "{case}: chip cell {x}"
+            );
+        }
+    }
+}
+
+/// [`seeded_app`] with the session titled `title`.
+fn seeded_app_titled(title: &str) -> App {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(GraphNode::Repo(RepoNode::new(RepoId::new(
+            "/home/op/src/proj",
+        ))));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string())
+        .with_title(title.to_string()),
+    ));
+    let snapshot = resolve_snapshot(snapshot);
+    let tree = build_sessions_tree(SessionsBuildInputs {
+        snapshot: &snapshot,
+        grouping: SessionsGrouping::Graph,
+        home: Some(std::path::Path::new("/home/op")),
+        now: None,
+        cwd: None,
+        filter: RowFilter::default(),
+    });
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Sessions;
+    let mut app = App::new(config);
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app
+}
+
+#[test]
+fn a_wide_title_is_cut_at_its_cell_budget_and_offers_the_full_value() {
+    // Thirty CJK characters take sixty cells: past the title's 48-cell
+    // budget although the title is only thirty characters long.
+    let title = "東京の会議メモと設計レビューについての長いタイトルの表示幅テスト";
+    assert!(title.chars().count() < 48 && text::width(title) > 48);
+    let mut app = seeded_app_titled(title);
+    app.update(Msg::NavDown);
+    let rendered = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 160, 30)));
+    assert!(
+        rendered.contains("(truncated"),
+        "a cut title offers the full value: {rendered}"
+    );
+    // A title one cell over the budget is cut too, and says so.
+    let mut app = seeded_app_titled(&"x".repeat(49));
+    app.update(Msg::NavDown);
+    let rendered = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 160, 30)));
+    assert!(rendered.contains("(truncated"), "{rendered}");
+}
+
+#[test]
+fn mux_rows_with_wide_names_fit_and_keep_the_columns_of_ascii_rows() {
+    let theme = Theme::default();
+    let wide = |native: &str, preview: &str| MuxSessionRow {
+        native_id: native.into(),
+        single_session_preview: Some(preview.into()),
+        agent_labels: vec!["codex".into()],
+        ..agentless_mux_row(None)
+    };
+    let ascii = wide("build-server", "running the suite");
+    let rows = [
+        wide("東京ビルドサーバー", "テスト ✅ 完了 ⚠\u{fe0f} 警告あり 🎉"),
+        wide(
+            "cafe\u{301}-na\u{308}ive",
+            "re\u{301}sume\u{301} of the run",
+        ),
+        wide("⚠\u{fe0f}-alerts", "👨\u{200d}👩\u{200d}👧 family emoji"),
+    ];
+    let column_of_badge = |spans: &[Span<'_>]| -> usize {
+        let at = spans
+            .iter()
+            .position(|span| span.content.contains("codex"))
+            .expect("badge");
+        text::spans_width(&spans[..at])
+    };
+    let reference = column_of_badge(&mux_spans_in(&ascii, &theme, 0, 100, None));
+    for row in &rows {
+        assert_eq!(
+            column_of_badge(&mux_spans_in(row, &theme, 0, 100, None)),
+            reference,
+            "{}: the badge column moved",
+            row.native_id
+        );
+        for width in 10..=100 {
+            let spans = mux_spans_in(row, &theme, 0, width, None);
+            assert!(
+                text::spans_width(&spans) <= width,
+                "{} at {width}: {spans:?}",
+                row.native_id
+            );
+        }
+    }
+}
+
+#[test]
+fn a_badge_with_a_wide_command_keeps_the_badge_width() {
+    let theme = Theme::default();
+    for command in ["ビルド", "ビルドサーバー起動", "🎉party", "cafe\u{301}"] {
+        let badge = crate::tui::widgets::badge::command_badge(command, &theme);
+        assert_eq!(
+            text::width(&badge.content),
+            theme.badge_width + 2,
+            "{command}: {:?}",
+            badge.content
+        );
+    }
+}
+
+#[test]
+fn form_rows_with_wide_values_fit_the_form() {
+    use tuikit::form::{Cols, Tone, read_only_row};
+    let theme = Theme::default();
+    let value = "東京/設計/レビュー/ノート/最終版/ドラフト/コメント付き ⚠\u{fe0f} 確認待ち";
+    for inner in [30, 44, 60] {
+        let line = read_only_row("cwd", value, Tone::Note, Cols::new(inner), &theme);
+        let width = line.width();
+        assert!(width <= inner, "{inner}: {width} cells: {line:?}");
+        assert!(line.to_string().ends_with('…'), "{inner}: {line:?}");
+    }
+}
+
+#[test]
+fn the_tree_window_follows_the_copy_of_a_duplicated_row_the_cursor_is_on() {
+    use crate::model::WorkspaceId;
+    use crate::tui::rows::{GroupRow, Row, RowTree, ViewLabel};
+    let workspace = |key: &str| NodeId::Workspace(WorkspaceId::new(key));
+    let group_row = |id: NodeId, label: &str| Row {
+        id: RowId::Group(id.clone()),
+        depth: 0,
+        expandable: false,
+        kind: RowKind::Group(GroupRow::named(label, Some(id))),
+    };
+    let mut rows = vec![group_row(workspace("dup"), "dup-first")];
+    rows.extend((0..30).map(|n| group_row(workspace(&format!("w{n}")), &format!("w{n}"))));
+    rows.push(group_row(workspace("dup"), "dup-second"));
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&GraphSnapshot::empty()),
+        tree: RowTree {
+            rows,
+            view: ViewLabel::Mux,
+        },
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    for _ in 0..31 {
+        app.update(Msg::NavDown);
+    }
+    assert_eq!(app.tree_state().position(), Some(31));
+    let text = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 120, 14)));
+    assert!(
+        text.contains("dup-second"),
+        "the cursor's copy is on screen:\n{text}"
+    );
+    assert!(
+        !text.contains("dup-first"),
+        "the first copy is scrolled away:\n{text}"
+    );
 }

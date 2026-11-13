@@ -1,0 +1,35 @@
+frame 70x14
+text  |                                                                      |
+style |                                                                      |
+text  |     ┌ Pick one  (2/3) ─────────────────────────────────────────┐     |
+style |     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa     |
+text  |     │/al                                                       │     |
+style |     aa  b                                                      a     |
+text  |     │  alpha  · running                                        │     |
+style |     a       ccccccccccc                                        a     |
+text  |     │► alphabet  · running                                     │     |
+style |     addddddddddeeeeeeeeeee                                     a     |
+text  |     │                                                          │     |
+style |     a                                                          a     |
+text  |     │                                                          │     |
+style |     a                                                          a     |
+text  |     │                                                          │     |
+style |     a                                                          a     |
+text  |     │                                                          │     |
+style |     a                                                          a     |
+text  |     │                                                          │     |
+style |     a                                                          a     |
+text  |     │                                                          │     |
+style |     a                                                          a     |
+text  |     │↑/↓ move · Enter pick · Esc close                         │     |
+style |     accccccccccccccccccccccccccccccccc                         a     |
+text  |     └──────────────────────────────────────────────────────────┘     |
+style |     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa     |
+text  |                                                                      |
+style |                                                                      |
+legend
+  a  fg Cyan
+  b  fg Black, bg White
+  c  dim
+  d  bold, reversed
+  e  bold, dim, reversed

@@ -70,7 +70,7 @@ Open the real TUI on a static scenario graph:
 ```sh
 cargo run -- dev scenario tui ambiguous-mux --view sessions
 cargo run -- dev scenario tui ambiguous-mux --grouping none --mux-state ambiguous --sort recency
-cargo run -- dev scenario tui fork-lineage --view forks
+cargo run -- dev scenario tui fork-lineage --view sessions
 ```
 
 The scenario TUI uses the normal renderer and reducer, but it does not
@@ -78,12 +78,16 @@ run live discovery. Pressing `r` reloads the static scenario snapshot.
 The controls overlay, grouping cycle, clear-filters action, search, and
 view switching work against the pre-materialized graph. Attach/resume
 and mutating actions such as rename writes are disabled so scenario runs
-cannot affect live tmux or harness state.
+cannot affect live tmux or harness state. A menu or form you can open
+there (the `.` row menu, and what its entries open) moves and closes
+with the usual keys (`Esc`, `Ctrl-C`); an entry that would write,
+launch, or touch a mux says it isn't available in this mode. The same
+holds for `tui --fixture`.
 
 Scenario TUI accepts the pure exploration flags from normal `conspectus
 tui`:
 
-- `--view {sessions|mux|union|prs|forks}`
+- `--view {sessions|mux|prs|pinned|history|search}`
 - `--grouping VALUE` (valid values depend on `--view`)
 - `--harness HARNESS` (repeatable)
 - `--mux-state attached,ambiguous,unmuxed`
@@ -164,6 +168,17 @@ conspectus tui --snapshot --snapshot-keys 'jjj<Enter>'  # navigate, expand
 # `<Enter>`, and `<Backspace>` drive the right-pane explorer.
 conspectus tui --snapshot --snapshot-pane right --snapshot-keys 'j<Tab>jjjjj<Enter>'
 
+# Draw the Messages log with entries in it (repeat for more; the last is
+# the newest). A leading `info:`, `warning:`, or `error:` sets an entry's
+# severity; it is a success otherwise.
+conspectus tui --snapshot --snapshot-message 'attached tmux:a' --snapshot-message 'error:launch failed' --snapshot-keys '!'
+
+# Draw a toast (a success unless it names a severity), or a status-line
+# message (a note unless it names one), after the keys run
+conspectus tui --snapshot --snapshot-toast 'copied: cwd'
+conspectus tui --snapshot --snapshot-toast 'error:copy failed: broken pipe'
+conspectus tui --snapshot --snapshot-status 'warning:rename: select an agent session or mux first'
+
 # Capture the live world to a fixture JSON for later iteration
 conspectus tui --snapshot --snapshot-export-fixture world.json
 
@@ -178,9 +193,20 @@ conspectus tui --fixture world.json
 
 Snapshot output uses the same row builders and renderer as the
 interactive TUI, so what you see is byte-for-byte what an operator
-sees. Lift a dialed-in fixture into a regression test with
+sees. Every key an open overlay takes does what it does live: a menu
+pick, a prompt's or form's submit, a checklist's apply, and a viewer's
+attach all run through the reducer, so the frame shows what the key did.
+What would reach outside the snapshot (a copy, an attach, a resume, a
+launch, a rebuild, a mux command, a store write) is skipped with a
+`conspectus: snapshot mode skipped …` line on stderr naming it.
+
+Lift a dialed-in fixture into a regression test with
 `serde_json::from_str(include_str!(...))` plus the existing
-`render_to_buffer` / `buffer_to_string` helpers in `src/tui/ui.rs`.
+`render_to_buffer` / `buffer_to_string` helpers in `src/tui/ui.rs`. To
+keep colors in the comparison, check the frame with
+`tuikit::testkit::golden::assert_golden` (a golden file with a legend of
+every style) and accept a deliberate change by rerunning the test with
+`TUIKIT_ACCEPT_GOLDENS=1`.
 
 Relative ages ("4m", "2d") are computed against the wall clock, so a
 fixture rendered long after it was captured shows stale ages. For

@@ -248,7 +248,10 @@ fn a_search_is_refused_while_live_preview_is_off() {
     assert!(app.content().is_none());
     assert!(app.take_scan_request().is_none());
     assert!(
-        matches!(effects.as_slice(), [Effect::Toast(text)] if text == CONTENT_OFF_NOTICE),
+        matches!(
+            effects.as_slice(),
+            [Effect::Toast(note)] if *note == Feedback::warning(CONTENT_OFF_NOTICE)
+        ),
         "the refusal is said once, as a toast: {effects:?}"
     );
     assert!(

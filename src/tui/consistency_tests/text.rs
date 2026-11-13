@@ -2,9 +2,17 @@
 //! backlog IDs, and design-document paths are developer artifacts and
 //! never reach the screen, `--help`, or an error message; a pin is
 //! called a pin, never by its storage word.
+//!
+//! The scans of source string literals cover the framework's sources
+//! (`crates/tuikit/src`) for developer artifacts as well as the host's;
+//! the storage-word rule, the rendered screens, and the help pages are
+//! host-only. `tests/support/source_tree.rs` explains why, and how each
+//! scan is guarded against visiting too few files.
 
 use clap::CommandFactory;
+use tuikit::testkit::source::{Literal, string_literals};
 
+use super::source_tree::{self, FRAMEWORK_SRC, Tree};
 use super::*;
 
 /// Documents written for operators, which messages may point at. Every
@@ -113,7 +121,7 @@ fn screens() -> Vec<(String, String)> {
             overlays.push((name, app));
         }
         let mut mux_menu = app_in(view);
-        mux_menu.open_mux_menu(crate::tui::widgets::mux_menu::MuxMenuState::new());
+        mux_menu.open_mux_menu(crate::tui::actions::mux_menu());
         overlays.push(("mux menu", mux_menu));
         for (name, mut app) in overlays {
             out.push((format!("{view:?} {name}"), frame(&mut app, 160, 60)));
@@ -209,146 +217,39 @@ fn no_help_page_shows_a_developer_artifact() {
     assert!(offenders.is_empty(), "{}", offenders.join("\n"));
 }
 
-/// The string literals of `source` outside comments, with their 1-based
-/// line numbers. Understands escapes, raw strings, and char literals;
-/// stops at the first `#[cfg(test)]` so test code is exempt.
-fn string_literals(source: &str) -> Vec<(usize, String)> {
-    let chars: Vec<char> = source.chars().collect();
-    let mut out = Vec::new();
-    let (mut i, mut line) = (0, 1);
-    let mut at_line_start = true;
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '\n' {
-            line += 1;
-            at_line_start = true;
-            i += 1;
-            continue;
-        }
-        if at_line_start && !c.is_whitespace() {
-            at_line_start = false;
-            if chars[i..].starts_with(&['#', '[', 'c', 'f', 'g', '(', 't', 'e', 's', 't', ')']) {
-                break;
-            }
-        }
-        if c == '/' && chars.get(i + 1) == Some(&'/') {
-            while i < chars.len() && chars[i] != '\n' {
-                i += 1;
-            }
-            continue;
-        }
-        if c == '/' && chars.get(i + 1) == Some(&'*') {
-            i += 2;
-            while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
-                if chars[i] == '\n' {
-                    line += 1;
-                }
-                i += 1;
-            }
-            i += 2;
-            continue;
-        }
-        if c == 'r' && matches!(chars.get(i + 1), Some('"' | '#')) {
-            let hashes = chars[i + 1..].iter().take_while(|c| **c == '#').count();
-            if chars.get(i + 1 + hashes) == Some(&'"') {
-                let start = i + hashes + 2;
-                let close: Vec<char> = std::iter::once('"')
-                    .chain(std::iter::repeat_n('#', hashes))
-                    .collect();
-                let mut j = start;
-                while j < chars.len() && !chars[j..].starts_with(&close) {
-                    j += 1;
-                }
-                out.push((line, chars[start..j].iter().collect()));
-                line += chars[start..j].iter().filter(|c| **c == '\n').count();
-                i = j + close.len();
-                continue;
-            }
-        }
-        if c == '"' {
-            let mut j = i + 1;
-            let mut text = String::new();
-            let start_line = line;
-            while j < chars.len() && chars[j] != '"' {
-                if chars[j] == '\\' {
-                    j += 1;
-                }
-                if chars[j] == '\n' {
-                    line += 1;
-                }
-                text.push(chars[j]);
-                j += 1;
-            }
-            out.push((start_line, text));
-            i = j + 1;
-            continue;
-        }
-        if c == '\'' {
-            // A char literal like '"' or '\n', not a lifetime.
-            if chars.get(i + 1) == Some(&'\\') {
-                i += 4;
-                continue;
-            }
-            if chars.get(i + 2) == Some(&'\'') {
-                i += 3;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out
-}
+/// The host's TUI sources. The tripwire minimum is below the current
+/// count (169 files) because code leaves `src/tui` for the framework.
+const TUI_SRC: Tree = Tree::new("src/tui", 100);
+/// The host's CLI sources (22 files today).
+const CLI_SRC: Tree = Tree::new("src/cli", 15);
 
-#[test]
-fn the_literal_scanner_skips_comments_and_tests() {
-    let source = "let a = \"keep\"; // \"not this\"\n/* \"nor this\" */\nlet b = r#\"raw \"q\" \"#; let c = '\"'; let d = \"e\\\"s\";\n#[cfg(test)]\nlet e = \"test only\";";
-    let found: Vec<String> = string_literals(source)
-        .into_iter()
-        .map(|(_, s)| s)
-        .collect();
-    assert_eq!(found, ["keep", "raw \"q\" ", "e\"s"]);
-}
-
-fn source_files(dir: &str) -> Vec<(PathBuf, String)> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                walk(&path, out);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
-                out.push(path);
-            }
-        }
-    }
-    let mut paths = Vec::new();
-    walk(&Path::new(env!("CARGO_MANIFEST_DIR")).join(dir), &mut paths);
-    paths
+/// The non-test sources under `trees` with their text. The consistency
+/// tests are skipped: they hold the offending words on purpose.
+fn source_files(root: &Path, trees: &[Tree]) -> Vec<(PathBuf, String)> {
+    source_tree::rust_files(root, trees)
         .into_iter()
         .filter(|path| {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            !name.ends_with("_tests.rs")
-                && name != "tests.rs"
-                && !path.to_string_lossy().contains("consistency_tests")
+            !source_tree::is_test_file(path)
+                && !source_tree::relative(root, path).contains("consistency_tests")
         })
         .filter_map(|path| Some((path.clone(), std::fs::read_to_string(path).ok()?)))
         .collect()
 }
 
-fn literal_offenders(dir: &str, bad: impl Fn(&str) -> Option<String>) -> Vec<String> {
-    let files = source_files(dir);
-    assert!(files.len() > 10, "{dir} has sources: {}", files.len());
+/// String literals under `trees` that `bad` flags, as `path:line: ...`
+/// findings.
+fn literal_offenders(
+    root: &Path,
+    trees: &[Tree],
+    bad: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
     let mut out = Vec::new();
-    for (path, source) in files {
-        for (line, text) in string_literals(&source) {
+    for (path, source) in source_files(root, trees) {
+        for Literal { line, text } in string_literals(&source) {
             if let Some(found) = bad(&text) {
                 out.push(format!(
                     "{}:{line}: {found} in {:?}",
-                    path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
-                        .unwrap_or(&path)
-                        .display(),
+                    source_tree::relative(root, &path),
                     text.chars().take(70).collect::<String>()
                 ));
             }
@@ -357,20 +258,52 @@ fn literal_offenders(dir: &str, bad: impl Fn(&str) -> Option<String>) -> Vec<Str
     out
 }
 
+fn slot_in(text: &str) -> Option<String> {
+    says_slot(text).then(|| "slot".into())
+}
+
 #[test]
 fn no_string_in_the_tui_names_a_developer_artifact() {
-    let offenders = literal_offenders("src/tui", artifact_in);
+    let offenders = literal_offenders(source_tree::workspace_root(), &[TUI_SRC], artifact_in);
     assert!(offenders.is_empty(), "{}", offenders.join("\n"));
 }
 
 #[test]
 fn no_string_in_the_cli_names_a_developer_artifact() {
-    let offenders = literal_offenders("src/cli", artifact_in);
+    let offenders = literal_offenders(source_tree::workspace_root(), &[CLI_SRC], artifact_in);
+    assert!(offenders.is_empty(), "{}", offenders.join("\n"));
+}
+
+/// The framework's text reaches the operator through the host's screens,
+/// so it follows the same rule as the host's own strings.
+#[test]
+fn no_string_in_the_framework_names_a_developer_artifact() {
+    let offenders = literal_offenders(source_tree::workspace_root(), &[FRAMEWORK_SRC], artifact_in);
+    assert!(offenders.is_empty(), "{}", offenders.join("\n"));
+}
+
+/// Host only: a pin is a Conspectus word the framework may not name, so a
+/// "slot" there is some other generic thing.
+#[test]
+fn no_string_in_the_tui_calls_a_pin_a_slot() {
+    let offenders = literal_offenders(source_tree::workspace_root(), &[TUI_SRC], slot_in);
     assert!(offenders.is_empty(), "{}", offenders.join("\n"));
 }
 
 #[test]
-fn no_string_in_the_tui_calls_a_pin_a_slot() {
-    let offenders = literal_offenders("src/tui", |text| says_slot(text).then(|| "slot".into()));
-    assert!(offenders.is_empty(), "{}", offenders.join("\n"));
+fn an_artifact_in_a_string_is_caught_in_every_tree_the_scan_covers() {
+    let violation = "fn f() { let _ = \"see ADR 0141\"; }\n";
+    source_tree::assert_scan_covers_every_tree(
+        &[TUI_SRC, CLI_SRC, FRAMEWORK_SRC],
+        violation,
+        |root, trees| literal_offenders(root, trees, artifact_in),
+    );
+}
+
+#[test]
+fn a_slot_in_a_string_is_caught_in_the_tui_tree() {
+    let violation = "fn f() { let _ = \"unpin this slot\"; }\n";
+    source_tree::assert_scan_covers_every_tree(&[TUI_SRC], violation, |root, trees| {
+        literal_offenders(root, trees, slot_in)
+    });
 }

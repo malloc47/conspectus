@@ -7,17 +7,18 @@
 //! width (blank) + separator on each visual line so the body's
 //! left edge is always at the same column.
 //!
-//! Theme integration goes through [`crate::viewer::theme::Theme`]
-//! (the ADR 0052 carve-out re-export); chip colours come from the
-//! palette so operators can override via `[tui.theme]`.
+//! Every style comes from the framework theme the viewer is given
+//! ([`crate::viewer::theme`] says which token or named style each role
+//! takes), so operators can override them via `[tui.theme]`.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use tuikit::glyphs::marks;
+use tuikit::text;
+use tuikit::theme::Theme;
 
 use crate::viewer::model::{TranscriptTurn, TurnKind, TurnRole};
 use crate::viewer::state::ToolDetail;
-use crate::viewer::theme::Theme;
 
 /// Total chip pill width in cells: 1 lead space + inner label +
 /// 1 trail space.
@@ -235,7 +236,7 @@ fn compose_line<'a>(
     let mut spans: Vec<Span<'a>> = Vec::with_capacity(3 + body.spans.len());
     if show_chip {
         let label = chip_label(turn);
-        let pill = format!(" {label:>gutter_inner_width$} ");
+        let pill = format!(" {} ", tuikit::text::pad_start(label, gutter_inner_width));
         spans.push(Span::styled(
             pill,
             Style::new().fg(chip_color).add_modifier(theme.badge),
@@ -263,27 +264,22 @@ pub fn chip_label(turn: &TranscriptTurn) -> &'static str {
 }
 
 /// Display width of a chip label in terminal cells.
-/// Uses char count to match Rust's `{:>width$}` format alignment.
 pub fn chip_label_width(label: &str) -> usize {
-    label.chars().count()
+    tuikit::text::width(label)
 }
 
-/// Color associated with a turn's chip (and therefore its
-/// separator thread). Routed through the viewer's [`Theme`]
-/// re-export so users can override via `[tui.theme]` config.
+/// Color associated with a turn's chip (and therefore its separator
+/// thread): a framework token for each role, and the compaction summary's
+/// own named style (see [`crate::viewer::theme`]).
 fn chip_color(turn: &TranscriptTurn, theme: &Theme) -> ratatui::style::Color {
     match (turn.role, turn.kind) {
-        (_, TurnKind::CompactionSummary) => theme.pr_merged,
-        (_, TurnKind::Thinking) => theme.secondary_text,
+        (_, TurnKind::CompactionSummary) => crate::viewer::theme::compaction(theme),
+        (_, TurnKind::Thinking) => theme.inert,
         (_, TurnKind::ToolUse) => theme.warning,
         (_, TurnKind::ToolResult) => theme.warning,
-        // Semantic reuse of the codex identity color
-        // for user turns. Kept in one place via the theme's
-        // registry-aware lookup so a theme override to
-        // `[tui.theme.harness].codex` also recolors user turns.
-        (TurnRole::User, _) => theme.harness_color("codex"),
+        (TurnRole::User, _) => theme.accent,
         (TurnRole::Assistant, _) => theme.success,
-        (TurnRole::System, _) => theme.secondary_text,
+        (TurnRole::System, _) => theme.inert,
     }
 }
 
@@ -297,80 +293,25 @@ fn build_body_lines<'a>(
 ) -> Vec<Line<'a>> {
     match turn.kind {
         TurnKind::Message | TurnKind::CompactionSummary => {
-            // Markdown body, possibly with GFM tables interleaved.
-            // We pre-segment with `table::segment_body` so each
-            // table block routes through comfy-table (ADR 0054)
-            // while the surrounding prose still flows through
-            // tui-markdown. Continuation lines stay within
-            // `content_width` so the gutter+separator never breaks.
-            let mut out: Vec<Line<'a>> = Vec::new();
-            for segment in crate::viewer::table::segment_body(&turn.body) {
-                match segment {
-                    crate::viewer::table::BodySegment::Markdown(src) => {
-                        let text = tui_markdown::from_str(src);
-                        for line in join_orphan_list_markers(text.lines) {
-                            wrap_styled_line(line, content_width, &mut out);
-                        }
-                    }
-                    crate::viewer::table::BodySegment::Table(parsed) => {
-                        let rendered =
-                            crate::viewer::table::render_table(&parsed, content_width, theme);
-                        out.extend(rendered);
-                    }
-                }
-            }
-            out
+            // Markdown body, possibly with GFM tables interleaved and
+            // fenced code highlighted (ADR 0051, ADR 0054), rendered by
+            // the framework's rich text (ADR 0181). Continuation lines
+            // stay within `content_width` so the gutter+separator never
+            // breaks.
+            tuikit::richtext::markdown(&turn.body, content_width, theme)
         }
         TurnKind::Thinking => {
             // Plain text, italicised for visual hint that the
             // content is private reasoning.
             let style = Style::new()
                 .add_modifier(Modifier::ITALIC)
-                .add_modifier(Modifier::DIM);
+                .add_modifier(theme.muted);
             wrap_plain(&turn.body, content_width, style)
         }
         TurnKind::ToolUse | TurnKind::ToolResult => {
             render_tool_body(turn, theme, content_width, tool_detail)
         }
     }
-}
-
-/// Put a list marker back on the line of its item's text.
-///
-/// For a loose list (items separated by blank lines, which agents
-/// often write) the Markdown renderer emits the `1. ` marker as a line
-/// of its own and the item's paragraph on the next. Join the two so the
-/// number sits beside its text, as it does in a tight list.
-fn join_orphan_list_markers(lines: Vec<Line<'_>>) -> Vec<Line<'_>> {
-    let mut out: Vec<Line<'_>> = Vec::with_capacity(lines.len());
-    let mut iter = lines.into_iter().peekable();
-    while let Some(line) = iter.next() {
-        if is_bare_list_marker(&line)
-            && let Some(next) = iter.next_if(|next| !next.spans.is_empty())
-        {
-            let mut joined = line;
-            joined.spans.extend(next.spans);
-            out.push(joined);
-        } else {
-            out.push(line);
-        }
-    }
-    out
-}
-
-/// A line holding only a list marker such as `1. `, `2) `, or `- `.
-fn is_bare_list_marker(line: &Line<'_>) -> bool {
-    let [span] = line.spans.as_slice() else {
-        return false;
-    };
-    let text = span.content.trim_start();
-    let Some(marker) = text.strip_suffix(' ') else {
-        return false;
-    };
-    matches!(marker, "-" | "*" | "+")
-        || marker
-            .strip_suffix(['.', ')'])
-            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Render a tool turn's body according to the detail level.
@@ -385,7 +326,7 @@ fn render_tool_body(
     content_width: u16,
     detail: ToolDetail,
 ) -> Vec<Line<'static>> {
-    let body_style = Style::new().add_modifier(Modifier::DIM);
+    let body_style = Style::new().add_modifier(theme.muted);
     if matches!(detail, ToolDetail::Hidden) {
         return Vec::new();
     }
@@ -418,7 +359,11 @@ fn render_tool_body(
             }
         }
         if total > TRUNCATED_TOOL_LINES {
-            let more = format!("… ({} more lines)", total - TRUNCATED_TOOL_LINES);
+            let more = format!(
+                "{} ({} more lines)",
+                marks::ELLIPSIS,
+                total - TRUNCATED_TOOL_LINES
+            );
             wrapped.extend(wrap_plain(
                 &more,
                 content_width,
@@ -457,33 +402,18 @@ fn line_with_styled_prefix(
     // double-dimming (color-fg + DIM) renders inconsistently across
     // terminals: some honor only one of the SGR codes, leaving the
     // prefix *more* visible than intended.
-    let prefix_style = Style::new().fg(theme.secondary_text);
+    let prefix_style = Style::new().fg(theme.inert);
     if let Some((prefix_end, _)) = detect_line_number_prefix(raw) {
         let prefix = &raw[..prefix_end];
         let rest = &raw[prefix_end..];
-        let prefix_w = UnicodeWidthStr::width(prefix) as u16;
-        // We word-wrap the body only, using the remaining width
-        // after the prefix on the first line. Wrapped continuation
-        // lines don't repeat the prefix (matches how grep / cat
-        // outputs read in a pager).
-        let first_budget = content_width.saturating_sub(prefix_w).max(1);
-        let pieces = word_wrap_with_budgets(rest, first_budget, content_width);
-        let mut out: Vec<Line<'static>> = Vec::with_capacity(pieces.len());
-        for (i, piece) in pieces.into_iter().enumerate() {
-            if i == 0 {
-                out.push(Line::from(vec![
-                    Span::styled(prefix.to_string(), prefix_style),
-                    Span::styled(piece, body_style),
-                ]));
-            } else {
-                let pad = Span::raw(" ".repeat(prefix_w as usize));
-                out.push(Line::from(vec![pad, Span::styled(piece, body_style)]));
-            }
-        }
-        if out.is_empty() {
-            out.push(Line::from(Span::styled(prefix.to_string(), prefix_style)));
-        }
-        out
+        // The body wraps after the prefix on the first row; continuation
+        // rows hang under the body instead of repeating the prefix
+        // (matches how grep / cat outputs read in a pager).
+        let line = Line::from(vec![
+            Span::styled(prefix.to_string(), prefix_style),
+            Span::styled(rest.to_string(), body_style),
+        ]);
+        text::wrap_line(&line, usize::from(content_width), text::width(prefix))
     } else {
         wrap_plain(raw, content_width, body_style)
     }
@@ -533,168 +463,16 @@ fn detect_line_number_prefix(raw: &str) -> Option<(usize, usize)> {
 }
 
 /// Wrap a plain-text body at `width` cells with one fixed style.
-/// Splits on existing newlines first, then word-wraps each chunk.
-/// Returns owned spans (`'static`) so callers can pass either
+/// Splits on existing newlines first, then word-wraps each line, so a
+/// body without text gives no lines and a blank line stays one blank
+/// row. Returns owned spans (`'static`) so callers can pass either
 /// borrowed input from the turn or a locally-built `String` (e.g.
 /// detabbed tool output) without lifetime contortions.
 fn wrap_plain(body: &str, width: u16, style: Style) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
-    for raw in body.lines() {
-        for wrapped in word_wrap(raw, width) {
-            out.push(Line::from(Span::styled(wrapped, style)));
-        }
-    }
-    out
-}
-
-/// Wrap a single line of plain text at `width` cells, breaking at
-/// whitespace where possible. Convenience wrapper over
-/// [`word_wrap_with_budgets`] when first-line and subsequent-line
-/// budgets are the same.
-pub(crate) fn word_wrap(input: &str, width: u16) -> Vec<String> {
-    word_wrap_with_budgets(input, width, width)
-}
-
-/// Wrap with a distinct first-line cap. The first returned chunk
-/// fits in `first_budget` cells; subsequent chunks fit in `rest`.
-/// This is what keeps the styled wrapper from orphaning leading
-/// content (like a `1. ` list marker) onto its own line: the
-/// caller passes the remaining cells on the current line as
-/// `first_budget` so the wrap picks a body chunk that joins
-/// cleanly.
-fn word_wrap_with_budgets(input: &str, first_budget: u16, rest: u16) -> Vec<String> {
-    let first = first_budget.max(1) as usize;
-    let rest = rest.max(1) as usize;
-    if input.is_empty() {
-        return vec![String::new()];
-    }
-    let mut out: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut current_width = 0usize;
-    let mut current_cap = first;
-
-    for word in input.split_inclusive(char::is_whitespace) {
-        let w = UnicodeWidthStr::width(word);
-        if w > current_cap {
-            // Word too long for the current line.
-            if !current.is_empty() {
-                out.push(std::mem::take(&mut current));
-                current_width = 0;
-            } else if out.is_empty() && first < rest {
-                // Nothing fits in the cells left on the caller's line.
-                // An empty first piece tells the caller to start the
-                // word on a fresh line instead of overflowing this one.
-                out.push(String::new());
-            }
-            // Whether or not we flushed, we're past the first piece
-            // now — switch to the full `rest` budget before deciding
-            // whether to hard-break. Skipping this swap was the bug
-            // behind `ccview`-style words getting broken into one
-            // character per line when they entered the slow path
-            // with a tiny `first_budget`.
-            current_cap = rest;
-            if w > current_cap {
-                // Word still too wide for normal lines; hard-break.
-                for piece in hard_break(word, current_cap) {
-                    out.push(piece);
-                }
-                continue;
-            }
-            current.push_str(word);
-            current_width = w;
-            continue;
-        }
-        if current_width + w > current_cap {
-            out.push(std::mem::take(&mut current));
-            current_width = 0;
-            current_cap = rest;
-        }
-        current.push_str(word);
-        current_width += w;
-    }
-    if !current.is_empty() {
-        out.push(current);
-    }
-    if out.is_empty() {
-        out.push(String::new());
-    }
-    out
-}
-
-/// Split a single string at `width` cells regardless of word
-/// boundaries. Used as the fallback for very long tokens.
-fn hard_break(input: &str, width: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut buf = String::new();
-    let mut buf_width = 0usize;
-    for ch in input.chars() {
-        let cw = UnicodeWidthStr::width(ch.to_string().as_str());
-        if buf_width + cw > width {
-            out.push(std::mem::take(&mut buf));
-            buf_width = 0;
-        }
-        buf.push(ch);
-        buf_width += cw;
-    }
-    if !buf.is_empty() {
-        out.push(buf);
-    }
-    out
-}
-
-/// Wrap a *styled* line at `width`. Each output span preserves its
-/// source span's style; breaks happen between spans when possible
-/// and inside long spans when not. Continuation lines own the same
-/// style chain as the source span chain.
-fn wrap_styled_line<'a>(line: Line<'a>, width: u16, out: &mut Vec<Line<'a>>) {
-    let width = width.max(1);
-    let mut current_spans: Vec<Span<'a>> = Vec::new();
-    let mut current_width: u16 = 0;
-    let max = width as usize;
-
-    for span in line.spans {
-        let span_width = UnicodeWidthStr::width(span.content.as_ref());
-        if span_width == 0 {
-            current_spans.push(span);
-            continue;
-        }
-        // Fast path: whole span fits.
-        if (current_width as usize) + span_width <= max {
-            current_width += span_width as u16;
-            current_spans.push(span);
-            continue;
-        }
-        // Slow path: split the span's content by word-wrap. The
-        // first chunk gets a budget equal to the remaining cells
-        // on the current line so leading content (a `1. ` list
-        // marker, an inline-code open, ...) doesn't orphan onto
-        // its own line. Subsequent chunks land on fresh lines.
-        let style = span.style;
-        let content = span.content;
-        let first_budget = width.saturating_sub(current_width);
-        let pieces = word_wrap_with_budgets(content.as_ref(), first_budget, width);
-        for (i, piece) in pieces.into_iter().enumerate() {
-            if i > 0 && (!current_spans.is_empty() || current_width > 0) {
-                out.push(Line::from(std::mem::take(&mut current_spans)));
-                current_width = 0;
-            }
-            if piece.is_empty() {
-                continue;
-            }
-            let piece_width = UnicodeWidthStr::width(piece.as_str()) as u16;
-            current_spans.push(Span::styled(piece, style));
-            current_width += piece_width;
-            if current_width >= width {
-                out.push(Line::from(std::mem::take(&mut current_spans)));
-                current_width = 0;
-            }
-        }
-    }
-    if !current_spans.is_empty() {
-        out.push(Line::from(current_spans));
-    } else if out.is_empty() {
-        out.push(Line::raw(""));
-    }
+    body.lines()
+        .flat_map(|raw| text::wrap(raw, usize::from(width)))
+        .map(|row| Line::from(Span::styled(row, style)))
+        .collect()
 }
 
 #[cfg(test)]

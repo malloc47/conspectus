@@ -1,0 +1,6 @@
+frame 16x1
+text  |/東京 quokka    |
+style |a  b            |
+legend
+  a  fg Cyan
+  b  fg Black, bg White

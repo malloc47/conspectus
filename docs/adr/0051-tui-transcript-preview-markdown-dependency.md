@@ -9,7 +9,10 @@ original v1 decision to keep `highlight-code` off is preserved
 in the §"Why turn off `highlight-code`" section as the
 counterfactual; see §"Amendment: re-enable `highlight-code`
 for the native viewer" at the bottom for the revised cost /
-benefit.
+benefit. Amended by [ADR 0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md): `tui-markdown`, with its
+`highlight-code` feature and so `syntect`, is an optional dependency of
+the framework crate behind its `richtext` feature, which `conspectus`
+turns on, and the rendering call is the framework's `richtext::markdown`.
 
 ## Context
 

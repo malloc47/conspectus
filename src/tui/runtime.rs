@@ -1,8 +1,8 @@
 //! Terminal lifecycle and event loop.
 //!
-//! `ratatui::init` already installs a panic hook that restores the
-//! terminal, so this module just sets up the loop and is the only
-//! place in the crate that touches stdout in raw mode.
+//! `term` takes the terminal over and hands it back (with a panic
+//! hook that restores it), so this module just sets up the loop and is
+//! the only place in the crate that touches stdout in raw mode.
 //!
 //! Discovery runs on a background thread per ADR 0024 (`mpsc` + no
 //! async runtime). The initial load still runs synchronously so the
@@ -11,13 +11,13 @@
 //! background channel and never block input.
 
 use std::process::Output;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
-use ratatui::layout::Rect;
+use tuikit::feedback::Feedback;
 
 use crate::discovery::tmux::{MuxBackend, SystemTmux};
 use crate::model::MuxSessionId;
@@ -27,7 +27,7 @@ use crate::tui::View;
 use crate::tui::actions::AttachTarget;
 use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::effect::Effect;
-use crate::tui::keybindings::overlay as overlay_keymap;
+use crate::tui::messages::{LogEntry, LogEntryExt};
 use crate::tui::preview::{
     PreviewContent, PreviewSource, capture_via, load_offline_preview, pane_native_id,
     preview_source,
@@ -44,22 +44,21 @@ use crate::tui::{RunConfig, ui};
 /// the app's current view config.
 mod content;
 mod executor;
+mod handoff;
 mod launch;
+mod mux_name;
 mod overlay_keys;
+mod term;
 mod visibility;
 mod worktree_exec;
 
 use executor::*;
 use launch::*;
-use overlay_keys::*;
 use worktree_exec::*;
 
-#[cfg(any(test, debug_assertions, feature = "snapshot"))]
-pub(super) use overlay_keys::handle_search_overlay_key;
-pub(super) use overlay_keys::{
-    handle_controls_overlay_key, handle_help_overlay_key, handle_messages_overlay_key,
-    handle_pane_viewer_key, handle_search_overlay_key_with, handle_viewer_overlay_key,
-};
+#[cfg(test)]
+pub(super) use overlay_keys::modal_key_pure;
+pub(super) use overlay_keys::{modal_key, open_rename_overlay};
 
 /// What a background discovery worker sends back. `warning` carries a
 /// problem the worker worked around, such as a failed daemon nudge
@@ -127,8 +126,26 @@ fn run_loop(
     config: RunConfig,
     mut mode: impl LoopMode,
 ) -> Result<()> {
+    let result = drive_loop(terminal, &mut app, &config, &mut mode);
+    // The state file is written however the loop ended, a quit or an
+    // error. View switches and settings changes write it as they happen,
+    // but the expanded and selected rows change with every key and are
+    // written only with those, before a hand-off of the terminal, and
+    // here, so this write is what keeps the last of them.
+    app.persist_state();
+    result
+}
+
+/// The event loop itself: draw, read a key, dispatch it, until the app
+/// signals quit or the terminal fails.
+fn drive_loop(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    mode: &mut impl LoopMode,
+) -> Result<()> {
     let poll_timeout = Duration::from_millis(100);
-    mode.init(terminal, &mut app, &config)?;
+    mode.init(terminal, app, config)?;
 
     // The preview source the last pass resolved, and whether the last
     // key asked for a refresh.
@@ -137,25 +154,27 @@ fn run_loop(
     while !app.should_quit() {
         // A contents query that has rested starts its scan.
         app.search_overlay_tick(Instant::now(), false);
-        mode.drain(&mut app, &config)?;
-        shown = refresh_preview_if_needed(&mut app, &config, &mut mode, shown, force_preview);
-        draw_frame(&mut app, terminal)?;
+        mode.drain(app, config)?;
+        shown = refresh_preview_if_needed(app, config, mode, shown, force_preview);
+        draw_frame(app, terminal)?;
         force_preview = false;
         if event::poll(poll_timeout)? {
             let event = event::read()?;
-            let viewport = terminal.size()?.height.saturating_sub(2);
-            let action = action_for_event(&app, event, viewport);
+            if let Event::Paste(text) = &event {
+                let mut dispatched = Ok(());
+                type_paste(app, text, &mut |app, action| {
+                    if dispatched.is_ok() {
+                        dispatched = mode.dispatch(terminal, app, config, Some(action));
+                    }
+                });
+                dispatched?;
+                continue;
+            }
+            let action = action_for_event(app, event);
             force_preview = matches!(action, Some(Action::Refresh | Action::HardRefresh));
-            mode.dispatch(terminal, &mut app, &config, action)?;
+            mode.dispatch(terminal, app, config, action)?;
         }
     }
-
-    // Belt-and-suspenders shutdown persist: the view / grouping /
-    // filter / sort reducer arms emit `Effect::Persist` per ADR
-    // 0085 contract 2 Phase E, so this final call is redundant
-    // on the happy path. Kept so any state a future non-reducer
-    // path mutates just before shutdown still lands on disk.
-    app.persist_state();
     Ok(())
 }
 
@@ -169,6 +188,14 @@ struct LiveMode {
     result_rx: mpsc::Receiver<DiscoveryResult>,
     preview_tx: mpsc::Sender<(PreviewSource, PreviewContent)>,
     preview_rx: mpsc::Receiver<(PreviewSource, PreviewContent)>,
+    /// Muxes the existence check after a hand-off confirmed.
+    confirmed_tx: mpsc::Sender<handoff::Confirmed>,
+    confirmed_rx: mpsc::Receiver<handoff::Confirmed>,
+    /// Asks a returned mux's server whether it is still the same
+    /// incarnation.
+    probe: Arc<dyn handoff::IncarnationProbe>,
+    /// The discovery every background refresh runs.
+    discover: Arc<Discover>,
     workers: WorkerLedger,
     last_refresh: Instant,
     refresh_interval: Duration,
@@ -218,23 +245,31 @@ const FORGE_POLL: Duration = Duration::from_secs(10);
 /// Bookkeeping for background discovery workers. Each spawn takes the
 /// next generation. Results apply only when newer than the last one
 /// applied, so a slow worker spawned before a tmux hand-off can't
-/// overwrite the post-hand-off snapshot (ADR 0108).
+/// overwrite the post-hand-off snapshot (ADR 0108). Each mux a hand-off
+/// froze waits for the refresh spawned after its own return, so a later
+/// hand-off never holds it (ADR 0201).
 #[derive(Debug, Default)]
 struct WorkerLedger {
     next: u64,
     in_flight: usize,
     applied: u64,
-    /// First generation spawned after the latest hand-off; its result
-    /// (or any newer one) settles the hand-off's pending rows.
+    /// Each frozen mux and the generation spawned after its latest
+    /// return: that result, or any newer one, releases it, unless the
+    /// existence check releases it first.
+    frozen: std::collections::BTreeMap<MuxSessionId, u64>,
+    /// The generation spawned after the latest hand-off; its result (or
+    /// any newer one) ends the hand-off.
     settles_handoff_at: Option<u64>,
 }
 
 /// What [`WorkerLedger::finish`] decided about one worker's result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct WorkerVerdict {
     /// The result is newer than what's on screen.
     apply: bool,
-    /// The result settles the pending hand-off.
+    /// The frozen muxes the result releases.
+    released: Vec<MuxSessionId>,
+    /// The result ends the pending hand-off.
     settles_handoff: bool,
 }
 
@@ -245,8 +280,13 @@ impl WorkerLedger {
         self.next
     }
 
-    fn start_for_handoff(&mut self) -> u64 {
+    /// Start the refresh after a hand-off that returned from `muxes`
+    /// (none when the TUI's pane came back into view).
+    fn start_for_handoff(&mut self, muxes: impl IntoIterator<Item = MuxSessionId>) -> u64 {
         let generation = self.start();
+        for mux in muxes {
+            self.frozen.insert(mux, generation);
+        }
         self.settles_handoff_at = Some(generation);
         generation
     }
@@ -257,14 +297,36 @@ impl WorkerLedger {
         if apply {
             self.applied = generation;
         }
+        let mut released = Vec::new();
+        if apply {
+            self.frozen.retain(|mux, waits_for| {
+                let release = *waits_for <= generation;
+                if release {
+                    released.push(mux.clone());
+                }
+                !release
+            });
+        }
         let settles_handoff = apply && self.settles_handoff_at.is_some_and(|at| generation >= at);
         if settles_handoff {
             self.settles_handoff_at = None;
         }
         WorkerVerdict {
             apply,
+            released,
             settles_handoff,
         }
+    }
+
+    /// The existence check confirmed `mux` for the refresh with
+    /// `generation`. Returns whether that releases it: a later return
+    /// to the mux froze it again for a newer refresh.
+    fn confirm(&mut self, mux: &MuxSessionId, generation: u64) -> bool {
+        let current = self.frozen.get(mux) == Some(&generation);
+        if current {
+            self.frozen.remove(mux);
+        }
+        current
     }
 
     fn idle(&self) -> bool {
@@ -277,7 +339,13 @@ impl LiveMode {
     /// any worker runs.
     fn spawn_discovery(&mut self, app: &mut App, nudge: DaemonNudge, generation: u64) {
         self.last_refresh = Instant::now();
-        spawn_discovery_worker(app.config(), &self.result_tx, nudge, generation);
+        spawn_discovery_worker(
+            app.config(),
+            &self.result_tx,
+            nudge,
+            generation,
+            &self.discover,
+        );
         let label = match nudge {
             DaemonNudge::LiveAndForge => "Refreshing forges",
             DaemonNudge::None | DaemonNudge::LiveClasses => "Discovering",
@@ -297,19 +365,28 @@ impl LiveMode {
         // Returning from tmux paints the old snapshot right away; the
         // live classes rescan in the background even if another
         // worker is already running, since that one predates the
-        // hand-off (ADR 0108).
-        if app.take_handoff_refresh_request() {
-            let generation = self.workers.start_for_handoff();
-            let before = app
-                .snapshot_handle()
-                .map(|handle| live_mux_ids(handle.snapshot()));
-            self.last_refresh = Instant::now();
-            spawn_discovery_worker_settling(
-                app.config(),
-                &self.result_tx,
-                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
+        // hand-off (ADR 0108). Beside it, each returned mux's server is
+        // asked whether the mux is still there (ADR 0201).
+        if let Some(request) = app.take_handoff_refresh_request() {
+            let generation = self
+                .workers
+                .start_for_handoff(request.returned.iter().map(|returned| returned.mux.clone()));
+            let job = handoff::HandoffJob::new(
                 generation,
-                before,
+                app.config().clone(),
+                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
+                request,
+                app.snapshot_handle().map(SnapshotHandle::snapshot),
+            );
+            self.last_refresh = Instant::now();
+            handoff::spawn_refresh(
+                job,
+                Arc::clone(&self.probe),
+                Arc::clone(&self.discover),
+                handoff::HandoffChannels {
+                    results: self.result_tx.clone(),
+                    confirmed: self.confirmed_tx.clone(),
+                },
             );
             app.update(Msg::InFlightStart {
                 kind: crate::tui::app::InFlightKind::Discovery,
@@ -328,6 +405,7 @@ impl LiveMode {
                 &self.result_tx,
                 DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
                 generation,
+                &self.discover,
             );
             app.update(Msg::InFlightStart {
                 kind: crate::tui::app::InFlightKind::Discovery,
@@ -375,6 +453,13 @@ impl LoopMode for LiveMode {
                 app.update(Msg::ViewRegained);
             }
         }
+        // A returned mux is still the incarnation the screen shows: its
+        // rows stop waiting for the refresh, which updates them behind.
+        while let Ok(handoff::Confirmed { mux, generation }) = self.confirmed_rx.try_recv() {
+            if self.workers.confirm(&mux, generation) {
+                app.update(Msg::HandoffReleased(mux));
+            }
+        }
         // Drain completed background discovery results without
         // blocking. A result older than the one on screen is dropped.
         // A finished background forge fetch: refresh to merge what it
@@ -404,7 +489,7 @@ impl LoopMode for LiveMode {
                 ));
             }
             if let Some(warning) = warning {
-                app.report(crate::tui::messages::LogEntry::warning(warning));
+                app.report(LogEntry::warning(warning));
             }
             if !verdict.apply {
                 continue;
@@ -436,6 +521,9 @@ impl LoopMode for LiveMode {
                 Err(err) => {
                     report_refresh_failure(app, &err);
                 }
+            }
+            for mux in verdict.released {
+                app.update(Msg::HandoffReleased(mux));
             }
             if verdict.settles_handoff {
                 app.update(Msg::HandoffSettled);
@@ -475,9 +563,9 @@ impl LoopMode for LiveMode {
         if action.as_ref().is_some_and(acts_on_selected_row) && app.selected_row_awaits_handoff() {
             // The row shows pre-hand-off values: its mux or session may
             // be gone, so an action on it could fail (ADR 0132).
-            app.update(Msg::SetStatus(Some(
-                crate::tui::app::HANDOFF_PENDING_HINT.to_string(),
-            )));
+            app.update(Msg::SetStatus(Some(Feedback::warning(
+                crate::tui::app::HANDOFF_PENDING_HINT,
+            ))));
             return Ok(());
         }
         match action {
@@ -506,6 +594,11 @@ impl LoopMode for LiveMode {
                 let generation = self.workers.start();
                 self.spawn_discovery(app, DaemonNudge::LiveAndForge, generation);
             }
+            // What a modal commits can need a terminal, a mux, or a store
+            // (a pick, a submit, a hit that opens the viewer).
+            Some(Action::ModalKey(key)) => {
+                modal_key(app, key, &mut live_send(terminal, config, tmux));
+            }
             Some(Action::Attach) => {
                 dispatch_live(terminal, app, config, tmux, Msg::AttachSelected);
             }
@@ -517,37 +610,11 @@ impl LoopMode for LiveMode {
             }
             Some(Action::DefaultAction) => default_action(terminal, app, config, tmux),
             Some(Action::OpenRename) => open_rename_overlay(app),
-            Some(Action::RenameOverlayKey(key)) => {
-                handle_rename_overlay_key(terminal, app, config, tmux, key);
-            }
             Some(Action::OpenWorktreeMenu) => open_worktree_menu_action(app),
             Some(Action::OpenWorktreeCloseDown) => open_worktree_close_down_action(app),
-            Some(Action::WorktreeMenuKey(key)) => {
-                handle_worktree_menu_key(terminal, app, config, tmux, key);
-            }
             Some(Action::OpenNewMuxForm) => open_new_mux_form_action(app),
-            Some(Action::NewMuxFormKey(key)) => {
-                handle_new_mux_form_key(terminal, app, config, tmux, key);
-            }
             Some(Action::OpenMuxMenu) => open_mux_menu_action(app),
-            Some(Action::MuxMenuKey(key)) => handle_mux_menu_key(terminal, app, config, tmux, key),
-            Some(Action::MuxLaunchFormKey(key)) => {
-                handle_mux_launch_form_key(terminal, app, config, tmux, key);
-            }
-            Some(Action::PinEditFormKey(key)) => {
-                handle_pin_edit_form_key(terminal, app, config, tmux, key);
-            }
-            Some(Action::RowMenuKey(key)) => handle_row_menu_key(terminal, app, config, tmux, key),
-            Some(Action::CleanUpKey(key)) => handle_clean_up_key(terminal, app, config, tmux, key),
-            Some(Action::PickerKey(key)) => handle_picker_key(terminal, app, config, tmux, key),
-            Some(Action::OpenControls) => {
-                app.open_controls_overlay();
-                app.update(Msg::SetStatus(Some(format!(
-                    "controls: {}",
-                    overlay_keymap::footer(overlay_keymap::CONTROLS_KEYS)
-                ))));
-            }
-            Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
+            Some(Action::OpenControls) => open_controls(app),
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
                 let next = cycle_view(app.active_view(), delta);
@@ -563,37 +630,14 @@ impl LoopMode for LiveMode {
             }
             Some(Action::ClearFilters) => {
                 dispatch(app, Msg::ClearFilters);
-                app.update(Msg::SetStatus(Some("filters cleared".to_string())));
+                app.update(Msg::SetStatus(Some(Feedback::success("filters cleared"))));
             }
-            Some(Action::OpenSearch) => {
-                let hint = app.open_search_entry();
-                app.update(Msg::SetStatus(Some(hint)));
-            }
-            Some(Action::OpenContentSearch) => {
-                let hint = app.open_content_search_entry();
-                app.update(Msg::SetStatus(Some(hint)));
-            }
-            Some(Action::SearchOverlayKey(key)) => {
-                // A hit that opens the viewer needs the live executor.
-                handle_search_overlay_key_with(app, key, &mut |app, msg| {
-                    dispatch_live(terminal, app, config, tmux, msg);
-                });
-            }
+            Some(Action::OpenSearch) => app.open_search_entry(),
+            Some(Action::OpenContentSearch) => app.open_content_search_entry(),
             Some(Action::OpenHelp) => {
                 app.open_help_overlay();
             }
-            Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(app, key),
             Some(Action::OpenMessages) => app.open_messages_overlay(),
-            Some(Action::MessagesOverlayKey(key)) => handle_messages_overlay_key(app, key),
-            Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
-            Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
-            Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
-            Some(Action::PaneViewerKey(key)) => {
-                if let Some(msg) = handle_pane_viewer_key(app, key) {
-                    dispatch_live(terminal, app, config, tmux, msg);
-                }
-            }
-            Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
         }
@@ -614,10 +658,11 @@ impl LoopMode for LiveMode {
             return;
         }
         let tx = self.preview_tx.clone();
+        let muted = app.theme().muted;
         std::thread::spawn(move || {
             // A loader panic still has to end the load, or the preview
             // would wait on it forever and `r` couldn't retry.
-            let content = std::panic::catch_unwind(|| load_offline_preview(&source))
+            let content = std::panic::catch_unwind(|| load_offline_preview(&source, muted))
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| {
@@ -631,7 +676,8 @@ impl LoopMode for LiveMode {
 
 /// Static-mode loop state: fixture-replay + scenario TUI. Its
 /// `dispatch` blocks mutating actions with a status hint and
-/// reloads the fixture on `Action::Refresh`.
+/// reloads the fixture on `Action::Refresh`. Overlays take their keys
+/// as in the live loop; what they commit runs on the pure executor.
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
 struct StaticMode {
     tmux: Box<dyn MuxBackend>,
@@ -640,6 +686,121 @@ struct StaticMode {
     /// A scenario world's root, whose recorded `gh pr view` output
     /// answers PR previews.
     recordings: Option<std::path::PathBuf>,
+}
+
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+impl StaticMode {
+    /// What [`LoopMode::dispatch`] does; it needs no terminal.
+    fn dispatch_action(&mut self, app: &mut App, config: &RunConfig, action: Option<Action>) {
+        match action {
+            Some(Action::Msg(msg)) => dispatch(app, *msg),
+            // A modal opened any way (`.`, a menu pick, a direct opener)
+            // takes its keys as in the live TUI, so it moves and closes;
+            // the pure executor refuses a pick that needs a terminal, a
+            // mux, or a store.
+            Some(Action::ModalKey(key)) => modal_key(app, key, &mut dispatch),
+            Some(Action::OpenHelp) => app.open_help_overlay(),
+            Some(Action::OpenMessages) => app.open_messages_overlay(),
+            Some(Action::OpenSearch) => app.open_search_entry(),
+            Some(Action::OpenContentSearch) => app.open_content_search_entry(),
+            Some(Action::OpenControls) => open_controls(app),
+            Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
+            Some(Action::CycleView(delta)) => {
+                let next = cycle_view(app.active_view(), delta);
+                dispatch(app, Msg::SwitchView(next));
+            }
+            Some(action @ (Action::Refresh | Action::HardRefresh)) => {
+                if action == Action::HardRefresh {
+                    // Recorded PR previews reload; nothing asks a forge.
+                    app.update(Msg::ForgeRefreshRequested);
+                }
+                if let Some(path) = self.fixture_path.as_deref() {
+                    // ADR 0069: in fixture mode, `r` re-reads the
+                    // file on disk so the operator can edit the
+                    // JSON and cycle in the new state without
+                    // leaving the session. Parse errors land in
+                    // the status bar; the previously loaded
+                    // fixture stays active.
+                    match read_fixture(path) {
+                        Ok(fresh) => {
+                            self.snapshot = fresh;
+                            set_static_data(app, config, &self.snapshot);
+                            app.update(Msg::SetStatus(Some(Feedback::success(format!(
+                                "fixture reloaded from {}",
+                                path.display()
+                            )))));
+                        }
+                        Err(err) => {
+                            app.update(Msg::SetStatus(Some(Feedback::error(format!(
+                                "fixture reload failed ({}): {err}",
+                                path.display()
+                            )))));
+                        }
+                    }
+                } else {
+                    set_static_data(app, config, &self.snapshot);
+                    app.update(Msg::SetStatus(Some(Feedback::success(
+                        "scenario snapshot reloaded",
+                    ))));
+                }
+            }
+            Some(Action::Attach) => {
+                app.update(Msg::SetStatus(Some(Feedback::warning(
+                    "scenario TUI is static; attach is disabled",
+                ))));
+            }
+            Some(Action::Resume) => {
+                app.update(Msg::SetStatus(Some(Feedback::warning(
+                    "scenario TUI is static; resume is disabled",
+                ))));
+            }
+            Some(Action::View) => {
+                app.update(Msg::SetStatus(Some(Feedback::warning(
+                    "scenario TUI is static; view is disabled",
+                ))));
+            }
+            Some(Action::DefaultAction) => {
+                let msg = match selected_default_action(app) {
+                    SelectedDefault::ToggleExpand => Msg::ToggleExpand,
+                    SelectedDefault::Attach => Msg::SetStatus(Some(Feedback::warning(
+                        "scenario TUI is static; attach is disabled",
+                    ))),
+                    SelectedDefault::View => Msg::SetStatus(Some(Feedback::warning(
+                        "scenario TUI is static; view is disabled",
+                    ))),
+                    SelectedDefault::Scrollback => Msg::SetStatus(Some(Feedback::warning(
+                        "scenario TUI is static; scrollback is disabled",
+                    ))),
+                };
+                dispatch(app, msg);
+            }
+            Some(Action::CycleGrouping(delta)) => {
+                let next = if delta >= 0 {
+                    app.grouping().cycle_next()
+                } else {
+                    app.grouping().cycle_prev()
+                };
+                dispatch(app, Msg::SetGrouping(next));
+            }
+            Some(Action::ClearFilters) => {
+                dispatch(app, Msg::ClearFilters);
+                app.update(Msg::SetStatus(Some(Feedback::success("filters cleared"))));
+            }
+            Some(
+                Action::OpenRename
+                | Action::OpenWorktreeMenu
+                | Action::OpenWorktreeCloseDown
+                | Action::OpenNewMuxForm
+                | Action::OpenMuxMenu,
+            ) => {
+                app.update(Msg::SetStatus(Some(Feedback::warning(
+                    "scenario TUI keeps mutating actions disabled",
+                ))));
+            }
+            Some(Action::CopySessionId) => copy_session_id_action(app),
+            None => {}
+        }
+    }
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
@@ -669,143 +830,7 @@ impl LoopMode for StaticMode {
         config: &RunConfig,
         action: Option<Action>,
     ) -> Result<()> {
-        match action {
-            Some(Action::Msg(msg)) => dispatch(app, *msg),
-            Some(Action::OpenHelp) => app.open_help_overlay(),
-            Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(app, key),
-            Some(Action::OpenMessages) => app.open_messages_overlay(),
-            Some(Action::MessagesOverlayKey(key)) => handle_messages_overlay_key(app, key),
-            Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
-            Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
-            Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
-            Some(Action::PaneViewerKey(key)) => {
-                if let Some(msg) = handle_pane_viewer_key(app, key) {
-                    dispatch(app, msg);
-                }
-            }
-            Some(Action::OpenSearch) => {
-                let hint = app.open_search_entry();
-                app.update(Msg::SetStatus(Some(hint)));
-            }
-            Some(Action::OpenContentSearch) => {
-                let hint = app.open_content_search_entry();
-                app.update(Msg::SetStatus(Some(hint)));
-            }
-            Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
-            Some(Action::OpenControls) => {
-                app.open_controls_overlay();
-                app.update(Msg::SetStatus(Some(format!(
-                    "controls: {}",
-                    overlay_keymap::footer(overlay_keymap::CONTROLS_KEYS)
-                ))));
-            }
-            Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
-            Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
-            Some(Action::CycleView(delta)) => {
-                let next = cycle_view(app.active_view(), delta);
-                dispatch(app, Msg::SwitchView(next));
-            }
-            Some(action @ (Action::Refresh | Action::HardRefresh)) => {
-                if action == Action::HardRefresh {
-                    // Recorded PR previews reload; nothing asks a forge.
-                    app.update(Msg::ForgeRefreshRequested);
-                }
-                if let Some(path) = self.fixture_path.as_deref() {
-                    // ADR 0069: in fixture mode, `r` re-reads the
-                    // file on disk so the operator can edit the
-                    // JSON and cycle in the new state without
-                    // leaving the session. Parse errors land in
-                    // the status bar; the previously loaded
-                    // fixture stays active.
-                    match read_fixture(path) {
-                        Ok(fresh) => {
-                            self.snapshot = fresh;
-                            set_static_data(app, config, &self.snapshot);
-                            app.update(Msg::SetStatus(Some(format!(
-                                "fixture reloaded from {}",
-                                path.display()
-                            ))));
-                        }
-                        Err(err) => {
-                            app.update(Msg::SetStatus(Some(format!(
-                                "fixture reload failed ({}): {err}",
-                                path.display()
-                            ))));
-                        }
-                    }
-                } else {
-                    set_static_data(app, config, &self.snapshot);
-                    app.update(Msg::SetStatus(Some(
-                        "scenario snapshot reloaded".to_string(),
-                    )));
-                }
-            }
-            Some(Action::Attach) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI is static; attach is disabled".to_string(),
-                )));
-            }
-            Some(Action::Resume) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI is static; resume is disabled".to_string(),
-                )));
-            }
-            Some(Action::View) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI is static; view is disabled".to_string(),
-                )));
-            }
-            Some(Action::DefaultAction) => {
-                let msg = match selected_default_action(app) {
-                    SelectedDefault::ToggleExpand => Msg::ToggleExpand,
-                    SelectedDefault::Attach => Msg::SetStatus(Some(
-                        "scenario TUI is static; attach is disabled".to_string(),
-                    )),
-                    SelectedDefault::View => {
-                        Msg::SetStatus(Some("scenario TUI is static; view is disabled".to_string()))
-                    }
-                    SelectedDefault::Scrollback => Msg::SetStatus(Some(
-                        "scenario TUI is static; scrollback is disabled".to_string(),
-                    )),
-                };
-                dispatch(app, msg);
-            }
-            Some(Action::CycleGrouping(delta)) => {
-                let next = if delta >= 0 {
-                    app.grouping().cycle_next()
-                } else {
-                    app.grouping().cycle_prev()
-                };
-                dispatch(app, Msg::SetGrouping(next));
-            }
-            Some(Action::ClearFilters) => {
-                dispatch(app, Msg::ClearFilters);
-                app.update(Msg::SetStatus(Some("filters cleared".to_string())));
-            }
-            Some(
-                Action::OpenRename
-                | Action::RenameOverlayKey(_)
-                | Action::OpenWorktreeMenu
-                | Action::OpenWorktreeCloseDown
-                | Action::WorktreeMenuKey(_)
-                | Action::OpenNewMuxForm
-                | Action::NewMuxFormKey(_)
-                | Action::OpenMuxMenu
-                | Action::MuxMenuKey(_)
-                | Action::RowMenuKey(_)
-                | Action::CleanUpKey(_)
-                | Action::PickerKey(_)
-                | Action::MuxLaunchFormKey(_)
-                | Action::PinEditFormKey(_),
-            ) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI keeps mutating actions disabled".to_string(),
-                )));
-            }
-            Some(Action::ExplorerEnter) => explorer_enter_action(app),
-            Some(Action::CopySessionId) => copy_session_id_action(app),
-            None => {}
-        }
+        self.dispatch_action(app, config, action);
         Ok(())
     }
 
@@ -817,7 +842,7 @@ impl LoopMode for StaticMode {
     /// everything else loads as usual.
     fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
         if let Some(root) = &self.recordings
-            && let Some(content) = recorded_preview(&source, root)
+            && let Some(content) = recorded_preview(&source, root, app.theme().muted)
         {
             app.update(Msg::SetPreview { source, content });
             return;
@@ -826,121 +851,74 @@ impl LoopMode for StaticMode {
     }
 }
 
-/// Prepare the toast area and render one frame. Shared between
-/// [`event_loop`] and [`static_event_loop`] —
-/// the toast prep + viewer-or-ui draw block was byte-identical
-/// in both loops.
+/// Retire an expired toast and render one frame. Shared between
+/// [`event_loop`] and [`static_event_loop`].
 fn draw_frame(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
-    let size = terminal.size()?;
-    app.prepare_toast_for_render(Rect::new(0, 0, size.width, size.height));
+    app.prepare_toast_for_render();
     terminal.draw(|frame| draw_screen(app, frame))?;
     Ok(())
 }
 
-/// Draw the whole screen: the full-screen transcript viewer (with its
-/// help page over it when open) while one is up, the row tree and panes
-/// otherwise. The interactive loops and `--snapshot` share it.
+/// Draw the whole screen (the panes, then every open modal bottom to
+/// top, then a toast) and keep the windows the panes drew. The
+/// interactive loops and `--snapshot` share it.
 pub(super) fn draw_screen(app: &mut App, frame: &mut ratatui::Frame<'_>) {
-    let area = frame.area();
-    if app.viewer_modal().is_some() {
-        let theme = app.theme().clone();
-        if let Some(state) = app.viewer_modal_mut() {
-            crate::viewer::widget::draw(state, &theme, frame, area);
-            if state.show_help {
-                crate::tui::widgets::viewer_help::draw(state, &theme, frame, area);
-            }
-        }
-    } else if app.pane_viewer().is_some() {
-        let theme = app.theme().clone();
-        if let Some(state) = app.pane_viewer_mut() {
-            crate::tui::widgets::pane_viewer::draw(state, &theme, frame, area);
-        }
-    } else {
-        ui::draw(app, frame);
-    }
+    let report = ui::draw(app, frame);
+    app.keep_viewports(report);
 }
 
-/// Route a crossterm event through the modal stack (ADR 0085
-/// contract 3). Returns `Some(...OverlayKey(key))` when an overlay
-/// owns the input, `None` when the caller should fall through to
-/// its per-mode action translation.
-///
-/// Shared between the live and static event loops. Only
-/// KeyEventKind::Press events are forwarded — the
-/// modal stack ignores repeat/release + non-key events like the
-/// individual overlay handlers already did.
 /// Resolve a terminal event to an action the way every key path
-/// must: an open overlay owns the key, otherwise the keymap
-/// translates it and the focus pass routes navigation keys to the
-/// focused pane. The interactive loop and the `--snapshot-keys`
-/// driver both go through here so they can't disagree about what a
-/// key does.
-pub(super) fn action_for_event(app: &App, event: Event, viewport_height: u16) -> Option<Action> {
-    overlay_key_from_event(app, &event)
-        .or_else(|| translate(event, viewport_height).and_then(|a| remap_for_focus(a, app.focus())))
+/// must: an open overlay owns the key; otherwise the keymap resolves it
+/// in the focused pane's scope, then the program's ([`translate_in`]).
+/// The interactive loop, the fixture loop, and the `--snapshot-keys`
+/// driver all go through here so they can't disagree about what a key
+/// does. Page keys move the tree by the rows it drew in the last frame,
+/// which its state keeps, and the explorer by the rows its zone drew.
+pub(super) fn action_for_event(app: &App, event: Event) -> Option<Action> {
+    overlay_key_from_event(app, &event).or_else(|| translate_in(app.focus(), event))
 }
 
+/// Type a bracketed paste into the text field that has the keys, one key
+/// per character, so each field edits, completes, and refilters exactly
+/// as it does for typing. The text is flattened to one line first
+/// (`single_line_paste`), so a paste never presses Enter or Tab.
+/// `dispatch` handles each key's action the way the loop handles a typed
+/// key. A paste goes only into a text field (`App::text_field_has_keys`):
+/// with none focused it does nothing, and typing stops if a key leaves
+/// the field, so pasted characters never act as the keys of a menu, a
+/// choice, or the tree.
+pub(super) fn type_paste(app: &mut App, text: &str, dispatch: &mut dyn FnMut(&mut App, Action)) {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    for c in tuikit::text_edit::single_line_paste(text).chars() {
+        if !app.text_field_has_keys() {
+            break;
+        }
+        let key = Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        let Some(action) = overlay_key_from_event(app, &key) else {
+            break;
+        };
+        dispatch(app, action);
+    }
+}
+
+/// The key press an open modal owns, as [`Action::ModalKey`] for the
+/// modal stack (ADR 0085 contract 3, ADR 0161); `None` when no modal is
+/// open or the event is not a press, so the caller translates it with the
+/// main keymap. Repeats, releases, and other events never reach a modal.
 fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
-    let key = match event {
-        Event::Key(k) if k.kind == KeyEventKind::Press => *k,
-        _ => return None,
-    };
-    if app.viewer_modal().is_some() {
-        return Some(Action::ViewerOverlayKey(key));
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press && app.has_modal() => {
+            Some(Action::ModalKey(*key))
+        }
+        _ => None,
     }
-    if app.pane_viewer().is_some() {
-        return Some(Action::PaneViewerKey(key));
-    }
-    if app.value_modal().is_some() {
-        return Some(Action::ValueModalKey(key));
-    }
-    if app.messages_overlay().is_some() {
-        return Some(Action::MessagesOverlayKey(key));
-    }
-    if app.rename_overlay().is_some() {
-        return Some(Action::RenameOverlayKey(key));
-    }
-    if app.worktree_menu().is_some() {
-        return Some(Action::WorktreeMenuKey(key));
-    }
-    if app.new_mux_form().is_some() {
-        return Some(Action::NewMuxFormKey(key));
-    }
-    if app.mux_menu().is_some() {
-        return Some(Action::MuxMenuKey(key));
-    }
-    if app.row_menu().is_some() {
-        return Some(Action::RowMenuKey(key));
-    }
-    if app.clean_up().is_some() {
-        return Some(Action::CleanUpKey(key));
-    }
-    if app.picker().is_some() {
-        return Some(Action::PickerKey(key));
-    }
-    if app.mux_launch_form().is_some() {
-        return Some(Action::MuxLaunchFormKey(key));
-    }
-    if app.pin_edit_form().is_some() {
-        return Some(Action::PinEditFormKey(key));
-    }
-    if app.controls_overlay().is_some() {
-        return Some(Action::ControlsOverlayKey(key));
-    }
-    if app.search_overlay().is_some() {
-        return Some(Action::SearchOverlayKey(key));
-    }
-    if app.help_overlay().is_some() {
-        return Some(Action::HelpOverlayKey(key));
-    }
-    None
 }
 
 /// Run the TUI to completion. Restores the terminal on normal exit,
-/// errors, and panics (the panic path is covered by the hook
-/// `ratatui::init` installs).
+/// errors, and panics (the panic path is covered by the hooks
+/// `term::enter` installs).
 pub fn run(config: RunConfig) -> Result<()> {
-    let mut terminal = ratatui::init();
+    let mut terminal = term::enter();
     // Explicitly clear the alt screen before the first draw.
     // `EnterAlternateScreen` alone isn't enough under some
     // multiplexers — notably mosh, which doesn't fully blank the
@@ -951,7 +929,7 @@ pub fn run(config: RunConfig) -> Result<()> {
     // the reattach path below.
     let _ = terminal.clear();
     let result = event_loop(&mut terminal, config);
-    ratatui::restore();
+    term::leave();
     result
 }
 
@@ -969,10 +947,10 @@ pub fn run_static(
     tmux: Box<dyn MuxBackend>,
     recordings: Option<std::path::PathBuf>,
 ) -> Result<()> {
-    let mut terminal = ratatui::init();
+    let mut terminal = term::enter();
     let _ = terminal.clear();
     let result = static_event_loop(&mut terminal, config, snapshot, None, tmux, recordings);
-    ratatui::restore();
+    term::leave();
     result
 }
 
@@ -986,7 +964,7 @@ pub fn run_from_fixture(config: RunConfig, fixture_path: std::path::PathBuf) -> 
     use anyhow::Context as _;
     let snapshot = read_fixture(&fixture_path)
         .with_context(|| format!("load fixture `{}`", fixture_path.display()))?;
-    let mut terminal = ratatui::init();
+    let mut terminal = term::enter();
     let _ = terminal.clear();
     let result = static_event_loop(
         &mut terminal,
@@ -996,15 +974,29 @@ pub fn run_from_fixture(config: RunConfig, fixture_path: std::path::PathBuf) -> 
         Box::new(SystemTmux::new()),
         None,
     );
-    ratatui::restore();
+    term::leave();
     result
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn read_fixture(path: &std::path::Path) -> Result<crate::model::GraphSnapshot> {
+pub(in crate::tui) fn read_fixture(path: &std::path::Path) -> Result<crate::model::GraphSnapshot> {
     let raw = std::fs::read_to_string(path)?;
     let snapshot: crate::model::GraphSnapshot = serde_json::from_str(&raw)?;
     Ok(resolve_snapshot(snapshot))
+}
+
+/// The app an interactive run starts with: persistence on at `cache`,
+/// and the state file read back, sort, filters, groupings, and each
+/// view's expanded and selected rows (applied once the view lists rows,
+/// unless `--no-resume-view`).
+pub(in crate::tui) fn resumed_app(
+    config: &RunConfig,
+    cache: crate::tui_state::TuiStateCache,
+) -> App {
+    let mut app = App::new(config.clone());
+    app.enable_view_persistence(cache);
+    app.restore_persisted_state();
+    app
 }
 
 /// Block on terminal input, dispatching crossterm events to the
@@ -1014,15 +1006,12 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
     // cached listings, a background worker fetches them, and only
     // Ctrl-R fetches in its refresh (ADR 0136).
     config.forge_fetch = crate::discovery::forge::ForgeFetch::CachedOnly;
-    let mut app = App::new(config.clone());
-    // Enable last-active-view persistence. Snapshot mode and
-    // `--no-resume-view` both go through a different entry point
-    // (or skip this branch) so the file only ever moves under
-    // genuine interactive runs.
-    app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
-    app.restore_persisted_state();
+    // Snapshot mode goes through a different entry point, so the
+    // file only ever moves under interactive runs.
+    let app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
     let (preview_tx, preview_rx) = mpsc::channel();
+    let (confirmed_tx, confirmed_rx) = mpsc::channel();
     let refresh_interval = config.refresh_interval;
     let mode = LiveMode {
         tmux: Box::new(SystemTmux::new()),
@@ -1030,6 +1019,10 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         result_rx,
         preview_tx,
         preview_rx,
+        confirmed_tx,
+        confirmed_rx,
+        probe: Arc::new(handoff::TmuxIncarnation::default()),
+        discover: Arc::new(nudged_discovery),
         workers: WorkerLedger::default(),
         last_refresh: Instant::now(),
         refresh_interval,
@@ -1049,14 +1042,11 @@ fn static_event_loop(
     tmux: Box<dyn MuxBackend>,
     recordings: Option<std::path::PathBuf>,
 ) -> Result<()> {
-    let mut app = App::new(config.clone());
-    // Enable last-active-view persistence for the static
-    // fixture-replay TUI mode too. Snapshot mode (ADR 0067) uses a
-    // distinct entry point in `src/tui/snapshot.rs` that
-    // deliberately skips this so the on-disk file stays
+    // The static fixture-replay TUI mode persists too. Snapshot mode
+    // (ADR 0067) uses a distinct entry point in `src/tui/snapshot.rs`
+    // that deliberately skips this so the on-disk file stays
     // unconditionally unmoved when the snapshot tooling runs.
-    app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
-    app.restore_persisted_state();
+    let app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
     let mode = StaticMode {
         tmux,
         snapshot: initial_snapshot,
@@ -1067,7 +1057,11 @@ fn static_event_loop(
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn set_static_data(app: &mut App, config: &RunConfig, snapshot: &crate::model::GraphSnapshot) {
+pub(in crate::tui) fn set_static_data(
+    app: &mut App,
+    config: &RunConfig,
+    snapshot: &crate::model::GraphSnapshot,
+) {
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         snapshot, app,
     ));
@@ -1080,6 +1074,25 @@ fn set_static_data(app: &mut App, config: &RunConfig, snapshot: &crate::model::G
         initial_selection_hint,
     });
     populate_provider_status(app, config);
+}
+
+/// Handle one terminal event the way `tui --fixture` and the scenario
+/// TUI do: the loop's key routing, then their dispatch. For tests, which
+/// have no terminal; `r` reloads the snapshot `app` holds.
+#[cfg(test)]
+pub(in crate::tui) fn press_in_fixture_mode(app: &mut App, event: Event) {
+    let mut mode = StaticMode {
+        tmux: Box::new(crate::discovery::tmux::FakeTmux::with_sessions("")),
+        snapshot: app
+            .snapshot_handle()
+            .map(|handle| handle.snapshot().clone())
+            .unwrap_or_default(),
+        fixture_path: None,
+        recordings: None,
+    };
+    let config = app.config().clone();
+    let action = action_for_event(app, event);
+    mode.dispatch_action(app, &config, action);
 }
 
 /// Whether a refresh first asks a running daemon to rescan.
@@ -1121,7 +1134,47 @@ impl DaemonNudge {
     }
 }
 
-/// Spawn a background thread that runs discovery and sends the resolved
+/// One discovery a background refresh runs: nudge the daemon as `nudge`
+/// says, then load a snapshot. The live loop runs [`nudged_discovery`];
+/// tests give canned snapshots.
+type Discover = dyn Fn(&mut RunConfig, DaemonNudge) -> Discovered + Send + Sync;
+
+/// What one [`Discover`] call produced.
+struct Discovered {
+    snapshot: Result<crate::model::GraphSnapshot>,
+    /// The snapshot came from a running daemon.
+    from_daemon: bool,
+    /// Why the daemon nudge failed; the snapshot is then a local
+    /// rebuild.
+    warning: Option<String>,
+}
+
+/// Rescan what `nudge` names, through the daemon when there is one, and
+/// load a snapshot. A failed nudge leaves `config` asking for a local
+/// rebuild, so a later probe by the same worker skips the daemon too.
+fn nudged_discovery(config: &mut RunConfig, nudge: DaemonNudge) -> Discovered {
+    prepare_rescan(config, nudge);
+    let warning = nudge_daemon(nudge.classes()).err();
+    if warning.is_some() {
+        // The daemon's snapshot may be stale; rebuild locally so the
+        // operator still sees current state.
+        config.refresh = true;
+    }
+    match discover_and_resolve_sourced(config) {
+        Ok((snapshot, from_daemon)) => Discovered {
+            snapshot: Ok(snapshot),
+            from_daemon,
+            warning,
+        },
+        Err(err) => Discovered {
+            snapshot: Err(err),
+            from_daemon: false,
+            warning,
+        },
+    }
+}
+
+/// Spawn a background thread that runs `discover` and sends the resolved
 /// snapshot through `tx`. Row-tree building stays on the main thread so
 /// it can use the app's current view state.
 fn spawn_discovery_worker(
@@ -1129,50 +1182,19 @@ fn spawn_discovery_worker(
     tx: &mpsc::Sender<DiscoveryResult>,
     nudge: DaemonNudge,
     generation: u64,
-) {
-    spawn_discovery_worker_settling(config, tx, nudge, generation, None);
-}
-
-/// [`spawn_discovery_worker`] for the refresh after a mux hand-off.
-/// `before` is the live mux set the screen showed before the hand-off;
-/// a result that equals it is probed again a moment later (see
-/// [`SETTLE_TRIES`]), since the hand-off nearly always changes it.
-fn spawn_discovery_worker_settling(
-    config: &RunConfig,
-    tx: &mpsc::Sender<DiscoveryResult>,
-    nudge: DaemonNudge,
-    generation: u64,
-    before: Option<std::collections::BTreeSet<crate::model::NodeId>>,
+    discover: &Arc<Discover>,
 ) {
     let mut config = config.clone();
     config.forge_fetch = worker_forge_fetch(nudge, config.forge_fetch);
     let tx = tx.clone();
+    let discover = Arc::clone(discover);
     std::thread::spawn(move || {
-        let mut warning = None;
-        let (snapshot, from_daemon) = probe_until_changed(
-            before.as_ref(),
-            SETTLE_TRIES,
-            SETTLE_DELAY,
-            std::thread::sleep,
-            || {
-                prepare_rescan(&config, nudge);
-                if let Err(message) = nudge_daemon(nudge.classes()) {
-                    // The daemon's snapshot may be stale; rebuild
-                    // locally so the operator still sees current state.
-                    config.refresh = true;
-                    warning = Some(message);
-                }
-                match discover_and_resolve_sourced(&config) {
-                    Ok((snapshot, from_daemon)) => (Ok(snapshot), from_daemon),
-                    Err(err) => (Err(err), false),
-                }
-            },
-        );
+        let found = discover(&mut config, nudge);
         let _ = tx.send(DiscoveryResult {
             generation,
-            snapshot,
-            warning,
-            from_daemon,
+            snapshot: found.snapshot,
+            warning: found.warning,
+            from_daemon: found.from_daemon,
         });
     });
 }
@@ -1184,33 +1206,6 @@ fn spawn_discovery_worker_settling(
 pub(in crate::tui) fn prepare_rescan(config: &RunConfig, nudge: DaemonNudge) {
     if nudge.rescans_mux() {
         config.discovery_caches.clear_mux();
-    }
-}
-
-/// Run `probe` and, while its snapshot's live mux set still equals
-/// `before` (nothing changed across a hand-off, which is almost never
-/// true), wait `delay` and probe again, at most `tries` more times.
-/// Returns the last probe's result.
-fn probe_until_changed<T>(
-    before: Option<&std::collections::BTreeSet<crate::model::NodeId>>,
-    tries: u32,
-    delay: Duration,
-    mut sleep: impl FnMut(Duration),
-    mut probe: impl FnMut() -> (Result<crate::model::GraphSnapshot>, T),
-) -> (Result<crate::model::GraphSnapshot>, T) {
-    let mut retried = 0;
-    loop {
-        let (snapshot, extra) = probe();
-        let unchanged = match (before, &snapshot) {
-            (Some(before), Ok(snapshot)) => live_mux_ids(snapshot) == *before,
-            _ => false,
-        };
-        if unchanged && retried < tries {
-            retried += 1;
-            sleep(delay);
-            continue;
-        }
-        return (snapshot, extra);
     }
 }
 
@@ -1260,14 +1255,6 @@ fn spawn_forge_fetch(
         let _ = tx.send(fetched);
     });
 }
-
-/// How many times a refresh after a mux hand-off re-probes when the
-/// mux set came back exactly as it was before the hand-off, and how
-/// long it waits between tries. A session that ended, or a server that
-/// was killed, can still answer a listing for a moment; both probes
-/// rescan in well under a second.
-const SETTLE_TRIES: u32 = 2;
-const SETTLE_DELAY: Duration = Duration::from_millis(150);
 
 /// Ask a running `conspectus serve` daemon to rescan
 /// the live classes now. The daemon otherwise serves its last tick,
@@ -1327,7 +1314,7 @@ fn apply_handoff_refresh(app: &mut App, fetched: HandoffRefresh) {
     let config = app.config().clone();
     apply_discovery(app, &config, fetched.snapshot);
     if let Some(message) = fetched.warning {
-        app.report(crate::tui::messages::LogEntry::warning(message));
+        app.report(LogEntry::warning(message));
     }
 }
 
@@ -1492,68 +1479,66 @@ fn try_daemon_snapshot() -> Option<crate::model::GraphSnapshot> {
 /// `w`: build the worktree action menu for the current selection and
 /// open it, or post a status when there is nothing to offer.
 pub(super) fn open_worktree_menu_action(app: &mut App) {
-    use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
+    use crate::tui::widgets::worktree_menu::{context_for_node, worktree_menu};
     let Some(node) = crate::tui::actions::action_subject(app).node else {
-        app.update(Msg::SetStatus(Some(
-            "worktree: nothing selected".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "worktree: nothing selected",
+        ))));
         return;
     };
     let can_mutate = worktree_mutation_available();
     let ctx = if let Some(db) = app.snapshot_handle() {
         context_for_node(db.snapshot(), &node, can_mutate)
     } else {
-        app.update(Msg::SetStatus(Some(
-            "worktree: no graph loaded".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "worktree: no graph loaded",
+        ))));
         return;
     };
-    if let Some(state) = WorktreeMenuState::new(ctx) {
-        app.open_worktree_menu(state);
-        app.update(Msg::SetStatus(Some(
-            "worktree: ↑/↓ move · Enter pick · Esc close".to_string(),
-        )));
+    if let Some(menu) = worktree_menu(&ctx) {
+        app.open_worktree_menu(menu);
+        // The status bar names the menu's keys; a message from before
+        // goes.
+        app.update(Msg::SetStatus(None));
     } else {
         let hint = if can_mutate {
             "worktree: no actions for this selection"
         } else {
             "worktree: read-only — install worktrunk or set `[worktree] backend`"
         };
-        app.update(Msg::SetStatus(Some(hint.to_string())));
+        app.update(Msg::SetStatus(Some(Feedback::warning(hint))));
     }
 }
 
-/// The `X` hot key: open the worktree menu straight into the close-down
-/// merge/discard choice for the selected node.
+/// The `X` hot key: open the close-down merge/discard choice for the
+/// selected node on its own, without the worktree menu under it. The
+/// choice shows its keys, so nothing goes on the status line.
 pub(super) fn open_worktree_close_down_action(app: &mut App) {
-    use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
+    use crate::tui::widgets::worktree_menu::{close_down_dialog, context_for_node};
     let Some(node) = crate::tui::actions::action_subject(app).node else {
-        app.update(Msg::SetStatus(Some(
-            "worktree: nothing selected".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "worktree: nothing selected",
+        ))));
         return;
     };
     let can_mutate = worktree_mutation_available();
     let ctx = if let Some(db) = app.snapshot_handle() {
         context_for_node(db.snapshot(), &node, can_mutate)
     } else {
-        app.update(Msg::SetStatus(Some(
-            "worktree: no graph loaded".to_string(),
-        )));
+        app.update(Msg::SetStatus(Some(Feedback::warning(
+            "worktree: no graph loaded",
+        ))));
         return;
     };
-    if let Some(state) = WorktreeMenuState::new_close_down(ctx) {
-        app.open_worktree_menu(state);
-        app.update(Msg::SetStatus(Some(
-            "close down: m merge · d discard · Esc cancel".to_string(),
-        )));
+    if let Some(dialog) = close_down_dialog(&ctx) {
+        app.open_modal(crate::tui::Modal::Dialog(Box::new(dialog)));
     } else {
         let hint = if can_mutate {
             "close down: select a worktree, mux, or checkout with a branch"
         } else {
             "worktree: read-only — install worktrunk or set `[worktree] backend`"
         };
-        app.update(Msg::SetStatus(Some(hint.to_string())));
+        app.update(Msg::SetStatus(Some(Feedback::warning(hint))));
     }
 }
 
@@ -1570,22 +1555,23 @@ fn worktree_mutation_available() -> bool {
     .is_some()
 }
 
-/// Open the bare-tmux new-session form (`n`), seeding cwd from the
-/// selected row's cwd when it resolves to a repo, checkout, mux, or
-/// agent-session row; otherwise fall back to `$HOME`. Name defaults
-/// to a unique-per-live-mux slug derived from the selected row when
-/// possible, else empty (operator types it in).
+/// Open the bare-tmux new-session form (`n`) the way the mux menu does,
+/// through the reducer, which seeds it ([`new_mux_form`]). The form shows
+/// its own keys, so nothing goes on the status line.
 pub(super) fn open_new_mux_form_action(app: &mut App) {
-    use crate::tui::widgets::new_mux::NewMuxFormState;
-    let seeded_cwd = derive_new_mux_cwd(app).unwrap_or_else(default_new_mux_cwd);
-    let seeded_name = derive_new_mux_name(app);
-    let candidates = known_cwd_candidates(app, Some(&seeded_cwd));
-    app.open_new_mux_form(
-        NewMuxFormState::new(seeded_name, seeded_cwd).with_cwd_candidates(candidates),
-    );
-    app.update(Msg::SetStatus(Some(
-        "mux: ↑/↓ move · Tab complete/next · Enter next/commit · Esc cancel".to_string(),
-    )));
+    app.update(Msg::OpenNewMuxForm);
+}
+
+/// The bare-tmux new-session form, seeded: the cwd from the selected
+/// row's cwd when it resolves to a repo, checkout, mux, or agent-session
+/// row, otherwise `$HOME`; the name from [`derive_new_mux_name`] (the
+/// next free name after the mux the operator is looking at, else empty
+/// for the operator to type); and the known directories the cwd field
+/// completes with.
+pub(crate) fn new_mux_form(app: &App) -> tuikit::form::Form<Msg> {
+    let cwd = derive_new_mux_cwd(app).unwrap_or_else(default_new_mux_cwd);
+    let candidates = known_cwd_candidates(app, Some(&cwd));
+    crate::tui::widgets::new_mux::form(derive_new_mux_name(app), cwd, candidates)
 }
 
 /// Public alias for [`derive_new_mux_cwd`] so the reducer's
@@ -1595,58 +1581,59 @@ pub(crate) fn derive_mux_form_cwd(app: &App) -> Option<String> {
     derive_new_mux_cwd(app)
 }
 
-/// Directories the cwd fields offer to complete: the selected row's,
-/// then those of live agent sessions, muxes, processes, checkouts, repos,
-/// and workspaces in the graph, and the cwds of pins.
+/// Directories the cwd fields offer to complete, highest priority first:
+/// the selected row's, the cwds of pins, then those of live agent
+/// sessions, muxes (the session's, then its active pane's), processes,
+/// checkouts, repos, and workspaces in the graph.
 pub(crate) fn known_cwd_candidates(
     app: &App,
     selected: Option<&str>,
-) -> Vec<crate::tui::widgets::path_omnibox::PathCandidate> {
+) -> Vec<tuikit::path_field::Candidate> {
     use crate::model::GraphNode;
-    use crate::tui::widgets::path_omnibox::PathCandidate;
+    use tuikit::path_field::Candidate;
     let mut candidates = Vec::new();
-    let mut push = |path: &str, source: &str, rank: i32| {
+    let mut push = |path: &str, priority: i32| {
         let path = path.trim();
         if !path.is_empty() {
-            candidates.push(PathCandidate::new(path, source, rank));
+            candidates.push(Candidate::new(path, priority));
         }
     };
     if let Some(selected) = selected {
-        push(selected, "selected", 1_000);
+        push(selected, 1_000);
     }
     if let Some(handle) = app.snapshot_handle() {
         for node in handle.snapshot().live_nodes() {
             match node {
                 GraphNode::AgentSession(node) => {
                     if let Some(cwd) = node.cwd.as_deref() {
-                        push(cwd, "agent", 450);
+                        push(cwd, 450);
                     }
                 }
                 GraphNode::MuxSession(node) => {
                     if let Some(cwd) = node.cwd.as_deref() {
-                        push(cwd, "mux", 440);
+                        push(cwd, 440);
                     }
                     if let Some(cwd) = node.active_pane_current_path.as_deref() {
-                        push(cwd, "mux", 430);
+                        push(cwd, 430);
                     }
                 }
                 GraphNode::RuntimeProcess(node) => {
                     if let Some(cwd) = node.cwd.as_deref() {
-                        push(cwd, "process", 400);
+                        push(cwd, 400);
                     }
                 }
-                GraphNode::Checkout(node) => push(&node.root, "checkout", 350),
+                GraphNode::Checkout(node) => push(&node.root, 350),
                 GraphNode::Repo(node) => {
                     let root = node
                         .common_dir
                         .strip_suffix("/.git")
                         .unwrap_or(&node.common_dir);
-                    push(root, "repo", 320);
+                    push(root, 320);
                 }
-                GraphNode::Workspace(node) => push(&node.root, "workspace", 300),
+                GraphNode::Workspace(node) => push(&node.root, 300),
                 GraphNode::Pin(node) => {
                     if let Some(cwd) = node.text("cwd") {
-                        push(cwd, "pin", 500);
+                        push(cwd, 500);
                     }
                 }
                 GraphNode::Branch(_) | GraphNode::Fork(_) | GraphNode::ForgePr(_) => {}
@@ -1700,10 +1687,9 @@ fn strip_tmux_prefix(native_id: &str) -> String {
     }
 }
 
-/// Derive a default mux name for the mux-launch form. Today this
-/// mirrors [`derive_new_mux_name`] (empty — operator picks); a
-/// future refinement (slugify repo basename etc.) has one place to
-/// land.
+/// The mux name the launch form starts with: the same seed as the new
+/// tmux session form's ([`derive_new_mux_name`]), `None` when that is
+/// empty.
 pub(crate) fn derive_mux_launch_name(app: &App) -> Option<String> {
     let name = derive_new_mux_name(app);
     if name.is_empty() { None } else { Some(name) }
@@ -1771,23 +1757,27 @@ fn default_new_mux_cwd() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
 }
 
-/// Derive a default session-name seed from the selected row. Today
-/// this is intentionally empty — the operator picks a name that fits
-/// their workflow, and tmux forbids some of the punctuation we might
-/// derive from a path anyway. Kept as a helper so a future refinement
-/// (e.g. slugify the repo basename) has one place to land.
-fn derive_new_mux_name(_app: &App) -> String {
-    String::new()
+/// The session name both new-mux forms start with: the next free name
+/// in the series of the mux the operator is looking at (`worker-1` gives
+/// `worker-2`), or empty when that is not a mux and runs in none, so
+/// the operator types one ([`mux_name::seed`]).
+fn derive_new_mux_name(app: &App) -> String {
+    mux_name::seed(app)
 }
 
 /// Open the Mux action menu (`m`). Context-free — the menu itself
-/// derives per-entry defaults when its selection commits.
+/// derives per-entry defaults when its selection commits. The status bar
+/// names the menu's keys; a message from before goes.
 pub(super) fn open_mux_menu_action(app: &mut App) {
-    use crate::tui::widgets::mux_menu::MuxMenuState;
-    app.open_mux_menu(MuxMenuState::new());
-    app.update(Msg::SetStatus(Some(
-        "mux: ↑/↓ move · Enter pick · Esc close".to_string(),
-    )));
+    app.open_mux_menu(crate::tui::actions::mux_menu());
+    app.update(Msg::SetStatus(None));
+}
+
+/// Open Controls (`f`). The status bar names the panel's keys; a message
+/// from before goes.
+pub(super) fn open_controls(app: &mut App) {
+    app.open_controls_overlay();
+    app.update(Msg::SetStatus(None));
 }
 
 /// Append an informational advisory when the rename target is a
@@ -1880,12 +1870,16 @@ fn refresh_preview_if_needed(
 /// A preview a materialized scenario recorded in place of a live
 /// source: a PR's `gh pr view` output. `None` for anything else.
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn recorded_preview(source: &PreviewSource, root: &std::path::Path) -> Option<PreviewContent> {
+fn recorded_preview(
+    source: &PreviewSource,
+    root: &std::path::Path,
+    muted: ratatui::style::Modifier,
+) -> Option<PreviewContent> {
     let PreviewSource::PullRequest(pr) = source else {
         return None;
     };
     crate::dev_scenarios::recorded_pr_view(root, &pr.owner, &pr.repo, pr.number)
-        .map(|json| crate::tui::preview::forge::pr_preview_from_json(&json))
+        .map(|json| crate::tui::preview::forge::pr_preview_from_json(&json, muted))
 }
 
 /// Load one preview on the calling thread. A pane capture goes through
@@ -1906,7 +1900,7 @@ fn load_preview_now(app: &mut App, tmux: &dyn MuxBackend, source: PreviewSource)
             }
         },
         source => {
-            if let Some(content) = load_offline_preview(&source) {
+            if let Some(content) = load_offline_preview(&source, app.theme().muted) {
                 app.update(Msg::SetPreview { source, content });
             }
         }
@@ -1928,7 +1922,7 @@ pub(super) fn load_offline_preview_now(
         return;
     };
     if let Some((_, root)) = rebase
-        && let Some(content) = recorded_preview(&source, root)
+        && let Some(content) = recorded_preview(&source, root, app.theme().muted)
     {
         app.update(Msg::SetPreview { source, content });
         return;
@@ -1950,7 +1944,7 @@ pub(super) fn load_offline_preview_now(
         Some((from, to)) => source.rebased(from, to),
         None => source.clone(),
     };
-    if let Some(content) = load_offline_preview(&read) {
+    if let Some(content) = load_offline_preview(&read, app.theme().muted) {
         app.update(Msg::SetPreview { source, content });
     }
 }
@@ -2002,7 +1996,14 @@ pub(super) fn execute_effects_live(
             Effect::Exec(crate::tui::effect::ExecSpec::PaneScrollback { pane, line, text }) => {
                 open_pane_scrollback(app, tmux, &pane, line, &text);
             }
-            Effect::Exec(spec) => execute_exec_spec(terminal, app, config, spec, policy),
+            Effect::Exec(spec) => {
+                // The terminal goes to another program, which the
+                // operator may never come back from (a closed terminal
+                // ends this process too), so the state file is written
+                // first.
+                app.persist_state();
+                execute_exec_spec(terminal, app, config, spec, policy);
+            }
             Effect::RunMux(op) => execute_mux_op(app, tmux, op),
             Effect::WriteStore(op) => execute_store_op(app, tmux, op),
             other => execute_pure_effect(app, other),
@@ -2046,7 +2047,11 @@ pub(in crate::tui) fn live_executor_for(action: &Action) -> ExecutorKind {
 pub(in crate::tui) fn pure_executor_runs(effect: &Effect) -> bool {
     match effect {
         Effect::Exec(_) | Effect::RunMux(_) | Effect::WriteStore(_) => false,
-        Effect::SpawnRefresh { .. } | Effect::Toast(_) | Effect::Persist | Effect::Quit => true,
+        Effect::SpawnRefresh { .. }
+        | Effect::Toast(_)
+        | Effect::Copy { .. }
+        | Effect::Persist
+        | Effect::Quit => true,
     }
 }
 
@@ -2065,6 +2070,21 @@ pub(super) fn run_pending_content_scans(
             as std::sync::Arc<dyn MuxBackend>
     });
     content::run_blocking_with(app, rebase, panes.as_ref());
+}
+
+/// Open the pane viewer on a pane of the scenario world rooted at `root`,
+/// reading the scrollback it recorded instead of running tmux, as snapshot
+/// mode does for a pane search hit.
+#[cfg(feature = "snapshot")]
+pub(super) fn open_recorded_pane(
+    app: &mut App,
+    root: &std::path::Path,
+    pane: &crate::content_search::PaneRef,
+    line: usize,
+    text: &str,
+) {
+    let panes = crate::dev_scenarios::recorded_pane_backend(root);
+    open_pane_scrollback(app, &panes, pane, line, text);
 }
 
 /// Bridge helper: dispatch a `Msg` through the reducer and run any
@@ -2089,6 +2109,16 @@ pub(super) fn dispatch_live(
 ) {
     let effects = app.update(msg);
     execute_effects_live(terminal, app, config, tmux, effects);
+}
+
+/// [`dispatch_live`] as the `send` callback an overlay's key handler
+/// takes for what the overlay commits.
+fn live_send<'a>(
+    terminal: &'a mut DefaultTerminal,
+    config: &'a RunConfig,
+    tmux: &'a dyn MuxBackend,
+) -> impl FnMut(&mut App, Msg) + 'a {
+    move |app, msg| dispatch_live(terminal, app, config, tmux, msg)
 }
 
 /// The configuration a refresh after a state-changing action runs
@@ -2141,9 +2171,7 @@ fn report_refresh_failure(app: &mut App, err: &anyhow::Error) {
     app.update(Msg::SetRefreshFailure(format!(
         "last refresh failed; {err}"
     )));
-    app.report(crate::tui::messages::LogEntry::error(format!(
-        "refresh failed: {err:#}"
-    )));
+    app.report(LogEntry::error(format!("refresh failed: {err:#}")));
 }
 
 /// Populate `App::provider_status` from the run config and (in a
@@ -2228,11 +2256,6 @@ pub(super) use crate::tui::keymap::{Action, SelectedDefault, selected_default_ac
 
 pub(super) use crate::tui::keymap::cycle_view;
 
-/// Dispatch `Enter` on the left pane to the selected
-/// row's default action. Group rows expand/collapse; mux rows and
-/// muxed agent sessions attach; un-muxed agent sessions open the
-/// transcript viewer. Right-pane focus is handled in
-/// [`remap_for_focus`] before this is reached.
 /// Actions that read the selected row's live mux or session and then
 /// change something (rename, worktree, pin edits). The attach, resume,
 /// and launch actions are guarded in the reducer, so `Enter` can still
@@ -2244,6 +2267,11 @@ fn acts_on_selected_row(action: &Action) -> bool {
     )
 }
 
+/// Dispatch `Enter` on the left pane to the selected
+/// row's default action. Group rows expand/collapse; mux rows and
+/// muxed agent sessions attach; un-muxed agent sessions open the
+/// transcript viewer. On the right pane, `Enter` is the explorer's (the
+/// right pane's binding of it) and never reaches this.
 fn default_action(
     terminal: &mut DefaultTerminal,
     app: &mut App,
@@ -2260,29 +2288,6 @@ fn default_action(
     }
 }
 
-/// Right-pane Enter. When the explorer cursor is on
-/// a Node-zone field row with a copyable value, write it to the
-/// clipboard via OSC 52 (ADR 0056) and post a toast. Otherwise
-/// dispatch the normal `Msg::ExplorerActivate` so group expansion and
-/// link drill still work.
-fn explorer_enter_action(app: &mut App) {
-    explorer_enter(app, |value| {
-        let _ = crate::tui::clipboard::copy_to_clipboard(value);
-    });
-}
-
-/// [`explorer_enter_action`] with the clipboard write supplied by the
-/// caller, so the snapshot driver can run the same branch without
-/// emitting OSC 52 into its frame output.
-pub(super) fn explorer_enter(app: &mut App, write_clipboard: impl FnOnce(&str)) {
-    if let Some((label, value)) = app.explorer_copy_target() {
-        write_clipboard(&value);
-        app.post_toast(format!("copied: {label}"));
-        return;
-    }
-    app.update(Msg::ExplorerActivate);
-}
-
 /// `i` keybinding. Copies the selected agent or mux session's
 /// full id to the clipboard, posting a toast. Surfaces a status hint
 /// when the selection is something else (a group row, a PR, …).
@@ -2290,23 +2295,41 @@ fn copy_session_id_action(app: &mut App) {
     match app.selected_session_id() {
         Some((label, value)) => copy_and_toast(app, label, value),
         None => {
-            app.update(Msg::SetStatus(Some(
-                "i: select an agent or mux session row to copy its id".to_string(),
-            )));
+            app.update(Msg::SetStatus(Some(Feedback::warning(format!(
+                "{}: select an agent or mux session row to copy its id",
+                crate::tui::keybindings::key_name("row.copy-id")
+            )))));
         }
     }
 }
 
 /// Shared copy-side-effect: write `value` to the clipboard via OSC 52
-/// and post the `label` as a toast. Clipboard errors are silenced —
-/// OSC 52 is fire-and-forget per ADR 0056, and the toast is the
-/// operator-facing signal.
+/// and post the `label` as a toast. OSC 52 is fire-and-forget per ADR
+/// 0056, so a terminal that ignores the sequence still reads as copied;
+/// a write that fails says so.
 fn copy_and_toast(app: &mut App, label: String, value: String) {
-    let _ = crate::tui::clipboard::copy_to_clipboard(&value);
-    app.post_toast(label);
+    let written = crate::tui::clipboard::copy_to_clipboard(&value);
+    post_copy_toast(app, written, label);
 }
 
-pub(super) use crate::tui::keymap::{remap_for_focus, translate};
+/// Post [`copy_feedback`] for a clipboard write.
+fn post_copy_toast(app: &mut App, written: std::io::Result<()>, done: String) {
+    app.post_toast(copy_feedback(written, done));
+}
+
+/// What a copy says: `done` as a success when the clipboard write went
+/// out, or an error saying why it did not. The executor's copy and the
+/// `i` key's share it.
+pub(in crate::tui) fn copy_feedback(written: std::io::Result<()>, done: String) -> Feedback {
+    match written {
+        Ok(()) => Feedback::success(done),
+        Err(err) => Feedback::error(format!("copy failed: {err}")),
+    }
+}
+
+#[cfg(test)]
+pub(super) use crate::tui::keymap::translate;
+pub(super) use crate::tui::keymap::translate_in;
 
 #[cfg(test)]
 #[path = "runtime_tests.rs"]

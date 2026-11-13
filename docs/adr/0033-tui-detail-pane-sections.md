@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0074](0074-detail-pane-related-entities-flatten.md).
+The right pane shows the graph explorer, not a sectioned detail, and
+the model this record describes (`NodeDetail`, `HeaderField`,
+`SectionKind`, and the sectioned renderer in `src/tui/detail.rs` and
+`src/tui/ui/detail_header.rs`) is deleted. Only the right-anchored
+chip divider survives, as the explorer's `Related` and `Preview`
+dividers. The text below is kept as the record of what was decided.
 
 ## Context
 

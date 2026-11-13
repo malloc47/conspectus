@@ -171,11 +171,12 @@ fn an_explicit_rescan_keeps_the_list_and_selection_until_the_new_results_land() 
 
 #[test]
 fn the_refresh_key_is_the_one_that_rescans() {
-    use crate::tui::keybindings::KEYBINDINGS;
+    use crate::tui::keybindings::keymap;
     use crate::tui::keymap::Action;
-    let has_refresh_key = KEYBINDINGS
+    let has_refresh_key = keymap()
+        .bindings()
         .iter()
-        .any(|binding| (binding.action)() == Action::Refresh);
+        .any(|binding| binding.action().action() == Action::Refresh);
     assert!(
         has_refresh_key,
         "an explicit refresh key exists, and the live loop answers it with RescanContent"
@@ -279,22 +280,24 @@ fn a_startup_search_with_live_preview_off_says_it_cannot_run() {
     let app = App::new(config);
 
     assert!(app.content().is_none(), "nothing is searched");
-    assert!(app.toast().has_toast(), "the operator is told why");
+    assert!(!app.toasts().is_empty(), "the operator is told why");
 }
 
 #[test]
 fn the_controls_content_row_refuses_with_the_shared_notice_when_live_preview_is_off() {
-    use crate::tui::runtime::handle_controls_overlay_key;
-    use crate::tui::widgets::controls::{ControlsCursor, ControlsOverlayState};
+    use crate::tui::runtime::modal_key_pure;
+    use crate::tui::widgets::controls::ControlsCursor;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = live_preview_off();
     app.open_controls_overlay();
     let press = |app: &mut App, code| {
-        handle_controls_overlay_key(app, KeyEvent::new(code, KeyModifiers::NONE));
+        modal_key_pure(app, KeyEvent::new(code, KeyModifiers::NONE));
     };
     for _ in 0..60 {
-        if app.controls_overlay().map(ControlsOverlayState::cursor)
+        if app
+            .controls_overlay()
+            .and_then(|panel| panel.cursor().copied())
             == Some(ControlsCursor::FilterContent)
         {
             break;
@@ -302,7 +305,8 @@ fn the_controls_content_row_refuses_with_the_shared_notice_when_live_preview_is_
         press(&mut app, KeyCode::Down);
     }
     assert_eq!(
-        app.controls_overlay().map(ControlsOverlayState::cursor),
+        app.controls_overlay()
+            .and_then(|panel| panel.cursor().copied()),
         Some(ControlsCursor::FilterContent),
         "the Content row is reachable"
     );
@@ -313,7 +317,7 @@ fn the_controls_content_row_refuses_with_the_shared_notice_when_live_preview_is_
     press(&mut app, KeyCode::Enter);
 
     assert!(app.content().is_none(), "no search starts");
-    assert!(app.toast().has_toast(), "the shared notice is shown");
+    assert!(!app.toasts().is_empty(), "the shared notice is shown");
 }
 
 #[test]

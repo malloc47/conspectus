@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
 use support::replay::{ReplayWorld, TmuxReplayRow};
+use tuikit::testkit::strip_ansi;
 
 const MUXED: &str = "muxedd-0000-4000-8000-000000000001";
 const SOLO: &str = "solooo-0000-4000-8000-000000000002";
@@ -135,24 +136,6 @@ fn isolated_cmd(home: &Path) -> Command {
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
     cmd.env_remove("TMUX");
     cmd
-}
-
-fn strip_ansi(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            // CSI: ESC [ params final-byte.
-            for next in chars.by_ref() {
-                if next.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
 }
 
 #[test]

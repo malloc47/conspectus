@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended by [ADR 0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md):
+the Plain and Smart wraps break rows by the framework's shared rule, so a
+word that ends exactly at the preview's edge stays on its row. Amended by
+[ADR 0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md): `PreviewWrap` is the framework's `WrapMode` and the layout its
+`richtext::layout_capture` (the pane width is the source's width there);
+Conspectus keeps the setting's tokens and the Controls label.
 
 ## Context
 

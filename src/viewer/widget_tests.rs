@@ -152,11 +152,23 @@ fn snapshot_string(buf: &ratatui::buffer::Buffer) -> String {
         .join("\n")
 }
 
+/// The viewer over `document`, as the TUI opens it: at its newest turns.
+fn viewer(document: TranscriptDocument) -> tuikit::pager::Pager<Transcript> {
+    crate::viewer::find::viewer(Transcript::new(document), None)
+}
+
+/// Press `keys`, a key script, in `viewer`.
+fn press(viewer: &mut tuikit::pager::Pager<Transcript>, keys: &str) {
+    for key in tuikit::testkit::keys::script(keys) {
+        let _ = viewer.handle_key(key);
+    }
+}
+
 #[test]
 fn normal_open_lands_on_last_turn_with_gutter_chips() {
     let doc = sample_document();
     let theme = Theme::default();
-    let mut state = ViewerState::new(doc);
+    let mut state = viewer(doc);
     let buf = render_to_buffer(&mut state, &theme, 60, 12);
     insta::assert_snapshot!(snapshot_string(&buf));
 }
@@ -164,10 +176,9 @@ fn normal_open_lands_on_last_turn_with_gutter_chips() {
 #[test]
 fn jump_to_start_shows_top_of_long_document() {
     let theme = Theme::default();
-    let mut state = ViewerState::new(long_document());
+    let mut state = viewer(long_document());
     let _ = render_to_buffer(&mut state, &theme, 60, 10);
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::JumpToStart);
+    press(&mut state, "g");
     let buf = render_to_buffer(&mut state, &theme, 60, 10);
     insta::assert_snapshot!(snapshot_string(&buf));
 }
@@ -175,7 +186,7 @@ fn jump_to_start_shows_top_of_long_document() {
 #[test]
 fn empty_document_renders_unavailable_banner() {
     let theme = Theme::default();
-    let mut state = ViewerState::new(unavailable_document());
+    let mut state = viewer(unavailable_document());
     let buf = render_to_buffer(&mut state, &theme, 60, 8);
     insta::assert_snapshot!(snapshot_string(&buf));
 }
@@ -183,7 +194,7 @@ fn empty_document_renders_unavailable_banner() {
 #[test]
 fn compaction_summary_turn_renders_with_compact_chip() {
     let theme = Theme::default();
-    let mut state = ViewerState::new(document_with_compaction());
+    let mut state = viewer(document_with_compaction());
     let buf = render_to_buffer(&mut state, &theme, 60, 14);
     insta::assert_snapshot!(snapshot_string(&buf));
 }
@@ -216,7 +227,7 @@ fn document_with_table() -> TranscriptDocument {
 #[test]
 fn table_snapshot_at_80_cols_wide_enough_to_fit_naturally() {
     let theme = Theme::default();
-    let mut state = ViewerState::new(document_with_table());
+    let mut state = viewer(document_with_table());
     let buf = render_to_buffer(&mut state, &theme, 80, 18);
     insta::assert_snapshot!(snapshot_string(&buf));
 }
@@ -249,7 +260,7 @@ fn table_snapshot_at_40_cols_forces_dynamic_wrap() {
         }],
     };
     let theme = Theme::default();
-    let mut state = ViewerState::new(doc);
+    let mut state = viewer(doc);
     let buf = render_to_buffer(&mut state, &theme, 40, 20);
     insta::assert_snapshot!(snapshot_string(&buf));
 }
@@ -257,18 +268,14 @@ fn table_snapshot_at_40_cols_forces_dynamic_wrap() {
 #[test]
 fn tools_visible_at_full_detail_show_call_and_result_chips() {
     let theme = Theme::default();
-    let state = ViewerState::new(document_with_tools());
+    let mut state = viewer(document_with_tools());
     // Cycle to Full detail (3 t's: Hidden → Sum → Trunc → Full)
     // so the ToolUse + ToolResult turns render with full bodies.
-    let (state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
-    let (state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
-    let (state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
-    assert_eq!(state.tool_detail, ToolDetail::Full);
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::JumpToStart);
+    press(&mut state, "t");
+    press(&mut state, "t");
+    press(&mut state, "t");
+    assert_eq!(state.content().tool_detail, ToolDetail::Full);
+    press(&mut state, "g");
     let buf = render_to_buffer(&mut state, &theme, 60, 16);
     insta::assert_snapshot!(snapshot_string(&buf));
 }
@@ -276,7 +283,7 @@ fn tools_visible_at_full_detail_show_call_and_result_chips() {
 #[test]
 fn narrow_terminal_wraps_body_but_keeps_chip_alignment() {
     let theme = Theme::default();
-    let mut state = ViewerState::new(TranscriptDocument {
+    let mut state = viewer(TranscriptDocument {
         meta: TranscriptMeta {
             harness: "claude-code".to_string(),
             session_key: "wrap".to_string(),
@@ -299,12 +306,10 @@ fn narrow_terminal_wraps_body_but_keeps_chip_alignment() {
 #[test]
 fn footer_shows_position_and_toggle_state() {
     let theme = Theme::default();
-    let state = ViewerState::new(sample_document());
+    let mut state = viewer(sample_document());
     // Cycle tool to Summary; toggle thinking on.
-    let (state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleThinking);
+    press(&mut state, "t");
+    press(&mut state, "T");
     let buf = render_to_buffer(&mut state, &theme, 100, 8);
     let s = buffer_to_string(&buf);
     assert!(
@@ -318,25 +323,12 @@ fn footer_shows_position_and_toggle_state() {
 }
 
 #[test]
-fn the_viewer_leaves_drawing_its_help_to_the_host() {
-    // The help page is drawn by the TUI with the main help's frame
-    // (`tui::widgets::viewer_help`); the viewer itself draws only the
-    // transcript, so an open help flag changes nothing here.
+fn render_cache_persists_across_draws_until_a_toggle_changes_its_key() {
     let theme = Theme::default();
-    let mut closed = ViewerState::new(sample_document());
-    let mut open = ViewerState::new(sample_document());
-    open.show_help = true;
-    let without = snapshot_string(&render_to_buffer(&mut closed, &theme, 70, 18));
-    let with = snapshot_string(&render_to_buffer(&mut open, &theme, 70, 18));
-    assert_eq!(with, without);
-}
-
-#[test]
-fn render_cache_persists_across_draws_until_toggle_invalidates() {
-    let theme = Theme::default();
-    let mut state = ViewerState::new(document_with_tools());
+    let mut state = viewer(document_with_tools());
     let _ = render_to_buffer(&mut state, &theme, 60, 14);
     let cache = state
+        .content()
         .rendered
         .as_ref()
         .expect("cache populated on first draw");
@@ -348,20 +340,23 @@ fn render_cache_persists_across_draws_until_toggle_invalidates() {
     // we can at least assert the cache is still populated and
     // the metrics are stable.
     let _ = render_to_buffer(&mut state, &theme, 60, 14);
-    let cache_after = state.rendered.as_ref().expect("cache still up");
+    let cache_after = state.content().rendered.as_ref().expect("cache still up");
     assert_eq!(cache_after.lines.len(), cached_lines);
     assert_eq!(cache_after.content_width, cached_width);
 
-    // Cycling tool detail must invalidate via the reducer.
-    // The next draw rebuilds.
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+    // Cycling tool detail leaves the cache stale (its key holds the
+    // toggles); the next draw rebuilds.
+    press(&mut state, "t");
     assert!(
-        state.rendered.is_none(),
-        "CycleToolDetail invalidates cache"
+        state.content().cached_lines(60).is_none(),
+        "the cycled tool detail no longer matches the cache"
     );
     let _ = render_to_buffer(&mut state, &theme, 60, 14);
-    let cache_post = state.rendered.as_ref().expect("cache repopulated");
+    let cache_post = state
+        .content()
+        .rendered
+        .as_ref()
+        .expect("cache repopulated");
     assert_ne!(
         cache_post.tool_detail,
         ToolDetail::Hidden,
@@ -378,12 +373,12 @@ fn render_cache_persists_across_draws_until_toggle_invalidates() {
 #[test]
 fn render_cache_invalidates_on_width_change() {
     let theme = Theme::default();
-    let mut state = ViewerState::new(sample_document());
+    let mut state = viewer(sample_document());
     let _ = render_to_buffer(&mut state, &theme, 80, 12);
-    let lines_at_80 = state.rendered.as_ref().unwrap().lines.len();
+    let lines_at_80 = state.content().rendered.as_ref().unwrap().lines.len();
     let _ = render_to_buffer(&mut state, &theme, 40, 12);
-    let cache = state.rendered.as_ref().unwrap();
-    let inner = compute_gutter_inner_width(&state);
+    let cache = state.content().rendered.as_ref().unwrap();
+    let inner = state.content().gutter_inner_width();
     let content_width_at_40 = 40u16 - leader_width(inner);
     assert_eq!(
         cache.content_width, content_width_at_40,
@@ -396,31 +391,29 @@ fn render_cache_invalidates_on_width_change() {
 }
 
 #[test]
-fn draw_writes_viewport_height_and_total_lines_to_state() {
+fn the_draw_keeps_the_window_it_showed() {
     let theme = Theme::default();
-    let mut state = ViewerState::new(sample_document());
+    let mut state = viewer(sample_document());
     let _ = render_to_buffer(&mut state, &theme, 40, 12);
     assert_eq!(
-        state.viewport_height, 8,
+        state.window().viewport(),
+        8,
         "12 total - 4 chrome (header/2 seps/footer)"
     );
-    assert!(state.total_lines > 0);
+    assert!(state.window().content() > 0);
 }
 
 #[test]
 fn cycle_tool_detail_makes_tool_turns_visible() {
     let theme = Theme::default();
-    let mut state = ViewerState::new(document_with_tools());
+    let mut state = viewer(document_with_tools());
     let before = buffer_to_string(&render_to_buffer(&mut state, &theme, 60, 14));
     assert!(!before.contains("Glob:"), "tools hidden by default");
 
     // Cycle three times so we land on Full detail.
-    let (state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
-    let (state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+    press(&mut state, "t");
+    press(&mut state, "t");
+    press(&mut state, "t");
     let after = buffer_to_string(&render_to_buffer(&mut state, &theme, 60, 14));
     assert!(after.contains("Glob:"), "tool turns visible at Full detail");
     assert!(after.contains("tool  │"), "tool chip label visible");
@@ -456,7 +449,7 @@ fn markdown_table_in_message_body_renders_as_aligned_table() {
         }],
     };
     let theme = Theme::default();
-    let mut state = ViewerState::new(doc);
+    let mut state = viewer(doc);
     let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 80, 20));
     assert!(s.contains("Comparison of options"), "prose intro: {s}");
     assert!(s.contains("Recommend B"), "prose outro: {s}");
@@ -526,7 +519,7 @@ fn aborted_turns_hidden_by_default_visible_after_toggle() {
             },
         ],
     };
-    let mut state = ViewerState::new(doc);
+    let mut state = viewer(doc);
     let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 80, 14));
     assert!(
         s.contains("first prompt"),
@@ -538,8 +531,7 @@ fn aborted_turns_hidden_by_default_visible_after_toggle() {
         "aborted user msg hidden by default: {s}"
     );
 
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleAborted);
+    press(&mut state, "I");
     let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 80, 14));
     assert!(
         s.contains("interrupted thought"),
@@ -595,11 +587,10 @@ fn summary_tool_detail_aggregates_consecutive_tool_runs() {
         aborted: false,
         hidden: false,
     });
-    let state = ViewerState::new(doc);
+    let mut state = viewer(doc);
     // Cycle once: Hidden → Summary.
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
-    assert_eq!(state.tool_detail, ToolDetail::Summary);
+    press(&mut state, "t");
+    assert_eq!(state.content().tool_detail, ToolDetail::Summary);
     let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
     assert!(s.contains("tool  │"), "tool chip present at Summary");
     // The aggregated phrase replaces 16 per-turn lines.
@@ -672,9 +663,8 @@ fn summary_aggregation_separates_runs_around_messages() {
         aborted: false,
         hidden: false,
     });
-    let state = ViewerState::new(doc);
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+    let mut state = viewer(doc);
+    press(&mut state, "t");
     let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
     // Both aggregates appear (singular forms).
     assert!(s.contains("Read 1 file"), "first run aggregate: {s}");
@@ -700,10 +690,10 @@ fn transcripts_longer_than_u16_lines_scroll_to_the_end() {
         hidden: false,
     }];
     let theme = Theme::default();
-    let mut state = ViewerState::new(doc);
+    let mut state = viewer(doc);
     let buf = render_to_buffer(&mut state, &theme, 60, 12);
     let text = snapshot_string(&buf);
-    assert!(state.total_lines > usize::from(u16::MAX));
+    assert!(state.window().content() > usize::from(u16::MAX));
     assert!(
         text.contains("line 69999"),
         "the end of the transcript should be visible:\n{text}"
@@ -736,7 +726,7 @@ fn hidden_turns_are_filtered_until_toggled() {
             turn("visible prompt", false),
         ],
     };
-    let mut state = ViewerState::new(doc);
+    let mut state = viewer(doc);
     let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
     assert!(s.contains("visible prompt"), "{s}");
     assert!(
@@ -745,12 +735,378 @@ fn hidden_turns_are_filtered_until_toggled() {
     );
     assert!(s.contains("hidden·hide (H)"), "footer chip: {s}");
 
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleHidden);
+    press(&mut state, "H");
     let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
     assert!(
         s.contains("developer instructions"),
         "revealed after H: {s}"
     );
     assert!(s.contains("hidden·show (H)"), "footer chip: {s}");
+}
+
+// ---------------------------------------------------------------------
+// The transcript as the framework pager's content.
+// ---------------------------------------------------------------------
+
+mod content {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use tuikit::pager::Pager;
+    use tuikit::testkit::buffer;
+    use tuikit::testkit::keys::script;
+
+    use super::*;
+
+    fn turn(role: TurnRole, kind: TurnKind, body: &str) -> TranscriptTurn {
+        TranscriptTurn {
+            role,
+            kind,
+            body: body.to_string(),
+            timestamp: None,
+            aborted: false,
+            hidden: false,
+        }
+    }
+
+    /// Twelve messages (turns 2, 5, and 9 mention "needle"), then a tool
+    /// result and a thinking turn that mention it too.
+    fn needles() -> TranscriptDocument {
+        let mut turns: Vec<TranscriptTurn> = (0..12)
+            .map(|i| {
+                let role = if i % 2 == 0 {
+                    TurnRole::User
+                } else {
+                    TurnRole::Assistant
+                };
+                let body = if [2, 5, 9].contains(&i) {
+                    format!("turn {i} has the Needle in it")
+                } else {
+                    format!("turn {i} is plain")
+                };
+                turn(role, TurnKind::Message, &body)
+            })
+            .collect();
+        turns.push(turn(
+            TurnRole::Assistant,
+            TurnKind::ToolResult,
+            "output: a needle in tool output",
+        ));
+        turns.push(turn(
+            TurnRole::Assistant,
+            TurnKind::Thinking,
+            "thinking about the needle",
+        ));
+        TranscriptDocument {
+            meta: TranscriptMeta {
+                harness: "claude-code".to_string(),
+                session_key: "find".to_string(),
+                cwd: Some("/p".to_string()),
+            },
+            turns,
+        }
+    }
+
+    fn pager(document: TranscriptDocument) -> Pager<Transcript> {
+        Pager::new(Transcript::new(document)).at_end()
+    }
+
+    fn draw(pager: &mut Pager<Transcript>, width: u16, height: u16) -> String {
+        let theme = Theme::default();
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        pager.draw(area, &mut buf, &theme);
+        buffer::text(&buf)
+    }
+
+    fn press(pager: &mut Pager<Transcript>, keys: &str) {
+        for key in script(keys) {
+            let _ = pager.handle_key(key);
+        }
+    }
+
+    fn first_line_of(pager: &Pager<Transcript>, turn: usize) -> usize {
+        pager.content().rows_of(turn).start
+    }
+
+    #[test]
+    fn the_pager_draws_the_header_the_rows_and_the_toggle_chips() {
+        let mut viewer = pager(sample_document());
+        let screen = draw(&mut viewer, 100, 12);
+        let rows: Vec<&str> = screen.lines().collect();
+        assert!(
+            rows[0].starts_with(" claude-code:0b34e59c · /p/proj · 2 turns"),
+            "{screen}"
+        );
+        assert!(screen.contains(" you  │ what's up?"), "{screen}");
+        let footer = rows.last().unwrap();
+        for part in [
+            "tools·off   (t)",
+            "think·off (T)",
+            "aborted·hide (I)",
+            "/ find",
+            "? help",
+            "Esc/q close",
+        ] {
+            assert!(footer.contains(part), "{part}: {footer}");
+        }
+        assert!(!footer.contains("hidden·"), "no hidden turns: {footer}");
+    }
+
+    #[test]
+    fn a_header_too_wide_keeps_its_title() {
+        let mut viewer = pager(sample_document());
+        let screen = draw(&mut viewer, 26, 8);
+        assert_eq!(
+            screen.lines().next().unwrap().trim_end(),
+            " claude-code:0b34e59c"
+        );
+    }
+
+    #[test]
+    fn it_opens_at_the_end_and_the_ends_move_it() {
+        let mut viewer = pager(long_document());
+        let screen = draw(&mut viewer, 60, 10);
+        assert!(screen.contains("turn 29"), "{screen}");
+        press(&mut viewer, "g");
+        let screen = draw(&mut viewer, 60, 10);
+        assert!(screen.contains("turn 0"), "{screen}");
+        assert!(!screen.contains("turn 29"), "{screen}");
+    }
+
+    #[test]
+    fn a_toggle_lays_the_rows_out_again() {
+        let mut viewer = pager(document_with_tools());
+        draw(&mut viewer, 60, 16);
+        let before = viewer.content().rendered.as_ref().unwrap().lines.len();
+        press(&mut viewer, "ttt");
+        assert_eq!(viewer.content().tool_detail, ToolDetail::Full);
+        let screen = draw(&mut viewer, 60, 16);
+        let after = viewer.content().rendered.as_ref().unwrap().lines.len();
+        assert!(after > before, "{before} → {after}");
+        assert!(screen.contains("tools·all"), "{screen}");
+        assert!(screen.contains("src/main.rs"), "{screen}");
+        press(&mut viewer, "T");
+        assert!(viewer.content().show_thinking);
+        press(&mut viewer, "IH");
+        assert!(viewer.content().show_aborted && viewer.content().show_hidden);
+    }
+
+    #[test]
+    fn a_find_matches_shown_turns_and_lands_a_row_above_the_turn() {
+        let mut viewer = pager(needles());
+        draw(&mut viewer, 80, 8);
+        press(&mut viewer, "g/needle<Enter>");
+        let screen = draw(&mut viewer, 80, 8);
+        assert_eq!(viewer.find().matches(), [2, 5, 9]);
+        assert_eq!(viewer.find().current_unit(), Some(2));
+        assert_eq!(viewer.window().offset(), first_line_of(&viewer, 2) - 1);
+        assert!(screen.contains("find \"needle\" 1/3"), "{screen}");
+        press(&mut viewer, "n");
+        draw(&mut viewer, 80, 8);
+        assert_eq!(viewer.find().current_unit(), Some(5));
+        assert_eq!(viewer.window().offset(), first_line_of(&viewer, 5) - 1);
+    }
+
+    #[test]
+    fn matches_the_toggles_hide_are_counted_in_the_chip() {
+        let mut viewer = pager(needles());
+        draw(&mut viewer, 120, 8);
+        press(&mut viewer, "/tool output<Enter>");
+        let screen = draw(&mut viewer, 120, 8);
+        assert!(
+            screen.contains("find \"tool output\" no match · 1 in hidden turns"),
+            "{screen}"
+        );
+        assert_eq!(
+            viewer.content().find_detail("needle").as_deref(),
+            Some("2 in hidden turns")
+        );
+    }
+
+    #[test]
+    fn showing_a_kind_brings_its_matches_into_the_find() {
+        let mut viewer = pager(needles());
+        draw(&mut viewer, 80, 8);
+        press(&mut viewer, "g/needle<Enter>T");
+        assert_eq!(viewer.find().matches(), [2, 5, 9, 13]);
+        assert_eq!(viewer.find().current_unit(), Some(2), "stays on its turn");
+        press(&mut viewer, "ttt");
+        assert_eq!(viewer.find().matches(), [2, 5, 9, 12, 13]);
+    }
+
+    #[test]
+    fn the_current_turn_is_painted_in_the_selection_look_after_the_gutter() {
+        let theme = Theme::default();
+        let mut viewer = pager(needles());
+        let area = Rect::new(0, 0, 80, 8);
+        let mut buf = Buffer::empty(area);
+        viewer.draw(area, &mut buf, &theme);
+        press(&mut viewer, "g/needle<Enter>");
+        viewer.draw(area, &mut buf, &theme);
+        let current = buffer::style_at(&buf, "Needle").expect("the match is drawn");
+        assert!(
+            current.add_modifier.contains(theme.selection_active),
+            "{current:?}"
+        );
+        let rows = buffer::rows(&buf);
+        let label = rows.iter().find(|row| row.contains("Needle")).unwrap();
+        assert!(label.contains("│ turn 2"), "{label}");
+    }
+
+    #[test]
+    fn a_collapsed_tool_run_is_one_unit_of_rows_for_all_its_turns() {
+        let mut document = sample_document();
+        document.turns.extend([
+            turn(TurnRole::Assistant, TurnKind::ToolUse, "Read: /a"),
+            turn(TurnRole::Assistant, TurnKind::ToolResult, "ok"),
+            turn(TurnRole::Assistant, TurnKind::Thinking, "hmm"),
+            turn(TurnRole::Assistant, TurnKind::Message, "done"),
+        ]);
+        let mut transcript: Transcript = Transcript::new(document);
+        transcript.tool_detail = ToolDetail::Summary;
+        let lines = transcript.lines(&Theme::default(), 80).len();
+        let run = transcript.rows_of(2);
+        assert!(!run.is_empty());
+        assert_eq!(transcript.rows_of(3), run, "one summary line for the run");
+        assert_eq!(transcript.rows_of(1).end, run.start);
+        // A turn the toggles hide takes no rows, where the next one starts.
+        let hidden = transcript.rows_of(4);
+        assert!(hidden.is_empty(), "{hidden:?}");
+        assert_eq!(hidden.start, transcript.rows_of(5).start);
+        assert_eq!(transcript.rows_of(5).end, lines);
+        assert_eq!(transcript.rows_of(9), lines..lines, "past the last turn");
+    }
+
+    #[test]
+    fn the_hidden_chip_shows_only_for_a_transcript_with_hidden_turns() {
+        let mut document = sample_document();
+        let mut viewer = pager(document.clone());
+        assert_eq!(viewer.content().chips(&Theme::default()).len(), 3);
+        document.turns[0].hidden = true;
+        viewer = pager(document);
+        let screen = draw(&mut viewer, 120, 8);
+        assert!(screen.contains("hidden·hide (H)"), "{screen}");
+    }
+
+    #[test]
+    fn an_empty_body_says_why() {
+        let mut viewer = pager(unavailable_document());
+        let screen = draw(&mut viewer, 60, 8);
+        assert!(screen.contains("transcript unavailable"), "{screen}");
+        let mut only_thinking = sample_document();
+        for turn in &mut only_thinking.turns {
+            turn.kind = TurnKind::Thinking;
+        }
+        let mut viewer = pager(only_thinking);
+        let screen = draw(&mut viewer, 60, 8);
+        assert!(screen.contains("every turn here is hidden"), "{screen}");
+    }
+
+    #[test]
+    fn the_help_page_lists_the_toggles_and_the_viewers_words() {
+        let mut viewer = pager(sample_document());
+        press(&mut viewer, "?");
+        let screen = draw(&mut viewer, 100, 40);
+        for line in [
+            "Showing more or less",
+            "Cycle tool detail: hidden, summary, truncated, full",
+            "Show or hide records the harness's own UI never showed",
+            "Jump to the start of the transcript",
+            "Jump to the end, where the viewer opens, and stay there",
+            "Find in transcript; a match in hidden content turns that content on",
+        ] {
+            assert!(screen.contains(line), "{line}: {screen}");
+        }
+        let sections = viewer.help_sections();
+        let titles: Vec<&str> = sections
+            .iter()
+            .map(|section| section.title.as_ref())
+            .collect();
+        assert_eq!(
+            titles,
+            ["Moving", "Finding", "Showing more or less", "Viewer"]
+        );
+        assert!(tuikit::help::undescribed(crate::viewer::keys::TRANSCRIPT_KEYS).is_empty());
+    }
+
+    /// Every key the viewer binds, the pager's and the toggles', is listed
+    /// on exactly one row of its help page.
+    #[test]
+    fn every_key_the_viewer_binds_is_listed_once_on_its_help_page() {
+        use tuikit::help::HelpRow;
+        use tuikit::keys::{KeyRow, READER_KEYS, key_label, rows};
+        fn labels<A>(table: &'static [KeyRow<A>]) -> impl Iterator<Item = String> {
+            rows(table).filter_map(|row| match row {
+                KeyRow::Bind { key, .. } => Some(key_label(key)),
+                _ => None,
+            })
+        }
+        let viewer = pager(sample_document());
+        let listed: Vec<String> = viewer
+            .help_sections()
+            .into_iter()
+            .flat_map(|section| section.rows)
+            .filter_map(|row| match row {
+                HelpRow::Keys { keys, .. } => Some(keys),
+                HelpRow::Legend { .. } => None,
+            })
+            .collect();
+        let labels = labels(READER_KEYS).chain(labels(crate::viewer::keys::TRANSCRIPT_KEYS));
+        for label in labels {
+            let rows = listed
+                .iter()
+                .filter(|keys| keys.split(" / ").any(|key| key == label))
+                .count();
+            assert_eq!(rows, 1, "{label}: {listed:?}");
+        }
+    }
+
+    /// The help page over the viewer, scrolled `down` rows, as text.
+    fn help_page(width: u16, height: u16, down: &str) -> String {
+        let mut viewer = pager(sample_document());
+        press(&mut viewer, &format!("?{down}"));
+        let theme = Theme::default();
+        let buf = render_to_buffer(&mut viewer, &theme, width, height);
+        snapshot_string(&buf)
+    }
+
+    #[test]
+    fn the_help_page_at_120_columns() {
+        insta::assert_snapshot!(help_page(120, 30, ""));
+    }
+
+    #[test]
+    fn the_help_page_at_80_columns() {
+        insta::assert_snapshot!(help_page(80, 24, ""));
+    }
+
+    #[test]
+    fn the_help_page_at_a_narrow_width_scrolled() {
+        insta::assert_snapshot!(help_page(50, 14, "jjjjjj"));
+    }
+
+    #[test]
+    fn the_help_page_holds_the_toggles_and_esc_and_q_step_back_and_leave() {
+        use tuikit::overlay::Outcome;
+        let mut viewer = pager(sample_document());
+        press(&mut viewer, "/needle<Enter>?");
+        assert!(viewer.help_is_open());
+        press(&mut viewer, "T");
+        assert!(!viewer.content().show_thinking, "the toggles wait");
+        let mut steps = Vec::new();
+        for _ in 0..3 {
+            steps.push(viewer.handle_key(tuikit::testkit::keys::press(
+                ratatui::crossterm::event::KeyCode::Esc,
+            )));
+        }
+        assert_eq!(
+            steps,
+            [Outcome::Consumed, Outcome::Consumed, Outcome::Close],
+            "Esc closes the help, then the find, then the viewer"
+        );
+        let mut viewer = pager(sample_document());
+        press(&mut viewer, "/needle<Enter>?");
+        let quit = viewer.handle_key(tuikit::testkit::keys::typed('q'));
+        assert_eq!(quit, Outcome::Dismiss, "q leaves from the help page");
+    }
 }

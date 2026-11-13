@@ -5,49 +5,40 @@ fn pin(id: &str) -> LogTarget {
 }
 
 #[test]
-fn log_keeps_the_newest_entries_up_to_capacity() {
-    let mut log = MessageLog::default();
+fn the_log_keeps_the_messages_capacity() {
+    let mut log = message_log();
     for n in 0..MESSAGE_LOG_CAPACITY + 5 {
-        log.push(LogEntry::info(format!("entry {n}")));
+        log.push(LogEntry::success(format!("entry {n}")));
     }
 
     assert_eq!(log.len(), MESSAGE_LOG_CAPACITY);
-    let newest = log.newest_first().next().expect("entries");
-    assert_eq!(
-        newest.summary,
-        format!("entry {}", MESSAGE_LOG_CAPACITY + 4)
-    );
     let oldest = log.newest_first().last().expect("entries");
     assert_eq!(oldest.summary, "entry 5");
 }
 
 #[test]
-fn only_warnings_and_errors_count_as_unseen() {
-    let mut log = MessageLog::default();
-    log.push(LogEntry::info("attached"));
-    log.push(LogEntry::warning("resume failed, launched fresh"));
-    log.push(LogEntry::error("launch failed"));
-    assert_eq!(log.unseen(), 2);
+fn latest_failure_is_hidden_by_a_later_success_on_the_same_target() {
+    let mut log = message_log();
+    log.push(LogEntry::error("launch failed").with_target(pin("w1")));
+    log.push(LogEntry::success("other pin launched").with_target(pin("w2")));
+    assert_eq!(
+        latest_failure_for(&log, &[pin("w1")]).map(|e| e.summary.as_str()),
+        Some("launch failed")
+    );
+    assert!(latest_failure_for(&log, &[pin("w2")]).is_none());
 
-    log.mark_seen();
-    assert_eq!(log.unseen(), 0);
-    assert_eq!(log.len(), 3, "marking seen keeps the entries");
+    log.push(LogEntry::success("launched").with_target(pin("w1")));
+    assert!(latest_failure_for(&log, &[pin("w1")]).is_none());
 }
 
 #[test]
-fn latest_failure_is_hidden_by_a_later_success_on_the_same_target() {
-    let mut log = MessageLog::default();
+fn entries_about_different_targets_do_not_collapse() {
+    let mut log = message_log();
     log.push(LogEntry::error("launch failed").with_target(pin("w1")));
-    log.push(LogEntry::info("other pin launched").with_target(pin("w2")));
-    assert_eq!(
-        log.latest_failure_for(&[pin("w1")])
-            .map(|e| e.summary.as_str()),
-        Some("launch failed")
-    );
-    assert!(log.latest_failure_for(&[pin("w2")]).is_none());
-
-    log.push(LogEntry::info("launched").with_target(pin("w1")));
-    assert!(log.latest_failure_for(&[pin("w1")]).is_none());
+    log.push(LogEntry::error("launch failed").with_target(pin("w2")));
+    log.push(LogEntry::error("launch failed").with_target(pin("w2")));
+    assert_eq!(log.len(), 2, "the target is part of what repeats");
+    assert_eq!(log.unseen(), 2);
 }
 
 #[test]
@@ -75,6 +66,22 @@ fn full_text_carries_argv_exit_status_and_both_streams() {
 }
 
 #[test]
+fn full_text_leads_with_the_severity_mark() {
+    for (entry, mark) in [
+        (LogEntry::info("noted"), "•"),
+        (LogEntry::success("attached"), "√"),
+        (LogEntry::warning("fell back"), "▲"),
+        (LogEntry::error("failed"), "×"),
+    ] {
+        let text = entry.full_text();
+        assert!(
+            text.contains(&format!(" {mark} {}", entry.summary)),
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn output_tail_prefers_detail_then_stderr() {
     let command = CommandRecord {
         stderr: "one\ntwo\n\nthree".into(),
@@ -92,7 +99,13 @@ fn output_tail_prefers_detail_then_stderr() {
 
 #[test]
 fn blank_detail_is_dropped() {
-    assert!(LogEntry::info("x").with_detail("  \n").detail.is_none());
+    assert!(
+        LogEntry::success("x")
+            .with_detail("  \n")
+            .item
+            .detail
+            .is_none()
+    );
 }
 
 #[test]
@@ -102,21 +115,16 @@ fn clock_renders_utc_time_of_day() {
 }
 
 #[test]
-fn back_to_back_duplicates_collapse_into_a_repeat_count() {
-    let mut log = MessageLog::default();
-    log.push(LogEntry::error("refresh failed: daemon gone"));
-    log.push(LogEntry::error("refresh failed: daemon gone"));
-    log.push(LogEntry::error("refresh failed: daemon gone"));
+fn repeats_show_as_a_count_after_the_summary() {
+    let mut log = message_log();
+    for _ in 0..3 {
+        log.push(LogEntry::error("refresh failed: daemon gone"));
+    }
 
     assert_eq!(log.len(), 1);
-    assert_eq!(log.unseen(), 1);
     let entry = log.newest_first().next().expect("entry");
     assert_eq!(
         entry.summary_with_repeats(),
         "refresh failed: daemon gone (×3)"
     );
-
-    log.push(LogEntry::error("refresh failed: other"));
-    log.push(LogEntry::error("refresh failed: daemon gone"));
-    assert_eq!(log.len(), 3, "only consecutive duplicates collapse");
 }

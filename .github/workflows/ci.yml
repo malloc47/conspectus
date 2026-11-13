@@ -45,18 +45,71 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --all-targets --all-features
+        run: cargo test --workspace --all-targets --all-features
 
       - name: Run nextest
-        run: cargo nextest run --all-targets --all-features
+        run: cargo nextest run --workspace --all-targets --all-features
+
+      # The workspace steps above turn `richtext` on through the host, so
+      # only a build of the framework alone catches code outside
+      # `tuikit::richtext` that comes to need it. Same as `just
+      # tuikit-features`.
+      - name: Lint the framework with its features off and with richtext alone
+        run: |
+          cargo clippy -p tuikit --no-default-features -- -D warnings
+          cargo clippy -p tuikit --no-default-features --all-targets -- -D warnings
+          cargo clippy -p tuikit --no-default-features --features richtext -- -D warnings
+          cargo clippy -p tuikit --no-default-features --features richtext --all-targets -- -D warnings
+
+      - name: Test the framework with its features off and with richtext alone
+        run: |
+          cargo test -p tuikit --no-default-features
+          cargo test -p tuikit --no-default-features --features richtext
 
       - name: Check docs
-        run: cargo doc --no-deps
+        run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
       - name: Check whitespace errors
         run: git diff --check
+
+  # The framework crate exported with its history into a repository of its
+  # own, its manifest made standalone, and its checks run there with no file
+  # of this repository reachable (ADR 0199). Not path-filtered: the export
+  # also reads the root manifest's workspace tables, Cargo.lock,
+  # rust-toolchain.toml, LICENSE, and the script. Same as
+  # `just separation-rehearsal --self-test`.
+  separation-rehearsal:
+    name: Separation rehearsal
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The export keeps the crate's history.
+          fetch-depth: 0
+
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: echo "channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: clippy,rustfmt
+
+      # The export builds in its own target directory under the runner's
+      # temporary space, so only the registry is worth caching.
+      - name: Cache Cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
+
+      - name: Export the framework and check it alone
+        run: scripts/export-tuikit.sh --self-test "$RUNNER_TEMP/separation-rehearsal"
