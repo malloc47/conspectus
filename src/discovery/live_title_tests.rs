@@ -508,3 +508,43 @@ fn an_entry_with_no_pane_is_the_agent_of_its_muxs_active_pane() {
     );
     assert_eq!(bound.panes.len(), 1);
 }
+
+#[test]
+fn an_entry_from_a_server_with_the_same_name_is_not_the_panes_agent() {
+    // The probe read the default server's socket; the entry's agent ran
+    // on a default server under another TMUX_TMPDIR, in a session and a
+    // pane of the same names.
+    let nodes = vec![
+        mux_node("cx", "codex"),
+        GraphNode::AgentSession(AgentSessionNode::new(session_id("s-1"), "codex")),
+    ];
+    let mut snapshot = graph(nodes, &[("cx", twice(TitleMark::Working))]);
+    snapshot
+        .mux_probes
+        .get_mut("tmux")
+        .expect("probe")
+        .socket_path = Some(DEFAULT_SOCKET.to_string());
+    let mut foreign = entry("s-1", LiveState::Waiting, MINUTE, "cx", "%0");
+    foreign.tmux.as_mut().expect("tmux").socket =
+        Some("/run/user/1000/tmux-1000/default".to_string());
+    let bound = bind_live(&snapshot, &file([foreign]), &alive());
+    // The session keeps its own hook wait, and the title binds to the pane
+    // as an agent with no hook entry.
+    assert_eq!(
+        state_and_source(bound.nodes.get(&session("s-1"))),
+        Some((LiveState::Waiting, LiveSource::Hook))
+    );
+    assert_eq!(
+        state_and_source(bound.panes.get(&pane("cx", "%0"))),
+        Some((LiveState::Working, LiveSource::PaneTitle))
+    );
+
+    // From this server, it is.
+    let same = entry("s-1", LiveState::Waiting, MINUTE, "cx", "%0");
+    let bound = bind_live(&snapshot, &file([same]), &alive());
+    assert_eq!(
+        state_and_source(bound.nodes.get(&session("s-1"))),
+        Some((LiveState::Working, LiveSource::PaneTitle))
+    );
+    assert!(bound.panes.is_empty());
+}

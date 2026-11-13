@@ -15,7 +15,10 @@
 //!    to the pane it names on the tmux mux of that name on that server:
 //!    an agent seen in one of the mux's panes that no session matches
 //!    yet, such as a new session with no transcript. Once its session
-//!    appears, the next bind moves the state there;
+//!    appears, the next bind moves the state there. The server is the
+//!    one whose socket path the mux's probe read, exactly; a probe that
+//!    read none falls back to the path's last component, the name `tmux
+//!    -L` gives the server;
 //! 3. otherwise to nothing. The entry stays in the store and shows
 //!    nowhere.
 //!
@@ -56,7 +59,8 @@ use crate::discovery::live_poller::LivePoller;
 use crate::live_store::{LiveEntry, LiveFile, LiveStore, PidProbe};
 use crate::model::live::{LiveBinding, LiveState};
 use crate::model::{
-    GraphNode, GraphSnapshot, LivePane, LiveTables, MuxSessionId, NodeId, effective_socket,
+    GraphNode, GraphSnapshot, LivePane, LiveTables, MuxSessionId, MuxSessionNode, NodeId,
+    effective_socket, probe_key,
 };
 
 /// The store in `root` bound to `snapshot`, replacing its `node_live`,
@@ -203,17 +207,24 @@ enum Target<'a> {
 }
 
 /// The nodes an entry can bind to, indexed once per bind.
-struct Targets {
+struct Targets<'a> {
     /// Live agent sessions by harness and native session id. Two nodes
     /// for one session (seen under two state scopes) keep the lower id.
     sessions: BTreeMap<(String, String), NodeId>,
     /// Live tmux muxes by server and session name; the default server is
     /// `None`, as a mux node records it.
-    muxes: BTreeMap<(Option<String>, String), MuxSessionId>,
+    muxes: BTreeMap<(Option<String>, String), TmuxTarget<'a>>,
 }
 
-impl Targets {
-    fn of(snapshot: &GraphSnapshot) -> Self {
+/// A live tmux mux an entry can bind to, with the socket path its
+/// server's probe read, when it read one.
+struct TmuxTarget<'a> {
+    mux: MuxSessionId,
+    probed: Option<&'a str>,
+}
+
+impl<'a> Targets<'a> {
+    fn of(snapshot: &'a GraphSnapshot) -> Self {
         let mut sessions: BTreeMap<(String, String), NodeId> = BTreeMap::new();
         let mut muxes = BTreeMap::new();
         for node in snapshot.live_nodes() {
@@ -233,7 +244,13 @@ impl Targets {
                     if mux.backend == crate::discovery::tmux::TMUX_BACKEND =>
                 {
                     let server = effective_socket(mux.socket.as_deref()).map(str::to_string);
-                    muxes.insert((server, mux.session_name().to_string()), mux.id.clone());
+                    muxes.insert(
+                        (server, mux.session_name().to_string()),
+                        TmuxTarget {
+                            mux: mux.id.clone(),
+                            probed: probed_socket(snapshot, mux),
+                        },
+                    );
                 }
                 _ => {}
             }
@@ -247,10 +264,14 @@ impl Targets {
             return Some(Target::Session(node));
         }
         let tmux = entry.tmux.as_ref()?;
-        let server = server_of(tmux.socket.as_deref()?)?.map(str::to_string);
-        let mux = self.muxes.get(&(server, tmux.session.clone()?))?;
+        let socket = tmux.socket.as_deref()?;
+        let server = server_of(socket)?.map(str::to_string);
+        let target = self.muxes.get(&(server, tmux.session.clone()?))?;
+        if !names_server(socket, target.probed) {
+            return None;
+        }
         let pane = tmux.pane.clone().filter(|pane| !pane.is_empty());
-        Some(Target::Pane(LivePane::new(mux.clone(), pane)))
+        Some(Target::Pane(LivePane::new(target.mux.clone(), pane)))
     }
 }
 
@@ -260,6 +281,26 @@ impl Targets {
 fn server_of(socket_path: &str) -> Option<Option<&str>> {
     let name = Path::new(socket_path).file_name()?.to_str()?;
     Some(effective_socket(Some(name)))
+}
+
+/// The full path of the socket of `mux`'s server, as the probe of that
+/// server read it, when it read one.
+fn probed_socket<'a>(snapshot: &'a GraphSnapshot, mux: &MuxSessionNode) -> Option<&'a str> {
+    snapshot
+        .mux_probes
+        .get(&probe_key(&mux.backend, mux.socket.as_deref()))?
+        .socket_path
+        .as_deref()
+}
+
+/// Whether the socket path `socket` an entry recorded is the socket of
+/// a server whose name its last component already matched, given the
+/// path that server's probe read. Two servers can share a name (a `tmux
+/// -S /some/dir/work` socket and a `-L work` server, or the default
+/// server under another `TMUX_TMPDIR` or uid), so a probed path must be
+/// the entry's exactly; with none, the name is all there is to go by.
+fn names_server(socket: &str, probed: Option<&str>) -> bool {
+    probed.is_none_or(|probed| probed == socket)
 }
 
 #[path = "live_title.rs"]

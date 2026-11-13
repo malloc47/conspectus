@@ -760,3 +760,88 @@ fn the_pass_replaces_the_table_from_the_store() {
         "an entry the store no longer backs is gone"
     );
 }
+
+/// `graph` with the probe of server `socket` (`None` the default) having
+/// read the server's socket at `path`.
+fn with_probed_socket(mut graph: GraphSnapshot, socket: Option<&str>, path: &str) -> GraphSnapshot {
+    let mut probe =
+        crate::model::MuxProbe::new(crate::model::MuxProbeStatus::Listed, NOW_MS / 1000);
+    probe.socket_path = Some(path.to_string());
+    graph
+        .mux_probes
+        .insert(crate::model::probe_key("tmux", socket), probe);
+    graph
+}
+
+#[test]
+fn a_pane_only_entry_binds_only_to_the_server_whose_socket_it_names() {
+    let graph = snapshot(vec![
+        mux_node("work", None),
+        mux_node("work", Some("scratch")),
+    ]);
+    let graph = with_probed_socket(graph, None, DEFAULT_SOCKET);
+    let graph = with_probed_socket(graph, Some("scratch"), SCRATCH_SOCKET);
+    let store = file([
+        in_pane(
+            entry("pi", "this-default", LiveState::Working, 1),
+            DEFAULT_SOCKET,
+            "work",
+            "%1",
+        ),
+        in_pane(
+            entry("pi", "this-scratch", LiveState::Waiting, 2),
+            SCRATCH_SOCKET,
+            "work",
+            "%2",
+        ),
+        // The default server under another TMUX_TMPDIR, and another uid's.
+        in_pane(
+            entry("pi", "other-tmpdir", LiveState::Working, 3),
+            "/run/user/1000/tmux-1000/default",
+            "work",
+            "%3",
+        ),
+        in_pane(
+            entry("pi", "other-uid", LiveState::Working, 4),
+            "/tmp/tmux-1001/default",
+            "work",
+            "%4",
+        ),
+        // A `tmux -S /some/dir/scratch` socket, named like `-L scratch`.
+        in_pane(
+            entry("pi", "dash-s", LiveState::Working, 5),
+            "/some/dir/scratch",
+            "work",
+            "%5",
+        ),
+    ]);
+
+    let bound = bind_live(&graph, &store, &FakePids::none());
+
+    assert!(bound.nodes.is_empty());
+    assert_eq!(
+        pane_states(&bound.panes),
+        vec![
+            (pane("scratch:work", "%2"), LiveState::Waiting),
+            (pane("work", "%1"), LiveState::Working),
+        ]
+    );
+}
+
+#[test]
+fn without_a_probed_socket_path_the_servers_name_decides() {
+    // A probe that read no path (an older tmux, an older snapshot) leaves
+    // the socket's last component to tell servers apart.
+    let graph = snapshot(vec![mux_node("work", None)]);
+    let store = file([in_pane(
+        entry("pi", "other-tmpdir", LiveState::Working, 1),
+        "/run/user/1000/tmux-1000/default",
+        "work",
+        "%1",
+    )]);
+    let bound = bind_live(&graph, &store, &FakePids::none());
+    assert_eq!(
+        pane_states(&bound.panes),
+        vec![(pane("work", "%1"), LiveState::Working)]
+    );
+}

@@ -14,7 +14,9 @@ const SENTINEL: &str = "sentinel-title-7f3a91";
 /// A listing row for session `name`, whose active pane `pane` runs
 /// `command` under the title `title`.
 fn row(name: &str, command: &str, pane: &str, title: &str) -> String {
-    format!("{name}\t/work\t1\t1\t{command}\t42\t/work\t{command}\t0\t\t\t$1\t{pane}\t{title}\n")
+    format!(
+        "{name}\t/work\t1\t1\t{command}\t42\t/work\t{command}\t0\t\t\t$1\t{pane}\t/tmp/tmux-1000/default\t{title}\n"
+    )
 }
 
 #[test]
@@ -63,11 +65,19 @@ fn rows_without_the_pane_fields_still_parse() {
     let rows = parse_list_sessions(older);
     assert_eq!(rows[0].active_pane_id, None);
     assert_eq!(rows[0].active_pane_title, None);
-    // The format without titles ends at the pane id.
-    let untitled = format!("{older}\t%0");
+    // The format without titles ends at the socket path, and a row
+    // from before it at the pane id.
+    let untitled = format!("{older}\t%0\t/tmp/tmux-1000/default");
     let rows = parse_list_sessions(&untitled);
     assert_eq!(rows[0].active_pane_id.as_deref(), Some("%0"));
+    assert_eq!(
+        rows[0].socket_path.as_deref(),
+        Some("/tmp/tmux-1000/default")
+    );
     assert_eq!(rows[0].active_pane_title, None);
+    let rows = parse_list_sessions(&format!("{older}\t%0"));
+    assert_eq!(rows[0].active_pane_id.as_deref(), Some("%0"));
+    assert_eq!(rows[0].socket_path, None);
 }
 
 #[test]
@@ -76,7 +86,9 @@ fn the_formats_differ_only_by_the_title() {
         TMUX_LIST_FORMAT,
         format!("{TMUX_LIST_FORMAT_WITHOUT_TITLES}\t#{{pane_title}}")
     );
-    assert!(TMUX_LIST_FORMAT_WITHOUT_TITLES.ends_with("\t#{session_id}\t#{pane_id}"));
+    assert!(
+        TMUX_LIST_FORMAT_WITHOUT_TITLES.ends_with("\t#{session_id}\t#{pane_id}\t#{socket_path}")
+    );
     assert_eq!(TMUX_LIST_FORMAT.split('\t').count(), TMUX_LIST_FIELDS);
 }
 

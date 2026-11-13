@@ -44,19 +44,21 @@ pub const KNOWN_MUX_BACKENDS: &[&str] = &[
 ];
 
 /// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
-/// session roots can safely contain spaces. Fields added later come last, so
-/// rows recorded before them still parse: `#{session_id}`, then the active
-/// pane's `#{pane_id}` and `#{pane_title}` (ADR 0217). The title is last of
-/// all, so a tab in it could not shift another field.
-pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}\t#{session_id}\t#{pane_id}\t#{pane_title}";
+/// session roots can safely contain spaces. Fields added later come after
+/// the earlier ones, so rows recorded before them still parse:
+/// `#{session_id}`, then the active pane's `#{pane_id}`, the server's
+/// `#{socket_path}` (the same on every row), and the active pane's
+/// `#{pane_title}` (ADR 0217). The title is last of all, so a tab in it
+/// could not shift another field.
+pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}\t#{session_id}\t#{pane_id}\t#{socket_path}\t#{pane_title}";
 
 /// [`TMUX_LIST_FORMAT`] without the pane title, for a probe that reads no
 /// titles (`CONSPECTUS_DISABLE_PANE_TITLES`).
-pub const TMUX_LIST_FORMAT_WITHOUT_TITLES: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}\t#{session_id}\t#{pane_id}";
+pub const TMUX_LIST_FORMAT_WITHOUT_TITLES: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}\t#{session_id}\t#{pane_id}\t#{socket_path}";
 
 /// The fields of a [`TMUX_LIST_FORMAT`] row; the last, the title, is the
 /// rest of the line.
-const TMUX_LIST_FIELDS: usize = 14;
+const TMUX_LIST_FIELDS: usize = 15;
 
 /// Format used with `tmux list-panes -a -F`: every pane of the server,
 /// with its id, its session, and the program in its foreground. The
@@ -1673,6 +1675,9 @@ pub struct TmuxSessionRow {
     pub session_id: Option<String>,
     /// The active pane's `#{pane_id}` (`%3`).
     pub active_pane_id: Option<String>,
+    /// The full path of the server's socket, `#{socket_path}`: the same on
+    /// every row of one listing.
+    pub socket_path: Option<String>,
     /// What the active pane's title says about its agent, when the pane
     /// runs a harness that classifies its titles (ADR 0217). The title
     /// itself is dropped as the row is parsed.
@@ -1707,6 +1712,7 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
     let last_attached_epoch = optional_epoch(fields.next());
     let session_id = optional_string(fields.next());
     let active_pane_id = optional_string(fields.next());
+    let socket_path = optional_string(fields.next());
     let active_pane_title = fields
         .next()
         .and_then(|title| title_mark(active_pane_command.as_deref(), title));
@@ -1724,6 +1730,7 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
         last_attached_epoch,
         session_id,
         active_pane_id,
+        socket_path,
         active_pane_title,
     })
 }
@@ -1965,6 +1972,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
                 MuxProbe {
                     titles,
                     panes,
+                    socket_path: outcome.rows.iter().find_map(|row| row.socket_path.clone()),
                     ..MuxProbe::new(status, epoch)
                 },
             );

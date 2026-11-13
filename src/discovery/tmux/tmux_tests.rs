@@ -105,6 +105,7 @@ fn parser_extracts_name_path_activity_and_created_epoch() {
             client_attached: None,
             session_id: None,
             active_pane_id: None,
+            socket_path: None,
             active_pane_title: None,
         }]
     );
@@ -956,4 +957,25 @@ fn a_server_with_no_session_is_not_asked_for_its_panes() {
         .discover(&DiscoveryContext::default())
         .unwrap();
     assert!(down.pane_calls().listed.is_empty());
+}
+
+#[test]
+fn the_probe_records_the_servers_socket_path() {
+    let tmux = FakeTmux::with_sessions(
+        "editor\t/w\t1\t1\tzsh\t9\t/w\tzsh\t0\t\t\t$1\t%1\t/tmp/tmux-1000/default\n",
+    );
+    let fragment = TmuxDiscovery::with_runner(tmux)
+        .discover(&DiscoveryContext::default())
+        .unwrap();
+    assert_eq!(
+        fragment.mux_probes["tmux"].socket_path.as_deref(),
+        Some("/tmp/tmux-1000/default")
+    );
+
+    // A tmux that leaves the field blank, or a listing from before it.
+    let older = FakeTmux::with_sessions("editor\t/w\t1\t1\n");
+    let fragment = TmuxDiscovery::with_runner(older)
+        .discover(&DiscoveryContext::default())
+        .unwrap();
+    assert_eq!(fragment.mux_probes["tmux"].socket_path, None);
 }

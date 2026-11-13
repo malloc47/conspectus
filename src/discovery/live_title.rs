@@ -33,7 +33,7 @@ use crate::model::live::{
 };
 use crate::model::{GraphNode, GraphSnapshot, LivePane, NodeId, effective_socket, probe_key};
 
-use super::{BoundLive, rank, server_of};
+use super::{BoundLive, names_server, probed_socket, rank, server_of};
 
 /// Fold every pane title `snapshot`'s probes recorded into `bound`, the
 /// tables of the store's entries, whose winners per session and per pane
@@ -137,6 +137,8 @@ struct Reading<'a> {
     mux: crate::model::MuxSessionId,
     /// The mux's server by the name tmux gives it; `None` is the default.
     server: Option<&'a str>,
+    /// The full path of the server's socket, when its probe read one.
+    socket_path: Option<&'a str>,
     session: &'a str,
     /// The harness the mux's active pane runs.
     harness: &'static str,
@@ -161,6 +163,7 @@ fn readings(snapshot: &GraphSnapshot) -> Vec<Reading<'_>> {
                 Some(Reading {
                     mux: mux.id.clone(),
                     server: effective_socket(mux.socket.as_deref()),
+                    socket_path: probed_socket(snapshot, mux),
                     session: mux.session_name(),
                     harness,
                     title,
@@ -209,16 +212,20 @@ fn hook_entry(
 }
 
 /// Whether `entry`'s tmux names the reading's mux and its pane, or the
-/// mux and no pane.
+/// mux and no pane. The server is matched as the binding matches it.
 fn names_pane(entry: &LiveEntry, read: &Reading<'_>) -> bool {
     let Some(tmux) = &entry.tmux else {
         return false;
     };
-    let Some(server) = tmux.socket.as_deref().and_then(server_of) else {
+    let Some(socket) = tmux.socket.as_deref() else {
+        return false;
+    };
+    let Some(server) = server_of(socket) else {
         return false;
     };
     let pane = tmux.pane.as_deref().filter(|pane| !pane.is_empty());
     server == read.server
+        && names_server(socket, read.socket_path)
         && tmux.session.as_deref() == Some(read.session)
         && (pane.is_none() || pane == read.title.pane.as_deref())
 }

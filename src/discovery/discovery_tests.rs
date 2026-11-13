@@ -1533,7 +1533,7 @@ fn discovery_without_a_live_state_root_binds_nothing() {
 /// under the title `title`.
 fn codex_in_alpha(title: &str) -> String {
     format!(
-        "alpha\t/work/x\t1700000500\t1700000000\tcodex\t42\t/work/x\tcodex\t0\t\t\t$1\t%0\t{title}\n"
+        "alpha\t/work/x\t1700000500\t1700000000\tcodex\t42\t/work/x\tcodex\t0\t\t\t$1\t%0\t\t{title}\n"
     )
 }
 

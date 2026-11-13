@@ -735,11 +735,18 @@ pub struct MuxProbe {
     /// this says what each of the others runs.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub panes: BTreeMap<String, ProbedPane>,
+    /// The full path of the server's socket as the server reports it
+    /// (tmux `#{socket_path}`), when the probe listed a session and the
+    /// backend gave one. Two servers can share a socket name (`-S
+    /// /some/dir/work` and `-L work`, or the default server under two
+    /// `TMUX_TMPDIR`s); their paths differ.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_path: Option<String>,
 }
 
 impl MuxProbe {
     /// A probe with `status` that ran at `epoch`, listing no exited
-    /// session, no pane title, and no pane.
+    /// session, no pane title, no pane, and no socket path.
     pub fn new(status: MuxProbeStatus, epoch: i64) -> Self {
         Self {
             status,
@@ -747,6 +754,7 @@ impl MuxProbe {
             exited: Vec::new(),
             titles: BTreeMap::new(),
             panes: BTreeMap::new(),
+            socket_path: None,
         }
     }
 
