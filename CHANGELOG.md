@@ -837,6 +837,13 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **An agent on another tmux server no longer counts on a mux of the
+  same name.** An agent with no session yet was counted on the tmux
+  session it names on the server whose socket *name* matched, so a
+  `tmux -S /some/dir/work` socket looked like the `-L work` server, and
+  a default server under another `TMUX_TMPDIR` or user looked like
+  yours. The tmux listing now also reads each server's socket path, and
+  such an agent counts only on the server whose path it recorded.
 - **Agents in split panes of one tmux session are both attributed.**
   A hook record was ignored when the session's *active* pane ran a
   different harness, so with Codex in one pane and Claude Code beside

@@ -401,9 +401,10 @@ The sane default is:
   observation to the spool and ingests it into the in-memory graph at once
   (ADR 0146)
 - read the live-state store and bind each entry to its agent session, or to
-  its tmux mux when no session matches yet, checking the recorded pid and
-  start time against the process table; binding never creates a node, and
-  the table is rebuilt on every discovery (ADR 0205)
+  its tmux mux when no session matches yet (on the server whose socket path
+  the entry recorded), checking the recorded pid and start time against the
+  process table; binding never creates a node, and the table is rebuilt on
+  every discovery (ADR 0205)
 - read read-only harness state and log databases when the harness maintains
   them, using stable indexed fields to discover sessions and to derive live
   mux attribution; for Codex this is the `state_*.sqlite` threads/lineage

@@ -2,9 +2,11 @@
 
 ## Status
 
-Accepted. Part of the live agent state plan with ADRs 0203, 0204, 0206,
-and 0207. Extends the graph snapshot (ADR 0083) with two sparse tables,
-following the presence table of ADR 0140. Bumps the rkyv format version.
+Accepted (amended 2026-11-13: the server of a pane-only entry is matched
+by its full socket path; see the amendment below). Part of the live agent
+state plan with ADRs 0203, 0204, 0206, and 0207. Extends the graph
+snapshot (ADR 0083) with two sparse tables, following the presence table
+of ADR 0140. Bumps the rkyv format version.
 
 ## Context
 
@@ -182,3 +184,40 @@ five representations:
   mux shows counts over all of them. A session's own row shows its own
   state. Until a pane's agent has a session node, its entry binds to its
   pane of the mux in `pane_live`, one entry per pane (decision 2).
+
+## Amendment: the server by its full socket path (2026-11-13)
+
+Decision 2's rule 2 matched an entry's tmux server by the last component
+of its socket path against the mux node's socket name. Two servers can
+share that name: a `tmux -S /some/dir/work` socket and a `tmux -L work`
+server, or the default server under another `TMUX_TMPDIR` or another
+uid's `/tmp/tmux-<uid>/default`. An agent in a pane of one would bind to
+the mux of the same session name on the other and count there.
+Everything above stands except as follows.
+
+1. **The probe reads each server's socket path.** The tmux session
+   listing asks for `#{socket_path}` too (before the active pane's title,
+   which stays last), and each probe records the path the server reports
+   (`MuxProbe.socket_path`, in `graph.bin` only). It is the same string
+   tmux puts in `$TMUX`, where `hook write` reads the entry's socket, so
+   the two compare exactly. No further tmux call is made.
+2. **A pane-only entry binds only on that server.** The candidate mux is
+   still found by the name and the session, and then binds only when its
+   probe recorded no socket path or recorded exactly the entry's. The
+   pane-title fold (ADR 0217 decision 7) finds a pane's hook entry by the
+   same rule.
+3. **Without a path, the name decides.** A probe from a tmux that leaves
+   `#{socket_path}` blank, or a snapshot from before this amendment (which
+   cold-rebuilds anyway at format 16), keeps the name match.
+
+Rule 1 (an entry that matches a session binds to it, whatever its socket)
+is unchanged, and so is the hook sidecar's attribution, which matches a
+record's mux by session name and pane process, not by socket. The
+snapshot format moves to 16.
+
+Alternatives considered: computing the expected path of each probed
+server from Conspectus's own `TMUX_TMPDIR` and uid, which repeats tmux's
+lookup (and its `realpath`) and can drift from it; a `display-message`
+per server, a call the listing makes unneeded; and putting the path on
+the mux node, which would add it to the JSON and the node's identity for
+a fact about the server.

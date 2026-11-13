@@ -796,6 +796,12 @@ pane, a plugin report's instance and sequence number, and, for hooks that
 report events, the ids of pending waits and running subagents and the
 state to return to after compaction.
 
+An entry whose session Conspectus has not found yet counts on the row
+of the tmux session it names, on the server its socket path names: the
+path is compared with the one tmux reports for each server Conspectus
+lists, so a session of the same name on another server (a `tmux -S`
+socket, another `TMUX_TMPDIR`, another user's) is not counted there.
+
 It never holds a prompt, a message, a tool's input, output, or name, a
 title, a question or a form's fields, a permission's patterns or
 resources, an error's text, or an agent's type. Each writer reads the harness's payload in

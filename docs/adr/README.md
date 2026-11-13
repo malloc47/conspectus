@@ -42,7 +42,7 @@ The provider-neutral node model, evidence-preserving `GraphLink` candidates, and
 | [0077](0077-resolver-ambiguous-slot-preservation.md) | Resolver-Side Preservation Of Ambiguous Resolution Slots | Accepted (narrowed by 0107) |
 | [0084](0084-first-class-pin-nodes.md) | First-Class Pin Nodes | Accepted (amended by 0141) |
 | [0203](0203-live-state-is-a-neutral-observation-with-a-closed-state-set.md) | Live State Is A Neutral Observation With A Closed State Set | Accepted |
-| [0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md) | Live State Is A Snapshot Side Table Bound To Sessions And Muxes | Accepted |
+| [0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md) | Live State Is A Snapshot Side Table Bound To Sessions And Muxes | Accepted (amended) |
 
 ## Discovery and attribution
 
