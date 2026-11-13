@@ -7,17 +7,20 @@
 //! running `conspectus serve` rewrites every cycle), each looked up in
 //! the process table so that an agent that has since exited does not
 //! count. It reads those two files and `/proc`, starts no process, and
-//! asks no daemon, so `hook status` stays fast and read-only. For a
-//! harness whose pane titles the mux probe reads (ADR 0217), the line
-//! also says how many of its agents that graph shows from their titles,
-//! which is how a harness whose hooks are silent can still show state.
+//! asks no daemon, so `hook status` stays fast and read-only. When the
+//! store holds entries for the harness, the line also counts its running
+//! agents that none of them describes, so one agent whose hooks are
+//! silent is not hidden by another that reports. For a harness whose
+//! pane titles the mux probe reads (ADR 0217), the line also says how
+//! many of its agents that graph shows from their titles, which is how a
+//! harness whose hooks are silent can still show state.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::live_store::{LiveFile, LiveStore, PidProbe, PidStatus, ProcProbe};
 use crate::model::live::LiveSource;
-use crate::model::{GraphNode, GraphSnapshot, NodeId, RuntimeProcessRole};
+use crate::model::{GraphNode, GraphSnapshot, NodeId, RelationKind, RuntimeProcessRole};
 
 /// What the health line reports for a harness.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,6 +30,8 @@ pub(super) enum Health {
         sessions: usize,
         /// The latest evidence among them, Unix epoch milliseconds.
         newest_ms: i64,
+        /// Running agents of the harness that no entry describes.
+        unreported: usize,
     },
     /// The hooks are installed and an agent of the harness runs, but the
     /// store holds nothing from it.
@@ -44,32 +49,51 @@ impl Health {
     /// The health of `harness`'s live state, deciding in this order:
     /// entries in the store (however the hooks got there), a hook that
     /// reports no live state, hooks not installed, a running agent with
-    /// no entries, and no entries. `running_agents` is asked only when
-    /// the hooks are installed and the store holds nothing.
+    /// no entries, and no entries. `running_agents` is asked when the
+    /// store holds entries of a harness whose hooks report live state,
+    /// to count the agents none of them describes, and when the hooks
+    /// are installed and the store holds nothing.
     pub(super) fn assess(
         harness: &str,
         reports_live_state: bool,
         installed: bool,
         file: &LiveFile,
-        running_agents: impl FnOnce() -> usize,
+        running_agents: impl FnOnce() -> Vec<RunningAgent>,
     ) -> Self {
-        let entries: Vec<i64> = file
+        let entries: Vec<_> = file
             .entries
             .values()
             .filter(|entry| entry.harness == harness)
-            .map(|entry| entry.observation.observed_ms)
             .collect();
-        if let Some(newest_ms) = entries.iter().copied().max() {
+        if let Some(newest_ms) = entries
+            .iter()
+            .map(|entry| entry.observation.observed_ms)
+            .max()
+        {
+            let unreported = if reports_live_state {
+                running_agents()
+                    .iter()
+                    .filter(|agent| {
+                        !entries.iter().any(|entry| {
+                            entry.observation.pid == Some(agent.pid)
+                                || agent.sessions.contains(&entry.session_id)
+                        })
+                    })
+                    .count()
+            } else {
+                0
+            };
             return Health::Receiving {
                 sessions: entries.len(),
                 newest_ms,
+                unreported,
             };
         }
         if !reports_live_state {
             Health::Unsupported
         } else if !installed {
             Health::Off
-        } else if running_agents() > 0 {
+        } else if !running_agents().is_empty() {
             Health::Silent
         } else {
             Health::NoEvents
@@ -94,6 +118,7 @@ impl Health {
             Health::Receiving {
                 sessions,
                 newest_ms,
+                unreported,
             } => {
                 let plural = if sessions == 1 { "" } else { "s" };
                 let newest = if newest_ms > now_ms {
@@ -107,7 +132,12 @@ impl Health {
                         )
                     )
                 };
-                format!("live state: {sessions} session{plural}, newest event {newest}")
+                let unreported = match unreported {
+                    0 => String::new(),
+                    1 => "; 1 running agent has no live state".to_string(),
+                    count => format!("; {count} running agents have no live state"),
+                };
+                format!("live state: {sessions} session{plural}, newest event {newest}{unreported}")
             }
             Health::Silent => "live state: active but no events: hooks may be untrusted, \
                  disabled, or the agent was started before they were installed"
@@ -121,30 +151,69 @@ impl Health {
     }
 }
 
-/// How many distinct agent processes of `harness` the graph `snapshot`
+/// A running main agent of a harness, as the saved graph shows it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct RunningAgent {
+    pub(super) pid: i64,
+    /// The native ids of the sessions the graph says the process runs:
+    /// those its links identify, or its only candidate.
+    pub(super) sessions: BTreeSet<String>,
+}
+
+/// The distinct agent processes of `harness` the graph `snapshot`
 /// recorded that `probe` finds running now. Only main agents count, not
 /// their subagents, background helpers, or shells.
 pub(super) fn running_agents(
     snapshot: &GraphSnapshot,
     harness: &str,
     probe: &dyn PidProbe,
-) -> usize {
-    snapshot
-        .nodes
-        .iter()
-        .filter_map(|node| match node {
-            GraphNode::RuntimeProcess(process)
-                if process.harness_key.as_deref() == Some(harness)
-                    && process.role == Some(RuntimeProcessRole::HumanAgent) =>
-            {
-                process.pid
-            }
-            _ => None,
-        })
-        .collect::<BTreeSet<i64>>()
+) -> Vec<RunningAgent> {
+    let mut agents: BTreeMap<i64, BTreeSet<String>> = BTreeMap::new();
+    for node in &snapshot.nodes {
+        let GraphNode::RuntimeProcess(process) = node else {
+            continue;
+        };
+        let Some(pid) = process.pid else {
+            continue;
+        };
+        if process.harness_key.as_deref() != Some(harness)
+            || process.role != Some(RuntimeProcessRole::HumanAgent)
+        {
+            continue;
+        }
+        agents.entry(pid).or_default().extend(sessions_of(
+            snapshot,
+            &NodeId::RuntimeProcess(process.id.clone()),
+        ));
+    }
+    agents
         .into_iter()
-        .filter(|pid| matches!(probe.status(*pid), PidStatus::Running { .. }))
-        .count()
+        .filter(|(pid, _)| matches!(probe.status(*pid), PidStatus::Running { .. }))
+        .map(|(pid, sessions)| RunningAgent { pid, sessions })
+        .collect()
+}
+
+/// The native ids of the sessions `process` runs, by the graph's links:
+/// every session a link says it identifies, or the only session a link
+/// names it a candidate for, as the resolver reads them.
+fn sessions_of(snapshot: &GraphSnapshot, process: &NodeId) -> BTreeSet<String> {
+    let session = |relation: RelationKind| {
+        snapshot
+            .candidate_links
+            .iter()
+            .filter(move |link| link.relation == relation && link.source == *process)
+            .filter_map(|link| match link.target_node_id() {
+                Some(NodeId::AgentSession(session)) => Some(session.session_key.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<String>>()
+    };
+    let mut sessions = session(RelationKind::ProcessIdentifiesSession);
+    let candidates = session(RelationKind::ProcessCandidatesSession);
+    if candidates.len() == 1 {
+        sessions.extend(candidates);
+    }
+    sessions
 }
 
 /// How many of `harness`'s agents the graph `snapshot` shows from their
@@ -208,7 +277,7 @@ pub(super) fn print_health(harness: &str, installed: bool, scope_flag: &str) {
     let graph = std::cell::OnceCell::new();
     let saved = || graph.get_or_init(saved_graph).as_ref();
     let health = Health::assess(harness, reports_live_state, installed, &file, || {
-        saved().map_or(0, |snapshot| {
+        saved().map_or_else(Vec::new, |snapshot| {
             running_agents(snapshot, harness, &ProcProbe::system())
         })
     });

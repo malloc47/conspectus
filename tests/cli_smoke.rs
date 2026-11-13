@@ -1194,6 +1194,72 @@ fn hook_status_calls_an_installed_hook_silent_when_its_agent_runs_without_events
 }
 
 #[test]
+fn hook_status_counts_a_running_agent_without_live_state_beside_one_that_reports() {
+    use conspectus::live_store::{LiveContext, LiveEvent, LiveEventKind, LiveStore, now_ms};
+    use conspectus::model::{
+        GraphNode, GraphSnapshot, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole,
+    };
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    install_claude_hooks(home.path());
+    // Two Claude Code agents run: this test's own process, whose hooks
+    // report, and a child that stands in for one whose hooks are silent.
+    let mut silent = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn a stand-in agent");
+    let agent = |key: &str, pid: i64| {
+        GraphNode::RuntimeProcess(RuntimeProcessNode {
+            id: RuntimeProcessId::new(key),
+            observation_key: key.to_string(),
+            pid: Some(pid),
+            parent_pid: None,
+            root_pane_pid: None,
+            command: Some("claude".to_string()),
+            cwd: None,
+            harness_key: Some("claude-code".to_string()),
+            role: Some(RuntimeProcessRole::HumanAgent),
+            depth: Some(0),
+            observed_epoch: None,
+        })
+    };
+    let reporting = i64::from(std::process::id());
+    let graph = GraphSnapshot {
+        nodes: vec![
+            agent("mux_session:tmux:work:root:1:pid:2", reporting),
+            agent(
+                "mux_session:tmux:other:root:1:pid:3",
+                i64::from(silent.id()),
+            ),
+        ],
+        ..GraphSnapshot::empty()
+    };
+    conspectus::snapshot::write_atomic(
+        &home.path().join(".local/share/conspectus/graph.bin"),
+        &graph,
+    )
+    .expect("write graph.bin");
+    LiveStore::at(home.path().join(".local/state/conspectus"))
+        .apply_event(
+            &LiveEvent::new("claude-code", "alpha", now_ms(), LiveEventKind::TurnStarted)
+                .with_context(LiveContext {
+                    pid: Some(reporting),
+                    ..LiveContext::default()
+                }),
+        )
+        .expect("write live state");
+
+    let line = health_line(home.path(), "claude-code");
+    let _ = silent.kill();
+    let _ = silent.wait();
+    assert!(line.starts_with("receiving\tclaude-code\t"), "{line}");
+    assert!(
+        line.ends_with("; 1 running agent has no live state"),
+        "{line}"
+    );
+}
+
+#[test]
 fn hook_status_reports_codex_live_state_health() {
     use conspectus::live_store::{LiveEvent, LiveEventKind, LiveStore, now_ms};
 
