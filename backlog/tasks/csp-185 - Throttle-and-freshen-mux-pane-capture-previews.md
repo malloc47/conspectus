@@ -4,7 +4,7 @@ title: Throttle and freshen mux pane-capture previews
 status: To Do
 assignee: []
 created_date: '2026-05-20 01:56'
-updated_date: '2026-10-31 08:15'
+updated_date: '2026-11-13 20:40'
 labels:
   - t8
 milestone: m-13
@@ -36,4 +36,6 @@ Legacy ID: `T8-009`
 
 <!-- SECTION:NOTES:BEGIN -->
 TUI framework update (2026-10-31, CSP-766): the Preview's divider is the framework's `tuikit::frame::SectionRule` (`preview_divider_line` in `src/tui/ui/preview_pane.rs`, ADR 0188) and carries no summary today, so a "captured Ns ago" label would be its summary, worded with `tuikit::age` (ADR 0157). The old sectioned detail's `captured` field went with CSP-710. Capture and preview loading are still in `src/tui/preview/`; the framework adds no worker (the runtime stays in Conspectus, ADR 0200).
+
+Scroll-stall investigation (2026-11-13): item (4), running the capture on a background thread so it never blocks input, is now tracked alone as CSP-876, so it can land with the scroll fixes (CSP-874, CSP-875). The rest of this task (refresh interval, freshness label, snapshot test) is unchanged.
 <!-- SECTION:NOTES:END -->
