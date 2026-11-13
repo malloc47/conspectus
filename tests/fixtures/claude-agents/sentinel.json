@@ -1,0 +1,24 @@
+[
+  {
+    "pid": 41234,
+    "sessionId": "sentinel-poll-7d31aa fix the login bug",
+    "name": "sentinel-poll-7d31aa refactor the payments module",
+    "cwd": "/home/user/sentinel-poll-7d31aa/project",
+    "kind": "sentinel-poll-7d31aa",
+    "startedAt": "sentinel-poll-7d31aa",
+    "status": "idle",
+    "prompt": "sentinel-poll-7d31aa delete the production database",
+    "nested": { "title": "sentinel-poll-7d31aa", "list": ["sentinel-poll-7d31aa"] }
+  },
+  {
+    "pid": 41235,
+    "sessionId": "2b4d6f8a-1c3e-4a5b-9d7f-0e2a4c6b8d10",
+    "status": "waiting",
+    "waitingFor": "sentinel-poll-7d31aa approve this command: rm -rf /"
+  },
+  {
+    "pid": 41236,
+    "status": "sentinel-poll-7d31aa",
+    "state": "sentinel-poll-7d31aa"
+  }
+]

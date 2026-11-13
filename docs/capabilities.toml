@@ -108,8 +108,11 @@ globals = { "-C" = 1 }
 act = ["switch ...", "remove ...", "merge ...", "step prune ..."]
 
 [programs.harness]
-adr = ["0058", "0143", "0121"]
+adr = ["0058", "0143", "0121", "0218"]
 names = ["claude", "codex", "opencode", "pi"]
+# Claude Code's own list of its sessions, polled by the daemon and a
+# daemonless TUI to repair a live state the hooks left stuck (ADR 0218).
+read = ["agents --json"]
 act = ["--resume *", "exec --resume *", "--session *"]
 
 [programs.claude-history]
@@ -140,10 +143,13 @@ bind = ["$RUNTIME/conspectus/server.sock"]
 connect = ["$RUNTIME/conspectus/server.sock"]
 
 # Signals Conspectus sends to other processes. Signal 0 only probes
-# whether a process is alive. SIGKILL goes only to a `gh` child whose
-# fetch the daemon's shutdown cancels.
+# whether a process is alive. Outside the operator's actions, SIGKILL
+# goes only to a child Conspectus started itself: a `gh` fetch the
+# daemon's shutdown cancels, or a `claude agents --json` still running
+# at its timeout (ADR 0218).
 [signals]
-adr = ["0093", "0137"]
+adr = ["0093", "0137", "0218"]
+read = ["SIGKILL"]
 act = ["SIGTERM", "SIGKILL", "0"]
 
 # Files and directories Conspectus creates, writes, renames, or

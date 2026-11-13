@@ -26,7 +26,8 @@ pub enum Program {
     /// `wt` (worktrunk): worktree changes the operator starts (ADR 0092).
     Worktrunk,
     /// A harness binary (`claude`, `codex`, ...) started to resume a
-    /// session outside tmux.
+    /// session outside tmux, or `claude agents --json`, polled to repair
+    /// a live state (ADR 0218).
     Harness,
     /// `claude-history`, the external viewer for Claude Code transcripts.
     ClaudeHistory,

@@ -423,6 +423,15 @@ pub trait HarnessAdapter: Send + Sync {
         None
     }
 
+    /// A poll of the harness's own list of its sessions that repairs a
+    /// hook state its hooks left stuck (ADR 0218), or `None` for a
+    /// harness without one. A process that discovers in the background
+    /// builds it once and keeps it ([`crate::discovery::live_poller`]).
+    /// Defaults to `None`.
+    fn live_poller(&self) -> Option<crate::discovery::live_poller::LivePoller> {
+        None
+    }
+
     /// The reducer that folds this harness's live events into a
     /// session's entry. Defaults to the shared one; a harness whose
     /// events need a transition of their own returns a reducer that

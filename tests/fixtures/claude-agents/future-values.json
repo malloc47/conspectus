@@ -1,0 +1,42 @@
+[
+  {
+    "pid": 60001,
+    "kind": "interactive",
+    "status": "thinking-harder"
+  },
+  {
+    "pid": 60002,
+    "kind": "background",
+    "status": "paused",
+    "state": "working"
+  },
+  {
+    "pid": 60003,
+    "kind": "interactive",
+    "status": "waiting",
+    "waitingFor": "a dialog no version has yet"
+  },
+  {
+    "pid": "60004",
+    "sessionId": 12345,
+    "status": "busy"
+  },
+  {
+    "pid": 60005,
+    "status": ["idle"],
+    "state": { "value": "done" }
+  },
+  {
+    "kind": "interactive",
+    "status": "idle"
+  },
+  {
+    "pid": 1,
+    "status": "  IDLE  "
+  },
+  {
+    "pid": 60008,
+    "status": "  IDLE  ",
+    "renamedField": "something a later version adds"
+  }
+]

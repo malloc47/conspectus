@@ -192,10 +192,19 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     fn reports_live_state(&self) -> bool {
         true
     }
+
+    /// `claude agents --json`, run to repair a working or waiting state
+    /// the hooks left stuck (ADR 0218); see `claude_code_agents.rs`.
+    fn live_poller(&self) -> Option<crate::discovery::live_poller::LivePoller> {
+        Some(agents::poller())
+    }
 }
 
 #[path = "claude_code_live.rs"]
 mod live;
+
+#[path = "claude_code_agents.rs"]
+pub mod agents;
 
 pub(crate) use live::{HOOK_SUBSCRIPTIONS, HookSubscription};
 

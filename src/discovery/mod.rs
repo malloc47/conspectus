@@ -26,6 +26,7 @@ pub mod forge;
 pub mod git;
 pub mod harness;
 pub mod hook_sidecar;
+pub mod live_poller;
 pub mod live_state;
 pub(crate) mod memo;
 pub mod orchestrator;
@@ -1029,6 +1030,13 @@ pub struct LocalDiscoveryConfig {
     /// default; [`Self::from_env`] turns it off when
     /// `CONSPECTUS_DISABLE_PANE_TITLES` is set.
     pub pane_titles: bool,
+    /// The repair polls the `live_state` pass may run (ADR 0218). Empty
+    /// from [`Self::from_env`] and [`Self::empty`], so a one-shot command
+    /// never polls; the daemon and a daemonless TUI's background refresh
+    /// build them once ([`live_poller::from_env`]) and pass them to every
+    /// discovery through [`Self::with_live_pollers`], which keeps what each
+    /// remembers between discoveries.
+    pub live_pollers: Vec<Arc<live_poller::LivePoller>>,
     /// Registered orchestrator adapter roots.
     /// Keyed by orchestrator descriptor key
     /// (`agent_deck` today; dmux / herdr / pertmux / workmux
@@ -1161,6 +1169,7 @@ impl LocalDiscoveryConfig {
             live_state_root: crate::live_store::LiveStore::from_env()
                 .map(|store| store.dir().to_path_buf()),
             pane_titles: env::var_os("CONSPECTUS_DISABLE_PANE_TITLES").is_none(),
+            live_pollers: Vec::new(),
             orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
             pin_slots: crate::pin_slots::SlotStore::from_env(),
@@ -1188,6 +1197,7 @@ impl LocalDiscoveryConfig {
             hook_sidecar_root: None,
             live_state_root: None,
             pane_titles: true,
+            live_pollers: Vec::new(),
             orchestrator_roots: BTreeMap::new(),
             worktree_backend: None,
             declared_config_loader: None,
@@ -1368,6 +1378,14 @@ impl LocalDiscoveryConfig {
     /// Read no pane title: the tmux probe leaves them out of its listing.
     pub fn without_pane_titles(mut self) -> Self {
         self.pane_titles = false;
+        self
+    }
+
+    /// Let the `live_state` pass run `pollers` (ADR 0218). Pass the same
+    /// pollers to every discovery of a process: each remembers when it
+    /// last ran and what it read.
+    pub fn with_live_pollers(mut self, pollers: &[Arc<live_poller::LivePoller>]) -> Self {
+        self.live_pollers = pollers.to_vec();
         self
     }
 
