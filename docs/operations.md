@@ -186,7 +186,7 @@ agent's pane; to act on a waiting agent, attach to its mux as usual.
 
 Live state shows in the TUI (a mark after the age on session and mux
 rows, a count of waiting agents on group headers and in the header line,
-and a word on pinned sessions; see
+a word on pinned sessions, and fields in the detail pane; see
 [Live state in the TUI](#live-state-in-the-tui)), in `conspectus table`,
 `conspectus node show`, and the graph JSON.
 
@@ -307,6 +307,18 @@ state has its own shape, so it reads without color:
   `resumable`. Can't-tell, ended, and no-state sessions keep `in mux` or
   `resumable`, and the detail pane still says which mux a session runs
   in.
+- **The detail pane** spells it out. A session with live state lists,
+  after `status`: `state`, its row's mark and then the state and detail
+  in words (`! waiting · permission`, `› ready · finished`, `? unknown ·
+  stale`); `since`, when that state began (`5m ago`); `source`, what
+  reported it (`hook`); `evidence`, `fresh`, `quiet`, or `stale`, the
+  last two dimmed along with the state's words; and `subagents` (`2
+  active`) while the row shows `+N`. A mux lists `agents`, its mark and
+  its agents' counts, most urgent first (`! 1 waiting · 2 working`), and
+  `pane_agents`, the agents in its panes that no session matches yet
+  (`%3 working · generating`). Moving the cursor onto a field previews
+  what its words mean. A node without live state lists none of them.
+  The fields change with the row's mark.
 - **Nothing animates.** The spinner still means a refresh is pending, and
   takes the link cell, not the live mark, which keeps its value until the
   agent reports again.

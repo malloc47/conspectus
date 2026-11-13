@@ -710,9 +710,13 @@ its `(N)` (ADR 0210): its session rows, or in the Mux view every agent of
 its muxes. The header line counts every waiting agent anywhere, whatever
 the view shows, in the same chip before `▲ N` (ADR 0211). A session row
 shows the subagents its agent runs as a dim `+N` after its label, capped
-at `+9+`, never on a mux row (ADR 0212). Ordering,
-grouping, filtering, the jump key, seen and unseen, and the detail pane's
-fields are later stories (the plan's section 7.1).
+at `+9+`, never on a mux row (ADR 0212). The detail pane lists a
+session's `state` (led by its row's mark), `since`, `source`,
+`evidence` (fresh, quiet, or stale), and running `subagents`, and a mux's
+`agents` counts and `pane_agents`, read from the values the rows were
+filled with, and none of them without evidence (ADR 0213). Ordering,
+grouping, filtering, the jump key, and seen and unseen are later stories
+(the plan's section 7.1).
 
 ## Pin Slots
 

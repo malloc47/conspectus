@@ -161,6 +161,15 @@ forms, lists, readers, and keys look and behave alike.
   in every view that lists sessions; mux rows show none. It hides once a
   session has exited or can't be told, as `conspectus table` does. Rows
   with it drop their preview a few cells sooner.
+- **The detail pane says what an agent is doing.** A session with live
+  state lists `state` (its row's mark, then the state and detail in
+  words, such as `! waiting · permission`), `since`, `source`, and
+  `evidence` (`fresh`, `quiet`, or `stale`, the last two dimmed), and
+  `subagents` while it runs any; a mux lists `agents`, its agents'
+  counts, and `pane_agents`, the agents in its panes no session matches.
+  Each previews what its words mean. A node without live state lists
+  none, but a session with it shows up to five fewer lines of its
+  transcript below them.
 
 ### Changed
 

@@ -288,7 +288,8 @@ synthetic, built from the documented payload shapes.
 | 12 | TUI group headers count waiting agents (ADR 0210) | CSP-824 (done) |
 | 13 | TUI header chip for waiting agents (ADR 0211) | CSP-825 (done) |
 | 14 | TUI subagent chip on session rows (ADR 0212) | CSP-854 (done) |
-| decided | TUI order, jump, seen, detail, notify | CSP-826 to CSP-830 |
+| 15 | TUI detail pane fields, Pinned and History words (ADR 0213) | CSP-829 (done) |
+| decided | TUI order, jump, seen, notify | CSP-826 to CSP-828, CSP-830 |
 | parked | Hook-free sources (pane title, `claude agents --json`, tails, other orchestrators) | CSP-831 to CSP-834 |
 
 Follow-ups the stories filed (labels `live-state`, milestone m-26):
@@ -409,10 +410,11 @@ state must rebuild the tree on such a change instead.
 
 The live cell on session and mux rows and the Pinned words landed with
 CSP-823 (ADR 0209), the group headers' waiting counts with CSP-824
-(ADR 0210), the header's with CSP-825 (ADR 0211), and the session rows'
-subagent chip with CSP-854 (ADR 0212; the detail pane's list of them is
-CSP-829's); the rest of the list above is still to build, and the
-CLI and the graph JSON keep the fuller view
+(ADR 0210), the header's with CSP-825 (ADR 0211), the session rows'
+subagent chip with CSP-854 (ADR 0212), and the detail pane's fields,
+the subagents as a count among them, with CSP-829 (ADR 0213); the rest
+of the list above is still to build, and the CLI and the graph JSON
+keep the fuller view
 ([`docs/operations.md`](../../operations.md#live-agent-state)).
 
 The mockups and a recommended default for each are in
@@ -473,8 +475,9 @@ Where the build differs from, or settles, the draft above:
   second (CSP-843); the row models carry `live` fields (CSP-814), which
   the live cell and the Pinned words draw (CSP-823, ADR 0209), the
   group headers count (CSP-824, ADR 0210), the header line counts over
-  the whole graph (CSP-825, ADR 0211), and session rows show running
-  subagents (CSP-854, ADR 0212).
+  the whole graph (CSP-825, ADR 0211), session rows show running
+  subagents (CSP-854, ADR 0212), and the detail pane spells out
+  (CSP-829, ADR 0213).
 - **CLI surfaces.** An opt-in `live` column on `table sessions` and
   `table mux`, a `live state` section in `node show`, the two lists in
   the graph JSON, and a health line at the end of `hook status`
