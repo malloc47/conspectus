@@ -1018,7 +1018,13 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         confirmed_tx,
         confirmed_rx,
         probe: Arc::new(handoff::TmuxIncarnation::default()),
-        discover: Arc::new(nudged_discovery),
+        discover: {
+            // Built once, so each poll remembers its last run across
+            // refreshes; only this worker's discovery runs them, never
+            // the UI thread or the overlay (ADR 0218).
+            let pollers = crate::discovery::live_poller::from_env();
+            Arc::new(move |config: &mut RunConfig, nudge| nudged_discovery(config, nudge, &pollers))
+        },
         workers: WorkerLedger::default(),
         last_refresh: Instant::now(),
         refresh_interval,
@@ -1137,8 +1143,13 @@ struct Discovered {
 
 /// Rescan what `nudge` names, through the daemon when there is one, and
 /// load a snapshot. A failed nudge leaves `config` asking for a local
-/// rebuild, so a later probe by the same worker skips the daemon too.
-fn nudged_discovery(config: &mut RunConfig, nudge: DaemonNudge) -> Discovered {
+/// rebuild, so a later probe by the same worker skips the daemon too. A
+/// local rebuild may run `pollers` (ADR 0218).
+fn nudged_discovery(
+    config: &mut RunConfig,
+    nudge: DaemonNudge,
+    pollers: &[Arc<crate::discovery::live_poller::LivePoller>],
+) -> Discovered {
     prepare_rescan(config, nudge);
     let warning = nudge_daemon(nudge.classes()).err();
     if warning.is_some() {
@@ -1146,7 +1157,7 @@ fn nudged_discovery(config: &mut RunConfig, nudge: DaemonNudge) -> Discovered {
         // operator still sees current state.
         config.refresh = true;
     }
-    match discover_and_resolve_sourced(config) {
+    match discover_and_resolve_sourced(config, pollers) {
         Ok((snapshot, from_daemon)) => Discovered {
             snapshot: Ok(snapshot),
             from_daemon,
@@ -1390,12 +1401,16 @@ pub(super) fn refresh_after_launch_with_spinner(terminal: &mut DefaultTerminal, 
 /// benefits from the freshest data. `RunConfig::refresh` collapses
 /// the prior to empty for a forced cold scan.
 pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::GraphSnapshot> {
-    discover_and_resolve_sourced(config).map(|(snapshot, _)| snapshot)
+    discover_and_resolve_sourced(config, &[]).map(|(snapshot, _)| snapshot)
 }
 
 /// [`discover_and_resolve`], also reporting whether the snapshot came
-/// from a running daemon.
-fn discover_and_resolve_sourced(config: &RunConfig) -> Result<(crate::model::GraphSnapshot, bool)> {
+/// from a running daemon. A local rebuild may run `pollers`, which only
+/// the background refresh worker passes.
+fn discover_and_resolve_sourced(
+    config: &RunConfig,
+    pollers: &[Arc<crate::discovery::live_poller::LivePoller>],
+) -> Result<(crate::model::GraphSnapshot, bool)> {
     if !config.refresh
         && let Some(snapshot) = try_daemon_snapshot()
     {
@@ -1412,7 +1427,8 @@ fn discover_and_resolve_sourced(config: &RunConfig) -> Result<(crate::model::Gra
     let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
         .with_caches(std::sync::Arc::clone(&config.discovery_caches))
         .with_forge_fetch(config.forge_fetch)
-        .with_forge_concurrency(config.forge_concurrency);
+        .with_forge_concurrency(config.forge_concurrency)
+        .with_live_pollers(pollers);
     let fresh_since = crate::discovery::current_epoch();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,

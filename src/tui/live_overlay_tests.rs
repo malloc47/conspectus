@@ -710,3 +710,49 @@ fn a_killed_agents_rows_take_the_new_state_in_place() {
     assert_eq!(app.selection().cloned(), selection);
     assert_eq!(files.reads(), 1, "and the store was not read again");
 }
+
+#[test]
+fn a_poll_the_snapshot_carries_repairs_the_overlays_table_until_a_newer_event() {
+    use crate::model::live::{LivePoll, PolledAgent};
+
+    // The daemon's last poll, a minute after the hooks went quiet, read
+    // the agent idle: its turn was interrupted.
+    let mut snapshot = graph(&["s1", "s2"]);
+    snapshot.live_polls.insert(
+        "claude-code".to_string(),
+        LivePoll {
+            observed_ms: NOW_MS,
+            agents: vec![PolledAgent {
+                pid: Some(PID),
+                pid_start: Some(PID_START),
+                ..PolledAgent::new(LiveState::Ready, None, NOW_MS)
+            }],
+        },
+    );
+    let mut other = entry("s2", LiveState::Working, 0);
+    other.observation.pid = Some(PID + 1);
+    other.tmux = None;
+    let files = Files::holding(&store([entry("s1", LiveState::Working, 1), other.clone()]));
+    let pids = Pids::default();
+    let mut overlay = overlay(&files, &pids);
+    let start = Instant::now();
+    overlay.rebind(&snapshot, start);
+    let read = |overlay: &LiveOverlay| {
+        let binding = overlay.table(&snapshot).nodes[&session("s1")];
+        (binding.observation.state, binding.observation.source)
+    };
+    assert_eq!(read(&overlay), (LiveState::Ready, LiveSource::HarnessPoll));
+
+    // Another session's event rewrites the store: the overlay binds it
+    // again against the same snapshot, and the repair holds.
+    let mut moved = other.clone();
+    moved.observation.state = LiveState::Waiting;
+    files.write(&store([entry("s1", LiveState::Working, 1), moved]));
+    assert!(overlay.poll(start + REREAD_INTERVAL, Some(&snapshot)));
+    assert_eq!(read(&overlay), (LiveState::Ready, LiveSource::HarnessPoll));
+
+    // The agent's next prompt is newer than the poll and takes over.
+    files.write(&store([entry("s1", LiveState::Working, -1), other]));
+    assert!(overlay.poll(start + 2 * REREAD_INTERVAL, Some(&snapshot)));
+    assert_eq!(read(&overlay), (LiveState::Working, LiveSource::Hook));
+}

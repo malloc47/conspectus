@@ -334,7 +334,7 @@ fn binding_never_creates_a_node() {
         ))
         .expect("write the store");
 
-    apply_live_state(&mut graph, root.path(), &FakePids::none());
+    apply_live_state(&mut graph, root.path(), &FakePids::none(), &[]);
 
     assert_eq!(graph.nodes, before);
     assert!(graph.node_live.is_empty());
@@ -712,7 +712,12 @@ fn a_missing_or_corrupt_store_leaves_an_empty_table() {
     );
     let root = tempfile::tempdir().expect("store dir");
 
-    apply_live_state(&mut graph, &root.path().join("absent"), &FakePids::none());
+    apply_live_state(
+        &mut graph,
+        &root.path().join("absent"),
+        &FakePids::none(),
+        &[],
+    );
     assert!(graph.node_live.is_empty(), "a missing store binds nothing");
 
     std::fs::write(
@@ -720,7 +725,7 @@ fn a_missing_or_corrupt_store_leaves_an_empty_table() {
         "{ not json",
     )
     .expect("corrupt store");
-    apply_live_state(&mut graph, root.path(), &FakePids::none());
+    apply_live_state(&mut graph, root.path(), &FakePids::none(), &[]);
     assert!(graph.node_live.is_empty(), "a corrupt store binds nothing");
 }
 
@@ -747,7 +752,7 @@ fn the_pass_replaces_the_table_from_the_store() {
         ))
         .expect("write the store");
 
-    apply_live_state(&mut graph, root.path(), &FakePids::none());
+    apply_live_state(&mut graph, root.path(), &FakePids::none(), &[]);
 
     assert_eq!(
         states(&graph.node_live),

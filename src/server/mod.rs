@@ -342,18 +342,21 @@ struct DispatchCtx {
 type DiscoveryFactory = Arc<dyn Fn(ForgeFetch) -> LocalDiscoveryConfig + Send + Sync>;
 
 /// The production [`DiscoveryFactory`]: the environment's providers,
-/// `caches`, and `forge`'s concurrency.
+/// `caches`, `forge`'s concurrency, and the live-state repair polls
+/// (ADR 0218), built once so each remembers its last run across cycles.
 fn env_discovery(
     caches: Arc<DiscoveryCaches>,
     forge: crate::config::ForgeConfig,
     shutdown: Arc<AtomicBool>,
 ) -> DiscoveryFactory {
+    let pollers = crate::discovery::live_poller::from_env();
     Arc::new(move |fetch| {
         LocalDiscoveryConfig::from_env()
             .with_caches(Arc::clone(&caches))
             .with_forge_concurrency(forge.concurrency)
             .with_forge_fetch(fetch)
             .with_forge_cancel(Arc::clone(&shutdown))
+            .with_live_pollers(&pollers)
     })
 }
 

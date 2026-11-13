@@ -969,7 +969,12 @@ fn apply_mutators(
     // 0205). The table is replaced, never merged, so it is rebuilt on
     // every cycle.
     if let Some(root) = &config.live_state_root {
-        live_state::apply_live_state(snapshot, root, &crate::live_store::ProcProbe::system());
+        live_state::apply_live_state(
+            snapshot,
+            root,
+            &crate::live_store::ProcProbe::system(),
+            &config.live_pollers,
+        );
     }
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(snapshot, context, loader);

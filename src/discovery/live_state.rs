@@ -34,30 +34,57 @@
 //! Then the marks the mux probes read from the titles of agents' panes
 //! (ADR 0217) fill in where the store's entries say nothing, or nothing
 //! fresh, about a pane's agent, and clear a wait Codex's hooks cannot
-//! report the end of (the `title` module).
+//! report the end of (the `title` module). Last, the snapshot's latest
+//! poll of a harness's own list of its sessions (ADR 0218) repairs a
+//! `working` or `waiting` entry of that harness whose hooks have been
+//! silent since before the poll (the `poll` module); the pass runs the
+//! polls it is given before it binds ([`apply_live_state`]).
 //!
 //! Each binding records whether the entry's process ran when it was
 //! bound, from the recorded pid and start time checked through a
 //! [`PidProbe`], so readers apply the time rules alone. The pass reads
-//! one small file and checks one pid per bound entry; it starts no
-//! process and walks no process tree, and it runs after the process-tree
-//! fingerprint is taken, so a state change never reopens that walk (ADR
-//! 0091).
+//! one small file and checks one pid per bound entry; the only process it
+//! starts is a poll its caller gave it, at most one per poller every
+//! thirty seconds, and binding itself starts none. It walks no process
+//! tree, and it runs after the process-tree fingerprint is taken, so a
+//! state change never reopens that walk (ADR 0091).
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::discovery::live_poller::LivePoller;
 use crate::live_store::{LiveEntry, LiveFile, LiveStore, PidProbe};
 use crate::model::live::{LiveBinding, LiveState};
 use crate::model::{
     GraphNode, GraphSnapshot, LivePane, LiveTables, MuxSessionId, NodeId, effective_socket,
 };
 
-/// The store in `root` bound to `snapshot`, replacing its `node_live` and
-/// `pane_live` tables. A missing, unreadable, corrupt, or newer-schema
-/// store binds nothing, so the tables end empty and discovery carries on.
-pub fn apply_live_state(snapshot: &mut GraphSnapshot, root: &Path, probe: &dyn PidProbe) {
+/// The store in `root` bound to `snapshot`, replacing its `node_live`,
+/// `pane_live`, and `live_polls` tables. A missing, unreadable, corrupt,
+/// or newer-schema store binds nothing, so the tables end empty and
+/// discovery carries on.
+///
+/// Each of `pollers` is first handed its harness's bound hook entries
+/// that a poll might repair, runs its poll when they call for one (ADR
+/// 0218), and puts its latest poll in `live_polls` for the binding to
+/// fold in. With no pollers, as in a one-shot command, `live_polls` ends
+/// empty.
+pub fn apply_live_state(
+    snapshot: &mut GraphSnapshot,
+    root: &Path,
+    probe: &dyn PidProbe,
+    pollers: &[std::sync::Arc<LivePoller>],
+) {
     let file = LiveStore::at(root).read();
+    snapshot.live_polls = BTreeMap::new();
+    for poller in pollers {
+        let candidates = poll::candidates(snapshot, &file, probe, poller.harness());
+        if let Some(read) = poller.poll(&candidates, probe) {
+            snapshot
+                .live_polls
+                .insert(poller.harness().to_string(), read);
+        }
+    }
     let bound = bind_live(snapshot, &file, probe);
     snapshot.node_live = bound.nodes;
     snapshot.pane_live = bound.panes;
@@ -97,19 +124,7 @@ impl BoundLive {
 /// in the module documentation, with each entry's process checked
 /// through `probe`.
 pub fn bind_live(snapshot: &GraphSnapshot, file: &LiveFile, probe: &dyn PidProbe) -> BoundLive {
-    let targets = Targets::of(snapshot);
-    let mut sessions: BTreeMap<NodeId, &LiveEntry> = BTreeMap::new();
-    let mut panes: BTreeMap<LivePane, &LiveEntry> = BTreeMap::new();
-    // Entries come in key order, and a later one replaces the winner
-    // only when it ranks strictly higher, so equal ranks keep the lowest
-    // key.
-    for entry in file.entries.values() {
-        match targets.target_for(entry) {
-            Some(Target::Session(node)) => keep_last(&mut sessions, node.clone(), entry),
-            Some(Target::Pane(pane)) => keep_last(&mut panes, pane, entry),
-            None => {}
-        }
-    }
+    let Winners { sessions, panes } = Winners::of(snapshot, file);
     let bind =
         |entry: &LiveEntry| LiveBinding::new(entry.observation, probe.liveness(&entry.observation));
     let mut bound = BoundLive {
@@ -123,7 +138,39 @@ pub fn bind_live(snapshot: &GraphSnapshot, file: &LiveFile, probe: &dyn PidProbe
             .collect(),
     };
     title::fold_titles(snapshot, &sessions, &panes, &mut bound);
+    poll::fold_polls(snapshot, &sessions, &panes, &mut bound);
     bound
+}
+
+/// The store entry that binds to each session and to each pane: of the
+/// entries that bind to one slot, the one [`rank`] puts first.
+struct Winners<'a> {
+    sessions: BTreeMap<NodeId, &'a LiveEntry>,
+    panes: BTreeMap<LivePane, &'a LiveEntry>,
+}
+
+impl<'a> Winners<'a> {
+    fn of(snapshot: &GraphSnapshot, file: &'a LiveFile) -> Self {
+        let targets = Targets::of(snapshot);
+        let mut sessions: BTreeMap<NodeId, &LiveEntry> = BTreeMap::new();
+        let mut panes: BTreeMap<LivePane, &LiveEntry> = BTreeMap::new();
+        // Entries come in key order, and a later one replaces the winner
+        // only when it ranks strictly higher, so equal ranks keep the
+        // lowest key.
+        for entry in file.entries.values() {
+            match targets.target_for(entry) {
+                Some(Target::Session(node)) => keep_last(&mut sessions, node.clone(), entry),
+                Some(Target::Pane(pane)) => keep_last(&mut panes, pane, entry),
+                None => {}
+            }
+        }
+        Self { sessions, panes }
+    }
+
+    /// Every winning entry, sessions' first.
+    fn entries(&self) -> impl Iterator<Item = &'a LiveEntry> + '_ {
+        self.sessions.values().chain(self.panes.values()).copied()
+    }
 }
 
 /// Put `entry` in `key`'s slot unless the entry already there ranks at
@@ -217,6 +264,9 @@ fn server_of(socket_path: &str) -> Option<Option<&str>> {
 
 #[path = "live_title.rs"]
 mod title;
+
+#[path = "live_poll.rs"]
+mod poll;
 
 #[cfg(test)]
 #[path = "live_state_tests.rs"]

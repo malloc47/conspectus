@@ -5,10 +5,10 @@
 //!
 //! Each scenario runs one or more commands against a materialized
 //! showcase world, with a temporary home and XDG directories and
-//! stand-in `gh`, `tmux`, `zellij`, and `wt` scripts on `PATH`, so the
-//! run is deterministic and never touches the network or a real tmux
-//! server. Only what the Conspectus process itself does is checked;
-//! what the programs it starts do is theirs.
+//! stand-in `gh`, `tmux`, `zellij`, `wt`, and `claude` scripts on `PATH`,
+//! so the run is deterministic and never touches the network, a real
+//! tmux server, or a real harness. Only what the Conspectus process
+//! itself does is checked; what the programs it starts do is theirs.
 //!
 //! Without `strace` (or when ptrace isn't permitted) the test skips,
 //! unless `CONSPECTUS_REQUIRE_STRACE` is set, as CI sets it. Set
@@ -735,6 +735,13 @@ const SHIMS: &[(&str, &str)] = &[
         "echo 'No active zellij sessions found.' >&2\nexit 1\n",
     ),
     ("wt", "exit 0\n"),
+    (
+        "claude",
+        "# Lists no session, and leaves a mark that the daemon polled\n\
+         # (with shell builtins only: `PATH` holds no coreutils).\n\
+         : > \"$0.ran\"\n\
+         case \"$1 $2\" in\n  \"agents --json\") echo '[]' ;;\n  *) exit 2 ;;\nesac\n",
+    ),
 ];
 
 struct World {
@@ -1086,7 +1093,23 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
     );
 
     // The daemon, with clients asking it for a snapshot and a forge
-    // refresh.
+    // refresh. A Claude Code session whose turn the hooks left working
+    // a minute ago has the daemon poll `claude agents --json` (ADR 0218).
+    let pid = i64::from(std::process::id());
+    let stuck = conspectus::live_store::LiveEvent::new(
+        "claude-code",
+        "showcase-claude",
+        conspectus::live_store::now_ms() - 60_000,
+        conspectus::live_store::LiveEventKind::TurnStarted,
+    )
+    .with_context(conspectus::live_store::LiveContext {
+        pid: Some(pid),
+        pid_start: conspectus::live_store::process_start_time(pid),
+        ..Default::default()
+    });
+    conspectus::live_store::LiveStore::at(world.root.join("xdg/state/conspectus"))
+        .apply_event(&stuck)
+        .expect("seed the live-state store");
     let (serve, serve_dir) = world.spawn(&strace, "serve", &["serve"], project);
     let socket = world.root.join("xdg/run/conspectus/server.sock");
     wait_for(&socket, Duration::from_secs(60));
@@ -1108,6 +1131,7 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             project,
         ),
     ];
+    wait_for(&world.root.join("bin/claude.ran"), Duration::from_secs(60));
     let pid = traced_root(&serve_dir).expect("traced serve pid");
     // SAFETY: `kill` with a pid this test spawned and a valid signal.
     unsafe {
@@ -1123,6 +1147,13 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         fs::read_to_string(&pins).expect("pins.toml"),
         "[pins]\nschema_version = 2\n\n[[pins.slots]]\nid = \"seeded\"\nkind = \"mux\"\n",
         "the daemon left the slot store byte for byte alone"
+    );
+    let polled = conspectus_events(&serve_dir, project)
+        .into_iter()
+        .any(|event| matches!(&event, Event::Exec { argv, .. } if argv == &["claude", "agents", "--json"]));
+    assert!(
+        polled,
+        "the daemon's poll of `claude agents --json` was traced"
     );
     let mut daemon = clients;
     daemon.push(serve_dir);
