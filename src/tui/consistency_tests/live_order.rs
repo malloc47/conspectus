@@ -376,3 +376,19 @@ fn the_empty_state_names_the_agent_state_chip() {
     let screen = frame(&mut app, 200, 30);
     assert!(screen.contains("No rows match `agent:error`."), "{screen}");
 }
+
+#[test]
+fn pinned_and_history_ignore_the_agent_state_filter_and_the_float() {
+    let snapshot = with_table();
+    for view in [View::Pinned, View::History] {
+        let all = row_ids(&listing_with(view, &snapshot, LiveOverlay::off()));
+        for filter in [keeping(LiveStateKey::Error), floating()] {
+            let filter = RowFilter {
+                show_pinned_history: true,
+                ..filter
+            };
+            let app = filtered(listing_with(view, &snapshot, LiveOverlay::off()), filter);
+            assert_eq!(row_ids(&app), all, "{view:?}");
+        }
+    }
+}
