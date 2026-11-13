@@ -701,17 +701,20 @@ for the pane a mark binds pane-only
 as `waiting/input` or `working` with source `pane_title` and no pid; a
 fresh hook entry wins, a quiet or stale one gives way, and a hook's wait
 turns `working` after two probes past it without the marker. The second is
-`claude agents --json` (ADR 0218), run only as a repair by the processes
-that discover in the background (the daemon, a daemonless TUI's refresh
-worker), at most every 30 s, while a Claude Code hook entry recorded
-`working` or `waiting` and has been silent for 10 s. Each listed session is
+`claude agents --json` (ADR 0218), run by the processes that discover in
+the background (the daemon, a daemonless TUI's refresh worker), at most
+every 30 s, while a Claude Code hook entry recorded `working` or `waiting`
+and has been silent for 10 s, or while a running Claude Code agent
+discovery knows has no hook entry (ADR 0222). Each listed session is
 reduced in memory to its pid, a plain session id, and a mapped state; the
 latest poll rides in the snapshot's `live_polls` (in `graph.bin`, not JSON),
 and the binding folds it in after the pane titles, so a hook entry silent
 for the settle window before the poll reads the poll's state for the same
 process with source `harness_poll`. A newer hook event wins, hook `ready`,
-`error`, and `exited` never change, and a session with no hook entry gets
-nothing. The CLI shows
+`error`, and `exited` never change. An agent with no hook entry whose
+process discovery knows binds the poll's state on its session with no pid,
+so it ages to quiet and stale by the read rule once polls stop, and drops
+when its process ends or the poll no longer lists it. The CLI shows
 it as `node_live` in `graph --format json`, in opt-in `live` columns of
 `conspectus table` (a session's effective state, a mux's counts), in `node
 show`, and as a per-harness health line in `hook status` (events arriving, or

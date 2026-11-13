@@ -522,16 +522,18 @@ Claude Code's hooks miss two moments: an Esc interrupt fires no event, so
 the turn reads `working` until your next prompt, and approving a
 permission prompt fires none until the approved tool ends, so the session
 reads `waiting` meanwhile. Claude Code also lists its own sessions with
-their status, `claude agents --json`, and Conspectus asks it, only to
-repair those two:
+their status, `claude agents --json`, and Conspectus asks it to repair
+those two, and to show an agent whose hooks report nothing:
 
 - **When.** A Claude Code session's hooks last said `working` or
   `waiting`, ten seconds have passed with no event, and no earlier call
   has already answered it; at most one call every 30 s. Only
   `conspectus serve` and a TUI with no daemon (at its refresh, in the
   background) make the call. A one-shot command such as `conspectus
-  table` never does, but shows a running daemon's answer. Nothing runs
-  while every Claude Code session is ready or keeps reporting.
+  table` never does, but shows a running daemon's answer. It also runs,
+  at most every 30 s, while a Claude Code agent runs whose hooks report
+  nothing (see below). Nothing runs while every Claude Code agent
+  reports through its hooks and is ready or keeps reporting.
 - **What it reads.** Each session's status: busy reads `working`, waiting
   reads `waiting` (detail `permission` for a permission prompt or a
   sandbox request, `input` for anything else), idle reads `ready` with no
@@ -543,11 +545,24 @@ repair those two:
   the hooks did and the call came at least ten seconds after their last
   event. The next hook event, such as your next prompt, takes over again
   at once. A hook's `ready`, `error`, `compacting`, and `exited` never
-  change on the list's account, and a session with no hook entry gets
-  nothing from it: install the hooks for that.
+  change on the list's account.
+- **An agent whose hooks report nothing** (untrusted, turned off, or not
+  installed) shows what the list says, with `source` `harness_poll`, when
+  Conspectus knows its process: an agent process the process tree found
+  (in a tmux session's active pane) that no hook has reported for. The
+  state shows on that agent's session and is refreshed by the next call,
+  30 s later, for as long as the agent runs without hooks. It is gone as
+  soon as the process ends or the list stops listing it. If the calls
+  stop (they fail, or `claude` is gone), it ages like any state whose
+  process cannot be checked: `working` goes quiet after ten minutes, and
+  every state reads `unknown` fifteen minutes after the last call that
+  listed it. Hooks still say more (whether a turn finished or was
+  interrupted, which question waits), and once they report, they take
+  over.
 - **What it costs.** About half a second of one CPU per call. While an
   agent works through a long tool or waits on you, that is one call every
-  30 s; an interrupted session left idle costs one call.
+  30 s; an interrupted session left idle costs one call; an agent with no
+  hooks costs one call every 30 s while it runs.
 - **What it keeps.** Each listed session's pid, session id, and status,
   read in memory as the output arrives. Its name (which can be a title
   made from your prompt), its directory, and every other field are
@@ -566,7 +581,9 @@ What it cannot see:
 - **A session whose hooks recorded another process** than the one Claude
   Code lists (the pid each records), unless both name the same session
   id.
-- **A session with no hooks**, as above.
+- **An agent with no hooks whose process Conspectus does not know**,
+  such as one outside tmux or in a pane that is not active: it shows
+  nothing, and `hook status` still says `silent`.
 
 The fields come from Claude Code's documentation; a recording of a real
 session has not checked them yet.
@@ -845,7 +862,11 @@ against the running processes. It starts no process and asks no daemon.
 
 For Codex, any of them may end with `; 1 agent shown from its pane title`
 (or `2 agents ... their pane titles`): agents the saved graph shows from
-[Codex's pane title](#codexs-pane-title), with or without hooks.
+[Codex's pane title](#codexs-pane-title), with or without hooks. For
+Claude Code, `; 1 agent shown from its agent list` (or `2 agents ...
+their agent list`) counts the agents the saved graph shows from
+[Claude Code's agent list](#claude-codes-agent-list), repaired or
+reported by the list alone.
 
 ### Troubleshooting live state
 

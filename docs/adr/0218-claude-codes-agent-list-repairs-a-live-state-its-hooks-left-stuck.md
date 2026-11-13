@@ -19,6 +19,12 @@ existing program and a signal to the capability manifest
 ([ADR 0117](0117-capability-manifest-and-traced-backstop.md)); writes
 nothing (ADR 0143). Follows the template of
 [ADR 0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md).
+Amended by
+[ADR 0222](0222-claude-codes-agent-list-shows-a-known-agent-its-hooks-do-not-report.md)
+(decisions 2, 7, and 10): the poll also runs while a running Claude Code
+agent that discovery knows has no hook entry, and shows that agent's
+state on its session from the poll alone, recorded with no pid so it
+ages out when polls stop.
 
 ## Context
 

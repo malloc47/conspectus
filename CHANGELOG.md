@@ -14,6 +14,17 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **Claude Code agents with no hooks show their live state** from Claude
+  Code's own agent list (`claude agents --json`), when Conspectus knows
+  the agent's process (the process tree finds agents in tmux sessions'
+  active panes) and no hook has reported for it: untrusted, disabled, or
+  uninstalled hooks. With `conspectus serve` or a TUI running, the list
+  is asked at most every 30 s while such an agent runs, the state shows
+  on its session with `source: harness_poll`, and it is gone when the
+  process ends or the list stops listing it; if the calls stop, it reads
+  quiet after ten minutes of work and `unknown` fifteen minutes after
+  the last call. `hook status claude-code` adds how many agents it
+  shows (`1 agent shown from its agent list`).
 - **History.** Conspectus remembers every mux, checkout, repo, and PR it
   sees under `$XDG_STATE_HOME/conspectus/history/`, so an entity that
   disappears stays visible as *gone* (decided by a targeted check, never
