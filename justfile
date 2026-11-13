@@ -41,6 +41,22 @@ tuikit-features:
     cargo test -p tuikit --no-default-features
     cargo test -p tuikit --no-default-features --features richtext
 
+# The framework's feature matrix, when a change could alter its result
+# (ADR 0225). `check` calls this: it skips the matrix, and says so, when
+# neither the working tree nor a commit since the merge base with `main`
+# touches the crate or a root file its build reads (the list is in
+# scripts/tuikit-unchanged.sh), and runs it otherwise, including when that
+# comparison cannot be made. `just tuikit-features` and CI always run it.
+tuikit-features-if-changed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if reason=$(scripts/tuikit-unchanged.sh); then
+        echo "tuikit-features: skipped: $reason; \`just tuikit-features\` runs it"
+    else
+        echo "tuikit-features: running: $reason"
+        "{{just_executable()}}" --justfile "{{justfile()}}" tuikit-features
+    fi
+
 # Rehearse moving the framework into a repository of its own (ADR 0199):
 # export `crates/tuikit` at HEAD with its history into a scratch
 # repository, make its manifest stand alone, add its root files, and run
@@ -131,7 +147,7 @@ screenshots:
 demo:
     cargo run --quiet --features snapshot -- tui --fixture tests/fixtures/showcase.json
 
-check: fmt clippy nextest tuikit-features doc diff-check
+check: fmt clippy nextest tuikit-features-if-changed doc diff-check
 
 # Drop into a disposable Conspectus home (private tmux, stub harnesses,
 # a git repo) for manual testing; `just scratch smoke` runs the checks.

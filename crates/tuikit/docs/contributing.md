@@ -496,5 +496,12 @@ names, so it cannot see the feature-off build. The lib-only lints also build
 without `testkit`, which this crate's own tests always turn on. A repository
 that hosts the crate runs its own checks over every member as well.
 
+The host's everyday check (`just check`) runs these cargo commands only when
+the change touches the crate or a root file its build reads (the workspace
+manifest, the lockfile, the toolchain file), counting the uncommitted edits
+and the commits since the branch left `main`, and says so when it skips
+them; its CI runs them on every change. A change to the crate always counts,
+so the list above is still what to run before finishing one.
+
 If a guard fails, fix the design. Add an allowlist entry only through the
 process above.
