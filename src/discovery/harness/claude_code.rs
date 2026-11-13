@@ -171,6 +171,12 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         ])
     }
 
+    /// The fields `claude_code_live.rs` maps and the attribution record
+    /// reads.
+    fn hook_payload_fields(&self) -> &'static [crate::hook::payload::PayloadField] {
+        &live::PAYLOAD_FIELDS
+    }
+
     /// Only `SessionStart` names the session a process runs, so only it
     /// is recorded for attribution; every other event reaches only the
     /// live-state store.

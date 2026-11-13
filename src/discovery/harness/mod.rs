@@ -325,6 +325,20 @@ pub trait HarnessAdapter: Send + Sync {
         let _ = (snapshot, ctx);
     }
 
+    /// The payload fields this adapter's hook methods read, at every
+    /// depth. `conspectus hook write` parses its stdin against them and
+    /// skips every other value unbuilt ([`crate::hook::payload`]), so
+    /// [`Self::hook_record_from_payload`], [`Self::is_attribution_event`],
+    /// [`Self::live_events_from_payload`], and
+    /// [`Self::live_snapshot_from_payload`] see these fields and no
+    /// others: an adapter that reads another field in one of them names
+    /// it here too. Defaults to
+    /// [`crate::hook::payload::SESSION_FIELDS`], what the default
+    /// record reads.
+    fn hook_payload_fields(&self) -> &'static [crate::hook::payload::PayloadField] {
+        &crate::hook::payload::SESSION_FIELDS
+    }
+
     /// Build a hook sidecar record from a harness's SessionStart
     /// hook payload. The default implementation
     /// reads the ADR 0028 canonical `session_id` string and
@@ -976,3 +990,7 @@ mod tests;
 
 #[cfg(test)]
 mod live_sequences;
+
+#[cfg(test)]
+#[path = "payload_fields_tests.rs"]
+mod payload_fields_tests;

@@ -163,6 +163,11 @@ impl HarnessAdapter for OpenCodeAdapter {
         })
     }
 
+    /// The fields of the plugin's payloads that `opencode_live.rs` reads.
+    fn hook_payload_fields(&self) -> &'static [crate::hook::payload::PayloadField] {
+        &live::PAYLOAD_FIELDS
+    }
+
     /// A payload the plugin marks for attribution, or one with no live
     /// state (plugin 0.2.0, the 2.x TUI entrypoint); live-state snapshots
     /// and heartbeats reach only the live-state store. See

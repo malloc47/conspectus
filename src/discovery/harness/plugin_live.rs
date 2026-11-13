@@ -26,7 +26,9 @@
 //! | `heartbeat_s` | seconds, at most [`MAX_HEARTBEAT_S`] |
 //! | `pid`, `pid_start` | the harness process the plugin runs in, which replaces the one the writer found by walking its parents; the start time the writer read wins when both name the same pid |
 //!
-//! Nothing else is read, and no field can carry text into the store: a
+//! Nothing else is read (`hook write` parses only these fields,
+//! [`LIVE_FIELD`] inside the `live` object, and skips the rest unbuilt),
+//! and no field can carry text into the store: a
 //! state or detail outside the closed set is not copied, and every id and
 //! path is checked by the store (ADR 0086 Tier 3, ADR 0206 decisions 10
 //! to 12). Each harness's adapter decides which of its payloads also take
@@ -34,8 +36,28 @@
 
 use serde_json::{Map, Value};
 
+use crate::hook::payload::PayloadField;
 use crate::live_store::{LiveContext, LiveSnapshot};
 use crate::model::live::{LiveDetail, LiveState};
+
+/// The `live` object and every field of it [`live_snapshot`] and
+/// [`reported_pid`] read.
+pub(super) const LIVE_FIELD: PayloadField = PayloadField::nested(
+    "live",
+    &[
+        PayloadField::scalar("instance"),
+        PayloadField::scalar("seq"),
+        PayloadField::scalar("observed_ms"),
+        PayloadField::scalar("heartbeat_s"),
+        PayloadField::scalar("pid"),
+        PayloadField::scalar("pid_start"),
+        PayloadField::scalar("state"),
+        PayloadField::scalar("detail"),
+        PayloadField::scalar("subagents"),
+        PayloadField::scalar("via_subagent"),
+        PayloadField::scalar("since_ms"),
+    ],
+);
 
 /// The longest heartbeat interval a snapshot may claim, so a reader's
 /// quiet window (three heartbeats) stays under half an hour.

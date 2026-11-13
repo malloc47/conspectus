@@ -2,7 +2,8 @@
 //! replayed for their tests. A corpus is a directory of single payloads
 //! (`*.json`) and ordered sequences (`seq-*.jsonl`); each corpus's
 //! README says how a sequence is laid out. [`run_sequence`] drives one
-//! through the whole writer path: the adapter's mapping, the store in a
+//! through the whole writer path: the payload parsed against the fields
+//! the adapter reads, the adapter's mapping, the store in a
 //! scratch directory, the entry read back, and the state a reader shows,
 //! checked after every step.
 
@@ -136,7 +137,14 @@ pub(crate) fn run_sequence(adapter: &dyn HarnessAdapter, dir: &Path, name: &str)
                     .or_else(|| header["pid_start"].as_u64()),
                 ..LiveContext::default()
             };
-            let events = adapter.live_events_from_payload(payload, &context, at_ms);
+            // What `hook write` hands the adapter: the payload parsed
+            // against the fields it reads.
+            let payload = crate::hook::payload::parse(
+                payload.to_string().as_bytes(),
+                adapter.hook_payload_fields(),
+            )
+            .expect("a valid payload parses");
+            let events = adapter.live_events_from_payload(&payload, &context, at_ms);
             if !events.is_empty() {
                 store
                     .apply_events(adapter.live_reducer(), &events)

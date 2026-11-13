@@ -30,14 +30,16 @@
 //! vocabulary has no state for, so they are dropped. `Notification`s
 //! come from the main session and confirm whichever wait is pending.
 //!
-//! Each field is looked up by name in the parsed payload and a field of
-//! another type reads as absent, so one odd field never costs the event,
-//! and a field the table does not name (`prompt`, `tool_input`,
-//! `message`, `title`, `last_assistant_message`, error text, the rest of
-//! `tool_response`, background-task descriptions) is never read, however
-//! large (ADR 0206 decisions 10 and 11). `tool_name` and a task's `type`
-//! and `status` only classify and are not kept, and `agent_type` is not
-//! read (decision 12).
+//! `hook write` parses the payload against [`PAYLOAD_FIELDS`], the fields
+//! this table names, and skips every other value without building it.
+//! Each field is looked up by name in the result and a field of another
+//! type reads as absent, so one odd field never costs the event, and a
+//! field the table does not name (`prompt`, `tool_input`, `message`,
+//! `title`, `last_assistant_message`, error text, the rest of
+//! `tool_response`, background-task descriptions) is never read or
+//! copied, however large (ADR 0206 decisions 10 and 11). `tool_name` and
+//! a task's `type` and `status` only classify and are not kept, and
+//! `agent_type` is not read (decision 12).
 //!
 //! Some gaps come with the hooks, and readers have to live with them:
 //!
@@ -71,11 +73,41 @@
 
 use serde_json::{Map, Value};
 
+use crate::hook::payload::PayloadField;
 use crate::live_store::{
     FailureClass, LiveContext, LiveEvent, LiveEventKind, WaitKind, plausible_id,
 };
 
 use super::HARNESS_KEY;
+
+/// Every field the table above and the attribution record read.
+pub(super) const PAYLOAD_FIELDS: [PayloadField; 12] = [
+    PayloadField::scalar("session_id"),
+    PayloadField::scalar("cwd"),
+    PayloadField::scalar("transcript_path"),
+    PayloadField::scalar("hook_event_name"),
+    PayloadField::scalar("agent_id"),
+    PayloadField::scalar("source"),
+    PayloadField::scalar("tool_name"),
+    PayloadField::nested(
+        "tool_response",
+        &[
+            PayloadField::scalar("status"),
+            PayloadField::scalar("agentId"),
+        ],
+    ),
+    PayloadField::scalar("is_interrupt"),
+    PayloadField::scalar("notification_type"),
+    PayloadField::nested(
+        "background_tasks",
+        &[
+            PayloadField::scalar("id"),
+            PayloadField::scalar("type"),
+            PayloadField::scalar("status"),
+        ],
+    ),
+    PayloadField::scalar("error"),
+];
 
 /// One hook event `hook init claude-code` installs, with the matcher its
 /// entry needs; `None` matches every occurrence of the event.

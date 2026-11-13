@@ -1,8 +1,10 @@
 //! `conspectus hook write`: record one harness hook payload.
 //!
 //! A harness runs this once per hook event, with the event's JSON on
-//! stdin, and waits for it to finish. The harness's adapter says what
-//! the payload means, and it goes to up to two places:
+//! stdin, and waits for it to finish. The payload is parsed against the
+//! fields the harness's adapter reads, and every other value is skipped
+//! without being built ([`crate::hook::payload`]). The adapter says what
+//! those fields mean, and they go to up to two places:
 //!
 //! - **The live-state store** (ADR 0204), for every event the adapter
 //!   maps to a live event or snapshot. The write waits at most
@@ -72,7 +74,10 @@ impl HookWriteArgs {
         else {
             return;
         };
-        let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input) else {
+        // Only the fields the adapter reads are built; the rest of the
+        // payload, a large tool response included, is skipped unread.
+        let Some(payload) = crate::hook::payload::parse(&input, adapter.hook_payload_fields())
+        else {
             return;
         };
         let env = WriterEnv::from_env(&self.harness, observed_ms);

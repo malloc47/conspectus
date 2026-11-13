@@ -55,9 +55,20 @@
 use serde_json::Value;
 
 use crate::discovery::harness::plugin_live;
+use crate::hook::payload::PayloadField;
 use crate::live_store::{LiveContext, LiveSnapshot};
 
 use super::HARNESS_KEY;
+
+/// Every field the snapshot, the attribution decision, and the
+/// attribution record read.
+pub(super) const PAYLOAD_FIELDS: [PayloadField; 5] = [
+    PayloadField::scalar("session_id"),
+    PayloadField::scalar("cwd"),
+    PayloadField::scalar("transcript_path"),
+    PayloadField::scalar("hook_event_name"),
+    plugin_live::LIVE_FIELD,
+];
 
 pub(super) use plugin_live::reported_pid;
 

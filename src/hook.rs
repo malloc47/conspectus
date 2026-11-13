@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+pub mod payload;
+
 pub const SCHEMA_VERSION: u16 = 1;
 pub const LATEST_FILENAME: &str = "hooks-latest.json";
 /// The most records the spool keeps. A write past it drops the records

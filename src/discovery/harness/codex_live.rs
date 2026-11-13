@@ -30,9 +30,11 @@
 //! `PreModelRequest`, `PostModelRequest`, or one a later Codex adds,
 //! yields nothing.
 //!
-//! Each field is looked up by name in the parsed payload, and a field of
-//! another type reads as absent, so one odd field never costs the event.
-//! A field the table does not name is never read, however large:
+//! `hook write` parses the payload against [`PAYLOAD_FIELDS`], the fields
+//! this table names, and skips every other value without building it.
+//! Each field is looked up by name in the result, and a field of another
+//! type reads as absent, so one odd field never costs the event. A field
+//! the table does not name is never read or copied, however large:
 //! `prompt`, `tool_input`, `tool_response`, `last_assistant_message`,
 //! `agent_transcript_path`, a model request's `error`, and also
 //! `tool_name`, `agent_type`, `permission_mode`, `turn_id`, `trigger`,
@@ -67,9 +69,20 @@
 
 use serde_json::{Map, Value};
 
+use crate::hook::payload::PayloadField;
 use crate::live_store::{LiveContext, LiveEvent, LiveEventKind, WaitKind};
 
 use super::HARNESS_KEY;
+
+/// Every field the table above and the attribution record read.
+pub(super) const PAYLOAD_FIELDS: [PayloadField; 6] = [
+    PayloadField::scalar("session_id"),
+    PayloadField::scalar("cwd"),
+    PayloadField::scalar("transcript_path"),
+    PayloadField::scalar("hook_event_name"),
+    PayloadField::scalar("agent_id"),
+    PayloadField::scalar("source"),
+];
 
 const SESSION_START: &str = "SessionStart";
 const USER_PROMPT_SUBMIT: &str = "UserPromptSubmit";

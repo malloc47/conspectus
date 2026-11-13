@@ -135,6 +135,11 @@ impl HarnessAdapter for PiAdapter {
         Some(root.to_string_lossy().to_string())
     }
 
+    /// The fields of the extension's payloads that `pi_live.rs` reads.
+    fn hook_payload_fields(&self) -> &'static [crate::hook::payload::PayloadField] {
+        &live::PAYLOAD_FIELDS
+    }
+
     /// The extension reports the Pi process it runs in, which replaces
     /// the one the writer found by walking its parents (the walk finds Pi
     /// only by its process name). See `pi_live.rs`.
