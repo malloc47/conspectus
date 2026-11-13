@@ -4,7 +4,11 @@
 
 Accepted. Part of the live agent state plan with ADRs 0203 to 0206.
 Applies the carve-out in ADR 0028 (no generic terminal scraping without a
-separate decision) and the tiers of ADR 0086.
+separate decision) and the tiers of ADR 0086. Its first further source,
+a Codex pane's title, is
+[ADR 0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md),
+which follows decision 4 and makes one exception to it, for an approval
+answered while the hook record is fresh.
 
 ## Context
 

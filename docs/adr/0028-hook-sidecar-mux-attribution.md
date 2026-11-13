@@ -7,7 +7,9 @@ with or without a daemon, and a daemon ingest writes it too. Amended:
 the SQLite store below was retired with the rest of SQLite (ADR 0082)
 for the latest-record spool, which keeps one record per pane, and no
 time limit applies to a record (ADR 0146's amendment). See the
-amendment at the end.
+amendment at the end. Its carve-out for already-visible status
+surfaces is used once, by ADR 0217: the title a Codex pane sets, read
+for live state only.
 
 ## Context
 

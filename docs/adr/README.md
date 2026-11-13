@@ -53,7 +53,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0011](0011-forge-discovery-via-gh.md) | Forge Discovery Via The `gh` CLI | Accepted |
 | [0013](0013-opencode-sqlite-session-store.md) | Read opencode Sessions From SQLite | Accepted |
 | [0027](0027-workspace-detection-precedence.md) | Workspace Detection And Provider Precedence | Accepted |
-| [0028](0028-hook-sidecar-mux-attribution.md) | Hook Sidecar Mux Attribution | Accepted (amended; refined by 0146; live state added by 0204, 0206) |
+| [0028](0028-hook-sidecar-mux-attribution.md) | Hook Sidecar Mux Attribution | Accepted (amended; refined by 0146; live state added by 0204, 0206; status surface used by 0217) |
 | [0046](0046-process-tree-pane-linker.md) | Process-Tree Pane Linker | Accepted |
 | [0048](0048-codex-state-and-log-readers.md) | Codex State and Log Readers for Mux Attribution | Accepted (amended) |
 | [0049](0049-opencode-hook-plugin-distribution.md) | OpenCode Hook Plugin Distribution | Accepted (amended by 0126, 0206) |
@@ -66,7 +66,8 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0138](0138-provider-workspaces-from-observed-cwds.md) | Provider Workspaces From Observed Cwds | Accepted |
 | [0204](0204-the-live-state-store-folds-agent-events-per-session.md) | The Live-State Store Folds Agent Events Per Session | Accepted |
 | [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208) |
-| [0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted |
+| [0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted (applied by 0217) |
+| [0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md) | A Codex Pane's Title Fills In Its Live State Where Hooks Cannot | Accepted |
 
 ## User intent and the write envelope
 
@@ -77,7 +78,7 @@ Where user-authored intent lives, what Conspectus may write, and what it must ne
 | [0012](0012-config-file-layout.md) | Conspectus Configuration File Layout | Accepted |
 | [0014](0014-declared-link-storage-schema.md) | Declared Link Storage Schema | Accepted |
 | [0029](0029-session-alias-overlay.md) | Session Alias Overlay | Accepted (amended by 0141) |
-| [0086](0086-payload-privacy-tenet.md) | Payload Privacy Tenet | Accepted (amended by 0140, 0147, 0148, 0149) |
+| [0086](0086-payload-privacy-tenet.md) | Payload Privacy Tenet | Accepted (amended by 0140, 0147, 0148, 0149, 0217) |
 | [0087](0087-mutation-envelope.md) | Mutation Envelope | Superseded by 0143 |
 | [0090](0090-pin-store-registry-sidecar.md) | Pin-Store Registry Sidecar | Superseded by 0141 |
 | [0143](0143-mutation-envelope-with-history-pins-and-clone.md) | Mutation Envelope With History, Pin Slots, And Clone | Accepted (amended by 0148) |

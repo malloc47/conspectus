@@ -11,6 +11,11 @@ operator-initiated commands and never by the daemon. Amended by
 [ADR 0149](0149-two-level-search-current-and-wider-context.md): mux pane
 scrollback joins transcripts as a Tier 2 content source for content search,
 read under the same gesture, held in memory only, and never persisted.
+Amended by
+[ADR 0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md):
+a Codex pane's title is a Tier 2 source for live state, reduced in
+memory to one of three marks the moment it is read; the text is never
+shown or persisted, and neither it nor the mark feeds attribution.
 
 ## Context
 
