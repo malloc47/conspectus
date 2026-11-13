@@ -477,7 +477,7 @@
       "active_pane_start_command": "claude --resume showcase-deck-launcher",
       "client_attached": false,
       "activity_epoch": 1790767800,
-      "last_attached_epoch": 1790766900
+      "last_attached_epoch": 1790769570
     },
     {
       "type": "pin",
@@ -4255,6 +4255,20 @@
       "detail": "ended",
       "since_ms": 1790726400000,
       "observed_ms": 1790726400000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/harness/codex",
+        "session_key": "showcase-codex-parent"
+      },
+      "state": "ready",
+      "detail": "finished",
+      "since_ms": 1790510400000,
+      "observed_ms": 1790769540000,
       "source": "hook",
       "liveness": "unknown"
     },

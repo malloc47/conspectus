@@ -17,7 +17,7 @@
 use std::collections::BTreeSet;
 
 use conspectus::model::live::LiveState;
-use conspectus::model::{GraphSnapshot, RelationKind};
+use conspectus::model::{GraphSnapshot, NodeId, RelationKind};
 
 #[cfg(debug_assertions)]
 #[test]
@@ -169,6 +169,32 @@ fn assert_layer_coverage(snapshot: &GraphSnapshot) {
             .values()
             .any(|binding| binding.observation.via_subagent),
         "showcase missing a session waiting through a subagent"
+    );
+    // A finished turn seen (a client attached to its mux after it ended)
+    // and one in no mux, so unseen.
+    let ready: Vec<(&NodeId, i64)> = snapshot
+        .node_live
+        .iter()
+        .filter(|(_, binding)| binding.observation.state == LiveState::Ready)
+        .map(|(id, binding)| (id, binding.observation.since_ms))
+        .collect();
+    let attached_after = |id: &NodeId, since_ms: i64| {
+        snapshot.preferred_mux_for(id).is_some_and(|mux| {
+            snapshot.nodes.iter().any(|node| {
+                matches!(node, GraphNode::MuxSession(node) if node.id == mux
+                    && node.last_attached_epoch.is_some_and(|at| at * 1000 >= since_ms))
+            })
+        })
+    };
+    assert!(
+        ready.iter().any(|(id, since)| attached_after(id, *since)),
+        "showcase missing a ready turn whose mux was attached after it ended: {ready:?}"
+    );
+    assert!(
+        ready
+            .iter()
+            .any(|(id, _)| snapshot.preferred_mux_for(id).is_none()),
+        "showcase missing a ready turn of a session with no mux: {ready:?}"
     );
 
     // Lineage relation: codex parent → child fork chain.

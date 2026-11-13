@@ -974,11 +974,13 @@ fn build_showcase(world: &mut ScenarioWorld) -> Result<()> {
 /// store, so every live-state mark shows somewhere: sessions waiting on
 /// the operator (two of them in `project`, the pinned session among
 /// them, whose wait is its subagent's, so its header counts two), one
-/// working with three subagents and one gone quiet at it, a ready one, an
-/// error, evidence too old to trust, an exited session, and sessions with
-/// none. The `ambiguous` mux's two candidates are waiting and working, so
-/// its row rolls the two up, and two agents in panes of `project` that no
-/// session matches yet count there.
+/// working with three subagents and one gone quiet at it, two ready ones
+/// (the agent-deck launcher's turn, seen since a client attached to its
+/// mux after it ended, and the codex parent's, in no mux and not looked
+/// at, unseen), an error, evidence too old to trust, an exited session,
+/// and sessions with none. The `ambiguous` mux's two candidates are
+/// waiting and working, so its row rolls the two up, and two agents in
+/// panes of `project` that no session matches yet count there.
 ///
 /// No entry records a process, so each holds for fifteen minutes from its
 /// latest evidence, measured from the showcase's anchor time; the
@@ -1040,6 +1042,7 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
                 minute / 2,
             )
         },
+        // Its mux was last attached after this turn ended, so it is seen.
         report(
             "showcase-deck-launcher",
             LiveState::Ready,
@@ -1047,6 +1050,17 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
             minute,
             minute,
         ),
+        // In no mux, and the cursor never rested on its row: unseen.
+        Report {
+            harness: "codex",
+            ..report(
+                "showcase-codex-parent",
+                LiveState::Ready,
+                Some(LiveDetail::Finished),
+                3 * 24 * 60 * minute,
+                minute,
+            )
+        },
         // Twelve minutes without news is past the ten-minute quiet window
         // and inside the fifteen minutes an unchecked process holds its
         // state.
@@ -1728,12 +1742,13 @@ fn add_mux_layout_to_showcase(
     );
     world.add_fd_paths(1103, [path_to_string(&bare_transcript)]);
     // Agent-deck-style mux launched from the workspace composite
-    // dir (30 min ago).
+    // dir (30 min ago), last attached half a minute ago, after its
+    // agent's turn ended, so that turn reads as seen.
     world.add_tmux_row(
         TmuxReplayRow::new("showcase-deck")
             .with_cwd(deck_dir)
             .with_activity(SHOWCASE_NOW_EPOCH - 30 * 60)
-            .with_attached(false, SHOWCASE_NOW_EPOCH - 45 * 60)
+            .with_attached(false, SHOWCASE_NOW_EPOCH - 30)
             .with_active_pane(
                 "claude",
                 1104,

@@ -99,6 +99,12 @@ record a pin points at, shown only when History lists pinned records.
   than its source's quiet window) is dimmed and keeps its shape.
   On the cursor row the mark takes the highlight like the other cells, so
   its shape still reads where reverse video draws no color.
+- A ready mark (`›`, and Pinned's `ready`) is bold while its finished
+  turn is one you haven't seen, and plain once you have (see
+  [The live cell](#the-live-cell)). The weight is added to the same shape
+  and color, never in their place. On the cursor row, which the highlight
+  draws bold, the two look alike, and the detail pane's `state` field
+  says `unseen` or `seen` in words.
 - A row for something stopped, removed, missing, planned, or unknown is
   drawn as a ghost. A group header for such an entity is too.
 
@@ -130,7 +136,7 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `?` | can't be checked: a mux whose server didn't answer, or a PR with no state yet; in the live cell, an agent whose evidence is too old to trust | dim | Mux rows, stopped mux rows, PR rows; the live cell |
 | `!` | live state: the agent is waiting on you (a permission prompt, a question, a plan, other input); before a number, how many wait | yellow (the theme's warning color) | The live cell of session and mux rows, nested ones included, in every view; group headers, with the count |
 | `»` | live state: working (a turn, a compaction, or a start under way) | green (the theme's info color); dimmed when quiet | The live cell |
-| `›` | live state: ready, the turn is over and the agent takes a prompt | green (the theme's success color) | The live cell |
+| `›` | live state: ready, the turn is over and the agent takes a prompt | green (the theme's success color); bold while the finished turn is unseen | The live cell |
 | `·` | live state: no evidence, or the session exited; on a mux, no agent with live state but exited ones | dim | The live cell |
 | `○` | an open pull request | green | PR rows |
 | `◐` | a draft pull request (open and marked draft) | yellow | PR rows |
@@ -175,7 +181,7 @@ its own shape:
 |---|---|---|
 | `!` | waiting on you | some agent of it waits on you |
 | `»` | working, compacting, or starting | its most urgent agent is working |
-| `›` | ready for a prompt | its most urgent agent is ready |
+| `›` | ready for a prompt; bold until you have seen the finished turn | its most urgent agent is ready; bold while a ready agent's turn is unseen |
 | `×` | its turn ended on an error | its most urgent agent failed |
 | `?` | its evidence is too old to trust | its most urgent agent can't be told |
 | `·` | no evidence, or it exited | no agent of it has live state, or every one exited |
@@ -186,7 +192,26 @@ then the rest. The agents nested under a mux keep their own marks. A
 quiet state (work with no news past its source's quiet window) draws the
 same mark dimmed; a mux's mark is never dimmed, since its counts do not
 say how fresh each agent's evidence is. Nothing animates: the Braille
-spinner keeps meaning a pending refresh. A group header above the rows
+spinner keeps meaning a pending refresh.
+
+A finished turn is **unseen** until you have looked at it, and its `›`
+is bold until then. For an agent in a mux (a session's preferred mux,
+or the mux of the pane an agent no session matches runs in), looking is
+a tmux client attaching to that mux after the turn ended: the mux's last
+attach time is at or after the turn's end, or a refresh that came after
+the turn ended lists a client attached. Attaching through Conspectus
+counts once the refresh that follows lists it. For a session with no
+mux, looking is resting the cursor on one of its rows, in any view, for
+a second; a cursor that only passes the row while you scroll does not
+count. A turn found seen stays seen until the agent finishes a later
+one, even when a later refresh no longer shows a client attached, so a
+mark never turns bold again for the same turn. The TUI keeps this in
+memory only and writes nothing: a new TUI starts with the finished
+turns of sessions with no mux unseen again. A mux's `›` is bold while
+any of its ready agents' turns is unseen. In the frames below, which are
+plain text, the agent-deck launcher's `›` is plain (a client attached to
+its mux after its turn ended) and the codex parent's is bold (it has no
+mux, and the cursor has not rested on it). A group header above the rows
 counts the agents beneath it that wait on you, as `! N`, and a session
 whose agent runs subagents says how many after its label, as `+N` (see
 [Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings)).
@@ -212,13 +237,13 @@ instead: in the state cell, or for live state in the live cell.
 | `closed` | a closed, unmerged pull request | `⊗` | Pinned, History |
 | `waiting` | a running session whose agent is waiting on you; in place of `in mux` or `resumable` | `!` | Pinned, and sessions nested under a pin |
 | `working` | a running session whose agent is working, compacting, or starting; in place of `in mux` or `resumable` | `»` | Pinned, and sessions nested under a pin |
-| `ready` | a running session whose agent is ready for a prompt; in place of `in mux` or `resumable` | `›` | Pinned, and sessions nested under a pin |
+| `ready` | a running session whose agent is ready for a prompt; in place of `in mux` or `resumable`; bold while the finished turn is unseen | `›` | Pinned, and sessions nested under a pin |
 | `error` | a running session whose agent's turn ended on an error; in place of `in mux` or `resumable` | `×` | Pinned, and sessions nested under a pin |
 
 In Pinned, the word of a live pull request takes the style of its state
 glyph (green, yellow, magenta, red, or dim for `unknown`), and a live
 session's `waiting`, `working`, `ready`, or `error` the style of its live
-mark (dimmed when quiet); other live words are green. A session whose
+mark (dimmed when quiet, bold when unseen); other live words are green. A session whose
 live state can't be told, has exited, or is unknown keeps `in mux` or
 `resumable`; whether it runs in a mux stays in the detail pane either way.
 History lists no sessions, so it shows no live word. Words of rows that
@@ -466,7 +491,7 @@ the repo header's columns:
 │  ▼ ◆   repo-a                   ~/atelier-demo/repo-a     (2)                     │
 │    ▼ ◇   repo-a                 ~/atelier-demo/repo-a     (2)                     │
 │        ●   showcase   pi           2h  ×  ∘  Showcase: pi in atelier member repo  │
-│        ●   showcase   codex        3d  ·  ∘  Showcase: codex parent in atelier fo…│
+│        ●   showcase   codex        3d  ›  ∘  Showcase: codex parent in atelier fo…│
 │  ▶ ◆   repo-b                   ~/atelier-demo/repo-b     (1)                     │
 │► ▼ ◆   bare-project             ~/checkouts/bare-project  (1)                     │
 │    ▶ ◇   bare-project (linked)  ~/checkouts/bare-project  (1)                     │
@@ -482,7 +507,7 @@ the repo header's columns:
 | 2 | Session key | the harness's own id | always | first 8 cells, dim, padded to 8 |
 | 3 | Harness chip | the session's harness | always | 10 cells |
 | 4 | Age | last activity | always | 4 cells |
-| 5 | Live | what the agent is doing now (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when quiet; keeps its mark while a refresh is pending |
+| 5 | Live | what the agent is doing now (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when quiet; bold while a finished turn is unseen; keeps its mark while a refresh is pending |
 | 6 | State | `⊸` linked to a definitive mux, `∘` not | always | 1 cell; a spinner while a refresh is pending |
 | 7 | Label | alias, title, or mux name (see above) | when one applies | cut at 32 cells |
 | 8 | Subagents | `+N`: the subagents its agent runs now (see [Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings)) | while its agent reports one or more | dim; `+9+` from ten on, so at most 3 cells |
@@ -538,7 +563,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 │    ●   showcase   opencode     3h  ?  ∘  repo-b            Showcase: opencode in …│
 │    ●   showcase   codex       12h  ·  ⊸  bare-work  bare-project      Showcase: c…│
 │    ●   showcase   codex        2d  ·  ∘  repo-a            Showcase: codex child …│
-│    ●   showcase   codex        3d  ·  ∘  repo-a            Showcase: codex parent…│
+│    ●   showcase   codex        3d  ›  ∘  repo-a            Showcase: codex parent…│
 │    ●   showcase   codex        7d  ·  ∘  orphan            Showcase: orphan sessi…│
 ```
 
@@ -568,7 +593,7 @@ mux, so a header can show `! N` with no `(N)`.
 | 2 | Name | the mux name without its backend prefix | always | blue; a column of 18 cells, 20 once the row leaves it 37 cells, 24 from 71, and 30 from 103 (counted after the cursor gutter, the indent, and the prefix); long names keep their start and end |
 | 3 | Chip | its agents' harness chips, as many as fit in a column of at most two, with `+N` for the rest; else the pane's harness; else a program chip; else ` no agent ` | always | 10 cells each; the column is as wide as the widest row's chips, so the age lines up |
 | 4 | Age | the mux's own last activity | always | 4 cells |
-| 5 | Live | the state of its agents that needs you first (see [The live cell](#the-live-cell)) | always | 1 cell; never dimmed; keeps its mark while a refresh is pending |
+| 5 | Live | the state of its agents that needs you first (see [The live cell](#the-live-cell)) | always | 1 cell; never dimmed; bold while a ready agent's finished turn is unseen; keeps its mark while a refresh is pending |
 | 6 | State | `⊸` a client is attached, `∘` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
 | 7 | Preview | last message of the one agent | only with exactly one visible agent, and at least 7 cells for it | dim italic |
 
