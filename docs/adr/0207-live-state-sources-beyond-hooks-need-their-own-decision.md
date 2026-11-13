@@ -8,7 +8,12 @@ separate decision) and the tiers of ADR 0086. Its first further source,
 a Codex pane's title, is
 [ADR 0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md),
 which follows decision 4 and makes one exception to it, for an approval
-answered while the hook record is fresh.
+answered while the hook record is fresh. Its second, `claude agents
+--json` after the check decision 5 asked for, is
+[ADR 0218](0218-claude-codes-agent-list-repairs-a-live-state-its-hooks-left-stuck.md),
+which runs only to repair a Claude Code hook record silent for ten
+seconds in `working` or `waiting`, the meaning of "stale" in decision 4
+for that source.
 
 ## Context
 

@@ -9,7 +9,10 @@ for the latest-record spool, which keeps one record per pane, and no
 time limit applies to a record (ADR 0146's amendment). See the
 amendment at the end. Its carve-out for already-visible status
 surfaces is used once, by ADR 0217: the title a Codex pane sets, read
-for live state only.
+for live state only. Its exception for a harness-documented,
+non-mutating control channel audited as safe is used once, by ADR 0218:
+`claude agents --json`, run as a control-plane adapter for live state
+only, never for attribution.
 
 ## Context
 
