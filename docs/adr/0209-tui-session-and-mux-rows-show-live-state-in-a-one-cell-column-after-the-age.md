@@ -16,7 +16,10 @@ and [ADR 0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-mu
 as the row models already carry it; adds no theme role (ADR 0153) and one
 vetted glyph (ADR 0154). Amended by
 [ADR 0214](0214-tui-a-finished-turn-reads-unseen-until-you-look-at-it.md):
-a ready mark is bold while its finished turn is unseen.
+a ready mark is bold while its finished turn is unseen. Amended by
+[ADR 0215](0215-tui-rows-float-and-filter-by-live-state-only-when-the-tree-is-built.md):
+the live state that floats and filters rows is read when the tree is
+built; refills still change the cells in place.
 
 ## Context
 
