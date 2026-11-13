@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-13 03:55'
-updated_date: '2026-11-13 23:30'
+updated_date: '2026-11-13 23:37'
 labels:
   - h-devloop
 milestone: m-11
@@ -31,15 +31,15 @@ Approaches to weigh include starting the agent from inside the dev shell, nix-di
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 In an agent session started the documented way, cargo, just, nextest, and backlog run from a worktree without a per-command dev-shell start, and a command reaches cargo in under 1 s
-- [ ] #2 The toolchain those commands use is the one the flake pins, and a change to `flake.lock` or `rust-toolchain.toml` reaches the next session by the documented steps
-- [ ] #3 An ADR records the chosen approach and the alternatives weighed, before any new tool or checked-in file lands
+- [x] #1 In an agent session started the documented way, cargo, just, nextest, and backlog run from a worktree without a per-command dev-shell start, and a command reaches cargo in under 1 s
+- [x] #2 The toolchain those commands use is the one the flake pins, and a change to `flake.lock` or `rust-toolchain.toml` reaches the next session by the documented steps
+- [x] #3 An ADR records the chosen approach and the alternatives weighed, before any new tool or checked-in file lands
 - [ ] #4 AGENTS.md, and the README development section if it describes entering the dev shell, tell an agent how to run the checks under the chosen approach
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
@@ -57,4 +57,10 @@ Approaches to weigh include starting the agent from inside the dev shell, nix-di
 
 <!-- SECTION:NOTES:BEGIN -->
 Prototype of scripts/dev-env.sh works: 0.04 to 0.05 s per command that reaches cargo, just, nextest, or rustc (backlog 0.36 s, its own start-up), against 1.6 to 12 s for nix develop --command; the first call after a change to flake.nix, flake.lock, rust-toolchain.toml, or the script rebuilds the copy in 8 to 15 s.
+
+Approaches weighed in ADR 0226 before the script landed (same commit): starting the agent inside the dev shell (needs every session started that way, outside the repository, and fixes the environment for the session); direnv + nix-direnv with a checked-in `.envrc` (direnv loads from an interactive prompt hook, which agent commands never run, so each command would still need `direnv exec`; neither program is installed here, both would be outside the repository); `nix develop --profile` reused by hand (still starts Nix and the hook, still leaves temp dirs); a harness session-start hook (ties the fix to one harness and its configuration, which is the operator's to choose); host rustup (a second toolchain source, retired by ADR 0110). Chosen: a cached `nix print-dev-env --profile`, loaded by `scripts/dev-env.sh`.
+Verified: `scripts/dev-env.sh cargo --version` 0.04 to 0.05 s warm (just 0.03 s, cargo nextest 0.05 s, rustc 0.04 s, backlog 0.36 s, its own start-up), against 7.2 to 8.7 s for `nix develop --command cargo --version` today (one pair at 1.6 s right after the same tree had been evaluated); first build of the copy 7.9 s. The tools resolve to the same store paths as under `nix develop` (rust-default-1.99.0, just-1.50.0, cargo-nextest-0.9.133, backlog-1.53.0); without the script, this machine's PATH finds cargo 1.95.0 in the user's own profile. A test build right after one under `nix develop` was fresh (0.17 s), so the environments match for cargo. A comment added to rust-toolchain.toml rebuilt the copy on the next call (14.6 s) and reverting it rebuilt the original (9.6 s); older copies were pruned. Nested calls do not reload (PATH holds the toolchain once); sourced mode works and leaves no helper functions or variables; it works from any directory; no argument prints the usage and exits 2. No `nix-shell.*` or `nix-develop-*` directory was created by any of it, nor by a whole `scripts/dev-env.sh just check` (passed, 106 s, no edit).
+Checks: run-tests.sh 5,681 passed, 0 failed; checks.sh clean; `git diff --check` clean.
+WAITS ON THE OPERATOR (AC #4 for AGENTS.md, DoD #2): AGENTS.md is the agent's own instruction file, not edited on another agent's request. Proposed: after "Use `nix develop` for local development. The shell provides Rust tooling and standard checks." add: "An agent, whose every command starts a fresh shell, runs tools through `scripts/dev-env.sh` instead (`scripts/dev-env.sh just check`, or `. scripts/dev-env.sh && ...` for a command line that runs several): it loads the dev shell's environment from a cache that follows `flake.nix`, `flake.lock`, and `rust-toolchain.toml`. Don't wrap commands in `nix develop --command`." The whole patch (CSP-864, 865, 866): /tmp/csp-fu/agents-md.patch, `git apply` from the worktree.
+OPTIONAL OPERATOR STEP (not needed for the ACs): start sessions inside the environment, once the script is on main: `nono run <your usual --allow flags> -- /home/jwaggoner/src/oss/conspectus/scripts/dev-env.sh claude`. Commands then need no prefix; the environment is fixed for the session, and the prefix still picks up a flake change mid-session. Untested here (agents may not start `claude`): check that `command -v cargo` in a new session prints the rust-default-1.99.0 store path.
 <!-- SECTION:NOTES:END -->

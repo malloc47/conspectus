@@ -708,6 +708,13 @@ just check     # fmt, clippy -D warnings, nextest, tuikit alone with its feature
 just test      # cargo test, which CI runs besides nextest: each test binary's tests share a process
 ```
 
+Outside the shell, `scripts/dev-env.sh COMMAND` runs a command in the same
+environment, loaded from a copy kept under `target/dev-env/` (about 0.05 s
+instead of the seconds `nix develop --command` takes); `. scripts/dev-env.sh`
+loads it into the current shell. The copy is rebuilt on the first call after
+`flake.nix`, `flake.lock`, or `rust-toolchain.toml` changes. Agents, whose
+every command starts a fresh shell, use it instead of `nix develop`.
+
 To iterate on the TUI, use snapshot mode instead of screenshots. It lives
 behind the developer-only `snapshot` cargo feature, which `just check` and CI
 enable through `--all-features`:

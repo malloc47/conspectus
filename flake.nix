@@ -69,6 +69,9 @@
         devShells.default = pkgs.mkShell {
           packages = rustTools ++ devTools ++ backlogTools ++ darwinInputs ++ linuxInputs;
 
+          # The hook only prints the banner. scripts/dev-env.sh, which agents
+          # use instead of `nix develop --command` (ADR 0226), leaves it out,
+          # so set environment variables as attributes of mkShell, not here.
           shellHook = ''
             echo "conspectus dev shell (system: ${system})"
             echo

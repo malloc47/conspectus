@@ -289,6 +289,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0223](0223-the-dev-profile-keeps-line-tables-and-optimizes-dependencies.md) | The Dev Profile Keeps Line Tables And Optimizes Dependencies | Accepted |
 | [0224](0224-local-checks-run-the-workspace-tests-once-through-nextest.md) | Local Checks Run The Workspace Tests Once, Through Nextest | Accepted |
 | [0225](0225-local-checks-skip-the-framework-matrix-when-nothing-it-builds-from-changed.md) | Local Checks Skip The Framework Matrix When Nothing It Builds From Changed | Accepted |
+| [0226](0226-commands-load-the-dev-shells-environment-from-a-cache.md) | Commands Load The Dev Shell's Environment From A Cache | Accepted |
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
 | [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164); framework-owned in part |
 | [0068](0068-snapshot-fixture-mode.md) | Fixture Mode For The Snapshot Tool | Accepted |
