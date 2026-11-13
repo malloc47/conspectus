@@ -93,6 +93,15 @@ pub struct GraphSnapshot {
     /// with wall-clock times, and `node_presence` carries its effect.
     #[serde(skip)]
     pub mux_probes: BTreeMap<String, MuxProbe>,
+    /// The latest poll of each harness's own list of its sessions (ADR
+    /// 0218), keyed by harness key, which the live-state binding folds
+    /// in to repair a state the harness's hooks left stuck. The process
+    /// that polls (a daemon, a TUI with none) puts its latest poll on
+    /// every snapshot it builds; other snapshots have none. Left out of
+    /// JSON, like `mux_probes`: its effect is in `node_live` and
+    /// `pane_live`.
+    #[serde(skip)]
+    pub live_polls: BTreeMap<String, super::live::LivePoll>,
     /// The history records discovery read and wrote this cycle (ADR
     /// 0140), so views, pin slots, exports, and fixtures have recipes
     /// and record ids without the store.
@@ -712,8 +721,8 @@ impl GraphSnapshot {
 
     /// Sort every list into a stable order, so equal graphs compare and
     /// serialize alike. The node-keyed tables (`node_provenance`,
-    /// `node_presence`, `node_live`, `pane_live`) and `mux_probes` are
-    /// maps kept in key order already.
+    /// `node_presence`, `node_live`, `pane_live`), `mux_probes`, and
+    /// `live_polls` are maps kept in key order already.
     pub fn canonicalize(&mut self) {
         self.nodes.sort_by_key(GraphNode::id);
         self.candidate_links.sort_by_key(stable_json_key);

@@ -110,7 +110,7 @@ fn details_serialize_by_stable_lowercase_names() {
 #[test]
 fn sources_and_confidences_serialize_by_stable_lowercase_names() {
     let sources: Vec<&str> = LiveSource::ALL.iter().map(|source| source.name()).collect();
-    assert_eq!(sources, ["hook", "pane_title", "unknown"]);
+    assert_eq!(sources, ["hook", "pane_title", "harness_poll", "unknown"]);
     for source in LiveSource::ALL {
         assert_eq!(
             serde_json::to_value(source).expect("serialize source"),
@@ -875,4 +875,91 @@ fn a_pane_titles_run_goes_on_only_for_the_same_mark_in_the_same_pane() {
         assert_eq!(after, next);
     }
     assert_eq!(first.clone().after(None), first);
+}
+
+/// A listed session of process `pid` (started at `start`) and session
+/// `session`, read in `state` by a poll at `at`.
+fn polled(
+    pid: Option<i64>,
+    start: Option<u64>,
+    session: Option<&str>,
+    state: LiveState,
+    at: i64,
+) -> PolledAgent {
+    PolledAgent {
+        pid,
+        pid_start: start,
+        session_id: session.map(str::to_string),
+        ..PolledAgent::new(state, None, at)
+    }
+}
+
+#[test]
+fn a_polled_agent_is_its_process_or_else_its_session() {
+    let both = polled(Some(42), Some(7), Some("s-1"), Ready, T0);
+    assert!(both.is(Some(42), Some(7), Some("s-1")));
+    assert!(both.is(Some(42), None, None), "an unread start time agrees");
+    assert!(both.is(Some(42), Some(7), Some("s-2")), "the pids decide");
+    assert!(!both.is(Some(43), Some(7), Some("s-1")), "another process");
+    assert!(!both.is(Some(42), Some(8), Some("s-1")), "a reused pid");
+    assert!(both.is(None, None, Some("s-1")), "no recorded pid: the ids");
+    assert!(!both.is(None, None, Some("s-2")));
+    assert!(!both.is(None, None, None));
+
+    let unnamed = polled(Some(42), None, None, Ready, T0);
+    assert!(!unnamed.is(None, None, Some("s-1")));
+    let pidless = polled(None, None, Some("s-1"), Ready, T0);
+    assert!(pidless.is(Some(42), Some(7), Some("s-1")));
+    assert!(!pidless.is(Some(42), Some(7), Some("s-2")));
+}
+
+#[test]
+fn a_polled_agent_keeps_only_a_detail_its_state_accepts() {
+    assert_eq!(
+        PolledAgent::new(Waiting, Some(Permission), T0).detail,
+        Some(Permission)
+    );
+    assert_eq!(PolledAgent::new(Ready, Some(Permission), T0).detail, None);
+    assert_eq!(PolledAgent::new(Ready, None, T0).since_ms, T0);
+}
+
+#[test]
+fn a_poll_carries_each_agents_run_from_the_poll_before() {
+    let first = LivePoll {
+        observed_ms: T0,
+        agents: vec![
+            polled(Some(1), Some(10), None, Working, T0),
+            polled(Some(2), Some(20), None, Waiting, T0),
+        ],
+    };
+    let second = LivePoll {
+        observed_ms: T0 + 30 * SECOND,
+        agents: vec![
+            polled(Some(1), Some(10), None, Working, T0 + 30 * SECOND),
+            polled(Some(2), Some(20), None, Working, T0 + 30 * SECOND),
+            polled(Some(3), Some(30), None, Ready, T0 + 30 * SECOND),
+        ],
+    }
+    .after(Some(&first));
+    let since: Vec<i64> = second.agents.iter().map(|agent| agent.since_ms).collect();
+    assert_eq!(since, [T0, T0 + 30 * SECOND, T0 + 30 * SECOND]);
+    assert_eq!(
+        second
+            .agent_for(Some(1), Some(10), None)
+            .map(|agent| agent.state),
+        Some(Working)
+    );
+    assert_eq!(second.agent_for(Some(9), None, None), None);
+
+    // A poll no older than this one carries nothing.
+    let same_time = LivePoll {
+        observed_ms: T0,
+        agents: vec![polled(Some(1), Some(10), None, Working, T0)],
+    };
+    let later = LivePoll {
+        observed_ms: T0,
+        agents: vec![polled(Some(1), Some(10), None, Working, T0 + MINUTE)],
+    }
+    .after(Some(&same_time));
+    assert_eq!(later.agents[0].since_ms, T0 + MINUTE);
 }

@@ -331,8 +331,9 @@ impl From<GraphSnapshot> for GraphFragment {
         // is named here, so a new field has to be placed on one side or
         // the other: the resolver re-derives `resolved_relationships`,
         // the overlays reload `aliases` and `pins`, and `node_presence`,
-        // `node_live`, `pane_live`, and `history` are rebuilt after the
-        // merge by the passes that own them (ADRs 0140 and 0205).
+        // `node_live`, `pane_live`, `live_polls`, and `history` are
+        // rebuilt after the merge by the passes that own them (ADRs 0140,
+        // 0205, and 0218).
         let GraphSnapshot {
             nodes,
             candidate_links,
@@ -345,6 +346,7 @@ impl From<GraphSnapshot> for GraphFragment {
             node_live: _,
             pane_live: _,
             mux_probes,
+            live_polls: _,
             history: _,
         } = snapshot;
         GraphFragment {
@@ -1465,6 +1467,7 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
         node_live: BTreeMap::new(),
         pane_live: BTreeMap::new(),
         mux_probes,
+        live_polls: BTreeMap::new(),
         history: Default::default(),
     };
     snapshot.canonicalize();

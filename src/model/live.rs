@@ -309,19 +309,28 @@ pub enum LiveSource {
     /// The title the agent set on its terminal pane, as the mux probe
     /// read and classified it ([`TitleMark`]).
     PaneTitle,
+    /// The harness's own list of its sessions, polled to repair a hook
+    /// state the hooks left stuck ([`LivePoll`]).
+    HarnessPoll,
     /// A source this version does not know, written by a newer one.
     Unknown,
 }
 
 impl LiveSource {
     /// Every source.
-    pub const ALL: [LiveSource; 3] = [LiveSource::Hook, LiveSource::PaneTitle, LiveSource::Unknown];
+    pub const ALL: [LiveSource; 4] = [
+        LiveSource::Hook,
+        LiveSource::PaneTitle,
+        LiveSource::HarnessPoll,
+        LiveSource::Unknown,
+    ];
 
     /// The stable name the source serializes as.
     pub fn name(self) -> &'static str {
         match self {
             LiveSource::Hook => "hook",
             LiveSource::PaneTitle => "pane_title",
+            LiveSource::HarnessPoll => "harness_poll",
             LiveSource::Unknown => "unknown",
         }
     }
@@ -835,6 +844,142 @@ impl PaneTitle {
     /// both ran after `after_ms`.
     pub fn held_twice_after(&self, after_ms: i64) -> bool {
         self.previous_ms.is_some_and(|previous| previous > after_ms)
+    }
+}
+
+/// What one poll of a harness's own list of its sessions read (ADR
+/// 0218): when it ran and, for each listed session whose state it could
+/// read, that state and which process the session is. Nothing else the
+/// list says (a session's name, its directory) is kept. Times are Unix
+/// epoch milliseconds.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct LivePoll {
+    /// When the poll ran.
+    pub observed_ms: i64,
+    /// The listed sessions it read a state for.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<PolledAgent>,
+}
+
+impl LivePoll {
+    /// The listed session that is the agent whose process is `pid`
+    /// (started at `pid_start`), or whose session is `session_id`
+    /// ([`PolledAgent::is`]).
+    pub fn agent_for(
+        &self,
+        pid: Option<i64>,
+        pid_start: Option<u64>,
+        session_id: Option<&str>,
+    ) -> Option<&PolledAgent> {
+        self.agents
+            .iter()
+            .find(|agent| agent.is(pid, pid_start, session_id))
+    }
+
+    /// This poll with each agent's run carried on from `previous`, the
+    /// poll before it: an agent that `previous` read in the same state
+    /// keeps the start of that run, and any other starts a run at this
+    /// poll. A `previous` that is not older than this poll carries
+    /// nothing.
+    pub fn after(mut self, previous: Option<&LivePoll>) -> Self {
+        let Some(previous) = previous.filter(|previous| previous.observed_ms < self.observed_ms)
+        else {
+            return self;
+        };
+        for agent in &mut self.agents {
+            let before =
+                previous.agent_for(agent.pid, agent.pid_start, agent.session_id.as_deref());
+            if let Some(before) = before.filter(|before| before.state == agent.state) {
+                agent.since_ms = before.since_ms;
+            }
+        }
+        self
+    }
+}
+
+/// One session a [`LivePoll`] listed: its process, its session id when
+/// the list gave a plain one, the state the poll read, and since when
+/// consecutive polls have read it.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct PolledAgent {
+    /// The session's process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<i64>,
+    /// The start time of `pid` when the poll ran, as
+    /// [`LiveObservation::pid_start`] records it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid_start: Option<u64>,
+    /// The harness's id for the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub state: LiveState,
+    /// One of [`LiveState::details`] for `state`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_detail"
+    )]
+    pub detail: Option<LiveDetail>,
+    /// When the first of the consecutive polls that read `state` for
+    /// this session ran.
+    pub since_ms: i64,
+}
+
+impl PolledAgent {
+    /// A session read in `state`, with `detail` when the state accepts
+    /// it, by a poll at `observed_ms`; no process or session id yet.
+    pub fn new(state: LiveState, detail: Option<LiveDetail>, observed_ms: i64) -> Self {
+        Self {
+            pid: None,
+            pid_start: None,
+            session_id: None,
+            state,
+            detail: detail.filter(|detail| state.accepts(*detail)),
+            since_ms: observed_ms,
+        }
+    }
+
+    /// Whether this is the agent whose process is `pid`, started at
+    /// `pid_start`, or whose session is `session_id`. When both pids are
+    /// known they decide: equal, with equal start times when both are
+    /// known. Otherwise the session ids decide, when both are known.
+    pub fn is(&self, pid: Option<i64>, pid_start: Option<u64>, session_id: Option<&str>) -> bool {
+        match (self.pid, pid) {
+            (Some(listed), Some(recorded)) => {
+                listed == recorded
+                    && match (self.pid_start, pid_start) {
+                        (Some(listed), Some(recorded)) => listed == recorded,
+                        _ => true,
+                    }
+            }
+            _ => matches!(
+                (self.session_id.as_deref(), session_id),
+                (Some(listed), Some(recorded)) if listed == recorded
+            ),
+        }
     }
 }
 

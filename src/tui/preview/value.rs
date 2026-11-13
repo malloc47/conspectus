@@ -201,6 +201,10 @@ pub fn glossary_entry(field: &str, value: &str) -> Option<String> {
             "Read from the title the agent sets on its tmux pane, which says whether it waits on \
              you or works, but not what it waits for."
         }
+        ("source", "harness_poll") => {
+            "Read from the harness's own list of its sessions, which Conspectus asks for when \
+             the hooks have gone quiet on an agent that was working or waiting."
+        }
         ("source", "unknown") => "Reported by a source this version of Conspectus doesn't know.",
         ("evidence", "fresh") => {
             "Recent enough to trust, or a state that doesn't age while the agent runs."
