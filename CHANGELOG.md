@@ -818,6 +818,13 @@ forms, lists, readers, and keys look and behave alike.
   a session start, then writes the hook spool itself. Only a malformed
   command line still prints a usage message. Claude Code events other
   than `SessionStart` never reach the spool or the daemon.
+- **`conspectus hook write` builds only the payload fields it reads.**
+  It parsed the whole payload before the adapter looked at a few named
+  fields, so every tool call copied its full `tool_response`, megabytes
+  for a large file read or command output. It now parses the payload
+  against the fields the harness's mapping reads and skips the rest
+  unbuilt, so a large tool response costs a scan of its bytes and no
+  copy. What each event records is unchanged.
 - **`conspectus hook status claude-code` reports each event.** After the
   line for the settings file, which now says `installed`, `partial`, or
   `not-installed`, it prints one tab-separated line per event: its state

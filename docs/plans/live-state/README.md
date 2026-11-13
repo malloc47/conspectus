@@ -513,6 +513,11 @@ Where the build differs from, or settles, the draft above:
   TypeScript tests replay them through the reducer, and the Rust tests
   feed the expected snapshots through the payload parser and the store.
   Neither CI nor the dev shell runs the plugin tests yet (CSP-849).
+- **The writer parses only what it reads.** `hook write` parses stdin
+  against the fields its adapter names (`HarnessAdapter::hook_payload_fields`)
+  and skips every other value unbuilt, so a large `tool_response` is never
+  copied (CSP-840). A corpus test checks every adapter maps the parsed
+  payload exactly as it maps the whole one.
 - **Attribution fixes.** The hook spool keeps one record per pane
   (CSP-818), `hook write` asks tmux about its own pane (CSP-845), and Pi's
   idle cache warming no longer dates a session (CSP-820).
