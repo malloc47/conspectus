@@ -480,12 +480,12 @@ again.
 
 <!-- frame: pane=header keys="" width=170 height=30 -->
 ```text
-updated 0s ago · 11 sessions · 4 mux · 4 stopped  ·  ! 2  ·  ▲ 4
+updated 0s ago · 11 sessions · 4 mux · 4 stopped  ·  ! 4  ·  ▲ 4
 ```
 
 <!-- frame: pane=header keys="" width=50 height=30 -->
 ```text
-updated 0s ago · 11 sessions · 4 mux  ·  ! 2 …
+updated 0s ago · 11 sessions · 4 mux  ·  ! 4 …
 ```
 
 ## Sessions view
@@ -527,7 +527,7 @@ the repo header's columns:
 │► ▼ ◆   bare-project             ~/checkouts/bare-project  (1)                     │
 │    ▶ ◇   bare-project (linked)  ~/checkouts/bare-project  (1)                     │
 │  ▶ ◆   project                  ~/repos/project           (4)  ! 2  ▲             │
-│  ▶     Ungrouped                                          (3)                     │
+│  ▶     Ungrouped                                          (3)  ! 2                │
 ```
 
 ### Session row
@@ -559,11 +559,11 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                   │
 │      ●   showcase   claude       1m  ›  ⊸  Showcase: agent-deck composite launcher│
-│  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
+│  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)  ! 1              │
 │  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
 │  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
 │  ▶ ◆   project        ~/repos/project                       (4)  ! 2  ▲           │
-│  ▶     Ungrouped                                            (1)                   │
+│  ▶     Ungrouped                                            (1)  ! 1              │
 ```
 
 <!-- frame: keys="jjjjjlj" width=170 height=30 -->
@@ -571,7 +571,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │  ▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                   │
 │      ●   showcase   claude       1m  ›  ⊸  Showcase: agent-deck composite launcher│
-│  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                   │
+│  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)  ! 1              │
 │  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
 │  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
 │  ▼ ◆   project        ~/repos/project                       (4)  ! 2  ▲           │
@@ -579,7 +579,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 │      ●   showcase   claude       1m  »  ∘  ambiguous mux candidate B  +3  Showcas…│
 │      ●   showcase   claude       1m  »  ∘  hook-supersession current sessi…       │
 │      ● ◉ showcase   claude       1h  !  ∘  claude-code in project repo  +1        │
-│  ▶     Ungrouped                                            (1)                   │
+│  ▶     Ungrouped                                            (1)  ! 1              │
 ```
 
 <!-- frame: keys="<C-g><C-g><C-g><C-g><C-g>" width=170 height=30 -->
@@ -593,9 +593,9 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 │    ●   showcase   pi           2h  ×  ∘  repo-a            Showcase: pi in atelie…│
 │    ●   showcase   opencode     3h  ?  ∘  repo-b            Showcase: opencode in …│
 │    ●   showcase   codex       12h  ·  ⊸  bare-work  bare-project      Showcase: c…│
-│    ●   showcase   codex        2d  ·  ∘  repo-a            Showcase: codex child …│
+│    ●   showcase   codex        2d  !  ∘  repo-a            Showcase: codex child …│
 │    ●   showcase   codex        3d  ›  ∘  repo-a            Showcase: codex parent…│
-│    ●   showcase   codex        7d  ·  ∘  orphan            Showcase: orphan sessi…│
+│    ●   showcase   codex        7d  !  ∘  orphan            Showcase: orphan sessi…│
 ```
 
 ## Mux view

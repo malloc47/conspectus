@@ -4263,12 +4263,40 @@
         "type": "agent_session",
         "harness_key": "codex",
         "state_scope": "/fixture/harness/codex",
+        "session_key": "showcase-codex-child"
+      },
+      "state": "waiting",
+      "detail": "input",
+      "since_ms": 1790767800000,
+      "observed_ms": 1790769540000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/harness/codex",
         "session_key": "showcase-codex-parent"
       },
       "state": "ready",
       "detail": "finished",
       "since_ms": 1790510400000,
       "observed_ms": 1790769540000,
+      "source": "hook",
+      "liveness": "unknown"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/harness/codex",
+        "session_key": "showcase-orphan"
+      },
+      "state": "waiting",
+      "detail": "permission",
+      "since_ms": 1790762400000,
+      "observed_ms": 1790769480000,
       "source": "hook",
       "liveness": "unknown"
     },

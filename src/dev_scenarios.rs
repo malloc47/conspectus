@@ -972,8 +972,12 @@ fn build_showcase(world: &mut ScenarioWorld) -> Result<()> {
 
 /// What the showcase's agents are doing, in the world's own live-state
 /// store, so every live-state mark shows somewhere: sessions waiting on
-/// the operator (two of them in `project`, the pinned session among
-/// them, whose wait is its subagent's, so its header counts two), one
+/// the operator in three groups, since different times, so the jump to
+/// what waits has an order to walk (the orphan in Ungrouped for two
+/// hours, the pinned session in `project` for an hour, its wait its
+/// subagent's, the codex fork under its parent in `repo-a` for half an
+/// hour, and another in `project` for a minute, so `project`'s header
+/// counts two), one
 /// working with three subagents and one gone quiet at it, two ready ones
 /// (the agent-deck launcher's turn, seen since a client attached to its
 /// mux after it ended, and the codex parent's, in no mux and not looked
@@ -1105,6 +1109,28 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
                 Some(LiveDetail::Generating),
                 25 * minute,
                 20 * minute,
+            )
+        },
+        // The longest wait, in Ungrouped, and a fork waiting under its
+        // parent in `repo-a`.
+        Report {
+            harness: "codex",
+            ..report(
+                "showcase-orphan",
+                LiveState::Waiting,
+                Some(LiveDetail::Permission),
+                120 * minute,
+                2 * minute,
+            )
+        },
+        Report {
+            harness: "codex",
+            ..report(
+                "showcase-codex-child",
+                LiveState::Waiting,
+                Some(LiveDetail::Input),
+                30 * minute,
+                minute,
             )
         },
         Report {
