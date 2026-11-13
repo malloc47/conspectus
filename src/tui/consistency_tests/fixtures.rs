@@ -24,6 +24,7 @@ fn probe() -> crate::model::MuxProbe {
         status: crate::model::MuxProbeStatus::Listed,
         epoch: NOW,
         exited: Vec::new(),
+        titles: Default::default(),
     }
 }
 

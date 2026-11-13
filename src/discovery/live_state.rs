@@ -31,6 +31,11 @@
 //! has not exited, then the lowest entry key. Entries that name no pane
 //! share one slot on their mux.
 //!
+//! Then the marks the mux probes read from the titles of agents' panes
+//! (ADR 0217) fill in where the store's entries say nothing, or nothing
+//! fresh, about a pane's agent, and clear a wait Codex's hooks cannot
+//! report the end of (the `title` module).
+//!
 //! Each binding records whether the entry's process ran when it was
 //! bound, from the recorded pid and start time checked through a
 //! [`PidProbe`], so readers apply the time rules alone. The pass reads
@@ -107,16 +112,18 @@ pub fn bind_live(snapshot: &GraphSnapshot, file: &LiveFile, probe: &dyn PidProbe
     }
     let bind =
         |entry: &LiveEntry| LiveBinding::new(entry.observation, probe.liveness(&entry.observation));
-    BoundLive {
+    let mut bound = BoundLive {
         nodes: sessions
-            .into_iter()
-            .map(|(node, entry)| (node, bind(entry)))
+            .iter()
+            .map(|(node, entry)| (node.clone(), bind(entry)))
             .collect(),
         panes: panes
-            .into_iter()
-            .map(|(pane, entry)| (pane, bind(entry)))
+            .iter()
+            .map(|(pane, entry)| (pane.clone(), bind(entry)))
             .collect(),
-    }
+    };
+    title::fold_titles(snapshot, &sessions, &panes, &mut bound);
+    bound
 }
 
 /// Put `entry` in `key`'s slot unless the entry already there ranks at
@@ -207,6 +214,9 @@ fn server_of(socket_path: &str) -> Option<Option<&str>> {
     let name = Path::new(socket_path).file_name()?.to_str()?;
     Some(effective_socket(Some(name)))
 }
+
+#[path = "live_title.rs"]
+mod title;
 
 #[cfg(test)]
 #[path = "live_state_tests.rs"]

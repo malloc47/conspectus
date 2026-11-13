@@ -6439,6 +6439,7 @@ fn ghost_world_with(pinned: bool) -> GraphSnapshot {
             status: crate::model::MuxProbeStatus::Listed,
             epoch: 1_700_000_000,
             exited: Vec::new(),
+            titles: Default::default(),
         },
     );
     let mut history = std::mem::take(&mut snapshot.history);

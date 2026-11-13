@@ -24,6 +24,7 @@ fn listed(epoch: i64) -> BTreeMap<String, MuxProbe> {
             status: MuxProbeStatus::Listed,
             epoch,
             exited: Vec::new(),
+            titles: Default::default(),
         },
     )])
 }
@@ -126,6 +127,7 @@ fn an_exited_zellij_session_is_not_observed() {
             status: MuxProbeStatus::Listed,
             epoch: NOW,
             exited: vec!["old".into()],
+            titles: Default::default(),
         },
     );
     assert!(observe_with(&snapshot, &HistoryConfig::default()).is_empty());
@@ -388,6 +390,7 @@ fn a_launched_mux_is_recorded_with_its_argv_before_any_probe() {
             status: MuxProbeStatus::Listed,
             epoch: crate::discovery::current_epoch(),
             exited: Vec::new(),
+            titles: Default::default(),
         },
     );
     writer.record(&mut snapshot, 0).unwrap();

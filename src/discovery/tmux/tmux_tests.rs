@@ -104,6 +104,8 @@ fn parser_extracts_name_path_activity_and_created_epoch() {
             active_pane_start_command: None,
             client_attached: None,
             session_id: None,
+            active_pane_id: None,
+            active_pane_title: None,
         }]
     );
 }

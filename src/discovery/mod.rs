@@ -662,8 +662,11 @@ pub fn discover_local_warm_with(
     }
 
     if let Some(runner) = tmux_runner {
-        providers = providers
-            .with_keyed_provider(&[providers::TMUX], tmux::TmuxDiscovery::with_runner(runner));
+        let mut tmux = tmux::TmuxDiscovery::with_runner(runner);
+        if !config.pane_titles {
+            tmux = tmux.without_pane_titles();
+        }
+        providers = providers.with_keyed_provider(&[providers::TMUX], tmux);
     }
 
     if let Some(runner) = zellij_runner {
@@ -1019,6 +1022,11 @@ pub struct LocalDiscoveryConfig {
     /// `$HOME/.local/state/conspectus`, and the dev scenario builder its
     /// world's own state directory.
     pub live_state_root: Option<PathBuf>,
+    /// Whether the tmux probe reads the active panes' titles for the live
+    /// state of the harnesses that classify them (ADR 0217). On by
+    /// default; [`Self::from_env`] turns it off when
+    /// `CONSPECTUS_DISABLE_PANE_TITLES` is set.
+    pub pane_titles: bool,
     /// Registered orchestrator adapter roots.
     /// Keyed by orchestrator descriptor key
     /// (`agent_deck` today; dmux / herdr / pertmux / workmux
@@ -1150,6 +1158,7 @@ impl LocalDiscoveryConfig {
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
             live_state_root: crate::live_store::LiveStore::from_env()
                 .map(|store| store.dir().to_path_buf()),
+            pane_titles: env::var_os("CONSPECTUS_DISABLE_PANE_TITLES").is_none(),
             orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
             pin_slots: crate::pin_slots::SlotStore::from_env(),
@@ -1176,6 +1185,7 @@ impl LocalDiscoveryConfig {
             process_tree_enabled: false,
             hook_sidecar_root: None,
             live_state_root: None,
+            pane_titles: true,
             orchestrator_roots: BTreeMap::new(),
             worktree_backend: None,
             declared_config_loader: None,
@@ -1350,6 +1360,12 @@ impl LocalDiscoveryConfig {
     /// Bind no live state: `node_live` and `pane_live` stay empty.
     pub fn without_live_state(mut self) -> Self {
         self.live_state_root = None;
+        self
+    }
+
+    /// Read no pane title: the tmux probe leaves them out of its listing.
+    pub fn without_pane_titles(mut self) -> Self {
+        self.pane_titles = false;
         self
     }
 

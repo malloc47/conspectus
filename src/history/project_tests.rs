@@ -51,6 +51,7 @@ fn probe(status: MuxProbeStatus) -> MuxProbe {
         status,
         epoch: NOW,
         exited: Vec::new(),
+        titles: Default::default(),
     }
 }
 
@@ -433,6 +434,7 @@ fn an_exited_zellij_session_is_gone_in_place() {
                 status: MuxProbeStatus::Listed,
                 epoch: NOW,
                 exited: vec!["old".into()],
+                titles: Default::default(),
             },
         )]),
         ..GraphSnapshot::empty()
