@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-13 03:55'
-updated_date: '2026-11-13 23:26'
+updated_date: '2026-11-13 23:34'
 labels:
   - h-devloop
 milestone: m-11
@@ -42,7 +42,7 @@ CI keeps running the full matrix on every push and pull request, so a skip only 
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
@@ -65,4 +65,16 @@ Measured: whole `just check` after a one-line host edit in a scratch clone whose
 Framework record: none. What `crates/tuikit/docs/contributing.md` asks contributors to run is unchanged (the crate-alone commands before finishing a change to the crate, which always counts as touching it); the guide only gains a paragraph on when the host's `just check` runs them. ADR 0225's status says so. ADR 0225 is listed with the host's build records in the framework log's table of host records not included.
 Checks: run-tests.sh 5,681 passed, 0 failed; checks.sh clean; `just tuikit-features-if-changed` ran the matrix in this worktree and passed.
 WAITS ON THE OPERATOR (AC #4 for AGENTS.md, DoD #2): AGENTS.md is the agent's own instruction file, not edited on another agent's request. Proposed: append to the pre-main bullet that ends "`just tuikit-features` (CI runs the same commands)." the sentence: "`just check` runs it only when the working tree or a commit since the merge base with `main` touches `crates/tuikit` or a root file its build reads, and says so when it skips it."
+
+On a7750217: the whole `just check` in this worktree passed (123 s without an edit; the matrix ran, 43 s, since Cargo.toml differs from main), and `just separation-rehearsal --self-test` passed (4 min 39 s, both leaks caught).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+`just check` now runs the framework's feature matrix through a `tuikit-features-if-changed` recipe: `scripts/tuikit-unchanged.sh` compares the merge base of HEAD and `main` with the working tree (commits, staged, unstaged, untracked) for `crates/tuikit`, the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, the root cargo/clippy/rustfmt configuration, and the `justfile`; when none differ it prints the skip and why, otherwise, or when the comparison cannot be made (no work tree, shallow clone, no `main`, no merge base), it runs `just tuikit-features`. That recipe and CI's matrix steps are unchanged. ADR 0225 records the condition; no framework record, since what the framework guide asks contributors to run is unchanged (its new paragraph only says when the host's check runs it).
+
+Measured: whole `just check` after a one-line host edit on a branch that touches neither the framework nor the root build files: 125 s, against 233 s with the matrix (330 s at the start of this batch). Verified with 17 scripted cases in scratch clones, a whole `just check` in a scratch clone (skip) and in this worktree (run), the full suite, fmt, clippy, rustdoc, and `just separation-rehearsal --self-test`.
+
+Open: the AGENTS.md sentence (AC #4) waits on the operator; the proposed text is in the notes and in /tmp/csp-fu/agents-md.patch.
+<!-- SECTION:FINAL_SUMMARY:END -->

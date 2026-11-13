@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-13 03:55'
-updated_date: '2026-11-13 23:06'
+updated_date: '2026-11-13 23:34'
 labels:
   - h-devloop
 milestone: m-11
@@ -68,3 +68,13 @@ WAITS ON THE OPERATOR (AC #3, DoD #2): AGENTS.md is the agent's own instruction 
   test that fails only when it shares a process with others; `just test`
   runs it locally.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+`just check` runs the workspace tests once, through nextest; `just test` stays as its own recipe, and CI keeps both the `cargo test` and the nextest steps on every push and pull request, so a test that fails only when it shares a process is caught before `main` (the trade-off the operator accepted). ADR 0224 records it and amends ADR 0007's local baseline checks; the dev-shell banner and the README name nextest as the local run and `cargo test` as a CI run.
+
+Measured after the same one-line edit, with CSP-863's profile in place: whole `just check` 306 s -> 233 s (the 148 s `cargo test` step is gone; the nextest step, now carrying the build, took 119 s). Verified with a whole `just check`, the full suite (5,681 passed), and fmt, clippy, rustdoc.
+
+Open: AGENTS.md's pre-main invariant (AC #3) waits on the operator; the proposed text is in the notes and in /tmp/csp-fu/agents-md.patch.
+<!-- SECTION:FINAL_SUMMARY:END -->
