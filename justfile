@@ -10,6 +10,10 @@ fmt:
 clippy:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+# The tests as CI's `cargo test` step runs them, each binary's tests sharing
+# one process. `check` runs them once, through nextest, which gives each
+# test its own process (ADR 0224); this is how to reproduce a failure that
+# needs a shared process.
 test:
     cargo test --workspace --all-targets --all-features
 
@@ -127,7 +131,7 @@ screenshots:
 demo:
     cargo run --quiet --features snapshot -- tui --fixture tests/fixtures/showcase.json
 
-check: fmt clippy test nextest tuikit-features doc diff-check
+check: fmt clippy nextest tuikit-features doc diff-check
 
 # Drop into a disposable Conspectus home (private tmux, stub harnesses,
 # a git repo) for manual testing; `just scratch smoke` runs the checks.

@@ -704,7 +704,8 @@ the work moved from building to hardening.
 
 ```sh
 nix develop    # Rust toolchain, cargo-nextest, just, tmux, gh, termshot, backlog, strace
-just check     # fmt, clippy -D warnings, test, nextest, tuikit alone with its features off, rustdoc, git diff --check
+just check     # fmt, clippy -D warnings, nextest, tuikit alone with its features off, rustdoc, git diff --check
+just test      # cargo test, which CI runs besides nextest: each test binary's tests share a process
 ```
 
 To iterate on the TUI, use snapshot mode instead of screenshots. It lives

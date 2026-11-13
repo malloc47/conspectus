@@ -193,7 +193,7 @@ named.
 | 0115, 0116 | When the host fetches remote data, and how it refreshes. |
 | 0111, 0117 | The host's rule for reading the working directory, and its manifest of programs, sockets, signals, and write paths. The framework reads no working directory and starts and writes nothing, so it needs neither (record 0004). |
 | 0118, 0119 | The host's short name and its logo. |
-| 0007, 0010, 0016, 0017, 0109, 0110, 0223 | How the host's repository is built, tracked, distributed, and placed, its toolchain, and its build profile. A separated framework decides its own. |
+| 0007, 0010, 0016, 0017, 0109, 0110, 0223, 0224 | How the host's repository is built, checked, tracked, distributed, and placed, its toolchain, and its build profile. A separated framework decides its own. |
 
 ## Adding a record
 

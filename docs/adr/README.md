@@ -277,7 +277,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 
 | ADR | Decision | Status |
 | --- | --- | --- |
-| [0007](0007-rust-development-approach.md) | Rust Development Approach | Accepted (amended by 0110) |
+| [0007](0007-rust-development-approach.md) | Rust Development Approach | Accepted (amended by 0110, 0224) |
 | [0008](0008-beads-work-tracking.md) | Beads Work Tracking | Superseded by 0009 |
 | [0009](0009-lightweight-backlog-tracking.md) | Lightweight Backlog Tracking | Superseded by 0109 |
 | [0109](0109-backlog-md-work-tracking.md) | Backlog.md Work Tracking | Accepted |
@@ -287,6 +287,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0016](0016-distribution-policy.md) | Distribution Policy | Accepted (amended by 0110) |
 | [0110](0110-pinned-rust-toolchain.md) | Pinned Rust Toolchain | Accepted |
 | [0223](0223-the-dev-profile-keeps-line-tables-and-optimizes-dependencies.md) | The Dev Profile Keeps Line Tables And Optimizes Dependencies | Accepted |
+| [0224](0224-local-checks-run-the-workspace-tests-once-through-nextest.md) | Local Checks Run The Workspace Tests Once, Through Nextest | Accepted |
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
 | [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164); framework-owned in part |
 | [0068](0068-snapshot-fixture-mode.md) | Fixture Mode For The Snapshot Tool | Accepted |

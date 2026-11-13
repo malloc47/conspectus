@@ -47,6 +47,9 @@ jobs:
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      # `just check` runs the tests once, through nextest; this run, with
+      # each binary's tests in one process, also catches a test that fails
+      # only when it shares a process with others (ADR 0224).
       - name: Run tests
         run: cargo test --workspace --all-targets --all-features
 

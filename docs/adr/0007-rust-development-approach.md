@@ -4,6 +4,9 @@
 
 Accepted. Amended by ADR 0110: `rust-toolchain.toml` pins an exact Rust
 release rather than the stable channel, and the dev shell and CI read it.
+Amended by [ADR 0224](0224-local-checks-run-the-workspace-tests-once-through-nextest.md):
+the baseline checks below stay the CI checks, but the local `just check`
+runs the workspace tests once, through nextest; `cargo test` runs in CI.
 
 ## Context
 
