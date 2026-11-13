@@ -20,12 +20,7 @@ fn mux(name: &str) -> MuxSessionNode {
 fn listed(epoch: i64) -> BTreeMap<String, MuxProbe> {
     BTreeMap::from([(
         "tmux".to_string(),
-        MuxProbe {
-            status: MuxProbeStatus::Listed,
-            epoch,
-            exited: Vec::new(),
-            titles: Default::default(),
-        },
+        MuxProbe::new(MuxProbeStatus::Listed, epoch),
     )])
 }
 
@@ -124,10 +119,8 @@ fn an_exited_zellij_session_is_not_observed() {
     snapshot.mux_probes.insert(
         "zellij".into(),
         MuxProbe {
-            status: MuxProbeStatus::Listed,
-            epoch: NOW,
             exited: vec!["old".into()],
-            titles: Default::default(),
+            ..MuxProbe::new(MuxProbeStatus::Listed, NOW)
         },
     );
     assert!(observe_with(&snapshot, &HistoryConfig::default()).is_empty());
@@ -386,12 +379,7 @@ fn a_launched_mux_is_recorded_with_its_argv_before_any_probe() {
     };
     snapshot.mux_probes.insert(
         "tmux:work".into(),
-        MuxProbe {
-            status: MuxProbeStatus::Listed,
-            epoch: crate::discovery::current_epoch(),
-            exited: Vec::new(),
-            titles: Default::default(),
-        },
+        MuxProbe::new(MuxProbeStatus::Listed, crate::discovery::current_epoch()),
     );
     writer.record(&mut snapshot, 0).unwrap();
     assert_eq!(snapshot.history.muxes.len(), 1);

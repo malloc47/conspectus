@@ -880,3 +880,80 @@ fn outside_tmux_the_context_probe_starts_nothing() {
         None
     );
 }
+
+#[test]
+fn the_pane_parser_keeps_each_panes_session_and_program_and_skips_junk() {
+    let rows = parse_list_panes(
+        "%1\teditor\tcodex\n%2\teditor\tclaude\n%3\tother\t\nalpha\t/w\t1\t1\n%x\teditor\tzsh\n%4\t\tzsh\n",
+    );
+    assert_eq!(
+        rows,
+        [
+            TmuxPaneRow {
+                pane_id: "%1".into(),
+                session: "editor".into(),
+                command: Some("codex".into()),
+            },
+            TmuxPaneRow {
+                pane_id: "%2".into(),
+                session: "editor".into(),
+                command: Some("claude".into()),
+            },
+            TmuxPaneRow {
+                pane_id: "%3".into(),
+                session: "other".into(),
+                command: None,
+            },
+        ]
+    );
+}
+
+#[test]
+fn the_probe_records_every_pane_of_a_listed_server() {
+    let tmux = FakeTmux::with_sessions("editor\t/w\t1\t1\tcodex\t9\t/w\tcodex\t0\t\t\t$1\t%1\n")
+        .with_panes(
+            None,
+            TmuxOutcome::Sessions("%1\teditor\tcodex\n%2\teditor\tclaude\n".into()),
+        );
+    let fragment = TmuxDiscovery::with_runner(tmux.clone())
+        .discover(&DiscoveryContext::default())
+        .unwrap();
+    let probe = &fragment.mux_probes["tmux"];
+    assert_eq!(probe.pane_command("editor", "%2"), Some(Some("claude")));
+    assert_eq!(probe.pane_command("editor", "%1"), Some(Some("codex")));
+    assert_eq!(probe.pane_command("other", "%2"), None);
+    assert_eq!(probe.pane_command("editor", "%9"), None);
+    assert_eq!(tmux.pane_calls().listed, [None]);
+}
+
+#[test]
+fn a_failed_pane_listing_leaves_the_probe_without_panes() {
+    let tmux = FakeTmux::with_sessions("editor\t/w\t1\t1\n").with_panes(
+        None,
+        TmuxOutcome::Failed {
+            code: Some(1),
+            message: "boom".into(),
+        },
+    );
+    let fragment = TmuxDiscovery::with_runner(tmux)
+        .discover(&DiscoveryContext::default())
+        .unwrap();
+    let probe = &fragment.mux_probes["tmux"];
+    assert_eq!(probe.status, MuxProbeStatus::Listed);
+    assert!(probe.panes.is_empty());
+}
+
+#[test]
+fn a_server_with_no_session_is_not_asked_for_its_panes() {
+    let empty = FakeTmux::with_sessions("");
+    TmuxDiscovery::with_runner(empty.clone())
+        .discover(&DiscoveryContext::default())
+        .unwrap();
+    assert!(empty.pane_calls().listed.is_empty());
+
+    let down = FakeTmux::unavailable(UnavailableReason::NoServer);
+    TmuxDiscovery::with_runner(down.clone())
+        .discover(&DiscoveryContext::default())
+        .unwrap();
+    assert!(down.pane_calls().listed.is_empty());
+}

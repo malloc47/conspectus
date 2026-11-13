@@ -735,6 +735,184 @@ fn hook_record_links_normally_when_pane_command_is_unknown() {
     );
 }
 
+/// A probe of the default tmux server that listed `panes` of session
+/// `editor`, each with the program it runs.
+fn editor_panes(panes: &[(&str, &str)]) -> BTreeMap<String, crate::model::MuxProbe> {
+    let mut probe =
+        crate::model::MuxProbe::new(crate::model::MuxProbeStatus::Listed, 1_700_000_500);
+    probe.panes = panes
+        .iter()
+        .map(|(pane, command)| {
+            (
+                pane.to_string(),
+                crate::model::ProbedPane {
+                    session: "editor".to_string(),
+                    command: Some(command.to_string()),
+                },
+            )
+        })
+        .collect();
+    BTreeMap::from([("tmux".to_string(), probe)])
+}
+
+/// A live Codex record from pane `pane` of tmux session `editor`.
+fn codex_pane_record(session_key: &str, pane: &str, observed_epoch: i64) -> hook::HookRecord {
+    hook::HookRecord {
+        harness_key: "codex".to_string(),
+        ..pane_record(session_key, pane, observed_epoch)
+    }
+}
+
+fn codex_session(key: &str) -> GraphNode {
+    GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/codex", key),
+            "codex".to_string(),
+        )
+        .with_cwd("/work".to_string()),
+    )
+}
+
+/// The state of the hook link from `session` to a mux.
+fn hook_link_state(snapshot: &GraphSnapshot, session: &NodeId) -> LinkState {
+    hook_mux_links(snapshot)
+        .into_iter()
+        .find(|link| &link.source == session)
+        .map(|link| link.state.clone())
+        .expect("the session has a hook link")
+}
+
+#[test]
+fn a_record_from_a_split_pane_is_not_ignored_for_what_the_active_pane_runs() {
+    // Codex is in the active pane %1; Claude Code in pane %2 beside it.
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![session("beta"), mux_with_command("editor", Some("codex"))],
+        mux_probes: editor_panes(&[("%1", "codex"), ("%2", "claude")]),
+        ..GraphSnapshot::empty()
+    };
+    apply_hook_records(
+        &mut snapshot,
+        vec![pane_record("beta", "%2", 1_700_000_000)],
+        1_700_000_600,
+    );
+    assert_eq!(
+        hook_link_state(&snapshot, &session_node("beta")),
+        LinkState::Active
+    );
+}
+
+#[test]
+fn a_record_whose_own_pane_now_runs_another_harness_is_still_ignored() {
+    // Pane %2 is not the active one, and now runs Codex.
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![session("stale"), mux_with_command("editor", Some("claude"))],
+        mux_probes: editor_panes(&[("%1", "claude"), ("%2", "codex")]),
+        ..GraphSnapshot::empty()
+    };
+    apply_hook_records(
+        &mut snapshot,
+        vec![pane_record("stale", "%2", 1_700_000_000)],
+        1_700_000_600,
+    );
+    match hook_link_state(&snapshot, &session_node("stale")) {
+        LinkState::Ignored { reason } => {
+            let reason = reason.unwrap_or_default();
+            assert!(
+                reason.contains("`codex`") && reason.contains("`claude-code`"),
+                "{reason}"
+            );
+        }
+        other => panic!("expected Ignored, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_record_from_a_pane_the_listing_does_not_show_is_not_gated_by_another_pane() {
+    // The listing shows only the active pane; the record's pane is newer
+    // than the probe, or in another session now.
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![session("beta"), mux_with_command("editor", Some("codex"))],
+        mux_probes: editor_panes(&[("%1", "codex")]),
+        ..GraphSnapshot::empty()
+    };
+    apply_hook_records(
+        &mut snapshot,
+        vec![pane_record("beta", "%9", 1_700_000_000)],
+        1_700_000_600,
+    );
+    assert_eq!(
+        hook_link_state(&snapshot, &session_node("beta")),
+        LinkState::Active
+    );
+}
+
+#[test]
+fn a_record_naming_no_pane_is_still_judged_by_the_active_pane() {
+    let mut record = pane_record("stale", "%2", 1_700_000_000);
+    record.tmux.as_mut().expect("tmux").pane_id = None;
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![session("stale"), mux_with_command("editor", Some("codex"))],
+        mux_probes: editor_panes(&[("%1", "codex"), ("%2", "claude")]),
+        ..GraphSnapshot::empty()
+    };
+    apply_hook_records(&mut snapshot, vec![record], 1_700_000_600);
+    assert!(matches!(
+        hook_link_state(&snapshot, &session_node("stale")),
+        LinkState::Ignored { .. }
+    ));
+}
+
+#[test]
+fn agents_of_two_harnesses_in_split_panes_of_one_session_are_both_attributed() {
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            session("beta"),
+            codex_session("alpha"),
+            mux_with_command("editor", Some("codex")),
+        ],
+        mux_probes: editor_panes(&[("%1", "codex"), ("%2", "claude")]),
+        ..GraphSnapshot::empty()
+    };
+    apply_hook_records(
+        &mut snapshot,
+        vec![
+            codex_pane_record("alpha", "%1", 1_700_000_000),
+            pane_record("beta", "%2", 1_700_000_100),
+        ],
+        1_700_000_600,
+    );
+    let alpha = NodeId::AgentSession(AgentSessionId::new("codex", "/codex", "alpha"));
+    assert_eq!(hook_link_state(&snapshot, &alpha), LinkState::Active);
+    assert_eq!(
+        hook_link_state(&snapshot, &session_node("beta")),
+        LinkState::Active
+    );
+    assert_eq!(runtime_process_count(&snapshot), 2);
+
+    // With the active pane switched to Claude Code, Codex stays too.
+    let GraphNode::MuxSession(mux) = &mut snapshot.nodes[2] else {
+        unreachable!()
+    };
+    mux.active_pane_command = Some("claude".to_string());
+    snapshot.candidate_links.clear();
+    snapshot
+        .nodes
+        .retain(|node| !matches!(node, GraphNode::RuntimeProcess(_)));
+    apply_hook_records(
+        &mut snapshot,
+        vec![
+            codex_pane_record("alpha", "%1", 1_700_000_000),
+            pane_record("beta", "%2", 1_700_000_100),
+        ],
+        1_700_000_600,
+    );
+    assert_eq!(hook_link_state(&snapshot, &alpha), LinkState::Active);
+    assert_eq!(
+        hook_link_state(&snapshot, &session_node("beta")),
+        LinkState::Active
+    );
+}
+
 /// A live Claude Code record from pane `pane` of tmux session `editor`:
 /// its pid is this test process, so the liveness gate passes.
 fn pane_record(session_key: &str, pane: &str, observed_epoch: i64) -> hook::HookRecord {

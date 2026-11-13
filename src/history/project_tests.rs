@@ -47,12 +47,7 @@ fn mux_record(id: &str, name: &str, session_id: &str, hosted: &[&str]) -> MuxRec
 }
 
 fn probe(status: MuxProbeStatus) -> MuxProbe {
-    MuxProbe {
-        status,
-        epoch: NOW,
-        exited: Vec::new(),
-        titles: Default::default(),
-    }
+    MuxProbe::new(status, NOW)
 }
 
 fn session(key: &str, active: Option<i64>) -> GraphNode {
@@ -431,10 +426,8 @@ fn an_exited_zellij_session_is_gone_in_place() {
         mux_probes: BTreeMap::from([(
             "zellij".into(),
             MuxProbe {
-                status: MuxProbeStatus::Listed,
-                epoch: NOW,
                 exited: vec!["old".into()],
-                titles: Default::default(),
+                ..MuxProbe::new(MuxProbeStatus::Listed, NOW)
             },
         )]),
         ..GraphSnapshot::empty()

@@ -729,19 +729,59 @@ pub struct MuxProbe {
     /// never the title.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub titles: BTreeMap<String, crate::model::live::PaneTitle>,
+    /// Every pane of the server's sessions, by the backend's pane id
+    /// (tmux `%3`), when the backend lists panes: empty when it does not
+    /// or its listing failed. A mux node describes only its active pane;
+    /// this says what each of the others runs.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub panes: BTreeMap<String, ProbedPane>,
 }
 
 impl MuxProbe {
     /// A probe with `status` that ran at `epoch`, listing no exited
-    /// session and no pane title.
+    /// session, no pane title, and no pane.
     pub fn new(status: MuxProbeStatus, epoch: i64) -> Self {
         Self {
             status,
             epoch,
             exited: Vec::new(),
             titles: BTreeMap::new(),
+            panes: BTreeMap::new(),
         }
     }
+
+    /// The program pane `pane` of session `session` runs, as this probe
+    /// read it: `Some(None)` for a listed pane whose program the backend
+    /// left blank, `None` when the probe listed no panes or not this one
+    /// in that session.
+    pub fn pane_command(&self, session: &str, pane: &str) -> Option<Option<&str>> {
+        let listed = self
+            .panes
+            .get(pane)
+            .filter(|listed| listed.session == session)?;
+        Some(listed.command.as_deref())
+    }
+}
+
+/// One pane a mux probe listed.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProbedPane {
+    /// The session whose window holds the pane.
+    pub session: String,
+    /// The program in the pane's foreground (tmux
+    /// `#{pane_current_command}`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
 }
 
 /// Access to a record's envelope, whatever its kind.

@@ -58,6 +58,14 @@ pub const TMUX_LIST_FORMAT_WITHOUT_TITLES: &str = "#{session_name}\t#{session_pa
 /// rest of the line.
 const TMUX_LIST_FIELDS: usize = 14;
 
+/// Format used with `tmux list-panes -a -F`: every pane of the server,
+/// with its id, its session, and the program in its foreground. The
+/// session listing describes only each session's active pane.
+pub const TMUX_PANES_FORMAT: &str = "#{pane_id}\t#{session_name}\t#{pane_current_command}";
+
+/// The fields of a [`TMUX_PANES_FORMAT`] row.
+const TMUX_PANES_FIELDS: usize = 3;
+
 /// Backend-neutral mux abstraction (ADR 0089).
 ///
 /// Every mux backend Conspectus supports (tmux and zellij)
@@ -1731,6 +1739,43 @@ fn title_mark(command: Option<&str>, title: &str) -> Option<TitleMark> {
         .pane_title_mark(title)
 }
 
+/// One row of a `tmux list-panes -a` listing made with
+/// [`TMUX_PANES_FORMAT`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TmuxPaneRow {
+    /// `#{pane_id}` (`%3`).
+    pub pane_id: String,
+    /// The session whose window holds the pane.
+    pub session: String,
+    /// `#{pane_current_command}`.
+    pub command: Option<String>,
+}
+
+/// The rows of a pane listing. A row whose id is not a tmux pane id
+/// (`%` and digits) or that names no session is skipped, so output that
+/// is not a pane listing yields nothing.
+pub fn parse_list_panes(stdout: &str) -> Vec<TmuxPaneRow> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.splitn(TMUX_PANES_FIELDS, '\t');
+            let pane_id = fields.next()?.trim();
+            if !is_pane_id(pane_id) {
+                return None;
+            }
+            let session = fields.next()?.trim();
+            if session.is_empty() {
+                return None;
+            }
+            Some(TmuxPaneRow {
+                pane_id: pane_id.to_string(),
+                session: session.to_string(),
+                command: optional_string(fields.next()),
+            })
+        })
+        .collect()
+}
+
 fn optional_string(value: Option<&str>) -> Option<String> {
     let trimmed = value?.trim();
 
@@ -1841,6 +1886,18 @@ impl<R: MuxBackend> TmuxDiscovery<R> {
     }
 }
 
+impl<R: MuxBackend> TmuxDiscovery<R> {
+    /// Every pane of server `socket_name`, or of the default server; none
+    /// when the backend cannot list panes or the listing fails, which
+    /// leaves the session listing as the only word on the panes.
+    pub fn panes_on(&self, socket_name: Option<&str>) -> Vec<TmuxPaneRow> {
+        match self.runner.list_panes_on(socket_name, TMUX_PANES_FORMAT) {
+            Ok(TmuxOutcome::Sessions(stdout)) => parse_list_panes(&stdout),
+            _ => Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TmuxDiscoveryRows {
     pub rows: Vec<TmuxSessionRow>,
@@ -1882,6 +1939,13 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
             for row in &outcome.rows {
                 nodes.push(GraphNode::MuxSession(node_for_row(row, socket)));
             }
+            // One more call per listed server says what every pane runs,
+            // so a hook record is judged by its own pane (ADR 0220).
+            let panes = if outcome.status == TmuxStatus::Available && !outcome.rows.is_empty() {
+                panes_of(self.panes_on(socket))
+            } else {
+                BTreeMap::new()
+            };
             let key = crate::model::probe_key(TMUX_BACKEND, socket);
             let titles = context
                 .caches()
@@ -1900,6 +1964,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
                 key,
                 MuxProbe {
                     titles,
+                    panes,
                     ..MuxProbe::new(status, epoch)
                 },
             );
@@ -1929,6 +1994,21 @@ fn titles_of(rows: &[TmuxSessionRow], observed_ms: i64) -> BTreeMap<String, Pane
                 row.name.clone(),
                 PaneTitle::new(row.active_pane_id.clone(), mark, observed_ms),
             ))
+        })
+        .collect()
+}
+
+/// A pane listing as a probe records it, by pane id.
+fn panes_of(rows: Vec<TmuxPaneRow>) -> BTreeMap<String, crate::model::ProbedPane> {
+    rows.into_iter()
+        .map(|row| {
+            (
+                row.pane_id,
+                crate::model::ProbedPane {
+                    session: row.session,
+                    command: row.command,
+                },
+            )
         })
         .collect()
 }

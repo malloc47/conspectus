@@ -6435,12 +6435,7 @@ fn ghost_world_with(pinned: bool) -> GraphSnapshot {
     }
     snapshot.mux_probes.insert(
         "tmux".to_string(),
-        crate::model::MuxProbe {
-            status: crate::model::MuxProbeStatus::Listed,
-            epoch: 1_700_000_000,
-            exited: Vec::new(),
-            titles: Default::default(),
-        },
+        crate::model::MuxProbe::new(crate::model::MuxProbeStatus::Listed, 1_700_000_000),
     );
     let mut history = std::mem::take(&mut snapshot.history);
     crate::history::project::project_into(&mut snapshot, &mut history, 1_700_000_000);

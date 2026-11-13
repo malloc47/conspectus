@@ -23,12 +23,7 @@ fn snapshot(nodes: Vec<GraphNode>) -> GraphSnapshot {
         nodes,
         mux_probes: BTreeMap::from([(
             "tmux".to_string(),
-            MuxProbe {
-                status: MuxProbeStatus::Listed,
-                epoch: 1_000,
-                exited: Vec::new(),
-                titles: Default::default(),
-            },
+            MuxProbe::new(MuxProbeStatus::Listed, 1_000),
         )]),
         ..GraphSnapshot::empty()
     }

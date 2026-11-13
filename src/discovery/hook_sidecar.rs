@@ -103,7 +103,7 @@ pub fn apply_hook_records(
                     record.observed_epoch
                 )),
             };
-        } else if let Some(running) = pane_running_harness(&mux)
+        } else if let Some(running) = record_pane_harness(snapshot, &mux, &record)
             && running != record.harness_key
         {
             link.state = LinkState::Ignored {
@@ -294,13 +294,51 @@ fn drop_process_observation(
     });
 }
 
-/// Maps the mux's active pane command back to the harness key when the
-/// command is exactly one of a registered harness's executable names.
+/// The harness the record's own pane runs now, by its program. When the
+/// record names a pane and the probe of the mux's server listed panes,
+/// that is the pane's own program, and a pane the listing does not show
+/// in the mux's session runs nothing known. Otherwise (no pane named, or
+/// no pane listing) it is the mux's active pane's, the only pane a mux
+/// node describes. A record from one split pane is so never judged by
+/// what another pane runs.
+fn record_pane_harness(
+    snapshot: &GraphSnapshot,
+    mux: &MuxSessionNode,
+    record: &HookRecord,
+) -> Option<&'static str> {
+    let pane = record
+        .tmux
+        .as_ref()
+        .and_then(|tmux| tmux.pane_id.as_deref())
+        .filter(|pane| !pane.is_empty());
+    let probe = snapshot
+        .mux_probes
+        .get(&crate::model::probe_key(
+            &mux.backend,
+            mux.socket.as_deref(),
+        ))
+        .filter(|probe| !probe.panes.is_empty());
+    match (pane, probe) {
+        (Some(pane), Some(probe)) => {
+            harness_running(probe.pane_command(mux.session_name(), pane)??)
+        }
+        _ => pane_running_harness(mux),
+    }
+}
+
+/// Maps the mux's active pane command back to the harness key; see
+/// [`harness_running`].
+fn pane_running_harness(mux: &MuxSessionNode) -> Option<&'static str> {
+    harness_running(mux.active_pane_command.as_deref()?)
+}
+
+/// The harness key of a pane running `command` when the command is
+/// exactly one of a registered harness's executable names.
 /// Conservative: anything else (e.g. `node`, `shell`) returns `None` so
 /// hook records aren't filtered on weak evidence.
-fn pane_running_harness(mux: &MuxSessionNode) -> Option<&'static str> {
+fn harness_running(command: &str) -> Option<&'static str> {
     use crate::discovery::harness::{HarnessAdapter, adapters_for_program};
-    adapters_for_program(mux.active_pane_command.as_deref()?)
+    adapters_for_program(command)
         .next()
         .map(HarnessAdapter::harness_key)
 }

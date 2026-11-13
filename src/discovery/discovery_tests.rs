@@ -1623,3 +1623,86 @@ fn two_probes_without_the_marker_clear_a_codex_wait_its_hooks_reported() {
     assert_eq!(read(&second), (LiveState::Working, LiveSource::PaneTitle));
     assert!(second.pane_live.is_empty(), "the agent counts once");
 }
+
+#[test]
+fn agents_of_two_harnesses_in_split_panes_of_one_tmux_session_are_both_attributed() {
+    use crate::discovery::tmux::{FakeTmux, TmuxOutcome};
+    use crate::hook::{HookRecord, HookStore, HookTmuxRecord, SCHEMA_VERSION};
+    use crate::model::{GraphNode, LinkState, NodeId, RelationKind};
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let hooks = temp.path().join("hooks");
+    let record = |harness: &str, session: &str, pane: &str| HookRecord {
+        schema_version: SCHEMA_VERSION,
+        harness_key: harness.to_string(),
+        session_key: session.to_string(),
+        cwd: Some("/work/x".to_string()),
+        pid: Some(i64::from(std::process::id())),
+        ppid: None,
+        tmux: Some(HookTmuxRecord {
+            session_name: Some("editor".to_string()),
+            native_id: None,
+            pane_id: Some(pane.to_string()),
+            socket_path: None,
+        }),
+        transcript_path: None,
+        hook_event_name: Some("SessionStart".to_string()),
+        observed_epoch: 1_700_000_100,
+        harness_version: None,
+        background_harness: false,
+    };
+    let store = HookStore::new(&hooks);
+    store
+        .write_record(&record("codex", "cx-left", "%1"))
+        .expect("write the codex record");
+    store
+        .write_record(&record("claude-code", "cc-right", "%2"))
+        .expect("write the claude record");
+
+    // Codex is in the active pane %1, Claude Code in pane %2 beside it.
+    let tmux = FakeTmux::with_sessions(
+        "editor\t/work/x\t1700000500\t1700000000\tcodex\t42\t/work/x\tcodex\t0\t\t\t$1\t%1\n",
+    )
+    .with_panes(
+        None,
+        TmuxOutcome::Sessions("%1\teditor\tcodex\n%2\teditor\tclaude\n".into()),
+    );
+    std::fs::create_dir(temp.path().join("scan")).expect("scan dir");
+    let snapshot = discover_local_with(
+        [temp.path().join("scan")],
+        LocalDiscoveryConfig::empty()
+            .with_tmux_runner(tmux)
+            .with_hook_sidecar_root(&hooks),
+    )
+    .expect("discover");
+    let snapshot = crate::resolve::resolve_snapshot(snapshot);
+
+    let editor = NodeId::MuxSession(crate::model::MuxSessionId::new("tmux:editor"));
+    let mut hosted: Vec<String> = snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|rel| {
+            rel.relation == RelationKind::LinkedToMux
+                && rel.target == editor
+                && rel.selected_link_id.is_some()
+        })
+        .filter_map(|rel| match snapshot.find_node(&rel.source) {
+            Some(GraphNode::AgentSession(session)) => Some(session.id.session_key.clone()),
+            _ => None,
+        })
+        .collect();
+    hosted.sort();
+    assert_eq!(
+        hosted,
+        ["cc-right", "cx-left"],
+        "{:#?}",
+        snapshot.candidate_links
+    );
+    assert!(
+        snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::LinkedToMux)
+            .all(|link| matches!(link.state, LinkState::Active))
+    );
+}

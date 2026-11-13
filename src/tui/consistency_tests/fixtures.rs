@@ -20,12 +20,7 @@ pub(super) const ALL_VIEWS: [View; 6] = [
 pub(super) const ENTITY_VIEWS: [View; 3] = [View::Sessions, View::Mux, View::Prs];
 
 fn probe() -> crate::model::MuxProbe {
-    crate::model::MuxProbe {
-        status: crate::model::MuxProbeStatus::Listed,
-        epoch: NOW,
-        exited: Vec::new(),
-        titles: Default::default(),
-    }
+    crate::model::MuxProbe::new(crate::model::MuxProbeStatus::Listed, NOW)
 }
 
 fn slot(id: &str, kind: PinKind, target: Option<&str>, order: u32) -> PinSlot {

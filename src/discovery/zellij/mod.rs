@@ -282,10 +282,8 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
         fragment.mux_probes.insert(
             ZELLIJ_BACKEND.to_string(),
             MuxProbe {
-                status,
-                epoch,
                 exited,
-                titles: Default::default(),
+                ..MuxProbe::new(status, epoch)
             },
         );
 
