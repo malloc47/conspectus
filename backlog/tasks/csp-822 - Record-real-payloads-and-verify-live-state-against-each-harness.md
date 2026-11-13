@@ -4,7 +4,7 @@ title: Record real payloads and verify live state against each harness
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-12 12:09'
+updated_date: '2026-11-13 04:56'
 labels:
   - live-state
   - ls-docs
@@ -69,3 +69,13 @@ From CSP-816 (OpenCode): the event scripts in `tests/fixtures/hooks/opencode-liv
 
 From CSP-817 (Pi): the event scripts in `tests/fixtures/hooks/pi-live/` are synthetic; their README lists the event shapes to confirm. Also check in the sandbox: that Pi loads the extension (it was run under Node with a stand-in API, never compiled against Pi's types) and ignores its one extra export (`testOnly`); the field names of every handled event, including `after_provider_response.status` and `agent_settled.aborted`; whether a gate's dialog opens inside the tool's `tool_execution_start`/`_end` or before it; that `/reload` keeps the session id and calls the factory again; `ctx.isIdle()` at `session_start`; that a quit's and a `kill-pane`'s `session_shutdown` report lands; that the attribution record now carries Pi's own pid; and whether Pi exposes its version to an extension (CSP-851).
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: @claude
+created: 2026-11-13 04:56
+---
+When recording Codex, also record its pane titles (`tmux display-message -p '#{pane_title}'` in the private server): idle, working (spinner frames), waiting (both `[ ! ]` and `[ . ] Action Required` phases), with animations off, and with the microphone dot. Compare them with the golden table in `src/discovery/harness/codex_title_tests.rs` (ADR 0217); the strings there come from Codex's source, not a recording.
+---
+<!-- COMMENTS:END -->
