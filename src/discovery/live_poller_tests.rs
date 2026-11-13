@@ -107,9 +107,9 @@ fn nothing_runs_without_a_candidate_or_before_the_settle_window() {
     let script = Script::default();
     let clock = Clock::at(NOW_MS);
     let poller = poller(&script, &clock);
-    assert_eq!(poller.poll(&[], &EveryPid), None);
+    assert_eq!(poller.poll(&[], 0, &EveryPid), None);
     let just_heard = candidate(LiveState::Working, NOW_MS - SETTLE_MS + 1);
-    assert_eq!(poller.poll(&[just_heard], &EveryPid), None);
+    assert_eq!(poller.poll(&[just_heard], 0, &EveryPid), None);
     assert_eq!(script.runs(), 0);
 }
 
@@ -119,7 +119,7 @@ fn a_candidate_silent_for_the_settle_window_runs_a_poll() {
     let clock = Clock::at(NOW_MS);
     let poller = poller(&script, &clock);
     let stuck = candidate(LiveState::Working, NOW_MS - SETTLE_MS);
-    let poll = poller.poll(&[stuck], &EveryPid).expect("polled");
+    let poll = poller.poll(&[stuck], 0, &EveryPid).expect("polled");
     assert_eq!(script.runs(), 1);
     assert_eq!(poll.observed_ms, NOW_MS);
     assert_eq!(
@@ -140,13 +140,13 @@ fn at_most_one_attempt_runs_per_interval_whatever_it_came_to() {
     let stuck = [candidate(LiveState::Working, NOW_MS - 60 * SECOND)];
 
     // A failed attempt asserts nothing, and still counts.
-    assert_eq!(poller.poll(&stuck, &EveryPid), None);
+    assert_eq!(poller.poll(&stuck, 0, &EveryPid), None);
     clock.set(NOW_MS + POLL_INTERVAL_MS - 1);
-    assert_eq!(poller.poll(&stuck, &EveryPid), None);
+    assert_eq!(poller.poll(&stuck, 0, &EveryPid), None);
     assert_eq!(script.runs(), 1);
 
     clock.set(NOW_MS + POLL_INTERVAL_MS);
-    let poll = poller.poll(&stuck, &EveryPid).expect("polled");
+    let poll = poller.poll(&stuck, 0, &EveryPid).expect("polled");
     assert_eq!(script.runs(), 2);
     assert_eq!(poll.observed_ms, NOW_MS + POLL_INTERVAL_MS);
 }
@@ -167,9 +167,9 @@ fn a_failed_poll_keeps_the_last_one_that_succeeded() {
         let poller = poller(&script, &clock);
         // Busy agrees with working, so the entry stays due.
         let stuck = [candidate(LiveState::Working, NOW_MS - 60 * SECOND)];
-        let first = poller.poll(&stuck, &EveryPid).expect("polled");
+        let first = poller.poll(&stuck, 0, &EveryPid).expect("polled");
         clock.set(NOW_MS + POLL_INTERVAL_MS);
-        let after = poller.poll(&stuck, &EveryPid);
+        let after = poller.poll(&stuck, 0, &EveryPid);
         assert_eq!(script.runs(), 2, "{failure:?}");
         assert_eq!(after.as_ref(), Some(&first), "{failure:?}");
     }
@@ -181,20 +181,20 @@ fn a_poll_that_reads_ready_answers_the_entry_until_its_next_event() {
     let clock = Clock::at(NOW_MS);
     let poller = poller(&script, &clock);
     let stuck = candidate(LiveState::Working, NOW_MS - 60 * SECOND);
-    poller.poll(std::slice::from_ref(&stuck), &EveryPid);
+    poller.poll(std::slice::from_ref(&stuck), 0, &EveryPid);
     assert_eq!(script.runs(), 1);
 
     // An interrupted agent left idle costs one poll.
     for later in [1, 10, 100] {
         clock.set(NOW_MS + later * POLL_INTERVAL_MS);
-        poller.poll(std::slice::from_ref(&stuck), &EveryPid);
+        poller.poll(std::slice::from_ref(&stuck), 0, &EveryPid);
     }
     assert_eq!(script.runs(), 1);
 
     // Its next event, once silent again, makes it due.
     let heard_again = candidate(LiveState::Working, NOW_MS + 200 * POLL_INTERVAL_MS);
     clock.set(heard_again.observed_ms + SETTLE_MS);
-    poller.poll(&[heard_again], &EveryPid);
+    poller.poll(&[heard_again], 0, &EveryPid);
     assert_eq!(script.runs(), 2);
 }
 
@@ -204,9 +204,9 @@ fn an_agent_the_poll_does_not_list_is_answered_too() {
     let clock = Clock::at(NOW_MS);
     let poller = poller(&script, &clock);
     let stuck = [candidate(LiveState::Waiting, NOW_MS - 60 * SECOND)];
-    poller.poll(&stuck, &EveryPid);
+    poller.poll(&stuck, 0, &EveryPid);
     clock.set(NOW_MS + 10 * POLL_INTERVAL_MS);
-    poller.poll(&stuck, &EveryPid);
+    poller.poll(&stuck, 0, &EveryPid);
     assert_eq!(script.runs(), 1);
 }
 
@@ -224,9 +224,9 @@ fn a_poll_that_reads_work_or_a_wait_leaves_the_entry_due() {
         let clock = Clock::at(NOW_MS);
         let poller = poller(&script, &clock);
         let stuck = [candidate(state, NOW_MS - 60 * SECOND)];
-        poller.poll(&stuck, &EveryPid);
+        poller.poll(&stuck, 0, &EveryPid);
         clock.set(NOW_MS + POLL_INTERVAL_MS);
-        poller.poll(&stuck, &EveryPid);
+        poller.poll(&stuck, 0, &EveryPid);
         assert_eq!(script.runs(), 2, "{state:?} read {status}");
     }
 }
@@ -248,12 +248,12 @@ fn a_poll_too_soon_after_an_entrys_event_does_not_answer_it() {
         session_id: "s-2".to_string(),
         ..candidate(LiveState::Working, NOW_MS - 5 * SECOND)
     };
-    poller.poll(&[due.clone(), fresh.clone()], &EveryPid);
+    poller.poll(&[due.clone(), fresh.clone()], 0, &EveryPid);
     assert_eq!(script.runs(), 1);
     // The first poll answered `due`; it ran too soon after `fresh`'s
     // event for the binding to use, so `fresh` is still due.
     clock.set(NOW_MS + POLL_INTERVAL_MS);
-    poller.poll(&[due, fresh], &EveryPid);
+    poller.poll(&[due, fresh], 0, &EveryPid);
     assert_eq!(script.runs(), 2);
 }
 
@@ -266,15 +266,15 @@ fn a_run_of_one_state_keeps_the_time_it_began() {
     let clock = Clock::at(NOW_MS);
     let poller = poller(&script, &clock);
     let stuck = [candidate(LiveState::Working, NOW_MS - 60 * SECOND)];
-    poller.poll(&stuck, &EveryPid);
+    poller.poll(&stuck, 0, &EveryPid);
     clock.set(NOW_MS + POLL_INTERVAL_MS);
-    let second = poller.poll(&stuck, &EveryPid);
+    let second = poller.poll(&stuck, 0, &EveryPid);
     assert_eq!(
         read(second.as_ref()),
         Some(vec![(Some(4242), LiveState::Working, NOW_MS)])
     );
     clock.set(NOW_MS + 2 * POLL_INTERVAL_MS);
-    let third = poller.poll(&stuck, &EveryPid);
+    let third = poller.poll(&stuck, 0, &EveryPid);
     assert_eq!(
         read(third.as_ref()),
         Some(vec![(
@@ -295,11 +295,13 @@ fn a_clock_that_went_back_does_not_stop_the_polls() {
     let poller = poller(&script, &clock);
     poller.poll(
         &[candidate(LiveState::Working, NOW_MS - 60 * SECOND)],
+        0,
         &EveryPid,
     );
     clock.set(NOW_MS - 3_600 * SECOND);
     poller.poll(
         &[candidate(LiveState::Working, NOW_MS - 3_700 * SECOND)],
+        0,
         &EveryPid,
     );
     assert_eq!(script.runs(), 2);
@@ -318,7 +320,7 @@ impl PollRunner for Arc<Reentrant> {
         self.runs.fetch_add(1, Ordering::SeqCst);
         if let Some(poller) = self.poller.get().and_then(Weak::upgrade) {
             let stuck = [candidate(LiveState::Working, NOW_MS - 60 * SECOND)];
-            *self.inner.lock().unwrap() = Some(poller.poll(&stuck, &EveryPid));
+            *self.inner.lock().unwrap() = Some(poller.poll(&stuck, 0, &EveryPid));
         }
         RunOutcome::Output(serde_json::to_vec(&listing("idle")).unwrap())
     }
@@ -337,7 +339,7 @@ fn a_discovery_beside_a_running_poll_does_not_start_another() {
     );
     runner.poller.set(Arc::downgrade(&poller)).unwrap();
     let stuck = [candidate(LiveState::Working, NOW_MS - 60 * SECOND)];
-    let outer = poller.poll(&stuck, &EveryPid);
+    let outer = poller.poll(&stuck, 0, &EveryPid);
     assert_eq!(runner.runs.load(Ordering::SeqCst), 1);
     // The discovery beside it saw the attempt claimed and got the last
     // poll, of which there was none yet.
@@ -495,4 +497,29 @@ fn a_program_that_leaves_its_output_open_fails_at_the_timeout() {
     });
     assert_eq!(outcome, RunOutcome::Failed);
     assert!(took < Duration::from_secs(5), "took {took:?}");
+}
+
+#[test]
+fn a_running_agent_with_no_hook_entry_keeps_the_poll_running_every_interval() {
+    let script = Script::default()
+        .listing(listing("idle"))
+        .listing(listing("idle"));
+    let clock = Clock::at(NOW_MS);
+    let poller = poller(&script, &clock);
+    // No candidate and no unreported agent: nothing runs.
+    assert_eq!(poller.poll(&[], 0, &EveryPid), None);
+    assert_eq!(script.runs(), 0);
+    // One unreported agent runs it, at most once per interval.
+    assert!(poller.poll(&[], 1, &EveryPid).is_some());
+    assert_eq!(script.runs(), 1);
+    clock.set(NOW_MS + POLL_INTERVAL_MS - 1);
+    poller.poll(&[], 1, &EveryPid);
+    assert_eq!(script.runs(), 1);
+    clock.set(NOW_MS + POLL_INTERVAL_MS);
+    poller.poll(&[], 1, &EveryPid);
+    assert_eq!(script.runs(), 2);
+    // Once it is gone, the poll rests again.
+    clock.set(NOW_MS + 3 * POLL_INTERVAL_MS);
+    poller.poll(&[], 0, &EveryPid);
+    assert_eq!(script.runs(), 2);
 }

@@ -20,15 +20,25 @@
 //! The binding then reads the poll's state with source `harness_poll`.
 //! The store is not rewritten, so the entry's next event takes over
 //! again. A hook entry's `ready`, `error`, `compacting`, `starting`,
-//! `unknown`, and `exited` never change, and a poll never binds an agent
-//! the store has no entry for.
+//! `unknown`, and `exited` never change.
+//!
+//! An agent the store has no entry for binds from the poll alone (ADR
+//! 0222) only when discovery knows its process: a running main agent of
+//! the harness that no entry reports ([`unreported`]), which is also what
+//! makes the poller run every thirty seconds. It binds to the session the
+//! graph says that process runs, else to the session the poll names, and
+//! only where no other binding sits ([`fold_poll_only`]). It records no
+//! pid, so the read rule ages it as it ages any state whose process
+//! cannot be checked: quiet after ten minutes of work, stale fifteen
+//! minutes after the last poll that listed it. It is gone at once when
+//! its process ends or a newer poll no longer lists it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::discovery::live_poller::{PollCandidate, SETTLE_MS};
-use crate::live_store::{LiveEntry, LiveFile, PidProbe};
+use crate::live_store::{LiveEntry, LiveFile, PidProbe, PidStatus};
 use crate::model::live::{LiveBinding, LiveObservation, LivePoll, LiveSource, LiveState, Liveness};
-use crate::model::{GraphSnapshot, LivePane, NodeId};
+use crate::model::{GraphNode, GraphSnapshot, LivePane, NodeId, RelationKind, RuntimeProcessRole};
 
 use super::{BoundLive, Winners};
 
@@ -128,6 +138,188 @@ pub(super) fn candidates(
         .collect()
 }
 
+/// A running main agent of a harness, as a graph shows it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RunningAgent {
+    pub pid: i64,
+    /// The native ids of the sessions the graph says the process runs:
+    /// those its links identify, or its only candidate.
+    pub sessions: BTreeSet<String>,
+}
+
+impl RunningAgent {
+    /// Whether store entry `entry` describes this agent: it recorded the
+    /// agent's pid, or is one of the sessions the agent runs.
+    pub fn reported_by(&self, entry: &LiveEntry) -> bool {
+        entry.observation.pid == Some(self.pid) || self.sessions.contains(&entry.session_id)
+    }
+}
+
+/// The distinct agent processes of `harness` the graph `snapshot`
+/// recorded that `probe` finds running now. Only main agents count, not
+/// their subagents, background helpers, or shells.
+pub fn running_agents(
+    snapshot: &GraphSnapshot,
+    harness: &str,
+    probe: &dyn PidProbe,
+) -> Vec<RunningAgent> {
+    let mut agents: BTreeMap<i64, BTreeSet<String>> = BTreeMap::new();
+    for node in &snapshot.nodes {
+        let GraphNode::RuntimeProcess(process) = node else {
+            continue;
+        };
+        let Some(pid) = process.pid else {
+            continue;
+        };
+        if process.harness_key.as_deref() != Some(harness)
+            || process.role != Some(RuntimeProcessRole::HumanAgent)
+        {
+            continue;
+        }
+        agents.entry(pid).or_default().extend(sessions_of(
+            snapshot,
+            &NodeId::RuntimeProcess(process.id.clone()),
+        ));
+    }
+    agents
+        .into_iter()
+        .filter(|(pid, _)| matches!(probe.status(*pid), PidStatus::Running { .. }))
+        .map(|(pid, sessions)| RunningAgent { pid, sessions })
+        .collect()
+}
+
+/// The native ids of the sessions `process` runs, by the graph's links:
+/// every session a link says it identifies, or the only session a link
+/// names it a candidate for, as the resolver reads them.
+fn sessions_of(snapshot: &GraphSnapshot, process: &NodeId) -> BTreeSet<String> {
+    let session = |relation: RelationKind| {
+        snapshot
+            .candidate_links
+            .iter()
+            .filter(move |link| link.relation == relation && link.source == *process)
+            .filter_map(|link| match link.target_node_id() {
+                Some(NodeId::AgentSession(session)) => Some(session.session_key.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<String>>()
+    };
+    let mut sessions = session(RelationKind::ProcessIdentifiesSession);
+    let candidates = session(RelationKind::ProcessCandidatesSession);
+    if candidates.len() == 1 {
+        sessions.extend(candidates);
+    }
+    sessions
+}
+
+/// The running main agents of `harness` that no entry of the store
+/// `file` reports: the agents a poll may show on its own, and whose being
+/// known keeps the poller running.
+pub fn unreported(
+    snapshot: &GraphSnapshot,
+    file: &LiveFile,
+    probe: &dyn PidProbe,
+    harness: &str,
+) -> Vec<RunningAgent> {
+    let entries: Vec<&LiveEntry> = file
+        .entries
+        .values()
+        .filter(|entry| entry.harness == harness)
+        .collect();
+    running_agents(snapshot, harness, probe)
+        .into_iter()
+        .filter(|agent| !entries.iter().any(|entry| agent.reported_by(entry)))
+        .collect()
+}
+
+/// Bind, from each poll `snapshot` carries, the agents of the poll's
+/// harness that the store `file` has no entry for and that discovery
+/// knows as running ([`unreported`]), each to its session when that
+/// session's slot in `bound` is empty. See the module's rules.
+pub(super) fn fold_poll_only(
+    snapshot: &GraphSnapshot,
+    file: &LiveFile,
+    probe: &dyn PidProbe,
+    bound: &mut BoundLive,
+) {
+    for (harness, poll) in &snapshot.live_polls {
+        let known = unreported(snapshot, file, probe, harness);
+        if known.is_empty() {
+            continue;
+        }
+        let sessions = live_sessions(snapshot, harness);
+        for agent in &poll.agents {
+            let Some(pid) = agent.pid else {
+                continue;
+            };
+            let Some(process) = known.iter().find(|known| known.pid == pid) else {
+                continue;
+            };
+            // The listed process must still be the one the poll saw.
+            let start = match probe.status(pid) {
+                PidStatus::Running { start } => start,
+                PidStatus::Gone => continue,
+                PidStatus::Unknown => None,
+            };
+            if matches!((agent.pid_start, start), (Some(listed), Some(now)) if listed != now) {
+                continue;
+            }
+            let session = match process.sessions.len() {
+                1 => process.sessions.iter().next(),
+                _ => agent.session_id.as_ref(),
+            };
+            let Some(node) = session.and_then(|session| sessions.get(session)) else {
+                continue;
+            };
+            if bound.nodes.contains_key(node) {
+                continue;
+            }
+            bound
+                .nodes
+                .insert(node.clone(), poll_only(agent, poll.observed_ms));
+        }
+    }
+}
+
+/// The live agent sessions of `harness`, by native id. Two nodes for one
+/// session keep the lower id, as the store's binding does.
+fn live_sessions(snapshot: &GraphSnapshot, harness: &str) -> BTreeMap<String, NodeId> {
+    let mut sessions: BTreeMap<String, NodeId> = BTreeMap::new();
+    for node in snapshot.live_nodes() {
+        let GraphNode::AgentSession(session) = node else {
+            continue;
+        };
+        if session.harness_key != harness {
+            continue;
+        }
+        let id = node.id();
+        sessions
+            .entry(session.id.session_key.clone())
+            .and_modify(|kept| {
+                if id < *kept {
+                    *kept = id.clone();
+                }
+            })
+            .or_insert(id);
+    }
+    sessions
+}
+
+/// What a poll at `observed_ms` says of `agent` on its own: its state and
+/// detail since its run began, with no pid, so its process counts as
+/// unchecked and the read rule ages it once polls stop.
+fn poll_only(agent: &crate::model::live::PolledAgent, observed_ms: i64) -> LiveBinding {
+    let mut observation = LiveObservation::new(agent.state, LiveSource::HarnessPoll, observed_ms)
+        .with_since_ms(agent.since_ms);
+    if let Some(detail) = agent.detail {
+        observation = observation.with_detail(detail);
+    }
+    LiveBinding::new(observation, Liveness::Unknown)
+}
+
 #[cfg(test)]
 #[path = "live_poll_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "live_poll_only_tests.rs"]
+mod poll_only_tests;

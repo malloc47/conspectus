@@ -355,7 +355,9 @@ fn a_poll_applies_to_its_own_harness_only() {
 }
 
 #[test]
-fn a_session_with_no_hook_entry_gets_nothing_from_the_poll() {
+fn a_session_with_no_hook_entry_and_no_known_process_gets_nothing_from_the_poll() {
+    // Only an agent whose process discovery knows can show the poll's
+    // state on its own (see `live_poll_only_tests`).
     let snapshot = graph(vec![session_node(CLAUDE, SESSION)], &[(CLAUDE, idle())]);
     let bound = bind_live(&snapshot, &file([]), &Alive);
     assert!(bound.is_empty(), "{bound:?}");

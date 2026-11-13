@@ -6,12 +6,14 @@
 //! and keeps it for its lifetime (the daemon, a TUI with no daemon); a
 //! one-shot command has none. On each discovery the live-state pass hands
 //! it the hook bindings of its harness that could be stuck
-//! ([`PollCandidate`]), and the poller runs its program when both hold:
+//! ([`PollCandidate`]) and how many running agents of its harness no hook
+//! entry reports, and the poller runs its program when both hold:
 //!
 //! 1. [`POLL_INTERVAL_MS`] have passed since its last attempt, whatever
 //!    that attempt came to;
 //! 2. a candidate is *due*: it has had no event for [`SETTLE_MS`], and no
-//!    poll since has answered it ([`answered`]).
+//!    poll since has answered it ([`answered`]); or some running agent
+//!    has no hook entry, which only a poll can show (ADR 0222).
 //!
 //! Either way it returns the last poll that succeeded, which the pass
 //! puts on the snapshot for the binding to fold in. A poll that fails (no
@@ -213,19 +215,26 @@ impl LivePoller {
 
     /// The poll the binding should fold in now: a new one when the
     /// limits of the module documentation let it run and it succeeds,
-    /// else the last that succeeded. Each listed pid's start time is read
-    /// through `probe`, and each agent's run is carried on from the last
-    /// poll.
-    pub fn poll(&self, candidates: &[PollCandidate], probe: &dyn PidProbe) -> Option<LivePoll> {
+    /// else the last that succeeded. `unreported` counts the running
+    /// agents of the harness that no hook entry reports. Each listed
+    /// pid's start time is read through `probe`, and each agent's run is
+    /// carried on from the last poll.
+    pub fn poll(
+        &self,
+        candidates: &[PollCandidate],
+        unreported: usize,
+        probe: &dyn PidProbe,
+    ) -> Option<LivePoll> {
         let now_ms = (self.clock)();
         {
             let mut memory = self.memory();
             let rested = memory.last_attempt_ms.is_none_or(|last| {
                 now_ms < last || now_ms.saturating_sub(last) >= POLL_INTERVAL_MS
             });
-            let wanted = candidates
-                .iter()
-                .any(|candidate| due(candidate, memory.last.as_ref(), now_ms));
+            let wanted = unreported > 0
+                || candidates
+                    .iter()
+                    .any(|candidate| due(candidate, memory.last.as_ref(), now_ms));
             if !(rested && wanted) {
                 return memory.last.clone();
             }

@@ -40,8 +40,10 @@
 //! report the end of (the `title` module). Last, the snapshot's latest
 //! poll of a harness's own list of its sessions (ADR 0218) repairs a
 //! `working` or `waiting` entry of that harness whose hooks have been
-//! silent since before the poll (the `poll` module); the pass runs the
-//! polls it is given before it binds ([`apply_live_state`]).
+//! silent since before the poll, and shows a running agent of that
+//! harness that no entry reports on its session (ADR 0222; the `poll`
+//! module); the pass runs the polls it is given before it binds
+//! ([`apply_live_state`]).
 //!
 //! Each binding records whether the entry's process ran when it was
 //! bound, from the recorded pid and start time checked through a
@@ -69,10 +71,10 @@ use crate::model::{
 /// discovery carries on.
 ///
 /// Each of `pollers` is first handed its harness's bound hook entries
-/// that a poll might repair, runs its poll when they call for one (ADR
-/// 0218), and puts its latest poll in `live_polls` for the binding to
-/// fold in. With no pollers, as in a one-shot command, `live_polls` ends
-/// empty.
+/// that a poll might repair and how many of its running agents no entry
+/// reports, runs its poll when they call for one (ADRs 0218, 0222), and
+/// puts its latest poll in `live_polls` for the binding to fold in. With
+/// no pollers, as in a one-shot command, `live_polls` ends empty.
 pub fn apply_live_state(
     snapshot: &mut GraphSnapshot,
     root: &Path,
@@ -83,7 +85,8 @@ pub fn apply_live_state(
     snapshot.live_polls = BTreeMap::new();
     for poller in pollers {
         let candidates = poll::candidates(snapshot, &file, probe, poller.harness());
-        if let Some(read) = poller.poll(&candidates, probe) {
+        let unreported = poll::unreported(snapshot, &file, probe, poller.harness());
+        if let Some(read) = poller.poll(&candidates, unreported.len(), probe) {
             snapshot
                 .live_polls
                 .insert(poller.harness().to_string(), read);
@@ -143,6 +146,7 @@ pub fn bind_live(snapshot: &GraphSnapshot, file: &LiveFile, probe: &dyn PidProbe
     };
     title::fold_titles(snapshot, &sessions, &panes, &mut bound);
     poll::fold_polls(snapshot, &sessions, &panes, &mut bound);
+    poll::fold_poll_only(snapshot, file, probe, &mut bound);
     bound
 }
 
@@ -308,6 +312,8 @@ mod title;
 
 #[path = "live_poll.rs"]
 mod poll;
+
+pub use poll::{RunningAgent, running_agents};
 
 #[cfg(test)]
 #[path = "live_state_tests.rs"]

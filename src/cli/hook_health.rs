@@ -12,15 +12,16 @@
 //! agents that none of them describes, so one agent whose hooks are
 //! silent is not hidden by another that reports. For a harness whose
 //! pane titles the mux probe reads (ADR 0217), the line also says how
-//! many of its agents that graph shows from their titles, which is how a
-//! harness whose hooks are silent can still show state.
+//! many of its agents that graph shows from their titles, and for one
+//! whose own list of its sessions a poll reads (ADRs 0218, 0222), how
+//! many it shows from that list: either is how a harness whose hooks are
+//! silent can still show state.
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use crate::live_store::{LiveFile, LiveStore, PidProbe, PidStatus, ProcProbe};
+use crate::live_store::{LiveFile, LiveStore, ProcProbe};
 use crate::model::live::LiveSource;
-use crate::model::{GraphNode, GraphSnapshot, NodeId, RelationKind, RuntimeProcessRole};
+use crate::model::{GraphNode, GraphSnapshot, NodeId};
 
 /// What the health line reports for a harness.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,12 +74,7 @@ impl Health {
             let unreported = if reports_live_state {
                 running_agents()
                     .iter()
-                    .filter(|agent| {
-                        !entries.iter().any(|entry| {
-                            entry.observation.pid == Some(agent.pid)
-                                || agent.sessions.contains(&entry.session_id)
-                        })
-                    })
+                    .filter(|agent| !entries.iter().any(|entry| agent.reported_by(entry)))
                     .count()
             } else {
                 0
@@ -151,70 +147,7 @@ impl Health {
     }
 }
 
-/// A running main agent of a harness, as the saved graph shows it.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(super) struct RunningAgent {
-    pub(super) pid: i64,
-    /// The native ids of the sessions the graph says the process runs:
-    /// those its links identify, or its only candidate.
-    pub(super) sessions: BTreeSet<String>,
-}
-
-/// The distinct agent processes of `harness` the graph `snapshot`
-/// recorded that `probe` finds running now. Only main agents count, not
-/// their subagents, background helpers, or shells.
-pub(super) fn running_agents(
-    snapshot: &GraphSnapshot,
-    harness: &str,
-    probe: &dyn PidProbe,
-) -> Vec<RunningAgent> {
-    let mut agents: BTreeMap<i64, BTreeSet<String>> = BTreeMap::new();
-    for node in &snapshot.nodes {
-        let GraphNode::RuntimeProcess(process) = node else {
-            continue;
-        };
-        let Some(pid) = process.pid else {
-            continue;
-        };
-        if process.harness_key.as_deref() != Some(harness)
-            || process.role != Some(RuntimeProcessRole::HumanAgent)
-        {
-            continue;
-        }
-        agents.entry(pid).or_default().extend(sessions_of(
-            snapshot,
-            &NodeId::RuntimeProcess(process.id.clone()),
-        ));
-    }
-    agents
-        .into_iter()
-        .filter(|(pid, _)| matches!(probe.status(*pid), PidStatus::Running { .. }))
-        .map(|(pid, sessions)| RunningAgent { pid, sessions })
-        .collect()
-}
-
-/// The native ids of the sessions `process` runs, by the graph's links:
-/// every session a link says it identifies, or the only session a link
-/// names it a candidate for, as the resolver reads them.
-fn sessions_of(snapshot: &GraphSnapshot, process: &NodeId) -> BTreeSet<String> {
-    let session = |relation: RelationKind| {
-        snapshot
-            .candidate_links
-            .iter()
-            .filter(move |link| link.relation == relation && link.source == *process)
-            .filter_map(|link| match link.target_node_id() {
-                Some(NodeId::AgentSession(session)) => Some(session.session_key.clone()),
-                _ => None,
-            })
-            .collect::<BTreeSet<String>>()
-    };
-    let mut sessions = session(RelationKind::ProcessIdentifiesSession);
-    let candidates = session(RelationKind::ProcessCandidatesSession);
-    if candidates.len() == 1 {
-        sessions.extend(candidates);
-    }
-    sessions
-}
+pub(super) use crate::discovery::live_state::{RunningAgent, running_agents};
 
 /// How many of `harness`'s agents the graph `snapshot` shows from their
 /// pane titles: its live bindings whose source is the pane title, on a
@@ -261,6 +194,46 @@ pub(super) fn title_agents(snapshot: &GraphSnapshot, harness: &str) -> usize {
     sessions + panes
 }
 
+/// How many of `harness`'s agents the graph `snapshot` shows from a poll
+/// of the harness's own list of its sessions: its live bindings whose
+/// source is that poll, on a session of the harness, or on a pane when
+/// the harness is the only one the snapshot carries a poll of (a pane
+/// binding names no harness).
+pub(super) fn poll_agents(snapshot: &GraphSnapshot, harness: &str) -> usize {
+    let from_poll = |binding: &crate::model::live::LiveBinding| {
+        binding.observation.source == LiveSource::HarnessPoll
+    };
+    let sessions = snapshot
+        .node_live
+        .iter()
+        .filter(|(id, binding)| {
+            from_poll(binding)
+                && matches!(id, NodeId::AgentSession(session) if session.harness_key == harness)
+        })
+        .count();
+    let only_poll = snapshot.live_polls.len() == 1 && snapshot.live_polls.contains_key(harness);
+    let panes = if only_poll {
+        snapshot
+            .pane_live
+            .values()
+            .filter(|binding| from_poll(binding))
+            .count()
+    } else {
+        0
+    };
+    sessions + panes
+}
+
+/// What the health line adds when the graph shows `count` agents from
+/// the harness's own list of its sessions; nothing for none.
+pub(super) fn poll_note(count: usize) -> Option<String> {
+    match count {
+        0 => None,
+        1 => Some("1 agent shown from its agent list".to_string()),
+        count => Some(format!("{count} agents shown from their agent list")),
+    }
+}
+
 /// What the health line adds when the graph shows `count` agents from
 /// their pane titles; nothing for none.
 pub(super) fn title_note(count: usize) -> Option<String> {
@@ -303,8 +276,18 @@ pub(super) fn print_health(harness: &str, installed: bool, scope_flag: &str) {
     let path = store
         .as_ref()
         .map_or_else(|| PathBuf::from("-"), LiveStore::path);
+    // Building a poller runs nothing; it only says the harness has one.
+    let polls = adapter.is_some_and(|adapter| adapter.live_poller().is_some());
+    let polled = if polls {
+        saved().map_or(0, |snapshot| poll_agents(snapshot, harness))
+    } else {
+        0
+    };
     let mut message = health.message(crate::live_store::now_ms(), &init_command);
-    if let Some(note) = title_note(titles) {
+    for note in [title_note(titles), poll_note(polled)]
+        .into_iter()
+        .flatten()
+    {
         message.push_str("; ");
         message.push_str(&note);
     }

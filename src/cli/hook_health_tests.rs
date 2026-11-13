@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::*;
-use crate::live_store::LiveEntry;
-use crate::model::{RuntimeProcessId, RuntimeProcessNode};
+use crate::live_store::{LiveEntry, PidProbe, PidStatus};
+use crate::model::{RelationKind, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole};
 
 const NOW_MS: i64 = 1_790_769_600_000;
 
@@ -273,6 +273,60 @@ fn title_agents_reads_each_panes_own_program_from_the_pane_listing() {
         );
     }
     assert_eq!(title_agents(&snapshot, "codex"), 2);
+}
+
+#[test]
+fn poll_agents_counts_the_harnesss_bindings_read_from_its_agent_list() {
+    use crate::model::live::{
+        LiveBinding, LiveObservation, LivePoll, LiveSource, LiveState, Liveness,
+    };
+    use crate::model::{AgentSessionId, LivePane, MuxSessionId};
+
+    let binding = |source| {
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Ready, source, NOW_MS),
+            Liveness::Unknown,
+        )
+    };
+    let session = |harness: &str, key: &str| {
+        NodeId::AgentSession(AgentSessionId::new(harness, "/scope", key))
+    };
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.node_live.insert(
+        session("claude-code", "a"),
+        binding(LiveSource::HarnessPoll),
+    );
+    snapshot
+        .node_live
+        .insert(session("claude-code", "b"), binding(LiveSource::Hook));
+    snapshot
+        .node_live
+        .insert(session("codex", "c"), binding(LiveSource::HarnessPoll));
+    snapshot.pane_live.insert(
+        LivePane::new(MuxSessionId::new("tmux:w"), Some("%1".to_string())),
+        binding(LiveSource::HarnessPoll),
+    );
+    // A pane binding names no harness: it counts only while one harness's
+    // poll is on the graph.
+    assert_eq!(poll_agents(&snapshot, "claude-code"), 1);
+    snapshot
+        .live_polls
+        .insert("claude-code".to_string(), LivePoll::default());
+    assert_eq!(poll_agents(&snapshot, "claude-code"), 2);
+    assert_eq!(poll_agents(&snapshot, "pi"), 0);
+}
+
+#[test]
+fn the_line_says_how_many_agents_their_agent_list_shows() {
+    assert_eq!(poll_note(0), None);
+    assert_eq!(
+        poll_note(1).as_deref(),
+        Some("1 agent shown from its agent list")
+    );
+    assert_eq!(
+        poll_note(2).as_deref(),
+        Some("2 agents shown from their agent list")
+    );
 }
 
 #[test]
