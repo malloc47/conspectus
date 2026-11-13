@@ -178,6 +178,18 @@ forms, lists, readers, and keys look and behave alike.
   Each previews what its words mean. A node without live state lists
   none, but a session with it shows up to five fewer lines of its
   transcript below them.
+- **Waiting first, or only one state.** Controls has **Float waiting
+  sessions to top** (Sessions) and **Float waiting muxes to top** (Mux),
+  off by default, which lift the rows marked `!` above the rest of their
+  group, and an **agent state** row that steps `any`, `waiting`, `ready`,
+  `working`, `error` to list only the sessions in that state and the
+  muxes with an agent in it, shown as `agent:waiting` in the status bar.
+  Both are kept per view between runs and cleared by `F`. Rows keep still
+  between your actions: the order and the rows follow the agents' states
+  when the list is next built (a Controls change, `r`, a new snapshot),
+  while the marks change at once. `--state waiting,ready,…` on `table`,
+  `tui`, and `search` (also `unknown` and `none`), and `state = [...]` in
+  `[tui.views.<name>.filters]`, filter the same way.
 
 ### Changed
 

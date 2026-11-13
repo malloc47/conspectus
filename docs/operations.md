@@ -334,6 +334,27 @@ state has its own shape, so it reads without color:
 - **Nothing animates.** The spinner still means a refresh is pending, and
   takes the link cell, not the live mark, which keeps its value until the
   agent reports again.
+- **Waiting first.** Controls (`f`) has **Float waiting sessions to top**
+  in the Sessions view and **Float waiting muxes to top** in the Mux view,
+  both off by default. With it on, the sessions marked `!` sort above the
+  rest of their group (and of the flat list), and the running muxes marked
+  `!` above the other running muxes, each part keeping its order. It
+  comes before the view's other float when both are on.
+- **Only one state.** Controls' **agent state** row, after `mux state`,
+  steps `any`, `waiting`, `ready`, `working`, `error`: anything but `any`
+  lists only the sessions in that state, and the running muxes with an
+  agent in it (any agent the mux's mark counts, a pane's included), as
+  `agent:ready` in the status bar with `matching/total sessions` in the header. `F` or
+  **Clear all filters** turns it and the float off. Pinned and History
+  ignore it, as they do every filter. A ready turn is `ready` whether or
+  not you have seen it.
+- **Rows keep still between your actions.** The float and the filter read
+  each agent's state when the list is built: when you change a Controls
+  row, the view, its grouping, or the sort, press `r`, or a new snapshot
+  arrives. In between, a mark changes as soon as the agent reports, but
+  no row moves or leaves: a session whose wait you just answered stays
+  where the float put it, and stays listed under `agent:waiting`, until
+  the list is built again. The cursor stays on its row either way.
 - The colors are the theme's `warning`, `info`, `success`, and `error`
   colors and its `muted` look, which
   [`[tui.theme]`](#tuitheme--palette-overrides-adr-0032-adr-0153) sets.
@@ -389,6 +410,15 @@ session.
   repeated reports) 0. Each list is left out when it is empty.
 - **`conspectus hook status <harness>`** ends with the
   [health line](#live-state-health).
+- **`--state STATE`** on `conspectus table`, `conspectus tui`, and
+  `conspectus search` keeps only the sessions whose agent is in one of
+  the states, read when the command runs: `waiting`, `ready`, `working`
+  (compacting and starting too), `error`, `unknown` (evidence too old to
+  trust), or `none` (no live state, or ended). Comma-separated or
+  repeated: `conspectus table sessions --state waiting,error`. A mux
+  row of `table mux` stays when an agent it hosts matches, and lists only
+  those agents. `[tui.views.<name>.filters]` takes `state = ["waiting"]`
+  for the TUI.
 
 With `conspectus serve` running, these commands read its snapshot, which
 binds the store again every few seconds; `--refresh` binds the store as
@@ -758,7 +788,9 @@ teardown_grace = "3s"
 - **Filters:** `filters` takes one inline table or an array of tables
   (`[[tui.views.<name>.filters]]`); entries OR together per dimension.
   `max_age` accepts `s`, `m`, `h`, and `d` suffixes; `mux_state` values are
-  `attached`, `ambiguous`, and `unmuxed`. For the PRs view, `pr_branch` takes
+  `attached`, `ambiguous`, and `unmuxed`; `state` values are the agents'
+  live states as `--state` takes them (`waiting`, `ready`, `working`,
+  `error`, `unknown`, `none`). For the PRs view, `pr_branch` takes
   `tracked` and/or `untracked` to keep only PRs with or without a local branch
   (both, or neither, keeps every PR), `pr_state` takes `open` (drafts
   included), `draft`, `merged`, and/or `closed` to keep only PRs in those
@@ -988,7 +1020,7 @@ conspectus columns {sessions|mux|union|prs|forks}
                    [--pager | --no-pager]
                    [--color {auto|always|never}]
 conspectus tui [--view {sessions|mux|prs|pinned|history|search}] [--grouping VALUE] [--sort {hierarchy|recency}]
-               [--harness H]... [--max-age D] [--mux-state S]...
+               [--harness H]... [--max-age D] [--mux-state S]... [--state S]...
                [--scan-root PATH]... [--refresh-interval D] [--no-live-preview]
                [--contains TEXT]
 conspectus declared {list|create|remove|confirm|ignore|override} ...
@@ -999,7 +1031,7 @@ conspectus pin {add|edit|rename|retarget|refresh|move|rm|list|show|migrate} ...
 conspectus rebuild <REF> [--dry-run] [--no-attach] [--session ID]
 conspectus history {list|show|reap|forget} ...
 conspectus search <QUERY> [--source {sessions|panes|all}] [--group {session|message|flat}]
-                         [--tools] [--thinking] [--harness H]...
+                         [--tools] [--thinking] [--harness H]... [--state S]...
                          [--limit N] [--format {table|json}]
 conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach] [--pin [PIN] [--no-launch]]
 conspectus mux launch <HARNESS> --name <NAME> [--cwd PATH] [--argv ARG...]
@@ -1156,8 +1188,9 @@ Flags:
   session, or per matching message across all sessions, newest first,
   with no session grouping.
 - `--tools`, `--thinking`: also search tool calls and output, or thinking.
-- `--harness H` (repeatable), `--max-age DURATION`, `--mux-state STATE`:
-  narrow the sessions searched, with the same meaning as on `table`.
+- `--harness H` (repeatable), `--max-age DURATION`, `--mux-state STATE`,
+  `--state STATE`: narrow the sessions searched, with the same meaning as
+  on `table`.
 - `--limit N`: stop after N results (at least 1).
 - `--format table|json`; `--width N` and `--color auto|always|never`
   shape the table (the match is bold on a terminal).
@@ -2489,10 +2522,10 @@ What the file holds:
   run (`--sort` overrides the sort).
 - `view_states` has an entry for each view the operator has used:
   `filter` and `grouping` as last set (a `--grouping`, `--harness`,
-  `--max-age`, `--mux-state`, or PR filter flag overrides them for the
-  starting view), `expanded` (the rows whose children were showing),
-  and `selected` (the row under the cursor and the rows above it, the
-  top-level one first). The Search view keeps neither `expanded` nor
+  `--max-age`, `--mux-state`, `--state`, or PR filter flag overrides them
+  for the starting view), `expanded` (the rows whose children were
+  showing), and `selected` (the row under the cursor and the rows above
+  it, the top-level one first). The Search view keeps neither `expanded` nor
   `selected`; nothing keeps the right pane's drill or the preview's
   scroll.
 - Rows are named by keys: the row's kind (`group`, `session`, `mux`,

@@ -61,14 +61,17 @@ combines with the controls it sits beside.
    toward `N/M sessions`, and `Clear all filters` (and `F`) clears it.
    A mux passes when an agent attached to it passes, its listed agents
    narrowed to those that do, as for every session predicate, or, when
-   no other session predicate is set, when an agent in one of its panes
-   that no session matches passes. Pinned and History ignore it, as they
-   ignore the other filters.
+   no other session predicate is set, when an agent its mark counts
+   passes: a session whose preferred mux it is, attached by a resolved
+   link or not (an ambiguous one), or an agent in one of its panes that
+   no session matches. So a mux drawn with `!` stays under
+   `agent:waiting`. Pinned and History ignore it, as they ignore the
+   other filters.
 
 3. **Controls: an `agent state` row that steps.** The row sits after
-   `mux state` in every view, as its siblings do, and Space or Enter
-   steps it `any`, `waiting`, `ready`, `working`, `error`, `any`, the
-   values the operator named. A set the command line or the config gave
+   `mux state` in every view, as its siblings do, and Space steps it
+   `any`, `waiting`, `ready`, `working`, `error`, `any`, the values the
+   operator named. A set the command line or the config gave
    (`waiting,error`, `none`) reads as its values and steps to `any`. The
    row is named `agent state`, not `state`, beside `mux state` and the
    PRs view's `PR state`. The status bar's filter chips show it as
@@ -89,7 +92,7 @@ combines with the controls it sits beside.
    the Sessions view (`Float waiting sessions to top`) a session drawn
    with `!` sorts above the rest of its group, of the flat list, and of
    its parent's forks, each part keeping its order; groups do not move.
-   In the Mux view (`Float muxes with a waiting agent to top`) a running
+   In the Mux view (`Float waiting muxes to top`) a running
    mux drawn with `!` (an agent counted on it waits) sorts above the
    other running muxes; stopped muxes stay below them. Where the
    view's other float is on too, waiting comes first and the other float
@@ -117,8 +120,13 @@ combines with the controls it sits beside.
 
 ## Consequences
 
-- With the float on, `project`'s waiting session, an hour old, sits at
-  the top of its group in the showcase, above the newer ones at work.
+- With the float on, `project`'s pinned session, waiting for an hour,
+  rises in the showcase above the two newer sessions at work, below the
+  other waiting one.
+- In the Mux view, `N/M sessions` counts the sessions attached to the
+  listed muxes, as it does under every filter, so a mux listed for an
+  agent it counts but no link attaches (the showcase's `ambiguous`)
+  adds none to `N`.
 - A session whose wait was answered still reads `›` among the floated
   `!` rows, or stays listed under `agent:waiting`, for up to one snapshot
   interval; the mark is right at once and the order catches up at the

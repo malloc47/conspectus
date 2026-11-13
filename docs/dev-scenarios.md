@@ -91,6 +91,7 @@ tui`:
 - `--grouping VALUE` (valid values depend on `--view`)
 - `--harness HARNESS` (repeatable)
 - `--mux-state attached,ambiguous,unmuxed`
+- `--state waiting,ready,working,error,unknown,none`
 - `--max-age DURATION`
 - `--sort {hierarchy|recency}`
 - `--color {auto|always|never}`

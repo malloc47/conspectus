@@ -719,8 +719,14 @@ the operator has not seen draws its `›` bold, the shape unchanged (ADR
 0214): seen once a tmux client attached to its mux after it ended, or,
 for a session with no mux, once the cursor rested on its row for a
 second, and kept seen in the TUI's memory until a later turn ends;
-nothing is persisted. Ordering, grouping, filtering, and the jump key
-are later stories (the plan's section 7.1).
+nothing is persisted. Controls can float the rows marked `!` above the
+rest of their group (Sessions) or above the other running muxes (Mux),
+and narrow the lists to one agent state (`agent state`, `--state` on
+`table`, `tui`, and `search`, `state` in the views' config filters); a
+mux matches through any agent it hosts. Both read every agent's state
+when the tree is built, never on a refill of the marks, so rows keep
+still between operator actions (ADR 0215). No state grouping and no
+Attention view; the jump key is a later story (the plan's section 7.1).
 
 ## Pin Slots
 

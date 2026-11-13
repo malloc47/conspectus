@@ -215,6 +215,9 @@ mux, and the cursor has not rested on it). A group header above the rows
 counts the agents beneath it that wait on you, as `! N`, and a session
 whose agent runs subagents says how many after its label, as `+N` (see
 [Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings)).
+Controls can float the rows marked `!` to the top or list only one
+state (see [Ordering and filtering by live
+state](#ordering-and-filtering-by-live-state)).
 
 ## State words
 
@@ -422,6 +425,32 @@ A Pinned row in a narrow pane keeps its name and its state word:
 │      ⇄ ◉ ledger-pr      merged     5d│
 ```
 
+## Ordering and filtering by live state
+
+Two kinds of Controls rows (`f`) order and narrow the rows by the live
+cell's marks; both are off by default, and each view keeps its own
+settings with its filter between runs.
+
+| Row | Views | What it does |
+|---|---|---|
+| `agent state` | every view, after `mux state` | Space steps `any`, `waiting`, `ready`, `working`, `error`, `any`. A value other than `any` keeps only the sessions whose mark is that state's (`!`, `›`, `»`, `×`), and a running mux while an agent it hosts is in it (attached to it, counted on it as its preferred mux, or in one of its panes that no session matches), so a mux drawn with that mark stays; the agents listed under a mux narrow to those in it. The command line and the config also take `unknown` (`?`) and `none` (`·`), and sets of several (`--state waiting,error`), which the row reads as they are and steps to `any`. Pinned and History ignore it, as they ignore every filter |
+| `[ ] Float waiting sessions to top` | Sessions | The sessions whose mark is `!` sort above the rest of their group, of the flat list, and of their parent's forks; each part keeps its order, and groups do not move. With `Float muxed sessions to top` on too, waiting comes first and the muxed ones lead each part |
+| `[ ] Float waiting muxes to top` | Mux | The running muxes whose mark is `!` sort above the other running muxes, ahead of `Float attached muxes to top`; stopped muxes stay below |
+
+The filter shows in the status bar as `agent:waiting` among the filter
+chips (the PR state's chip is `state:`), and the header then reads
+`matching/total sessions`.
+
+**Rows keep still between your actions.** The order and the rows a list
+shows by live state are read when its tree is built: when you change a
+Controls row, the view, its grouping, or the sort, press `r`, or a new
+snapshot arrives. When an agent's state changes in between, its mark
+changes at once and nothing else does: a session whose wait you answered
+keeps its place among the waiting ones, and one the filter kept stays
+listed, until the tree is next built. Folding builds nothing. On a build
+the cursor stays on its row wherever the row moves; when the row leaves
+the list, the cursor takes the row at its place.
+
 ## Header line
 
 The line above the panes says how fresh the data is and what there is,
@@ -464,7 +493,9 @@ updated 0s ago · 11 sessions · 4 mux  ·  ! 2 …
 Reached with `1`. Groupings (`Ctrl-G` cycles): **graph** (default),
 **workspace**, **repo**, **checkout**, **scan-root** (same as repo), and
 **none**. Within a group, sessions are newest activity first; a control
-floats sessions that have a mux to the top.
+floats sessions that have a mux to the top, and another floats the
+sessions waiting on you above them (see [Ordering and filtering by live
+state](#ordering-and-filtering-by-live-state)).
 
 ### Group header
 
@@ -573,8 +604,10 @@ Reached with `2`. Groupings: **session** (default, a flat list), **host**
 (the same), **repo**, and **workspace**. Muxes are listed by name;
 with recency sorting they sort by their own activity, creation, or last
 attach, as chosen in the controls, and a control floats muxes that have an
-attached agent to the top. Stopped muxes always sort below the
-running ones, most recently seen first.
+attached agent to the top, and another the muxes an agent waits in, above
+those (see [Ordering and filtering by live
+state](#ordering-and-filtering-by-live-state)). Stopped muxes always sort
+below the running ones, most recently seen first.
 
 By default the view lists running muxes, plus stopped muxes that a pin
 points at. A control shows every stopped mux; any narrowing filter

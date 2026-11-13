@@ -290,7 +290,8 @@ synthetic, built from the documented payload shapes.
 | 14 | TUI subagent chip on session rows (ADR 0212) | CSP-854 (done) |
 | 15 | TUI detail pane fields, Pinned and History words (ADR 0213) | CSP-829 (done) |
 | 16 | TUI seen and unseen ready turns (ADR 0214) | CSP-828 (done) |
-| decided | TUI order, jump, notify | CSP-826, CSP-827, CSP-830 |
+| 17 | TUI float waiting first, agent-state filter, `--state` (ADR 0215) | CSP-826 (done) |
+| decided | TUI jump, notify | CSP-827, CSP-830 |
 | parked | Hook-free sources (pane title, `claude agents --json`, tails, other orchestrators) | CSP-831 to CSP-834 |
 
 Follow-ups the stories filed (labels `live-state`, milestone m-26):
@@ -383,9 +384,10 @@ subagents), `MuxSessionRow.live` (the counts), and `MixedRow.live` for
 Pinned, History, and stopped-mux rows, filled by `tui::rows::live::annotate`
 for every view and kept current between snapshots by the TUI's live
 overlay. A rendering story reads those fields; no builder computes live
-state. Because nothing sorts or filters by it yet, an overlay change
-refills the cells in place; a story that sorts, filters, or groups by live
-state must rebuild the tree on such a change instead.
+state. The float and the filter (CSP-826) read the states the build reads
+(`RowFilter.live`) and nothing else: an overlay change still refills the
+cells in place and never rebuilds the tree, so the order and the rows a
+build placed hold until the next build (ADR 0215).
 
 **TUI**
 
@@ -413,9 +415,10 @@ The live cell on session and mux rows and the Pinned words landed with
 CSP-823 (ADR 0209), the group headers' waiting counts with CSP-824
 (ADR 0210), the header's with CSP-825 (ADR 0211), the session rows'
 subagent chip with CSP-854 (ADR 0212), the detail pane's fields, the
-subagents as a count among them, with CSP-829 (ADR 0213), and seen and
-unseen ready turns with CSP-828 (ADR 0214); the rest of the list above
-is still to build, and the CLI and the graph JSON keep the fuller view
+subagents as a count among them, with CSP-829 (ADR 0213), seen and
+unseen ready turns with CSP-828 (ADR 0214), and the float-waiting-first
+controls, the agent-state filter, and `--state` with CSP-826 (ADR
+0215); the rest of the list above is still to build, and the CLI and the graph JSON keep the fuller view
 ([`docs/operations.md`](../../operations.md#live-agent-state)).
 
 The mockups and a recommended default for each are in
@@ -478,8 +481,9 @@ Where the build differs from, or settles, the draft above:
   group headers count (CSP-824, ADR 0210), the header line counts over
   the whole graph (CSP-825, ADR 0211), session rows show running
   subagents (CSP-854, ADR 0212), the detail pane spells out (CSP-829,
-  ADR 0213), and an unseen finished turn draws bold (CSP-828, ADR
-  0214).
+  ADR 0213), an unseen finished turn draws bold (CSP-828, ADR 0214),
+  and Controls floats and filters by when the tree is built (CSP-826,
+  ADR 0215).
 - **CLI surfaces.** An opt-in `live` column on `table sessions` and
   `table mux`, a `live state` section in `node show`, the two lists in
   the graph JSON, and a health line at the end of `hook status`
