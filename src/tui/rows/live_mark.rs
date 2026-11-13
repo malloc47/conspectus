@@ -3,6 +3,7 @@
 use ratatui::style::{Modifier, Style};
 use tuikit::chip::Tone;
 
+use crate::filter::LiveStateKey;
 use crate::model::live::{LiveConfidence, LiveCounts, LiveState};
 use crate::tui::Theme;
 use crate::tui::icons::live;
@@ -35,18 +36,13 @@ impl LiveMark {
         Self::None,
     ];
 
-    /// The mark of a session in `state`. Compacting and starting are work
-    /// under way; a session that exited has nothing to show, like one
-    /// with no evidence.
+    /// The mark of a session in `state`: the value the live-state filter
+    /// reads it as ([`LiveStateKey::of_state`]), so the filter keeps the
+    /// rows drawn with the mark it names. Compacting and starting are
+    /// work under way; a session that exited has nothing to show, like
+    /// one with no evidence.
     pub fn of_state(state: LiveState) -> Self {
-        match state {
-            LiveState::Waiting => Self::Waiting,
-            LiveState::Working | LiveState::Compacting | LiveState::Starting => Self::Working,
-            LiveState::Ready => Self::Ready,
-            LiveState::Error => Self::Error,
-            LiveState::Unknown => Self::Unknown,
-            LiveState::Exited => Self::None,
-        }
+        LiveStateKey::of_state(state).into()
     }
 
     /// The one-cell glyph of the mark.
@@ -100,6 +96,20 @@ impl LiveMark {
             .into_iter()
             .filter(|state| Self::of_state(*state) == self)
             .fold(0u32, |total, state| total.saturating_add(counts.get(state)))
+    }
+}
+
+impl From<LiveStateKey> for LiveMark {
+    /// The mark the filter's value names: one for each.
+    fn from(key: LiveStateKey) -> Self {
+        match key {
+            LiveStateKey::Waiting => Self::Waiting,
+            LiveStateKey::Ready => Self::Ready,
+            LiveStateKey::Working => Self::Working,
+            LiveStateKey::Error => Self::Error,
+            LiveStateKey::Unknown => Self::Unknown,
+            LiveStateKey::None => Self::None,
+        }
     }
 }
 

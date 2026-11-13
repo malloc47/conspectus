@@ -14,7 +14,7 @@ use super::render::{
 };
 use super::table::{agent_session_key_for_label, short_session_id};
 use crate::discovery::current_epoch;
-use crate::filter::{MuxStateKey, SessionMatchInputs};
+use crate::filter::{LiveStates, MuxStateKey, SessionMatchInputs};
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutNode, ForgePrNode, ForkNode, GraphLink, GraphNode,
     GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance, RelationKind,
@@ -104,10 +104,11 @@ pub fn build_agent_rows_from_snapshot(
     let declared_lookup = collect_declared_lookup(snapshot);
     let pr_global = collect_global_pr(snapshot);
     let live_now_ms = super::live::read_time_ms(options.now_epoch);
+    let live = super::live::filter_states(snapshot, options);
 
     let filtered: Vec<&SessionRow<'_>> = sessions
         .iter()
-        .filter(|row| row_matches(options, row, &mux_lookup))
+        .filter(|row| row_matches(options, row, &mux_lookup, &live))
         .collect();
 
     let mut rows: Vec<Vec<String>> = Vec::new();
@@ -224,6 +225,7 @@ fn row_matches(
     options: &RenderOptions,
     row: &SessionRow<'_>,
     mux_lookup: &HashMap<SessionKey, MuxInfo>,
+    live: &LiveStates,
 ) -> bool {
     if !options.filter.has_narrowing_predicates() {
         return true;
@@ -235,6 +237,7 @@ fn row_matches(
         now_epoch: options.now_epoch,
         last_active_epoch: row.agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
+        live_state: live.session(&NodeId::AgentSession(row.agent.id.clone())),
     };
     options.filter.matches_session(&inputs)
 }
@@ -248,9 +251,10 @@ pub fn sessions_passing_filter(
 ) -> std::collections::BTreeSet<(String, String)> {
     let sessions = collect_session_rows(snapshot);
     let mux_lookup = collect_mux_lookup(snapshot);
+    let live = super::live::filter_states(snapshot, options);
     sessions
         .iter()
-        .filter(|row| row_matches(options, row, &mux_lookup))
+        .filter(|row| row_matches(options, row, &mux_lookup, &live))
         .map(|row| {
             (
                 row.agent.harness_key.clone(),

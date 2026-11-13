@@ -372,6 +372,28 @@ fn mux_state_narrows_by_the_derived_state() {
 }
 
 #[test]
+fn state_narrows_by_what_the_agents_are_doing() {
+    // No hook reports anything here, so every session's state is none.
+    let world = world();
+    world
+        .search()
+        .args(["quokka", "--state", "none"])
+        .assert()
+        .success();
+    world
+        .search()
+        .args(["quokka", "--state", "waiting,ready"])
+        .assert()
+        .code(1);
+    world
+        .search()
+        .args(["quokka", "--state", "unseen"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid --state `unseen`"));
+}
+
+#[test]
 fn a_matching_harness_and_age_keep_the_results() {
     let world = world();
     world

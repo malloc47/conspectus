@@ -14,13 +14,19 @@
 //! Evaluation is driven by [`SessionMatchInputs`], a small struct the
 //! caller assembles for each row. The caller owns the cost of looking
 //! up mux state, recency, etc., so the predicate stays pure.
+//!
+//! An agent's live state (ADR 0215) is one more dimension: the caller
+//! reads each session's value from a [`LiveStates`] read once for the
+//! whole build, so every row of one build is judged at one moment.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::model::live::LiveState;
+use crate::model::{GraphSnapshot, LiveTables, MuxSessionId, NodeId};
 use crate::viewer::search::{Grouping, Hit, SessionHits};
 
 /// The sessions a content search matched, by harness and session key.
@@ -189,6 +195,10 @@ pub struct RowFilter {
     pub max_age: Option<Duration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mux_state: Option<MuxStateFilter>,
+    /// Keep only sessions whose agent's live state is one of these
+    /// (ADR 0215), read from [`Self::live`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_state: Option<LiveStateFilter>,
     /// Sessions view: float agent sessions resolved to a mux above
     /// sessions that aren't. Within each of the two resulting groups
     /// the existing within-group sort order is preserved.
@@ -199,6 +209,11 @@ pub struct RowFilter {
     /// within-group sort order is preserved.
     #[serde(skip_serializing_if = "is_false")]
     pub float_attached_muxes_top: bool,
+    /// Sessions and Mux views: float the sessions, or the running muxes,
+    /// whose agents wait on the operator above the rest (ADR 0215),
+    /// ahead of the view's other float. Read from [`Self::live`].
+    #[serde(skip_serializing_if = "is_false")]
+    pub float_waiting_top: bool,
     /// Mux view: list every stopped mux history keeps, below the
     /// running ones. Off (the default) lists only the stopped muxes a
     /// pin points at; the rest live in the History view. Like the
@@ -235,6 +250,14 @@ pub struct RowFilter {
     /// Held by the app, injected when a tree is built, and never saved.
     #[serde(skip)]
     pub content: Option<ContentFilter>,
+    /// Every session's and mux's live state at the moment a tree is
+    /// built, which [`Self::live_state`] and [`Self::float_waiting_top`]
+    /// read: injected by the build, never saved, and empty (every
+    /// session reads `none`) until then. A tree keeps the order and the
+    /// rows it was built with until it is built again, however the
+    /// states move in between (ADR 0215).
+    #[serde(skip)]
+    pub live: LiveStates,
 }
 
 impl RowFilter {
@@ -250,6 +273,7 @@ impl RowFilter {
             && self.pr_state.is_none()
             && !self.float_muxed_sessions_top
             && !self.float_attached_muxes_top
+            && !self.float_waiting_top
             && !self.show_stopped_muxes
             && !self.pinned_only
             && !self.show_pinned_history
@@ -263,7 +287,31 @@ impl RowFilter {
         self.harness.is_some()
             || self.max_age.is_some()
             || self.mux_state.is_some()
+            || self.live_state.is_some()
             || self.content.is_some()
+    }
+
+    /// Whether a predicate other than the live state is set: one that the
+    /// agents a mux's mark counts can't all be judged by (an agent in a
+    /// pane no session matches has no harness, age, or transcript), so
+    /// those agents keep their mux listed only without one.
+    pub fn has_session_only_predicates(&self) -> bool {
+        self.harness.is_some()
+            || self.max_age.is_some()
+            || self.mux_state.is_some()
+            || self.content.is_some()
+    }
+
+    /// Whether a mux is listed for the agents its mark counts, whose live
+    /// states are `counted` ([`LiveStates::mux_agents`]): when the live
+    /// state is the only predicate and one of them passes it (ADR 0215),
+    /// so a mux drawn with a state's mark stays under that state's filter.
+    pub fn admits_mux_agents(&self, counted: &BTreeSet<LiveStateKey>) -> bool {
+        !self.has_session_only_predicates()
+            && self
+                .live_state
+                .as_ref()
+                .is_some_and(|wanted| counted.iter().any(|key| wanted.admits(*key)))
     }
 
     /// Evaluate the filter against an agent session's per-row data.
@@ -281,6 +329,11 @@ impl RowFilter {
         }
         if let Some(mux_state) = &self.mux_state
             && !mux_state.matches(inputs.mux_state)
+        {
+            return false;
+        }
+        if let Some(live_state) = &self.live_state
+            && !live_state.admits(inputs.live_state)
         {
             return false;
         }
@@ -543,6 +596,190 @@ impl MuxStateKey {
     }
 }
 
+/// A session's live state as the filter reads it (ADR 0215): one value
+/// for each mark the TUI's live cell draws, so a session the filter keeps
+/// for `waiting` is one drawn with `!`. The TUI's marks are drawn from
+/// [`Self::of_state`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveStateKey {
+    /// Blocked on the operator.
+    Waiting,
+    /// The turn is over and the agent takes a prompt, seen or not.
+    Ready,
+    /// A turn, a compaction, or a start under way, quiet or not.
+    Working,
+    /// The turn ended on an error.
+    Error,
+    /// Evidence too old to trust.
+    Unknown,
+    /// No evidence, or the session exited.
+    None,
+}
+
+impl LiveStateKey {
+    /// Every value, in the order the command line lists them.
+    pub const ALL: [Self; 6] = [
+        Self::Waiting,
+        Self::Ready,
+        Self::Working,
+        Self::Error,
+        Self::Unknown,
+        Self::None,
+    ];
+
+    /// The value of a session whose effective state is `state`:
+    /// compacting and starting are work under way, and a session that
+    /// exited has nothing to show, like one with no evidence.
+    pub fn of_state(state: LiveState) -> Self {
+        match state {
+            LiveState::Waiting => Self::Waiting,
+            LiveState::Ready => Self::Ready,
+            LiveState::Working | LiveState::Compacting | LiveState::Starting => Self::Working,
+            LiveState::Error => Self::Error,
+            LiveState::Unknown => Self::Unknown,
+            LiveState::Exited => Self::None,
+        }
+    }
+
+    /// The value of a session with effective state `state`, `none`
+    /// without evidence.
+    pub fn of(state: Option<LiveState>) -> Self {
+        state.map_or(Self::None, Self::of_state)
+    }
+
+    /// Parse from the CLI / config text form. Returns `None` for any
+    /// unknown spelling so the caller can raise an actionable error.
+    pub fn from_str_ci(value: &str) -> Option<Self> {
+        let value = value.trim().to_ascii_lowercase();
+        Self::ALL.into_iter().find(|key| key.as_str() == value)
+    }
+
+    /// Stable string form used in chips, config, and CLI output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Waiting => "waiting",
+            Self::Ready => "ready",
+            Self::Working => "working",
+            Self::Error => "error",
+            Self::Unknown => "unknown",
+            Self::None => "none",
+        }
+    }
+
+    /// Every value's spelling, comma-separated, for a message that lists
+    /// what is accepted.
+    pub fn spellings() -> String {
+        Self::ALL
+            .iter()
+            .map(|key| key.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// Set membership over live states. Empty set matches nothing (callers
+/// pass `None` for no constraint).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveStateFilter {
+    Any(Vec<LiveStateKey>),
+}
+
+impl LiveStateFilter {
+    pub fn from_values<I>(values: I) -> Self
+    where
+        I: IntoIterator<Item = LiveStateKey>,
+    {
+        let mut canonical: Vec<LiveStateKey> = values.into_iter().collect();
+        canonical.sort();
+        canonical.dedup();
+        Self::Any(canonical)
+    }
+
+    /// Whether a session whose live state reads `key` passes.
+    pub fn admits(&self, key: LiveStateKey) -> bool {
+        match self {
+            Self::Any(values) => values.contains(&key),
+        }
+    }
+
+    pub fn values(&self) -> &[LiveStateKey] {
+        match self {
+            Self::Any(values) => values,
+        }
+    }
+}
+
+/// Every session's and mux's live state at one moment, as the rows of a
+/// build show it (ADR 0215): what the live-state filter and the
+/// float-waiting order read, read once for the whole build so they agree
+/// with the marks the rows are filled with. Held in memory only.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LiveStates {
+    /// Each session with live state, by its node.
+    sessions: Arc<BTreeMap<NodeId, LiveStateKey>>,
+    /// For each mux, the states of the agents its mark counts: the
+    /// sessions whose preferred mux it is and the agents in its panes no
+    /// session matches.
+    muxes: Arc<BTreeMap<MuxSessionId, BTreeSet<LiveStateKey>>>,
+}
+
+/// The states of a mux no agent counts toward.
+static NO_STATES: BTreeSet<LiveStateKey> = BTreeSet::new();
+
+impl LiveStates {
+    /// The states of `tables`, bound to `snapshot`, read at `now_ms`: a
+    /// session's effective state, and each mux's agents counted as
+    /// [`GraphSnapshot::live_counts_of_mux`] counts them.
+    pub fn read(snapshot: &GraphSnapshot, tables: LiveTables<'_>, now_ms: i64) -> Self {
+        let sessions = tables
+            .nodes
+            .iter()
+            .map(|(node, binding)| {
+                (
+                    node.clone(),
+                    LiveStateKey::of_state(binding.effective(now_ms).state),
+                )
+            })
+            .collect();
+        let muxes = snapshot
+            .live_counts_by_mux(tables, now_ms)
+            .into_iter()
+            .map(|(mux, counts)| {
+                let states = LiveState::ALL
+                    .into_iter()
+                    .filter(|state| counts.get(*state) > 0)
+                    .map(LiveStateKey::of_state)
+                    .collect();
+                (mux, states)
+            })
+            .collect();
+        Self {
+            sessions: Arc::new(sessions),
+            muxes: Arc::new(muxes),
+        }
+    }
+
+    /// The live state of the session `id`: `none` without evidence.
+    pub fn session(&self, id: &NodeId) -> LiveStateKey {
+        self.sessions.get(id).copied().unwrap_or(LiveStateKey::None)
+    }
+
+    /// The states of the agents `mux`'s mark counts, as
+    /// [`GraphSnapshot::live_counts_of_mux`] counts them: empty when none
+    /// has live state.
+    pub fn mux_agents(&self, mux: &MuxSessionId) -> &BTreeSet<LiveStateKey> {
+        self.muxes.get(mux).unwrap_or(&NO_STATES)
+    }
+
+    /// Whether an agent counted on `mux` waits on the operator, so its
+    /// mark is `!`.
+    pub fn mux_waits(&self, mux: &MuxSessionId) -> bool {
+        self.mux_agents(mux).contains(&LiveStateKey::Waiting)
+    }
+}
+
 /// Per-row data the predicate evaluates against. Callers assemble
 /// one of these for each candidate row; the predicate is read-only.
 #[derive(Clone, Copy, Debug)]
@@ -558,6 +795,8 @@ pub struct SessionMatchInputs<'a> {
     /// Session's last-active timestamp (Unix seconds).
     pub last_active_epoch: Option<i64>,
     pub mux_state: MuxStateKey,
+    /// The session's live state, from the [`LiveStates`] of the build.
+    pub live_state: LiveStateKey,
 }
 
 fn matches_max_age(

@@ -11,6 +11,7 @@ fn inputs<'a>(
         now_epoch: Some(1_000_000),
         last_active_epoch: last_active,
         mux_state: mux,
+        live_state: LiveStateKey::None,
     }
 }
 
@@ -65,6 +66,8 @@ fn max_age_filter_at_boundary() {
         now_epoch: Some(1_000_000),
         last_active_epoch: Some(1_000_000 - week.as_secs() as i64),
         mux_state: MuxStateKey::Attached,
+
+        live_state: LiveStateKey::None,
     };
     assert!(filter.matches_session(&just_in));
     // One second older fails.
@@ -87,6 +90,8 @@ fn max_age_admits_when_timestamps_missing() {
         now_epoch: Some(1_000_000),
         last_active_epoch: None,
         mux_state: MuxStateKey::Attached,
+
+        live_state: LiveStateKey::None,
     };
     assert!(filter.matches_session(&no_last));
     let no_now = SessionMatchInputs {
@@ -109,6 +114,8 @@ fn max_age_admits_on_clock_skew() {
         now_epoch: Some(1_000),
         last_active_epoch: Some(2_000),
         mux_state: MuxStateKey::Attached,
+
+        live_state: LiveStateKey::None,
     };
     assert!(filter.matches_session(&future));
 }
@@ -169,6 +176,8 @@ fn intersection_of_all_dimensions() {
         now_epoch: Some(1_000),
         last_active_epoch: Some(970),
         mux_state: MuxStateKey::Unmuxed,
+
+        live_state: LiveStateKey::None,
     };
     assert!(filter.matches_session(&good));
     // Wrong harness.
@@ -415,4 +424,185 @@ fn a_content_filter_is_never_serialized() {
     assert!(!json.contains("found"));
     let back: RowFilter = serde_json::from_str(&json).unwrap();
     assert!(back.content.is_none());
+}
+
+#[test]
+fn every_live_state_reads_as_the_value_of_its_mark() {
+    use crate::model::live::LiveState;
+    let expected = [
+        (LiveState::Waiting, LiveStateKey::Waiting),
+        (LiveState::Ready, LiveStateKey::Ready),
+        (LiveState::Working, LiveStateKey::Working),
+        (LiveState::Compacting, LiveStateKey::Working),
+        (LiveState::Starting, LiveStateKey::Working),
+        (LiveState::Error, LiveStateKey::Error),
+        (LiveState::Unknown, LiveStateKey::Unknown),
+        (LiveState::Exited, LiveStateKey::None),
+    ];
+    assert_eq!(
+        expected.len(),
+        LiveState::ALL.len(),
+        "every state is listed"
+    );
+    for (state, key) in expected {
+        assert_eq!(LiveStateKey::of_state(state), key, "{state:?}");
+        assert_eq!(LiveStateKey::of(Some(state)), key, "{state:?}");
+    }
+    assert_eq!(LiveStateKey::of(None), LiveStateKey::None, "no evidence");
+}
+
+#[test]
+fn live_state_keys_round_trip_their_text_form() {
+    for key in LiveStateKey::ALL {
+        assert_eq!(LiveStateKey::from_str_ci(key.as_str()), Some(key));
+    }
+    assert_eq!(
+        LiveStateKey::from_str_ci(" WAITING "),
+        Some(LiveStateKey::Waiting)
+    );
+    assert_eq!(LiveStateKey::from_str_ci("unseen"), None);
+    assert_eq!(
+        LiveStateKey::spellings(),
+        "waiting, ready, working, error, unknown, none"
+    );
+}
+
+#[test]
+fn a_live_state_filter_admits_the_sessions_in_its_states() {
+    let filter = RowFilter {
+        live_state: Some(LiveStateFilter::from_values([
+            LiveStateKey::Error,
+            LiveStateKey::Waiting,
+            LiveStateKey::Error,
+        ])),
+        ..RowFilter::default()
+    };
+    assert_eq!(
+        filter.live_state.as_ref().map(LiveStateFilter::values),
+        Some([LiveStateKey::Waiting, LiveStateKey::Error].as_slice())
+    );
+    let with = |live_state| SessionMatchInputs {
+        live_state,
+        ..inputs("claude-code", MuxStateKey::Unmuxed, Some(1))
+    };
+    assert!(filter.matches_session(&with(LiveStateKey::Waiting)));
+    assert!(filter.matches_session(&with(LiveStateKey::Error)));
+    for other in [
+        LiveStateKey::Ready,
+        LiveStateKey::Working,
+        LiveStateKey::Unknown,
+        LiveStateKey::None,
+    ] {
+        assert!(!filter.matches_session(&with(other)), "{other:?}");
+    }
+    assert!(filter.has_narrowing_predicates());
+    assert!(!filter.has_session_only_predicates());
+    assert!(!filter.is_empty());
+}
+
+#[test]
+fn the_agents_a_mux_counts_keep_it_only_under_a_lone_live_state_filter() {
+    let states = |keys: &[LiveStateKey]| keys.iter().copied().collect::<BTreeSet<_>>();
+    let waiting = RowFilter {
+        live_state: Some(LiveStateFilter::from_values([LiveStateKey::Waiting])),
+        ..RowFilter::default()
+    };
+    assert!(waiting.admits_mux_agents(&states(&[LiveStateKey::Working, LiveStateKey::Waiting])));
+    assert!(!waiting.admits_mux_agents(&states(&[LiveStateKey::Working])));
+    assert!(!waiting.admits_mux_agents(&states(&[])));
+    let with_harness = RowFilter {
+        harness: Some(HarnessFilter::from_values(["codex"])),
+        ..waiting
+    };
+    assert!(
+        !with_harness.admits_mux_agents(&states(&[LiveStateKey::Waiting])),
+        "the counts can't say which harness waits"
+    );
+    assert!(!RowFilter::default().admits_mux_agents(&states(&[LiveStateKey::Waiting])));
+}
+
+#[test]
+fn the_float_and_the_live_state_filter_are_saved_and_the_states_never_are() {
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    use crate::model::{AgentSessionId, GraphSnapshot, NodeId};
+
+    let session = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "s1"));
+    let mut snapshot = GraphSnapshot::default();
+    snapshot.node_live.insert(
+        session.clone(),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 1_000),
+            Liveness::Alive,
+        ),
+    );
+    let live = LiveStates::read(&snapshot, snapshot.live_tables(), 2_000);
+    assert_eq!(live.session(&session), LiveStateKey::Waiting);
+    let filter = RowFilter {
+        live_state: Some(LiveStateFilter::from_values([LiveStateKey::Waiting])),
+        float_waiting_top: true,
+        live,
+        ..RowFilter::default()
+    };
+    assert!(!filter.is_empty());
+    let json = serde_json::to_string(&filter).expect("serialize");
+    assert_eq!(
+        json,
+        r#"{"live_state":{"any":["waiting"]},"float_waiting_top":true}"#
+    );
+    let back: RowFilter = serde_json::from_str(&json).expect("read");
+    assert_eq!(back.live, LiveStates::default(), "the states are not saved");
+    assert_eq!(
+        back,
+        RowFilter {
+            live: LiveStates::default(),
+            ..filter
+        }
+    );
+    let float = RowFilter {
+        float_waiting_top: true,
+        ..RowFilter::default()
+    };
+    assert!(!float.is_empty(), "Clear all turns the float off");
+    assert!(!float.has_narrowing_predicates(), "a float hides nothing");
+}
+
+#[test]
+fn live_states_read_sessions_panes_and_the_muxes_an_agent_waits_on() {
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    use crate::model::{AgentSessionId, GraphSnapshot, LivePane, MuxSessionId, NodeId};
+
+    let mux = MuxSessionId::new("tmux:scratch".to_string());
+    let quiet = MuxSessionId::new("tmux:quiet".to_string());
+    let binding = |state| {
+        LiveBinding::new(
+            LiveObservation::new(state, LiveSource::Hook, 1_000),
+            Liveness::Alive,
+        )
+    };
+    let mut snapshot = GraphSnapshot::default();
+    snapshot.pane_live.insert(
+        LivePane::new(mux.clone(), Some("%1".into())),
+        binding(LiveState::Waiting),
+    );
+    snapshot.pane_live.insert(
+        LivePane::new(mux.clone(), Some("%2".into())),
+        binding(LiveState::Starting),
+    );
+    snapshot.pane_live.insert(
+        LivePane::new(quiet.clone(), Some("%1".into())),
+        binding(LiveState::Ready),
+    );
+    let live = LiveStates::read(&snapshot, snapshot.live_tables(), 2_000);
+    assert_eq!(
+        live.mux_agents(&mux).iter().copied().collect::<Vec<_>>(),
+        [LiveStateKey::Waiting, LiveStateKey::Working]
+    );
+    assert!(live.mux_waits(&mux));
+    assert!(!live.mux_waits(&quiet));
+    let unknown = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "none"));
+    assert_eq!(live.session(&unknown), LiveStateKey::None, "no evidence");
+    assert!(
+        live.mux_agents(&MuxSessionId::new("tmux:other".to_string()))
+            .is_empty()
+    );
 }

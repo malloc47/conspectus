@@ -168,6 +168,85 @@ fn the_live_columns_show_nothing_for_an_empty_store() {
     );
 }
 
+/// The `column` cell of every body row of `projection`'s table under the
+/// live-state filter for `states`, read at `now_ms`.
+fn kept(
+    snapshot: &GraphSnapshot,
+    projection: Projection,
+    column: &'static str,
+    states: &[conspectus::filter::LiveStateKey],
+    now_ms: i64,
+) -> Vec<String> {
+    use conspectus::filter::{LiveStateFilter, RowFilter};
+    let filter = RowFilter {
+        live_state: Some(LiveStateFilter::from_values(states.iter().copied())),
+        ..RowFilter::default()
+    };
+    render_with(
+        snapshot,
+        projection,
+        &RenderOptions::wide()
+            .with_columns(vec![column])
+            .with_filter(filter)
+            .with_now_epoch(Some(now_ms / 1000)),
+    )
+    .lines()
+    .skip(1)
+    .map(|line| line.trim().to_string())
+    .filter(|line| !line.chars().all(|c| c == '-'))
+    .collect()
+}
+
+#[test]
+fn the_state_filter_keeps_the_rows_whose_agents_are_in_its_states_at_the_read_time() {
+    use conspectus::filter::LiveStateKey;
+    let world = world();
+    let now_ms = read_time_ms();
+    write_live_state(&world, now_ms);
+    let snapshot = world.run().resolved;
+    let sessions = |states: &[LiveStateKey]| {
+        kept(&snapshot, Projection::Agent, "agent", states, now_ms)
+            .into_iter()
+            .map(|label| label.trim_start_matches("claude-code:").to_string())
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(sessions(&[LiveStateKey::Waiting]), ["waiter"]);
+    // Twelve quiet minutes are still work; twenty unchecked ones are not
+    // to be trusted; a gone process and no evidence read as none.
+    assert_eq!(sessions(&[LiveStateKey::Working]), ["builder"]);
+    assert_eq!(sessions(&[LiveStateKey::Unknown]), ["lost"]);
+    let mut none = sessions(&[LiveStateKey::None]);
+    none.sort();
+    assert_eq!(none, ["gone", "unheard"]);
+    let mut either = sessions(&[LiveStateKey::Waiting, LiveStateKey::Unknown]);
+    either.sort();
+    assert_eq!(either, ["lost", "waiter"]);
+    assert!(sessions(&[LiveStateKey::Ready, LiveStateKey::Error]).is_empty());
+
+    // A mux matches when an agent it hosts does; `spare` hosts none.
+    assert_eq!(
+        kept(
+            &snapshot,
+            Projection::Mux,
+            "mux",
+            &[LiveStateKey::Waiting],
+            now_ms
+        ),
+        ["tmux:editor"]
+    );
+    assert!(
+        kept(
+            &snapshot,
+            Projection::Mux,
+            "mux",
+            &[LiveStateKey::Error],
+            now_ms
+        )
+        .is_empty()
+    );
+}
+
 /// The fixture's evidence is from 2026-09-30; read it at noon that day.
 const FIXTURE_NOW_MS: i64 = 1_790_769_600_000;
 

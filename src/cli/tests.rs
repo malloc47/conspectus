@@ -299,6 +299,7 @@ fn filter_args_with(
         harness: harness.into_iter().map(String::from).collect(),
         max_age: max_age.map(String::from),
         mux_state: mux_state.into_iter().map(String::from).collect(),
+        state: Vec::new(),
         pr_branch: None,
         pr_state: Vec::new(),
         contains: None,
@@ -384,6 +385,49 @@ fn filter_args_mux_state_invalid_value_errors_with_choices() {
     let err = args.to_row_filter().unwrap_err().to_string();
     assert!(err.contains("invalid --mux-state"));
     assert!(err.contains("attached, ambiguous, unmuxed"));
+}
+
+#[test]
+fn filter_args_state_takes_every_live_state_value_as_a_set() {
+    use crate::filter::LiveStateKey;
+
+    let mut args = filter_args_with(vec![], None, vec![], None);
+    assert_eq!(args.to_row_filter().expect("none").live_state, None);
+    args.state = vec![
+        "Waiting".to_string(),
+        "error".to_string(),
+        " none ".to_string(),
+        "waiting".to_string(),
+    ];
+    let filter = args.to_row_filter().expect("parse");
+    assert_eq!(
+        filter
+            .live_state
+            .as_ref()
+            .map(|wanted| wanted.values().to_vec()),
+        Some(vec![
+            LiveStateKey::Waiting,
+            LiveStateKey::Error,
+            LiveStateKey::None
+        ])
+    );
+    assert!(filter.has_narrowing_predicates(), "it narrows the rows");
+    for value in ["ready", "working", "unknown"] {
+        args.state = vec![value.to_string()];
+        assert!(args.to_row_filter().is_ok(), "{value}");
+    }
+}
+
+#[test]
+fn filter_args_state_invalid_value_errors_with_choices() {
+    let mut args = filter_args_with(vec![], None, vec![], None);
+    args.state = vec!["unseen".to_string()];
+    let err = args.to_row_filter().unwrap_err().to_string();
+    assert!(err.contains("invalid --state `unseen`"), "{err}");
+    assert!(
+        err.contains("waiting, ready, working, error, unknown, none"),
+        "{err}"
+    );
 }
 
 #[test]

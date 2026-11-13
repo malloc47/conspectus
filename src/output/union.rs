@@ -75,11 +75,12 @@ pub fn build_union_rows_from_snapshot(
     );
 
     let filter_active = options.filter.has_narrowing_predicates();
+    let live = super::live::filter_states(snapshot, options);
     for (row, full_short) in rows_data.iter().zip(body_full_ids.iter()) {
         if filter_active {
             match row.kind {
                 UnionKind::Agent => {
-                    if !agent_matches_filter(row, &preferred_mux, options) {
+                    if !agent_matches_filter(row, &preferred_mux, options, &live) {
                         continue;
                     }
                 }
@@ -106,6 +107,7 @@ fn agent_matches_filter(
     row: &UnionRow<'_>,
     preferred_mux: &HashMap<SessionKey, PreferredMux>,
     options: &RenderOptions,
+    live: &crate::filter::LiveStates,
 ) -> bool {
     let Some(agent) = row.agent else {
         return false;
@@ -119,6 +121,7 @@ fn agent_matches_filter(
         now_epoch: options.now_epoch,
         last_active_epoch: agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
+        live_state: live.session(&crate::model::NodeId::AgentSession(agent.id.clone())),
     })
 }
 

@@ -24,6 +24,24 @@ pub(crate) fn read_time_ms(now_epoch: Option<i64>) -> i64 {
     })
 }
 
+/// Every session's and mux's live state in `snapshot`, read when `options`
+/// reads it, for the filter's live-state predicate (ADR 0215): the same
+/// moment as the `live` cells. Nothing is read when the filter does not
+/// ask.
+pub(crate) fn filter_states(
+    snapshot: &GraphSnapshot,
+    options: &super::render::RenderOptions,
+) -> crate::filter::LiveStates {
+    if options.filter.live_state.is_none() {
+        return crate::filter::LiveStates::default();
+    }
+    crate::filter::LiveStates::read(
+        snapshot,
+        snapshot.live_tables(),
+        read_time_ms(options.now_epoch),
+    )
+}
+
 /// `state`, or `state:detail` when the state has a detail, in the
 /// vocabulary's own names (`waiting:permission`, `ready:finished`).
 pub(crate) fn state_label(effective: &EffectiveLive) -> String {

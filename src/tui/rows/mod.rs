@@ -1327,6 +1327,9 @@ pub(crate) fn session_matches_filter(
         now_epoch: now,
         last_active_epoch: agent.node.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
+        live_state: filter
+            .live
+            .session(&crate::model::NodeId::AgentSession(agent.id.clone())),
     })
 }
 
@@ -1390,14 +1393,19 @@ impl<'a> TreeInputs<'a> {
 /// projection changes pull it from `App` state.
 ///
 /// Every view's rows then take their entities' live state, read now
-/// ([`live::annotate`]).
-pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
+/// ([`live::annotate`]). The builders filter and float by the same
+/// states, read at the same moment (ADR 0215): the order and the rows a
+/// tree is built with hold until it is built again, while the marks
+/// refill in place.
+pub(crate) fn build_tree_for_view(mut inputs: TreeInputs<'_>) -> RowTree {
     let pinned_only =
         inputs.filter.pinned_only && matches!(inputs.view, View::Sessions | View::Mux | View::Prs);
     let pinned = pinned_only.then(|| pinned_node_set(inputs.snapshot));
     let content = inputs.filter.content.clone();
     let snapshot = inputs.snapshot;
-    let live = live::LiveValues::at(snapshot, inputs.live, tree_current_unix_ms(), inputs.seen);
+    let now_ms = tree_current_unix_ms();
+    let live = live::LiveValues::at(snapshot, inputs.live, now_ms, inputs.seen);
+    inputs.filter.live = crate::filter::LiveStates::read(snapshot, inputs.live, now_ms);
     let mut tree = build_tree_for_view_unfiltered(inputs);
     if let Some(content) = &content {
         content::annotate(&mut tree, snapshot, content);

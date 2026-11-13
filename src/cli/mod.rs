@@ -508,6 +508,13 @@ pub(super) struct FilterArgs {
     /// Legal values: `attached`, `ambiguous`, `unmuxed`.
     #[arg(long = "mux-state", value_name = "STATE", value_delimiter = ',')]
     mux_state: Vec<String>,
+    /// Narrow by what each session's agent is doing now, as its live
+    /// state reads at this moment: `waiting`, `ready`, `working`,
+    /// `error`, `unknown` (evidence too old to trust), or `none` (no live
+    /// state, or the session ended). Comma-separated or repeatable. A mux
+    /// matches when an agent it hosts does.
+    #[arg(long = "state", value_name = "STATE", value_delimiter = ',')]
+    state: Vec<String>,
     /// PRs view: keep only PRs that have (`tracked`) or lack
     /// (`untracked`) a local branch.
     #[arg(long = "pr-branch", value_name = "STATE")]
@@ -584,11 +591,11 @@ impl FilterArgs {
 
     /// Convert the raw flag values into a [`crate::filter::RowFilter`].
     /// Returns an error when a value fails to parse (max-age
-    /// duration, mux-state spelling).
+    /// duration, mux-state or live-state spelling).
     pub(super) fn to_row_filter(&self) -> Result<crate::filter::RowFilter> {
         use crate::filter::{
-            HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
-            RowFilter,
+            HarnessFilter, LiveStateFilter, LiveStateKey, MuxStateFilter, MuxStateKey,
+            PrBranchFilter, PrStateFilter, PrStateKey, RowFilter,
         };
         let harness = if self.harness.is_empty() {
             None
@@ -616,6 +623,21 @@ impl FilterArgs {
             }
             Some(MuxStateFilter::from_values(keys))
         };
+        let live_state = if self.state.is_empty() {
+            None
+        } else {
+            let mut keys = Vec::with_capacity(self.state.len());
+            for raw in &self.state {
+                let key = LiveStateKey::from_str_ci(raw).ok_or_else(|| {
+                    anyhow!(
+                        "invalid --state `{raw}`; expected one of {}",
+                        LiveStateKey::spellings()
+                    )
+                })?;
+                keys.push(key);
+            }
+            Some(LiveStateFilter::from_values(keys))
+        };
         let pr_branch = match self.pr_branch.as_deref() {
             Some(raw) => Some(PrBranchFilter::from_str_ci(raw).ok_or_else(|| {
                 anyhow!("invalid --pr-branch `{raw}`; expected one of tracked, untracked")
@@ -640,6 +662,7 @@ impl FilterArgs {
             harness,
             max_age,
             mux_state,
+            live_state,
             pr_branch,
             pr_state,
             ..RowFilter::default()

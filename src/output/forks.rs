@@ -33,6 +33,8 @@ struct ParentInfo {
 struct ChildAgent {
     /// Display-form `NodeId` of the child agent.
     node_id: String,
+    /// The child agent's node, whose live state the filter reads.
+    node: NodeId,
     harness_key: String,
     session_key: String,
     last_active_epoch: Option<i64>,
@@ -66,6 +68,7 @@ pub fn build_fork_rows_from_snapshot(
     );
 
     let filter_active = options.filter.has_narrowing_predicates();
+    let live = super::live::filter_states(snapshot, options);
     // Resolved child-agent metadata is only needed when filter
     // is active — without a narrowing predicate the fork row
     // keeps the total `children` count (which includes
@@ -97,6 +100,7 @@ pub fn build_fork_rows_from_snapshot(
                     .as_ref()
                     .expect("populated when filter_active"),
                 options,
+                &live,
             );
             if visible == 0 {
                 continue;
@@ -122,6 +126,7 @@ fn visible_child_count(
     resolved: &HashMap<String, Vec<ChildAgent>>,
     candidate_counts: &HashMap<String, usize>,
     options: &RenderOptions,
+    live: &crate::filter::LiveStates,
 ) -> usize {
     let Some(children) = resolved.get(&fork.node_id_display) else {
         return 0;
@@ -136,6 +141,7 @@ fn visible_child_count(
                 now_epoch: options.now_epoch,
                 last_active_epoch: child.last_active_epoch,
                 mux_state: MuxStateKey::from_candidate_count(candidate_count),
+                live_state: live.session(&child.node),
             })
         })
         .count()
@@ -275,6 +281,7 @@ fn collect_resolved_child_agents_per_fork(
             .or_default()
             .push(ChildAgent {
                 node_id: target_display,
+                node: target_id.clone(),
                 harness_key: agent.harness_key.clone(),
                 session_key: agent.id.session_key.clone(),
                 last_active_epoch: agent.last_active_epoch,
