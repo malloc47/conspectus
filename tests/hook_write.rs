@@ -317,6 +317,18 @@ fn a_session_start_records_live_state_and_attribution_without_a_word() {
 }
 
 #[test]
+fn a_claude_code_record_carries_no_version_it_cannot_know() {
+    let world = World::new();
+    let mut cmd = world.hook_in_tmux("claude-code");
+    cmd.env("CLAUDE_CODE_VERSION", "2.1.322");
+    run_silently(cmd, session_start());
+
+    let record = world.spool_record();
+    assert_eq!(record["session_key"], SESSION);
+    assert!(record.get("harness_version").is_none(), "{record}");
+}
+
+#[test]
 fn a_state_event_touches_no_socket_no_process_and_no_spool() {
     let world = World::new();
     run_silently(world.hook_in_tmux("claude-code"), session_start());

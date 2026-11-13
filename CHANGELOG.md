@@ -828,6 +828,12 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A Claude Code hook record no longer claims a version.** `hook write
+  claude-code` filled the record's `harness_version` from
+  `CLAUDE_CODE_VERSION`, a variable Claude Code does not set, so the
+  field was always empty while the code suggested otherwise. Claude Code
+  documents no version for its hooks, so the record now carries none;
+  opencode and Pi records still carry their plugin's version.
 - **A stuck daemon no longer hangs a command or the TUI.** A `conspectus
   serve` that took a request and never answered made `status`,
   `refresh`, `graph`, `table`, `node show`, and the TUI's refresh wait

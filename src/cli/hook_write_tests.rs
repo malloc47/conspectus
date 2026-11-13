@@ -411,3 +411,20 @@ fn an_exported_pid_is_a_number_above_init() {
         assert_eq!(parse_exported_pid(value), None, "{value:?}");
     }
 }
+
+#[test]
+fn a_claude_code_record_takes_no_version_whatever_the_environment_says() {
+    // Every variable is set, the undocumented `CLAUDE_CODE_VERSION`
+    // included; only a plugin's own variable is read.
+    let everything = |name: &str| Some(format!("{name}=9.9.9"));
+    assert_eq!(harness_version_from("claude-code", everything), None);
+    assert_eq!(harness_version_from("codex", everything), None);
+    assert_eq!(
+        harness_version_from("opencode", everything).as_deref(),
+        Some("CONSPECTUS_OPENCODE_HOOK_VERSION=9.9.9")
+    );
+    assert_eq!(
+        harness_version_from("pi", everything).as_deref(),
+        Some("CONSPECTUS_PI_HOOK_VERSION=9.9.9")
+    );
+}

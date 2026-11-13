@@ -97,7 +97,8 @@ pub(super) struct WriterEnv {
     pub(super) process: Option<HarnessProcess>,
     /// The tmux pane the writer runs in; `None` outside tmux.
     pub(super) tmux: Option<TmuxEnv>,
-    /// The version the harness exported, if any.
+    /// The version of the Conspectus plugin that ran the hook, for a
+    /// harness whose plugin exports one.
     pub(super) harness_version: Option<String>,
 }
 
@@ -422,17 +423,26 @@ pub(super) fn harness_binaries(harness: &str) -> Vec<&'static str> {
         .unwrap_or_default()
 }
 
-/// Environment variable Conspectus consults for a harness's
-/// version string when writing a hook sidecar record. Read
-/// through a helper (rather than inline in `HookWriteArgs::run`)
-/// so the per-harness mapping stays in one place.
+/// The version string of `harness`'s hook record, from the variable
+/// `var` reads: the version of the Conspectus plugin that ran the hook,
+/// for a harness whose plugin exports one (opencode, Pi). Claude Code
+/// documents no version for its hooks, in their input or their
+/// environment, so its record carries none rather than one that is
+/// never there.
+pub(super) fn harness_version_from(
+    harness: &str,
+    var: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    let name = match harness {
+        "opencode" => "CONSPECTUS_OPENCODE_HOOK_VERSION",
+        "pi" => "CONSPECTUS_PI_HOOK_VERSION",
+        _ => return None,
+    };
+    var(name)
+}
+
 fn harness_version_env(harness: &str) -> Option<String> {
-    match harness {
-        "claude-code" => std::env::var("CLAUDE_CODE_VERSION").ok(),
-        "opencode" => std::env::var("CONSPECTUS_OPENCODE_HOOK_VERSION").ok(),
-        "pi" => std::env::var("CONSPECTUS_PI_HOOK_VERSION").ok(),
-        _ => None,
-    }
+    harness_version_from(harness, |name| std::env::var(name).ok())
 }
 
 /// The variable a harness sets to its own pid in the environment of the
