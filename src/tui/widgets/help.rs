@@ -108,7 +108,7 @@ fn live_state_legend(theme: &Theme) -> HelpSection {
             let (name, blurb): (&str, std::borrow::Cow<'static, str>) = match mark {
                 LiveMark::Waiting => (
                     "Waiting on you",
-                    "a permission prompt, a question, a plan, or other input; attach to answer it"
+                    "a permission prompt, a question, a plan, or other input; attach to answer it. Controls can float these to the top, or list only the sessions in one state (agent state)"
                         .into(),
                 ),
                 LiveMark::Working => (

@@ -34,8 +34,8 @@ use tuikit::settings_panel::{Row, Section, SettingsPanel};
 use tuikit::text_prompt::{PromptResult, TextPrompt};
 
 use crate::filter::{
-    HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
-    RowFilter,
+    HarnessFilter, LiveStateFilter, LiveStateKey, MuxStateFilter, MuxStateKey, PrBranchFilter,
+    PrStateFilter, PrStateKey, RowFilter,
 };
 use crate::tui::{Grouping, Modal, Msg, Sort, View};
 
@@ -55,6 +55,15 @@ pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
     MuxStateKey::Attached,
     MuxStateKey::Ambiguous,
     MuxStateKey::Unmuxed,
+];
+
+/// The values the agent-state row steps through after `any`, in order
+/// (ADR 0215). The command line and the config take the others too.
+pub const LIVE_STATE_STEPS: &[LiveStateKey] = &[
+    LiveStateKey::Waiting,
+    LiveStateKey::Ready,
+    LiveStateKey::Working,
+    LiveStateKey::Error,
 ];
 
 /// All views displayed in the View section, in stable order. This
@@ -119,6 +128,8 @@ pub enum ControlsCursor {
     FilterHarness,
     FilterMaxAge,
     FilterMuxState,
+    /// Steps the agents' live-state filter (ADR 0215).
+    FilterLiveState,
     /// Edits the content query that narrows the session lists.
     FilterContent,
     /// Search-view-only: list results per session or per message.
@@ -134,6 +145,9 @@ pub enum ControlsCursor {
     FilterFloatMuxedSessions,
     /// Mux-view-only checkbox: float attached muxes to the top.
     FilterFloatAttachedMuxes,
+    /// Sessions- and Mux-view checkbox: float what waits on the operator
+    /// to the top (ADR 0215).
+    FilterFloatWaiting,
     /// Mux-view-only checkbox: list every stopped mux, not just pinned ones.
     FilterShowStoppedMuxes,
     FilterPinnedOnly,
@@ -395,6 +409,12 @@ fn filters_section(ctx: &ControlsContext<'_>) -> Section<ControlsCursor, Msg> {
             mux_state_value(filter),
             Msg::OpenControlsEditor(ControlsEditor::MuxState),
         ),
+        Row::cycle(
+            ControlsCursor::FilterLiveState,
+            "agent state",
+            live_state_value(filter),
+            toggle(|f| f.live_state = next_live_state(f.live_state.as_ref())),
+        ),
     ];
     if matches!(
         ctx.view,
@@ -414,6 +434,12 @@ fn filters_section(ctx: &ControlsContext<'_>) -> Section<ControlsCursor, Msg> {
             filter.float_muxed_sessions_top,
             toggle(|f| f.float_muxed_sessions_top = !f.float_muxed_sessions_top),
         ));
+        rows.push(Row::checkbox(
+            ControlsCursor::FilterFloatWaiting,
+            "Float waiting sessions to top",
+            filter.float_waiting_top,
+            toggle(|f| f.float_waiting_top = !f.float_waiting_top),
+        ));
     }
     if matches!(ctx.view, View::Mux) {
         rows.push(Row::checkbox(
@@ -421,6 +447,12 @@ fn filters_section(ctx: &ControlsContext<'_>) -> Section<ControlsCursor, Msg> {
             "Float attached muxes to top",
             filter.float_attached_muxes_top,
             toggle(|f| f.float_attached_muxes_top = !f.float_attached_muxes_top),
+        ));
+        rows.push(Row::checkbox(
+            ControlsCursor::FilterFloatWaiting,
+            "Float waiting muxes to top",
+            filter.float_waiting_top,
+            toggle(|f| f.float_waiting_top = !f.float_waiting_top),
         ));
         rows.push(Row::checkbox(
             ControlsCursor::FilterShowStoppedMuxes,
@@ -721,6 +753,34 @@ fn max_age_value(filter: &RowFilter) -> String {
     filter
         .max_age
         .map_or_else(|| marks::NO_VALUE.to_string(), format_duration_for_input)
+}
+
+/// How the agent-state row reads: `any`, or the states it keeps.
+fn live_state_value(filter: &RowFilter) -> String {
+    match &filter.live_state {
+        Some(LiveStateFilter::Any(values)) if !values.is_empty() => values
+            .iter()
+            .map(|key| key.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => "any".to_string(),
+    }
+}
+
+/// The agent-state filter after one step of its row: `any`, then each of
+/// [`LIVE_STATE_STEPS`] alone, then `any` again. A set that is not one of
+/// them, as the command line or the config can give, steps to `any`.
+pub fn next_live_state(current: Option<&LiveStateFilter>) -> Option<LiveStateFilter> {
+    let Some(current) = current else {
+        return Some(LiveStateFilter::from_values([LIVE_STATE_STEPS[0]]));
+    };
+    let at = match current.values() {
+        [only] => LIVE_STATE_STEPS.iter().position(|step| step == only),
+        _ => None,
+    }?;
+    LIVE_STATE_STEPS
+        .get(at + 1)
+        .map(|next| LiveStateFilter::from_values([*next]))
 }
 
 fn mux_state_value(filter: &RowFilter) -> String {

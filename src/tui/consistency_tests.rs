@@ -36,6 +36,9 @@
 //! - **Feedback says how much it matters**: the status line, toasts, and
 //!   the Messages log style each report by its severity, and a refused or
 //!   failed gesture never reports like a success (`feedback`).
+//! - **Rows keep still between operator actions**: the order and the
+//!   rows a list shows by live state are read when its tree is built, so
+//!   a store change refills the marks and moves nothing (`live_order`).
 //!
 //! # Diagnosis of the reported defects
 //!
@@ -105,6 +108,7 @@ mod layout;
 mod lifecycle;
 mod live;
 mod live_detail;
+mod live_order;
 mod marks;
 mod menus;
 mod parity;
