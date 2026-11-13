@@ -4,7 +4,7 @@ title: Regenerate the README screenshots so they show the live-state cell
 status: To Do
 assignee: []
 created_date: '2026-11-12 21:29'
-updated_date: '2026-11-12 21:29'
+updated_date: '2026-11-13 00:24'
 labels:
   - live-state
   - ls-tui
@@ -32,3 +32,9 @@ CSP-823 gave the showcase world live state for every mark and drew a live-state 
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Since CSP-829 (ADR 0213) the session screenshot's right pane also lists the live fields (`state`, `since`, `source`, `evidence`, `subagents`) and shows fewer transcript lines, and the `related-preview` key script walks ten fields (`jjjjjljjjj<Tab>jjjjjjjjjj`); the recipe and tests/showcase_screenshots.rs already use it.
+<!-- SECTION:NOTES:END -->
