@@ -14,7 +14,12 @@ behavior, read:
 - `README.md` for the project summary
 
 Use `nix develop` for local development. The shell provides Rust tooling and
-standard checks.
+standard checks. An agent, whose every command starts a fresh shell, runs
+tools through `scripts/dev-env.sh` instead (`scripts/dev-env.sh just check`,
+or `. scripts/dev-env.sh && ...` for a command line that runs several): it
+loads the dev shell's environment from a cache that follows `flake.nix`,
+`flake.lock`, and `rust-toolchain.toml`. Don't wrap commands in
+`nix develop --command`.
 
 ## Design Guardrails
 
@@ -204,17 +209,21 @@ Before a feature branch, squash merge, or direct commit lands on `main`:
 - The repository is a Cargo workspace (the `conspectus` package at the root and
   the `tuikit` framework crate under `crates/`), so every cargo check below runs
   with `--workspace`; a run without it can leave the framework crate untested.
-- Relevant tests pass. Run at least
-  `cargo test --workspace --all-targets --all-features`; prefer
-  `cargo nextest run --workspace --all-targets --all-features` for full
-  validation.
+- Relevant tests pass: run
+  `cargo nextest run --workspace --all-targets --all-features` locally
+  (`just check` runs it). CI also runs
+  `cargo test --workspace --all-targets --all-features`, which catches a
+  test that fails only when it shares a process with others; `just test`
+  runs it locally.
 - Formatting and linting pass: `cargo fmt --all -- --check` and
   `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
 - Rustdoc passes with warnings as errors:
   `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps`.
 - The framework builds, lints, and tests on its own with its cargo features
   off and with `richtext` alone: `just tuikit-features` (CI runs the same
-  commands).
+  commands). `just check` runs it only when the working tree or a commit
+  since the merge base with `main` touches `crates/tuikit` or a root file
+  its build reads, and says so when it skips it.
 - The framework still leaves this repository cleanly:
   `just separation-rehearsal --self-test` (CI runs it).
 - `git diff --check` passes for every change.
