@@ -286,6 +286,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0101](0101-typed-errors-on-the-library-facade.md) | Typed Errors On The Library Facade | Accepted |
 | [0016](0016-distribution-policy.md) | Distribution Policy | Accepted (amended by 0110) |
 | [0110](0110-pinned-rust-toolchain.md) | Pinned Rust Toolchain | Accepted |
+| [0223](0223-the-dev-profile-keeps-line-tables-and-optimizes-dependencies.md) | The Dev Profile Keeps Line Tables And Optimizes Dependencies | Accepted |
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
 | [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164); framework-owned in part |
 | [0068](0068-snapshot-fixture-mode.md) | Fixture Mode For The Snapshot Tool | Accepted |

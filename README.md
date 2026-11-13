@@ -727,6 +727,11 @@ The TUI's controls, theme, and key tables are the framework crate
 `just separation-rehearsal --self-test` checks that it still stands alone (CI
 runs it).
 
+Development builds keep line tables only, so backtraces name files and lines
+but a debugger shows no local variables, and they optimize the dependencies
+(ADR 0223). For a debugger with locals, build with
+`CARGO_PROFILE_DEV_DEBUG=true CARGO_TARGET_DIR=target/full-debug`.
+
 [docs/dev-scenarios.md](docs/dev-scenarios.md) covers the fixture workflow,
 the three test-world surfaces (`ReplayWorld`, the captured-fixture corpus,
 and named `dev_scenarios`), and the `showcase` scenario that exercises most

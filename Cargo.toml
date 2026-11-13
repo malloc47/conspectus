@@ -212,3 +212,18 @@ tuikit = { path = "crates/tuikit", features = ["testkit"] }
 tui-pantry = { workspace = true }
 predicates = { workspace = true }
 tempfile = { workspace = true }
+
+# The dev profile, and through it the test profile (ADR 0223). Line tables
+# keep file and line in panics and backtraces, but not the local variables a
+# debugger shows; full debug info made up nine tenths of each test binary
+# and most of its link time. Dependencies are optimized because the tests
+# spend most of their CPU in them; the workspace members stay at
+# `opt-level = 0`, so an edit to them compiles as fast as before. For a
+# debugger with locals: `CARGO_PROFILE_DEV_DEBUG=true` with a
+# `CARGO_TARGET_DIR` of its own. Cargo reads profiles only here, at the
+# workspace root, and the framework's export does not carry them.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 1
