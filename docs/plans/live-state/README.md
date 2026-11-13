@@ -444,8 +444,9 @@ noted.
   an ingest leaves two active links for one pane until the next cycle. Fixed
   (CSP-818): the spool keeps one record per pane, the constant is gone (no
   time limit applies), and an ingest supersedes the pane's older link.
-- Socket clients have no timeouts. `hook write`'s ingest call is now bounded
-  at 2 s (CSP-810); the others are CSP-836.
+- Socket clients have no timeouts. Fixed: `hook write`'s ingest call is
+  bounded at 2 s (CSP-810), and every other request by what it can take
+  (CSP-836, ADR 0219).
 - The OpenCode 1.x plugin forwards child-session events (a pane briefly names
   the child); the 2.x plugin listens for an event that no longer exists. Both
   fixed (CSP-816): only root sessions' events are attributed, and the dead

@@ -1234,6 +1234,25 @@ the current directory.
 running `conspectus serve` and rebuild in-process) and `--no-cache`
 (don't write the rebuilt graph to `graph.bin`).
 
+A running `conspectus serve` that takes a request and never answers (one
+stuck behind its own work, or stopped) does not hang anything that asks
+it. Each request gives up after a bound that fits it, counted afresh for
+each read and write on the socket:
+
+| Request | Gives up after | Then |
+| :- | :- | :- |
+| The snapshot that `graph`, `table`, `node show`, and the TUI read | 5 seconds | Rebuilds in-process, silently, as with no daemon |
+| `status` | 5 seconds | Says the daemon did not answer, and exits 1 |
+| `refresh --class mux` or `--class harness` | 15 seconds | Says the daemon did not answer, and exits 1 |
+| `refresh --class git`, `--class forge`, or a whole-graph `refresh` | 2 minutes | Says the daemon did not answer, and exits 1 |
+| The refresh the TUI asks for after a hand-off, `r`, or `Ctrl-R` | The `refresh` bound of each class | Shows an in-process rebuild and logs a warning ([TUI messages](#tui-messages)) |
+| A hook writer's session start | 2 seconds | Writes the hook spool itself |
+
+A timed-out `refresh` does not refresh in-process: the daemon may still
+finish it, and a second rebuild would race it for `graph.bin`. Run
+`conspectus status` to see whether the daemon answers at all, and restart
+it if it does not.
+
 Worktree operations (`list` is read-only; the rest delegate to a
 mutation backend) are covered end to end in `docs/worktrees.md`.
 

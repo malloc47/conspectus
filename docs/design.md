@@ -1744,6 +1744,14 @@ in-process discovery otherwise. Both paths surface which one
 they took so operators can see at a glance whether the daemon
 is responding.
 
+Every client request is bounded by what it can take (ADR 0219):
+5 s for `snapshot` and `status`, which the daemon answers from
+memory; 15 s for a `mux` or `harness` refresh; 2 minutes for any
+other refresh; 2 s for `hook_ingest`. A snapshot reader that times
+out falls back as with no daemon; `status` and `refresh` report
+the timeout, and a timed-out `refresh` does not race the daemon
+with an in-process rebuild.
+
 The "absence is not an error" guarantee is structural rather
 than incidental: every reader can either talk to the daemon
 *or* read the on-disk `graph.bin` artifact (see "Graph Snapshot

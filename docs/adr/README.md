@@ -115,7 +115,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0035](0035-graph-to-view-query-layer.md) | Graph-to-View Query Layer | Accepted (amended; Stages 2 and 3 superseded by 0082) |
 | [0036](0036-embedded-query-engine-selection.md) | Embedded Query Engine Selection | Superseded by 0082 |
 | [0037](0037-snapshot-persistence-sqlite.md) | Snapshot Persistence Under SQLite | Superseded by 0082 |
-| [0038](0038-cli-server-transport-wal.md) | CLI / Server Transport Under WAL | Partially superseded by 0082 |
+| [0038](0038-cli-server-transport-wal.md) | CLI / Server Transport Under WAL | Partially superseded by 0082 (client bounds refined by 0219) |
 | [0039](0039-query-feature-gate.md) | Library API Query Feature Gate | Superseded by 0082 |
 | [0040](0040-distribution-amendment-sqlite.md) | Distribution Policy Amendment for SQLite | Superseded by 0082 |
 | [0042](0042-vector-search-sqlite-vec.md) | Vector Search Via `sqlite-vec` | Superseded by 0082 |
@@ -135,6 +135,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0148](0148-opt-in-transcript-search-index.md) | Opt-In Transcript Search Index | Accepted (decided, not built) |
 | [0149](0149-two-level-search-current-and-wider-context.md) | Two-Level Search: Current Context And Wider Context | Accepted (amended by 0157, 0158, 0198) |
 | [0201](0201-tui-a-hand-off-freeze-ends-per-mux-and-at-once-when-the-mux-is-still-there.md) | A Hand-Off Freeze Ends Per Mux, And At Once When The Mux Is Still There | Accepted |
+| [0219](0219-socket-clients-bound-each-request-by-what-it-can-take.md) | Socket Clients Bound Each Request By What It Can Take | Accepted |
 
 ## CLI output and exports
 
