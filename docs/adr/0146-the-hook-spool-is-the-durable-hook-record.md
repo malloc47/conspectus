@@ -105,7 +105,10 @@ applied. Everything above stands except as follows.
    supersedes it. Attribution ignores it when its process is no longer
    running, when its mux was created after it, or when the mux's active
    pane runs another harness. That is what "stale" means in the
-   consequences above.
+   consequences above. (Amended by
+   [ADR 0220](0220-a-hook-record-is-judged-by-the-harness-its-own-pane-runs.md):
+   the harness gate reads the record's own pane when the mux probe
+   listed it.)
 6. **An ingest supersedes the pane's older link.** The hook-sidecar pass
    seeds its per-pane winners from the graph's Active hook links. An
    ingested record that wins its pane overrides the older link and

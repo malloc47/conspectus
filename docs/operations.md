@@ -84,8 +84,10 @@ The spool lives under:
 The records are not project intent and should not be committed. A
 record counts for its pane until a newer one from that pane replaces it,
 however old it is; it is ignored once its agent process has exited, when
-its tmux session was created after it, or when the session's active
-pane now runs a different harness. The spool keeps at most 256 records, dropping the
+its tmux session was created after it, or when its own pane now runs a
+different harness (the discovery probe lists every pane's program, so an
+agent in one split pane is not judged by what the pane beside it runs).
+The spool keeps at most 256 records, dropping the
 oldest. Older per-event JSON records in the same directory remain
 readable as a compatibility path.
 

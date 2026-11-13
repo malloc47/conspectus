@@ -837,6 +837,14 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **Agents in split panes of one tmux session are both attributed.**
+  A hook record was ignored when the session's *active* pane ran a
+  different harness, so with Codex in one pane and Claude Code beside
+  it only one of them was linked to the mux, and switching panes
+  swapped which. Discovery now lists every pane once per tmux server
+  per cycle (`tmux list-panes -a`, one more cheap call) and judges a
+  record by what its own pane runs. A record whose own pane now runs
+  another harness is still ignored.
 - **A Claude Code hook record no longer claims a version.** `hook write
   claude-code` filled the record's `harness_version` from
   `CLAUDE_CODE_VERSION`, a variable Claude Code does not set, so the

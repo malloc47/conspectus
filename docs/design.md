@@ -447,9 +447,9 @@ facts.
 Hook sidecar records are local, rebuildable observations written by opt-in
 harness hooks outside project trees. A record refines mux/session attribution
 for its pane until a fresher record for that pane supersedes it; a stale one,
-whose process is gone, whose mux was created after it, or whose mux's active
-pane runs another harness, is ignored rather than overriding process evidence.
-No time limit applies (ADR 0146).
+whose process is gone, whose mux was created after it, or whose own pane now
+runs another harness (by the mux probe's pane listing, ADR 0220), is ignored
+rather than overriding process evidence. No time limit applies (ADR 0146).
 A record written from a harness's background process, such as opencode 2.x's
 shared service, carries no pane context and never produces mux links; opencode
 2.x pane attribution comes from the plugin's TUI entrypoint, which runs in the

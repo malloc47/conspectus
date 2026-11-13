@@ -217,7 +217,11 @@ code. The decision to attribute through `conspectus hook write` stands.
   active attribution when its process is no longer running, when its mux
   was created after it, or when the mux's active pane runs another
   harness; otherwise it stays evidence until a fresher record for its
-  pane supersedes it.
+  pane supersedes it. (Amended by
+  [ADR 0220](0220-a-hook-record-is-judged-by-the-harness-its-own-pane-runs.md):
+  the harness gate reads the record's own pane when the mux probe
+  listed it, and the active pane only when the record names no pane or
+  no pane listing is at hand.)
 - **The hook's own pane.** `hook write` asks tmux about the pane named
   by `TMUX_PANE` (`display-message -t`), so the record's tmux session and
   pane are the hook's. Untargeted, tmux answers a caller with no
