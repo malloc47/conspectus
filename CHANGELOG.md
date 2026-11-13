@@ -161,6 +161,14 @@ forms, lists, readers, and keys look and behave alike.
   in every view that lists sessions; mux rows show none. It hides once a
   session has exited or can't be told, as `conspectus table` does. Rows
   with it drop their preview a few cells sooner.
+- **Finished turns you haven't seen are bold.** A `›` (and Pinned's
+  `ready`) draws bold until you have looked at the finished turn:
+  attached a tmux client to its mux after it ended, or, for a session
+  with no mux, rested the cursor on its row for a second. A mux's `›` is
+  bold while any of its ready agents' turns is unseen, and the detail
+  pane's `state` ends with `unseen` or `seen`. A seen turn stays seen
+  until the agent finishes another; nothing is written, so a restarted
+  TUI reads the turns of sessions with no mux as unseen again.
 - **The detail pane says what an agent is doing.** A session with live
   state lists `state` (its row's mark, then the state and detail in
   words, such as `! waiting · permission`), `since`, `source`, and

@@ -714,9 +714,13 @@ at `+9+`, never on a mux row (ADR 0212). The detail pane lists a
 session's `state` (led by its row's mark), `since`, `source`,
 `evidence` (fresh, quiet, or stale), and running `subagents`, and a mux's
 `agents` counts and `pane_agents`, read from the values the rows were
-filled with, and none of them without evidence (ADR 0213). Ordering,
-grouping, filtering, the jump key, and seen and unseen are later stories
-(the plan's section 7.1).
+filled with, and none of them without evidence (ADR 0213). A ready turn
+the operator has not seen draws its `›` bold, the shape unchanged (ADR
+0214): seen once a tmux client attached to its mux after it ended, or,
+for a session with no mux, once the cursor rested on its row for a
+second, and kept seen in the TUI's memory until a later turn ends;
+nothing is persisted. Ordering, grouping, filtering, and the jump key
+are later stories (the plan's section 7.1).
 
 ## Pin Slots
 

@@ -283,6 +283,18 @@ state has its own shape, so it reads without color:
 
 - **Quiet** work (no news past the quiet window) draws the same `»`
   dimmed.
+- **Unseen** finished turns draw the same `›` bold, until you have looked
+  at them; then it is plain. For an agent in a mux, looking is attaching
+  a tmux client to that mux after the turn ended, through Conspectus or
+  not (the mark turns plain at the refresh that lists the attach). For a
+  session with no mux, it is resting the cursor on one of its rows, in
+  any view, for a second; scrolling past does not count. A turn you have
+  seen stays seen until the agent finishes another, but only in this
+  TUI: nothing is written, so after a restart the finished turns of
+  sessions with no mux read unseen again. A mux's `›` is bold while any
+  of its ready agents' turns is unseen, and the detail pane's `state`
+  says `unseen` or `seen`. On the cursor row, which is bold anyway, only
+  the detail pane tells them apart.
 - **A mux** shows the state of its agents that needs you first: waiting,
   then error, then ready, then working, then the rest. Under a mux with
   several agents, each agent's row shows its own mark.
@@ -309,8 +321,8 @@ state has its own shape, so it reads without color:
   in.
 - **The detail pane** spells it out. A session with live state lists,
   after `status`: `state`, its row's mark and then the state and detail
-  in words (`! waiting · permission`, `› ready · finished`, `? unknown ·
-  stale`); `since`, when that state began (`5m ago`); `source`, what
+  in words (`! waiting · permission`, `› ready · finished · unseen`, `?
+  unknown · stale`); `since`, when that state began (`5m ago`); `source`, what
   reported it (`hook`); `evidence`, `fresh`, `quiet`, or `stale`, the
   last two dimmed along with the state's words; and `subagents` (`2
   active`) while the row shows `+N`. A mux lists `agents`, its mark and
