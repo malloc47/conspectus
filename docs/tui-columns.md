@@ -451,6 +451,38 @@ listed, until the tree is next built. Folding builds nothing. On a build
 the cursor stays on its row wherever the row moves; when the row leaves
 the list, the cursor takes the row at its place.
 
+**`W` finds what waits.** It moves the cursor to the agent that has waited
+on you longest, and each press to the next, by when each wait began,
+wrapping: the agents the header's `! N` counts. It lands on the row of
+the view on screen that stands for the agent (its session row, a pin on
+it, or, in the Mux view, its mux's row when the mux has no row for it;
+an agent in a pane no session matches is on its mux's row), opening the
+groups above it, or switches to Sessions (Mux for a pane's agent) when
+the view lists no such row. The status line says which of how many it
+reached, and the status bar names `W next waiting` while anything waits.
+From the top of the showcase, the first press opens Ungrouped, whose
+session has waited two hours:
+
+<!-- frame: keys="W" width=170 height=30 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
+│  ▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                   │
+│      ●   showcase   claude       1m  ›  ⊸  Showcase: agent-deck composite launcher│
+│  ▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)  ! 1              │
+│  ▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                   │
+│  ▶ ◆   bare-project   ~/checkouts/bare-project              (1)                   │
+│  ▶ ◆   project        ~/repos/project                       (4)  ! 2  ▲           │
+│  ▼     Ungrouped                                            (1)  ! 1              │
+│►     ●   showcase   codex        7d  !  ∘  Showcase: orphan session with no check…│
+```
+
+and the status line under it says where it went:
+
+<!-- frame: pane=status keys="W" width=170 height=30 -->
+```text
+1 of 4 waiting, since 2h ago
+```
+
 ## Header line
 
 The line above the panes says how fresh the data is and what there is,

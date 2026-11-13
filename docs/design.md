@@ -725,8 +725,12 @@ and narrow the lists to one agent state (`agent state`, `--state` on
 `table`, `tui`, and `search`, `state` in the views' config filters); a
 mux matches through any agent it hosts. Both read every agent's state
 when the tree is built, never on a refill of the marks, so rows keep
-still between operator actions (ADR 0215). No state grouping and no
-Attention view; the jump key is a later story (the plan's section 7.1).
+still between operator actions (ADR 0215). `W` moves the cursor to the
+agent waiting longest, then the next, wrapping, from any view: to its
+row in the view on screen (a pin on it, in Mux its mux's row, a pane's
+agent on its mux), else in Sessions or Mux, with the groups above it
+opened and the status line saying where it went (ADR 0216). No state
+grouping and no Attention view (the plan's section 7.1).
 
 ## Pin Slots
 

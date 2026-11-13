@@ -366,6 +366,29 @@ A `·` on every row means no harness reports live state yet: turn it on as
 in [Turning live state on](#turning-live-state-on). The TUI picks up a new
 state within about a second, with or without `conspectus serve`.
 
+### Finding what waits
+
+- **`! N` in the header** says how many agents wait on you anywhere; a
+  group header's `! N` says how many wait beneath it.
+- **`W` goes to the one that has waited longest**, from any view and
+  either pane, and each press goes on to the next, longest wait first,
+  back to the first after the last. It lands on the session's row in the
+  view you are in, opening the groups above it: a session row, a pin on
+  it, or, in the Mux view, its mux's row when the mux shows its only
+  agent inline. An agent in a pane no session matches yet is reached on
+  its mux's row. When your view does not list the session (Pinned without
+  a pin on it, History, a filter that hides it), `W` switches to Sessions
+  (to Mux for a pane's agent) and the status line says so; `Backspace`
+  goes back. The status line says which it reached (`2 of 4 waiting,
+  since 1h ago`); with nothing waiting, or every waiting session hidden
+  by the views' filters, it says so and the cursor stays. Then `Enter` or
+  `a` attaches as usual. The status bar shows `W next waiting` while
+  anything waits.
+- **Controls** floats the waiting sessions (or muxes) to the top of
+  their groups, or lists only one state: see the bullets above.
+- **From a shell,** `conspectus table sessions --state waiting --columns
+  +live` lists them with their wait (`waiting:permission 12m`).
+
 ### Where live state shows
 
 An entry describes one session. It shows on the session Conspectus

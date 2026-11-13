@@ -190,6 +190,17 @@ forms, lists, readers, and keys look and behave alike.
   while the marks change at once. `--state waiting,ready,…` on `table`,
   `tui`, and `search` (also `unknown` and `none`), and `state = [...]` in
   `[tui.views.<name>.filters]`, filter the same way.
+- **`W` jumps to the agent waiting on you longest.** From any view, `W`
+  moves the cursor to the session that has waited longest, opening the
+  groups above it, and each press moves on to the next, wrapping. It
+  stays in your view when the view lists the session (a pin on it, or in
+  the Mux view its mux's row) and otherwise switches to Sessions, saying
+  so (`Backspace` goes back); an agent no session matches yet is reached
+  on its mux. The status line says which of how many it reached and since
+  when, or why it stayed; the status bar shows `W next waiting` while
+  anything waits, which on a narrow screen can push the sort or grouping
+  setting off it. The showcase now has four waiting sessions in three
+  groups.
 
 ### Changed
 
