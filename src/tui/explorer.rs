@@ -42,10 +42,11 @@ use crate::model::{
 };
 use crate::output::table::node_short_id;
 use crate::tui::icons::{NodeKind, node_kind_style};
-use crate::tui::rows::shorten_home;
+use crate::tui::rows::{LiveSign, LiveValues, shorten_home};
 use crate::tui::theme::Theme;
 
 pub(crate) mod grid;
+mod live;
 mod source;
 
 pub use source::{Graph, GraphExplorer, GraphSource};
@@ -65,6 +66,11 @@ pub struct ExplorerInputs<'a> {
     /// Current unix epoch for relative ages (`4m ago`). `None` renders
     /// timestamps as unknown.
     pub now: Option<i64>,
+    /// The live values the left pane's rows were filled with
+    /// ([`RowTree::live`](crate::tui::rows::RowTree::live)), so a node's
+    /// live fields say what its row's mark says. A node they hold nothing
+    /// for has no live fields.
+    pub live: &'a LiveValues,
 }
 
 /// Build the explorer view model for the given node id. Returns
@@ -75,14 +81,15 @@ pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
     let kind = NodeKind::from(node);
     let title_line = title_line(inputs.snapshot, node);
     let short_id = node_short_id(&id);
-    let core_fields = core_fields(inputs.snapshot, node, inputs.home, inputs.now);
-    let all_fields = all_fields(inputs.snapshot, node, inputs.home, inputs.now);
+    let core_fields = core_fields(inputs.snapshot, node, inputs.home, inputs.now, inputs.live);
+    let all_fields = all_fields(inputs.snapshot, node, inputs.home, inputs.now, inputs.live);
     let upstream = build_explorer(
         inputs.snapshot,
         &id,
         Direction::Upstream,
         inputs.home,
         inputs.now,
+        inputs.live,
     );
     let downstream = build_explorer(
         inputs.snapshot,
@@ -90,6 +97,7 @@ pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
         Direction::Downstream,
         inputs.home,
         inputs.now,
+        inputs.live,
     );
     let mut groups = upstream.groups;
     groups.extend(downstream.groups);
@@ -165,6 +173,14 @@ pub struct CoreField {
     /// resolves to a `repo` / `workspace` / `checkout` node, without
     /// stuffing that metadata into the value string.
     pub kind_chip: Option<NodeKind>,
+    /// The live-state mark the value leads with, drawn as the left
+    /// pane's live cell draws it, so a field and the row's mark look
+    /// alike.
+    pub live_mark: Option<LiveSign>,
+    /// `true` when a real value recedes, in the theme's muted look:
+    /// evidence that has gone quiet or is too old to trust. Unlike a
+    /// placeholder it is still copied.
+    pub receding: bool,
     /// The raw value, typed for its Preview (ADR 0112 §2). `None`
     /// previews the node the field belongs to.
     pub preview: Option<FieldValue>,
@@ -215,6 +231,8 @@ impl CoreField {
             annotation: None,
             cut_at: None,
             kind_chip: None,
+            live_mark: None,
+            receding: false,
             preview: None,
         }
     }
@@ -227,6 +245,8 @@ impl CoreField {
             annotation: None,
             cut_at: None,
             kind_chip: None,
+            live_mark: None,
+            receding: false,
             preview: None,
         }
     }
@@ -242,6 +262,16 @@ impl CoreField {
 
     fn with_kind_chip(mut self, kind: NodeKind) -> Self {
         self.kind_chip = Some(kind);
+        self
+    }
+
+    fn with_live_mark(mut self, sign: LiveSign) -> Self {
+        self.live_mark = Some(sign);
+        self
+    }
+
+    fn receding_when(mut self, receding: bool) -> Self {
+        self.receding = receding;
         self
     }
 
@@ -1035,13 +1065,14 @@ fn core_fields(
     node: &GraphNode,
     home: Option<&Path>,
     now: Option<i64>,
+    live: &LiveValues,
 ) -> Vec<CoreField> {
     match node {
         GraphNode::Repo(r) => repo_core(r, home),
         GraphNode::Checkout(c) => checkout_core(c, home),
         GraphNode::Workspace(w) => workspace_core(w, home),
-        GraphNode::AgentSession(s) => agent_session_core(snapshot, s, home, now),
-        GraphNode::MuxSession(m) => mux_session_core(snapshot, m, home, now),
+        GraphNode::AgentSession(s) => agent_session_core(snapshot, s, home, now, live),
+        GraphNode::MuxSession(m) => mux_session_core(snapshot, m, home, now, live),
         GraphNode::Pin(p) => pin_core(p, home),
         GraphNode::RuntimeProcess(p) => runtime_process_core(p, home, now),
         GraphNode::Branch(b) => branch_core(b),
@@ -1055,8 +1086,9 @@ fn all_fields(
     node: &GraphNode,
     home: Option<&Path>,
     now: Option<i64>,
+    live: &LiveValues,
 ) -> Vec<CoreField> {
-    let mut fields = core_fields(snapshot, node, home, now);
+    let mut fields = core_fields(snapshot, node, home, now, live);
     let extras = extra_fields(snapshot, node, home, now);
     for extra in extras {
         if fields.iter().any(|f| f.label == extra.label) {
@@ -1182,6 +1214,7 @@ fn agent_session_core(
     s: &AgentSessionNode,
     home: Option<&Path>,
     now: Option<i64>,
+    live: &LiveValues,
 ) -> Vec<CoreField> {
     let id_node = NodeId::AgentSession(s.id.clone());
     let mut fields = vec![
@@ -1220,6 +1253,9 @@ fn agent_session_core(
         });
     }
     fields.push(status);
+    if let Some(cell) = live.session(&id_node) {
+        fields.extend(live::session_fields(cell, now));
+    }
     fields
 }
 
@@ -1267,6 +1303,7 @@ fn mux_session_core(
     m: &MuxSessionNode,
     home: Option<&Path>,
     now: Option<i64>,
+    live: &LiveValues,
 ) -> Vec<CoreField> {
     // `id` carries the external mux session name (e.g. the raw tmux
     // session id), mirroring the agent-session detail's external
@@ -1306,6 +1343,7 @@ fn mux_session_core(
         Some(epoch) => CoreField::timestamp("last_active", epoch, now),
         None => CoreField::placeholder("last_active", marks::NO_VALUE),
     });
+    fields.extend(live::mux_fields(live, &m.id));
     fields
 }
 
@@ -1416,6 +1454,8 @@ fn runtime_process_core(
         annotation: None,
         cut_at: None,
         kind_chip: None,
+        live_mark: None,
+        receding: false,
         preview: p.pid.map(FieldValue::Process),
     });
     let command_field = match &p.command {
@@ -1626,6 +1666,7 @@ fn build_explorer(
     direction: Direction,
     home: Option<&Path>,
     now: Option<i64>,
+    live: &LiveValues,
 ) -> RelationshipExplorer {
     let mut groups_by_key: BTreeMap<(RelationKind, String), GroupBuilder> = BTreeMap::new();
     for link in &snapshot.candidate_links {
@@ -1677,7 +1718,7 @@ fn build_explorer(
 
     let groups = groups_by_key
         .into_values()
-        .map(|builder| finalize_group(snapshot, focused, direction, builder, home, now))
+        .map(|builder| finalize_group(snapshot, focused, direction, builder, home, now, live))
         .collect();
     RelationshipExplorer { groups }
 }
@@ -1701,6 +1742,7 @@ fn finalize_group(
     builder: GroupBuilder,
     home: Option<&Path>,
     now: Option<i64>,
+    live: &LiveValues,
 ) -> RelationshipGroup {
     let GroupBuilder {
         relation,
@@ -1786,7 +1828,7 @@ fn finalize_group(
                 |n| neighbor_display_label(n, home),
             );
             let preview = neighbor_node
-                .map(|n| core_fields(snapshot, n, home, now))
+                .map(|n| core_fields(snapshot, n, home, now, live))
                 .unwrap_or_default();
             let evidence = backing
                 .iter()

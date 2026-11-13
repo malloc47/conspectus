@@ -75,12 +75,14 @@ fn the_showcase_screens_render_real_previews_with_stable_paths_and_ages() {
     let session = frame(scratch.path(), "jjjjjljjjj");
     assert!(session.contains("~/repos/project"), "{session}");
     assert!(session.contains("active · last 1h ago"), "{session}");
+    assert!(session.contains("! waiting · question"), "{session}");
     assert!(
-        session.contains("What's on feature/extra that isn't on main yet?"),
+        session.contains("Expand the notes into a release summary"),
         "{session}"
     );
 
-    let related = frame(scratch.path(), "jjjjjljjjj<Tab>jjjjj");
+    // Past the session's ten fields, its live state among them.
+    let related = frame(scratch.path(), "jjjjjljjjj<Tab>jjjjjjjjjj");
     assert!(related.contains("feature/extra"), "{related}");
     assert!(related.contains(" M notes.md"), "{related}");
 

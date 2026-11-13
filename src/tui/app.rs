@@ -837,8 +837,9 @@ impl App {
     }
 
     /// The app's data as the explorer reads it: the snapshot, the theme,
-    /// whether link rows show their edge meta, and the left pane's
-    /// selection. `None` before the first snapshot.
+    /// whether link rows show their edge meta, the left pane's
+    /// selection, and the live values its rows show. `None` before the
+    /// first snapshot.
     pub fn graph_source(&self) -> Option<GraphSource<'_>> {
         Some(GraphSource {
             snapshot: self.handle.as_ref()?.snapshot(),
@@ -846,6 +847,7 @@ impl App {
             theme: self.theme(),
             edge_meta: self.edge_meta_visible,
             left: self.tree_state.selected(),
+            live: &self.tree.live,
         })
     }
 

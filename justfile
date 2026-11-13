@@ -103,8 +103,9 @@ screenshots:
     }
     # A session and its transcript.
     shot session-transcript "jjjjjljjjj"
-    # The same session's Related row: the evidence, then the checkout's git status.
-    shot related-preview "jjjjjljjjj<Tab>jjjjj"
+    # The same session's Related row (past its ten fields, live state among
+    # them): the evidence, then the checkout's git status.
+    shot related-preview "jjjjjljjjj<Tab>jjjjjjjjjj"
     # A repo row: its recent commits and remotes.
     shot repo-history "jjjjj"
     # The mux view: a tmux session and its pane.

@@ -27,6 +27,7 @@ fn cell(state: LiveState) -> LiveCell {
         confidence: LiveConfidence::Fresh,
         since_ms: 0,
         subagents: 0,
+        source: crate::model::live::LiveSource::Hook,
     }
 }
 

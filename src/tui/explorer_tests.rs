@@ -432,6 +432,7 @@ fn build(snapshot: &GraphSnapshot, target: &NodeId, home: Option<&Path>) -> Node
         target,
         home,
         now: Some(TEST_NOW),
+        live: &LiveValues::default(),
     })
     .expect("view exists")
 }
@@ -446,6 +447,7 @@ fn unknown_node_returns_none() {
             target: &phantom,
             home: None,
             now: Some(TEST_NOW),
+            live: &LiveValues::default(),
         })
         .is_none()
     );

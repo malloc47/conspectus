@@ -74,6 +74,7 @@ fn a_cell_is_the_effective_state_beside_the_observations_facts() {
             confidence: LiveConfidence::Fresh,
             since_ms: NOW_MS - 5 * MINUTE_MS,
             subagents: 2,
+            source: LiveSource::Hook,
         }
     );
 }

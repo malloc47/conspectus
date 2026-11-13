@@ -75,8 +75,9 @@ pub(crate) fn kind_chip_span(kind: Option<NodeKind>, theme: &Theme) -> Span<'sta
 }
 
 /// A field as a property row: its label and whole value, cut where the
-/// field says, receding when it is a placeholder, its kind glyph beside
-/// the label, and its annotation.
+/// field says, receding when it is a placeholder or says its evidence is
+/// not fresh, its kind glyph or live-state mark beside the label, and its
+/// annotation. The mark is drawn as the left pane's live cell draws it.
 pub(crate) fn field_row(field: &CoreField, theme: &Theme) -> PropertyRow {
     let mut row = PropertyRow::new(field.label, field.value.clone());
     if let Some(cells) = field.cut_at {
@@ -85,8 +86,14 @@ pub(crate) fn field_row(field: &CoreField, theme: &Theme) -> PropertyRow {
     if field.placeholder {
         row = row.placeholder();
     }
+    if field.receding {
+        row = row.style(Style::default().add_modifier(theme.muted));
+    }
     if field.kind_chip.is_some() {
         row = row.glyph(kind_chip_span(field.kind_chip, theme));
+    }
+    if let Some(sign) = field.live_mark {
+        row = row.glyph(Span::styled(sign.glyph(), sign.style(theme)));
     }
     if let Some(annotation) = field.annotation {
         row = row.annotation(annotation);

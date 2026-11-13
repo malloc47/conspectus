@@ -9,15 +9,17 @@
 //! TUI bound from the store since) at one moment: an effective state
 //! depends on the time it is read at.
 //!
-//! The rows carry the values; the left pane draws them
-//! ([`super::LiveSign`]) and no builder reads them.
+//! The rows carry the values, and the tree keeps the whole set it filled
+//! them from ([`RowTree::live`]), which the detail pane reads, so a
+//! session's fields there say what its row's mark says; the left pane
+//! draws them ([`super::LiveSign`]) and no builder reads them.
 
 use std::collections::BTreeMap;
 
 use crate::model::live::{
-    LiveBinding, LiveConfidence, LiveCounts, LiveDetail, LiveObservation, LiveState,
+    LiveBinding, LiveConfidence, LiveCounts, LiveDetail, LiveObservation, LiveSource, LiveState,
 };
-use crate::model::{GraphNode, GraphSnapshot, LiveTables, MuxSessionId, NodeId};
+use crate::model::{GraphNode, GraphSnapshot, LivePane, LiveTables, MuxSessionId, NodeId};
 
 use super::{LiveMark, LiveSign, RowKind, RowTree};
 
@@ -29,10 +31,14 @@ pub struct LiveCell {
     pub detail: Option<LiveDetail>,
     /// Whether the evidence is fresh, quiet, or too old to trust.
     pub confidence: LiveConfidence,
-    /// When the observed state began, Unix epoch milliseconds.
+    /// When the state shown began, Unix epoch milliseconds: the recorded
+    /// start, or the latest evidence when the read rules put another
+    /// state in the recorded one's place, as `conspectus node show` says.
     pub since_ms: i64,
     /// Active child agents.
     pub subagents: u16,
+    /// What reported the state.
+    pub source: LiveSource,
 }
 
 impl LiveCell {
@@ -40,16 +46,15 @@ impl LiveCell {
     pub fn of(binding: &LiveBinding, now_ms: i64) -> Self {
         let effective = binding.effective(now_ms);
         let LiveObservation {
-            since_ms,
-            subagents,
-            ..
+            subagents, source, ..
         } = binding.observation;
         Self {
             state: effective.state,
             detail: effective.detail,
             confidence: effective.confidence,
-            since_ms,
+            since_ms: crate::output::live::shown_since_ms(binding, &effective),
             subagents,
+            source,
         }
     }
 
@@ -79,11 +84,12 @@ pub enum MixedLive {
 }
 
 /// The live values of one snapshot's entities at one moment: a cell for
-/// each entry of the live table and counts for each mux an entry counts
-/// toward.
+/// each entry of the live tables (a session's, or a pane's no session
+/// matches) and counts for each mux an entry counts toward.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct LiveValues {
+pub struct LiveValues {
     cells: BTreeMap<NodeId, LiveCell>,
+    panes: BTreeMap<LivePane, LiveCell>,
     counts: BTreeMap<MuxSessionId, LiveCounts>,
     /// Every agent of the tables waiting on the operator.
     waiting: usize,
@@ -94,20 +100,17 @@ impl LiveValues {
     /// the rule of [`GraphSnapshot::live_counts_of_mux`].
     pub(crate) fn at(snapshot: &GraphSnapshot, tables: LiveTables<'_>, now_ms: i64) -> Self {
         let cells = cells_at(tables.nodes, now_ms);
-        let waits = |sign: LiveSign| sign.mark == LiveMark::Waiting;
-        let sessions = cells
+        let panes = cells_at(tables.panes, now_ms);
+        let waiting = cells
             .values()
-            .filter(|cell| waits(LiveSign::of_session(Some(**cell))))
-            .count();
-        let panes = tables
-            .panes
-            .values()
-            .filter(|binding| waits(LiveSign::of_session(Some(LiveCell::of(binding, now_ms)))))
+            .chain(panes.values())
+            .filter(|cell| LiveSign::of_session(Some(**cell)).mark == LiveMark::Waiting)
             .count();
         Self {
             cells,
+            panes,
             counts: snapshot.live_counts_by_mux(tables, now_ms),
-            waiting: sessions + panes,
+            waiting,
         }
     }
 
@@ -126,6 +129,18 @@ impl LiveValues {
     /// A mux's counts; empty without evidence.
     pub(crate) fn mux(&self, id: &MuxSessionId) -> LiveCounts {
         self.counts.get(id).copied().unwrap_or_default()
+    }
+
+    /// The agents seen in panes of `mux` that no session matches, each
+    /// with the pane it runs in, in pane order.
+    pub(crate) fn panes_of<'a>(
+        &'a self,
+        mux: &'a MuxSessionId,
+    ) -> impl Iterator<Item = (&'a LivePane, LiveCell)> + 'a {
+        self.panes
+            .iter()
+            .filter(move |(pane, _)| pane.mux == *mux)
+            .map(|(pane, cell)| (pane, *cell))
     }
 
     /// The value a row standing for `node` carries.
@@ -154,11 +169,13 @@ pub(crate) fn cells_at<K: Clone + Ord>(
 }
 
 /// Fill in the live value of every session, mux, and mixed row of
-/// `tree` from `values`, and the tree's count of the agents anywhere
-/// that wait. A pin's row carries the value of the entity it points at.
-/// Rows of other kinds carry none.
+/// `tree` from `values`, the tree's count of the agents anywhere that
+/// wait, and the values themselves, which the detail pane reads. A pin's
+/// row carries the value of the entity it points at. Rows of other kinds
+/// carry none.
 pub(crate) fn annotate(tree: &mut RowTree, snapshot: &GraphSnapshot, values: &LiveValues) {
     tree.waiting_anywhere = values.waiting();
+    tree.live = values.clone();
     for row in &mut tree.rows {
         match &mut row.kind {
             RowKind::AgentSession(session) => {

@@ -35,7 +35,7 @@ pub mod prs;
 pub mod search;
 pub mod sessions;
 
-pub use live::{LiveCell, MixedLive};
+pub use live::{LiveCell, LiveValues, MixedLive};
 pub use live_mark::{LiveMark, LiveSign};
 pub use pr_status::PrStatus;
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
@@ -112,6 +112,10 @@ pub struct RowTree {
     /// session and pane-only agent, listed by this view or not. The
     /// header's waiting count.
     pub waiting_anywhere: usize,
+    /// The live values the rows were filled with, for every entity of
+    /// the live tables, listed by this view or not: what the detail pane
+    /// says about a node's live state, so it agrees with the node's row.
+    pub live: LiveValues,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]

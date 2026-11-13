@@ -38,6 +38,7 @@ fn session(alias: &str, state: Option<LiveState>, subagents: u16) -> AgentSessio
             confidence: LiveConfidence::Fresh,
             since_ms: 0,
             subagents,
+            source: crate::model::live::LiveSource::Hook,
         }),
     }
 }

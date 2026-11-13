@@ -5,10 +5,11 @@
 //! rows are built, [`App::poll_live`] once a tick. When the overlay's
 //! table changes (a store rewrite, or an agent's process found gone), or
 //! time alone moves a state, the rows already built take their new live
-//! values in place. Nothing else about a row depends
-//! on its live state, so the tree is not rebuilt, and the selection and
-//! folds stay as they are; once rows are sorted, filtered, or grouped by
-//! live state, a change has to rebuild the tree instead.
+//! values in place, and so do the detail pane's live fields. Nothing else
+//! about a row depends on its live state, so the tree is not rebuilt, and
+//! the selection and folds stay as they are; once rows are sorted,
+//! filtered, or grouped by live state, a change has to rebuild the tree
+//! instead.
 
 use super::*;
 use crate::tui::live_overlay::LiveOverlay;
@@ -48,7 +49,9 @@ impl App {
         }
     }
 
-    /// Give the rows on screen their live values at `now_ms`.
+    /// Give the rows on screen their live values at `now_ms`, and the
+    /// detail pane's node its live fields from them, in place: the
+    /// explorer keeps its cursor, fold, and frames.
     fn refill_live(&mut self, now_ms: i64) {
         let Some(handle) = &self.handle else {
             return;
@@ -57,5 +60,6 @@ impl App {
         let values =
             crate::tui::rows::live::LiveValues::at(snapshot, self.live.table(snapshot), now_ms);
         crate::tui::rows::live::annotate(&mut self.tree, snapshot, &values);
+        self.with_explorer(|explorer, source| explorer.refresh(source));
     }
 }

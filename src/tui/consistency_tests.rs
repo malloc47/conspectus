@@ -104,6 +104,7 @@ mod keys;
 mod layout;
 mod lifecycle;
 mod live;
+mod live_detail;
 mod marks;
 mod menus;
 mod parity;

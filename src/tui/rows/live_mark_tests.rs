@@ -10,6 +10,7 @@ fn cell(state: LiveState, confidence: LiveConfidence) -> LiveCell {
         confidence,
         since_ms: 0,
         subagents: 0,
+        source: crate::model::live::LiveSource::Hook,
     }
 }
 

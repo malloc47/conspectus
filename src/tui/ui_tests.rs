@@ -1009,6 +1009,8 @@ fn a_field_row_places_its_kind_chip_before_the_value() {
         annotation: None,
         cut_at: None,
         kind_chip: Some(crate::model::NodeKind::Workspace),
+        live_mark: None,
+        receding: false,
         preview: None,
     };
     let line = explorer_line(field_row(&field, &theme), 80, &theme);
@@ -4455,6 +4457,7 @@ fn a_pending_row_keeps_its_live_mark_and_spins_the_link_cell() {
             confidence: LiveConfidence::Fresh,
             since_ms: 0,
             subagents: 0,
+            source: crate::model::live::LiveSource::Hook,
         });
     }
     let draw =
@@ -4997,6 +5000,7 @@ fn branch_ref_and_commit_fields_preview_git_history() {
         target: &NodeId::Branch(branch),
         home: None,
         now: None,
+        live: &crate::tui::rows::LiveValues::default(),
     })
     .expect("branch view");
     let preview = |label: &str| {
@@ -5066,6 +5070,7 @@ fn processes_and_pid_fields_preview_process_trees() {
         target: &node_id,
         home: None,
         now: None,
+        live: &crate::tui::rows::LiveValues::default(),
     })
     .expect("process view");
     let preview = |label: &str| {
@@ -5176,6 +5181,7 @@ fn a_field_naming_another_node_previews_that_node() {
         target: &NodeId::Checkout(CheckoutId::new(RepoId::new("/r/.git"), "/r")),
         home: None,
         now: None,
+        live: &crate::tui::rows::LiveValues::default(),
     })
     .expect("checkout view");
     let preview = |label: &str| {
