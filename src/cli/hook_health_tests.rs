@@ -154,3 +154,77 @@ fn running_agents_counts_main_agents_of_the_harness_still_running() {
     assert_eq!(running_agents(&snapshot, "pi", &probe), 0);
     assert_eq!(running_agents(&snapshot, "claude-code", &Table(&[])), 0);
 }
+
+#[test]
+fn only_codex_pane_titles_are_read_for_now() {
+    let reads = |harness: &str| {
+        crate::discovery::harness::registered_adapters()
+            .find(|adapter| adapter.harness_key() == harness)
+            .is_some_and(crate::discovery::harness::reads_pane_titles)
+    };
+    assert!(reads("codex"));
+    for harness in ["claude-code", "opencode", "pi", "aider"] {
+        assert!(!reads(harness), "{harness}");
+    }
+}
+
+#[test]
+fn title_agents_counts_the_harnesss_bindings_read_from_pane_titles() {
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    use crate::model::{AgentSessionId, LivePane, MuxSessionId, MuxSessionNode};
+
+    let mux = |name: &str, command: &str| {
+        let mut node = MuxSessionNode::new(MuxSessionId::new(format!("tmux:{name}")), "tmux", name);
+        node.active_pane_command = Some(command.to_string());
+        GraphNode::MuxSession(node)
+    };
+    let binding = |source| {
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Waiting, source, NOW_MS),
+            Liveness::Unknown,
+        )
+    };
+    let pane = |name: &str| LivePane::new(MuxSessionId::new(format!("tmux:{name}")), None);
+    let session = |harness: &str, key: &str| {
+        NodeId::AgentSession(AgentSessionId::new(harness, "/scope", key))
+    };
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![mux("cx", "codex"), mux("hooked", "codex"), mux("sh", "zsh")],
+        ..GraphSnapshot::empty()
+    };
+    snapshot
+        .pane_live
+        .insert(pane("cx"), binding(LiveSource::PaneTitle));
+    snapshot
+        .pane_live
+        .insert(pane("hooked"), binding(LiveSource::Hook));
+    snapshot
+        .pane_live
+        .insert(pane("sh"), binding(LiveSource::PaneTitle));
+    snapshot
+        .node_live
+        .insert(session("codex", "a"), binding(LiveSource::PaneTitle));
+    snapshot
+        .node_live
+        .insert(session("codex", "b"), binding(LiveSource::Hook));
+    snapshot
+        .node_live
+        .insert(session("pi", "c"), binding(LiveSource::PaneTitle));
+
+    assert_eq!(title_agents(&snapshot, "codex"), 2);
+    assert_eq!(title_agents(&snapshot, "claude-code"), 0);
+    assert_eq!(title_agents(&GraphSnapshot::empty(), "codex"), 0);
+}
+
+#[test]
+fn the_line_says_how_many_agents_their_pane_titles_show() {
+    assert_eq!(title_note(0), None);
+    assert_eq!(
+        title_note(1).as_deref(),
+        Some("1 agent shown from its pane title")
+    );
+    assert_eq!(
+        title_note(3).as_deref(),
+        Some("3 agents shown from their pane titles")
+    );
+}

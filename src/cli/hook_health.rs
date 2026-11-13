@@ -7,13 +7,17 @@
 //! running `conspectus serve` rewrites every cycle), each looked up in
 //! the process table so that an agent that has since exited does not
 //! count. It reads those two files and `/proc`, starts no process, and
-//! asks no daemon, so `hook status` stays fast and read-only.
+//! asks no daemon, so `hook status` stays fast and read-only. For a
+//! harness whose pane titles the mux probe reads (ADR 0217), the line
+//! also says how many of its agents that graph shows from their titles,
+//! which is how a harness whose hooks are silent can still show state.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use crate::live_store::{LiveFile, LiveStore, PidProbe, PidStatus, ProcProbe};
-use crate::model::{GraphNode, GraphSnapshot, RuntimeProcessRole};
+use crate::model::live::LiveSource;
+use crate::model::{GraphNode, GraphSnapshot, NodeId, RuntimeProcessRole};
 
 /// What the health line reports for a harness.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -143,22 +147,76 @@ pub(super) fn running_agents(
         .count()
 }
 
+/// How many of `harness`'s agents the graph `snapshot` shows from their
+/// pane titles: its live bindings whose source is the pane title, on a
+/// session of the harness or on a pane of a mux whose active pane runs
+/// it.
+pub(super) fn title_agents(snapshot: &GraphSnapshot, harness: &str) -> usize {
+    use crate::discovery::harness::adapters_for_program;
+    let from_title = |binding: &crate::model::live::LiveBinding| {
+        binding.observation.source == LiveSource::PaneTitle
+    };
+    let sessions = snapshot
+        .node_live
+        .iter()
+        .filter(|(id, binding)| {
+            from_title(binding)
+                && matches!(id, NodeId::AgentSession(session) if session.harness_key == harness)
+        })
+        .count();
+    let runs_harness = |mux: &crate::model::MuxSessionId| {
+        snapshot.nodes.iter().any(|node| match node {
+            GraphNode::MuxSession(node) if node.id == *mux => node
+                .active_pane_command
+                .as_deref()
+                .and_then(|command| adapters_for_program(command).next())
+                .is_some_and(|adapter| adapter.harness_key() == harness),
+            _ => false,
+        })
+    };
+    let panes = snapshot
+        .pane_live
+        .iter()
+        .filter(|(pane, binding)| from_title(binding) && runs_harness(&pane.mux))
+        .count();
+    sessions + panes
+}
+
+/// What the health line adds when the graph shows `count` agents from
+/// their pane titles; nothing for none.
+pub(super) fn title_note(count: usize) -> Option<String> {
+    match count {
+        0 => None,
+        1 => Some("1 agent shown from its pane title".to_string()),
+        count => Some(format!("{count} agents shown from their pane titles")),
+    }
+}
+
 /// Print the health line for `harness`:
 /// `<label>\t<harness>\t<store file>\t<message>`. `installed` says
 /// whether the hooks are installed in the scope `hook status` looked at,
 /// and `scope_flag` is that scope's flag for the install hint (empty for
 /// the user scope).
 pub(super) fn print_health(harness: &str, installed: bool, scope_flag: &str) {
-    let reports_live_state = crate::discovery::harness::registered_adapters()
-        .find(|adapter| adapter.harness_key() == harness)
-        .is_some_and(crate::discovery::harness::HarnessAdapter::reports_live_state);
+    let adapter = crate::discovery::harness::registered_adapters()
+        .find(|adapter| adapter.harness_key() == harness);
+    let reports_live_state =
+        adapter.is_some_and(crate::discovery::harness::HarnessAdapter::reports_live_state);
+    let reads_titles = adapter.is_some_and(crate::discovery::harness::reads_pane_titles);
     let store = LiveStore::from_env();
     let file = store.as_ref().map(LiveStore::read).unwrap_or_default();
+    let graph = std::cell::OnceCell::new();
+    let saved = || graph.get_or_init(saved_graph).as_ref();
     let health = Health::assess(harness, reports_live_state, installed, &file, || {
-        saved_graph().map_or(0, |snapshot| {
-            running_agents(&snapshot, harness, &ProcProbe::system())
+        saved().map_or(0, |snapshot| {
+            running_agents(snapshot, harness, &ProcProbe::system())
         })
     });
+    let titles = if reads_titles {
+        saved().map_or(0, |snapshot| title_agents(snapshot, harness))
+    } else {
+        0
+    };
     let init_command = format!(
         "{} hook init {harness}{scope_flag}",
         crate::invocation::invoked_name()
@@ -166,11 +224,15 @@ pub(super) fn print_health(harness: &str, installed: bool, scope_flag: &str) {
     let path = store
         .as_ref()
         .map_or_else(|| PathBuf::from("-"), LiveStore::path);
+    let mut message = health.message(crate::live_store::now_ms(), &init_command);
+    if let Some(note) = title_note(titles) {
+        message.push_str("; ");
+        message.push_str(&note);
+    }
     println!(
-        "{}\t{harness}\t{}\t{}",
+        "{}\t{harness}\t{}\t{message}",
         health.label(),
-        path.display(),
-        health.message(crate::live_store::now_ms(), &init_command)
+        path.display()
     );
 }
 
