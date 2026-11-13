@@ -35,6 +35,7 @@ pub mod codex;
 pub mod fixtures;
 pub mod opencode;
 pub mod pi;
+mod plugin_live;
 
 pub use aider::AiderAdapter;
 pub use claude_code::ClaudeCodeAdapter;
@@ -342,37 +343,148 @@ pub trait HarnessAdapter: Send + Sync {
         harness_version: Option<String>,
         observed_epoch: i64,
     ) -> anyhow::Result<crate::hook::HookRecord> {
-        use anyhow::bail;
-        let Some(session_id) = payload
-            .get("session_id")
-            .and_then(serde_json::Value::as_str)
-        else {
-            bail!(
-                "{} hook payload missing string `session_id`",
-                self.display_label()
-            );
-        };
-        if session_id.is_empty() {
-            bail!(
-                "{} hook payload has empty `session_id`",
-                self.display_label()
-            );
-        }
-        Ok(crate::hook::HookRecord {
-            schema_version: crate::hook::SCHEMA_VERSION,
-            harness_key: self.harness_key().to_string(),
-            session_key: session_id.to_string(),
-            cwd: crate::hook::optional_payload_string(payload, "cwd"),
+        session_hook_record(
+            self,
+            payload,
             pid,
             ppid,
-            tmux: tmux.filter(|tmux| !tmux.is_empty()),
-            transcript_path: crate::hook::optional_payload_string(payload, "transcript_path"),
-            hook_event_name: crate::hook::optional_payload_string(payload, "hook_event_name"),
-            observed_epoch,
+            tmux,
             harness_version,
-            background_harness: false,
-        })
+            observed_epoch,
+        )
     }
+
+    /// Whether `conspectus hook write` records `payload` for attribution
+    /// as well: the hook spool and the daemon's `hook_ingest`, which
+    /// re-resolves the graph (ADR 0146). That suits an event that names
+    /// the session a process now runs, such as a session start, and is
+    /// far too slow for one that fires on every tool call, so an adapter
+    /// that installs such events answers `false` for them: they reach
+    /// only the live-state store. Defaults to `true`, for adapters whose
+    /// hooks report only the session.
+    fn is_attribution_event(&self, payload: &serde_json::Value) -> bool {
+        let _ = payload;
+        true
+    }
+
+    /// The live-state events a hook payload says, in order (ADR 0204,
+    /// ADR 0206), for a harness that runs `conspectus hook write` once
+    /// per event. Each event carries `context`, which says where the
+    /// writer runs, with the cwd and transcript path the payload names
+    /// added, and `observed_ms`, when the writer started.
+    ///
+    /// Read the payload through a borrowed view of the whitelisted
+    /// fields (ADR 0206 decisions 10 to 12): never clone the payload or
+    /// walk into a field the view does not name, so a large
+    /// `tool_response` costs nothing, and never keep text. An event this
+    /// mapping does not cover, or a payload it cannot read, yields
+    /// nothing. Defaults to no events.
+    fn live_events_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        context: &crate::live_store::LiveContext,
+        observed_ms: i64,
+    ) -> Vec<crate::live_store::LiveEvent> {
+        let _ = (payload, context, observed_ms);
+        Vec::new()
+    }
+
+    /// The live-state snapshot a hook payload carries, for a harness
+    /// whose plugin keeps the session's state itself and sends all of
+    /// it (ADR 0204 decision 3). The same rules as
+    /// [`Self::live_events_from_payload`] apply. Defaults to none.
+    fn live_snapshot_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        context: &crate::live_store::LiveContext,
+        observed_ms: i64,
+    ) -> Option<crate::live_store::LiveSnapshot> {
+        let _ = (payload, context, observed_ms);
+        None
+    }
+
+    /// Whether the hooks `conspectus hook init` installs for this harness
+    /// report live state, through [`Self::live_events_from_payload`] or
+    /// [`Self::live_snapshot_from_payload`]. `hook status` reads it to
+    /// tell a hook that has nothing to report from one that is silent.
+    /// Defaults to `false`.
+    fn reports_live_state(&self) -> bool {
+        false
+    }
+
+    /// What `title`, the terminal title of a pane this harness runs in,
+    /// says about the agent (ADR 0217), or `None` for a harness whose
+    /// titles are not read. The mux probe calls it on each pane's title
+    /// as it splits its listing and keeps only the mark, so an override
+    /// must not copy or keep any part of `title`: it may carry words the
+    /// operator typed. Defaults to `None`.
+    fn pane_title_mark(&self, title: &str) -> Option<crate::model::live::TitleMark> {
+        let _ = title;
+        None
+    }
+
+    /// A poll of the harness's own list of its sessions that repairs a
+    /// hook state its hooks left stuck (ADR 0218), or `None` for a
+    /// harness without one. A process that discovers in the background
+    /// builds it once and keeps it ([`crate::discovery::live_poller`]).
+    /// Defaults to `None`.
+    fn live_poller(&self) -> Option<crate::discovery::live_poller::LivePoller> {
+        None
+    }
+
+    /// The reducer that folds this harness's live events into a
+    /// session's entry. Defaults to the shared one; a harness whose
+    /// events need a transition of their own returns a reducer that
+    /// handles it and hands the rest to [`crate::live_store::fold`].
+    fn live_reducer(&self) -> &dyn crate::live_store::Reducer {
+        &crate::live_store::SharedReducer
+    }
+}
+
+/// The hook sidecar record [`HarnessAdapter::hook_record_from_payload`]
+/// builds by default: the ADR 0028 canonical `session_id` string, the
+/// payload's `cwd`, `transcript_path`, and `hook_event_name`, stamped with
+/// `adapter`'s harness key. An adapter that overrides the method to adjust
+/// its inputs builds the record with this.
+pub(crate) fn session_hook_record<A: HarnessAdapter + ?Sized>(
+    adapter: &A,
+    payload: &serde_json::Value,
+    pid: Option<i64>,
+    ppid: Option<i64>,
+    tmux: Option<crate::hook::HookTmuxRecord>,
+    harness_version: Option<String>,
+    observed_epoch: i64,
+) -> anyhow::Result<crate::hook::HookRecord> {
+    use anyhow::bail;
+    let Some(session_id) = payload
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+    else {
+        bail!(
+            "{} hook payload missing string `session_id`",
+            adapter.display_label()
+        );
+    };
+    if session_id.is_empty() {
+        bail!(
+            "{} hook payload has empty `session_id`",
+            adapter.display_label()
+        );
+    }
+    Ok(crate::hook::HookRecord {
+        schema_version: crate::hook::SCHEMA_VERSION,
+        harness_key: adapter.harness_key().to_string(),
+        session_key: session_id.to_string(),
+        cwd: crate::hook::optional_payload_string(payload, "cwd"),
+        pid,
+        ppid,
+        tmux: tmux.filter(|tmux| !tmux.is_empty()),
+        transcript_path: crate::hook::optional_payload_string(payload, "transcript_path"),
+        hook_event_name: crate::hook::optional_payload_string(payload, "hook_event_name"),
+        observed_epoch,
+        harness_version,
+        background_harness: false,
+    })
 }
 
 /// Stub signature used as the [`HarnessAdapter::runtime_signature`]
@@ -482,6 +594,12 @@ pub fn adapters_for_program(program: &str) -> impl Iterator<Item = &'static dyn 
                 .iter()
                 .any(|basename| basename.eq_ignore_ascii_case(&name))
     })
+}
+
+/// Whether the mux probe reads the titles of `adapter`'s panes (ADR
+/// 0217): whether its title classifier answers at all.
+pub fn reads_pane_titles(adapter: &dyn HarnessAdapter) -> bool {
+    adapter.pane_title_mark("").is_some()
 }
 
 /// The first registered adapter whose harness binary appears among a
@@ -855,3 +973,6 @@ mod registry_tests {
 #[cfg(test)]
 #[path = "harness_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod live_sequences;

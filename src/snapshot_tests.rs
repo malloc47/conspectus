@@ -100,6 +100,29 @@ fn header_rejects_past_format_version() {
 }
 
 #[test]
+fn a_file_from_the_previous_format_version_is_refused() {
+    // A `graph.bin` left by the binary before the latest format bump
+    // must come back as `IncompatibleVersion`, the error every reader
+    // turns into a cold rebuild, rather than reach the archive check.
+    let (_temp, path) = fresh_path("graph.bin");
+    let mut bytes = serialize_to_bytes(&sample_snapshot()).expect("serialize");
+    bytes[8..12].copy_from_slice(&(FORMAT_VERSION - 1).to_le_bytes());
+    std::fs::write(&path, &bytes).expect("write old file");
+
+    let err = open_mmap(&path).expect_err("an older version must error");
+    assert!(
+        matches!(
+            err,
+            SnapshotError::IncompatibleVersion { expected, found }
+                if expected == FORMAT_VERSION && found == FORMAT_VERSION - 1
+        ),
+        "expected IncompatibleVersion, got {err:?}"
+    );
+    let err = from_bytes(&bytes).expect_err("an older version must error");
+    assert!(matches!(err, SnapshotError::IncompatibleVersion { .. }));
+}
+
+#[test]
 fn write_atomic_then_open_mmap_round_trips() {
     let (_temp, path) = fresh_path("graph.bin");
     let snap = sample_snapshot();
@@ -114,6 +137,33 @@ fn write_atomic_then_open_mmap_round_trips() {
     let mut decoded = decoded;
     decoded.canonicalize();
     assert_eq!(decoded, snap);
+}
+
+#[test]
+fn graph_bin_carries_every_pane_agent_of_a_mux() {
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    use crate::model::{LivePane, MuxSessionId};
+
+    let (_temp, path) = fresh_path("graph.bin");
+    let mut snap = sample_snapshot();
+    for (pane, state) in [
+        (Some("%1"), LiveState::Waiting),
+        (Some("%2"), LiveState::Starting),
+        (None, LiveState::Working),
+    ] {
+        snap.pane_live.insert(
+            LivePane::new(MuxSessionId::new("tmux:work"), pane.map(str::to_string)),
+            LiveBinding::new(
+                LiveObservation::new(state, LiveSource::Hook, 1_790_769_600_000),
+                Liveness::Alive,
+            ),
+        );
+    }
+    write_atomic(&path, &snap).expect("write");
+
+    let decoded = deserialize_owned(&open_mmap(&path).expect("open")).expect("deserialize");
+    assert_eq!(decoded.pane_live, snap.pane_live);
+    assert_eq!(decoded.pane_live.len(), 3);
 }
 
 #[test]

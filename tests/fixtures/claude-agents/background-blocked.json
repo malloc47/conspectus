@@ -1,0 +1,13 @@
+[
+  {
+    "id": "bg-placeholder-1",
+    "pid": 52001,
+    "sessionId": "1f4e7a2b-9c3d-4b6e-8f10-2d5c7e9a0b31",
+    "name": "placeholder background task",
+    "cwd": "/home/user/projects/my-project",
+    "kind": "background",
+    "startedAt": 1794545000000,
+    "state": "blocked",
+    "waitingFor": "sandbox request"
+  }
+]

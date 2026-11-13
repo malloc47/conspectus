@@ -32,6 +32,7 @@ impl App {
             .finish_rebuild(before, &self.tree.rows, initial_selection_hint.as_ref());
         self.reopen_saved_tree();
         self.recompute_explorer();
+        self.settle_seen();
     }
 
     /// Swap the row tree in place after a projection-only rebuild

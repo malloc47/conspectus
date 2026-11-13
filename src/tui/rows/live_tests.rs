@@ -1,0 +1,402 @@
+use super::*;
+use crate::model::live::{LiveSource, Liveness};
+use crate::model::{AgentSessionId, PinId};
+use crate::tui::rows::{RowId, TreeInputs, build_tree_for_view, pinned::fixture_world};
+use crate::tui::{Grouping, MuxRecency, Sort, View};
+
+const NOW_MS: i64 = 1_700_000_000_000;
+const MINUTE_MS: i64 = 60_000;
+
+/// The fixture's session, hosted by its mux `conspectus-main`.
+fn hosted() -> NodeId {
+    NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "e44d01cb5a"))
+}
+
+fn main_mux() -> MuxSessionId {
+    MuxSessionId::new("tmux:conspectus-main")
+}
+
+/// `state` observed `minutes_ago`, its process found running.
+fn running(state: LiveState, minutes_ago: i64) -> LiveBinding {
+    LiveBinding::new(
+        LiveObservation::new(state, LiveSource::Hook, NOW_MS - minutes_ago * MINUTE_MS)
+            .with_pid(42, None),
+        Liveness::Alive,
+    )
+}
+
+/// The pinned fixture with the hosted session waiting on a question for
+/// two subagents, and an agent that no session matches in the mux.
+fn world() -> GraphSnapshot {
+    let mut snapshot = fixture_world();
+    let mut waiting = running(LiveState::Waiting, 3);
+    waiting.observation = waiting
+        .observation
+        .with_detail(LiveDetail::Question)
+        .with_since_ms(NOW_MS - 5 * MINUTE_MS)
+        .with_subagents(2);
+    snapshot.node_live.insert(hosted(), waiting);
+    snapshot
+        .node_live
+        .insert(NodeId::MuxSession(main_mux()), running(LiveState::Ready, 1));
+    snapshot
+}
+
+fn built(snapshot: &GraphSnapshot, view: View, now_ms: i64) -> RowTree {
+    let mut tree = build_tree_for_view(TreeInputs {
+        snapshot,
+        live: snapshot.live_tables(),
+        seen: crate::tui::rows::seen::SeenContext::nothing(),
+        view,
+        grouping: Grouping::default_for(view),
+        filter: crate::filter::RowFilter::default(),
+        sort: Sort::Hierarchy,
+        mux_recency: MuxRecency::default(),
+        cwd: None,
+    });
+    // Read at a fixed time, so the test does not depend on the clock.
+    annotate(
+        &mut tree,
+        snapshot,
+        &LiveValues::at(
+            snapshot,
+            snapshot.live_tables(),
+            now_ms,
+            crate::tui::rows::seen::SeenContext::nothing(),
+        ),
+    );
+    tree
+}
+
+#[test]
+fn a_cell_is_the_effective_state_beside_the_observations_facts() {
+    let binding = world().node_live[&hosted()];
+
+    assert_eq!(
+        LiveCell::of(&binding, NOW_MS),
+        LiveCell {
+            state: LiveState::Waiting,
+            detail: Some(LiveDetail::Question),
+            confidence: LiveConfidence::Fresh,
+            since_ms: NOW_MS - 5 * MINUTE_MS,
+            subagents: 2,
+            source: LiveSource::Hook,
+            unseen: false,
+        }
+    );
+}
+
+#[test]
+fn a_cell_is_read_at_the_time_it_is_filled() {
+    let working = running(LiveState::Working, 0);
+    assert_eq!(
+        LiveCell::of(&working, NOW_MS).confidence,
+        LiveConfidence::Fresh
+    );
+    let later = LiveCell::of(&working, NOW_MS + 11 * MINUTE_MS);
+    assert_eq!(
+        (later.state, later.confidence),
+        (LiveState::Working, LiveConfidence::Quiet),
+        "a long turn stays working, flagged quiet"
+    );
+
+    let dead = LiveBinding::new(working.observation, Liveness::Dead);
+    assert_eq!(
+        (
+            LiveCell::of(&dead, NOW_MS).state,
+            LiveCell::of(&dead, NOW_MS).detail
+        ),
+        (LiveState::Exited, Some(LiveDetail::Killed))
+    );
+}
+
+#[test]
+fn a_session_row_carries_its_cell_and_a_session_without_evidence_none() {
+    let mut snapshot = world();
+    let tree = built(&snapshot, View::Sessions, NOW_MS);
+    let cell = tree
+        .rows
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::AgentSession(session) if session.primary_node == hosted() => {
+                Some(session.live)
+            }
+            _ => None,
+        })
+        .expect("the session has a row");
+    assert_eq!(
+        cell,
+        snapshot
+            .node_live
+            .get(&hosted())
+            .map(|b| LiveCell::of(b, NOW_MS))
+    );
+
+    snapshot.node_live.remove(&hosted());
+    let tree = built(&snapshot, View::Sessions, NOW_MS);
+    assert!(tree.rows.iter().all(|row| match &row.kind {
+        RowKind::AgentSession(session) => session.live.is_none(),
+        _ => true,
+    }));
+}
+
+#[test]
+fn a_mux_row_counts_the_agents_it_hosts_with_the_snapshots_rule() {
+    let snapshot = world();
+    let tree = built(&snapshot, View::Mux, NOW_MS);
+    let counts = tree
+        .rows
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) if mux.mux == main_mux() => Some(mux.live.counts),
+            _ => None,
+        })
+        .expect("the mux has a row");
+
+    assert_eq!(
+        counts,
+        LiveCounts {
+            waiting: 1,
+            ready: 1,
+            ..LiveCounts::default()
+        },
+        "its session and the agent in a pane no session matched"
+    );
+    assert_eq!(counts, snapshot.live_counts_of_mux(&main_mux(), NOW_MS));
+}
+
+#[test]
+fn a_pins_row_carries_the_value_of_the_entity_it_points_at() {
+    let snapshot = world();
+    let tree = built(&snapshot, View::Pinned, NOW_MS);
+    let slot = |name: &str| {
+        tree.rows
+            .iter()
+            .find_map(|row| match (&row.id, &row.kind) {
+                (RowId::Pin { pin_id }, RowKind::Mixed(mixed)) if pin_id == name => {
+                    Some(mixed.live)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no row for the pin {name}"))
+    };
+
+    assert_eq!(
+        slot("e44d01cb"),
+        MixedLive::Session(LiveCell::of(&snapshot.node_live[&hosted()], NOW_MS))
+    );
+    assert_eq!(
+        slot("conspectus-main"),
+        MixedLive::Mux(tree.live.mux(&main_mux())),
+        "the mux row's value"
+    );
+    assert_eq!(
+        tree.live.mux(&main_mux()).counts,
+        snapshot.live_counts_of_mux(&main_mux(), NOW_MS)
+    );
+    assert_eq!(slot("ledger-pr"), MixedLive::None, "a PR has no live state");
+    assert_eq!(
+        slot("nightly"),
+        MixedLive::None,
+        "a planned mux has no node"
+    );
+}
+
+#[test]
+fn a_mixed_row_for_a_mux_without_evidence_has_empty_counts() {
+    let values = LiveValues::at(
+        &world(),
+        GraphSnapshot::empty().live_tables(),
+        NOW_MS,
+        crate::tui::rows::seen::SeenContext::nothing(),
+    );
+
+    assert_eq!(
+        values.of_node(&NodeId::MuxSession(main_mux())),
+        MixedLive::Mux(MuxLive::default())
+    );
+    assert_eq!(values.of_node(&hosted()), MixedLive::None);
+    assert_eq!(
+        values.of_node(&NodeId::Pin(PinId::new("e44d01cb"))),
+        MixedLive::None,
+        "a pin itself is no session"
+    );
+}
+
+#[test]
+fn the_rows_read_the_table_they_are_given() {
+    let snapshot = world();
+    let mut later = GraphSnapshot::empty();
+    later
+        .node_live
+        .insert(hosted(), running(LiveState::Error, 0));
+    let mut tree = built(&snapshot, View::Sessions, NOW_MS);
+
+    annotate(
+        &mut tree,
+        &snapshot,
+        &LiveValues::at(
+            &snapshot,
+            later.live_tables(),
+            NOW_MS,
+            crate::tui::rows::seen::SeenContext::nothing(),
+        ),
+    );
+
+    let states: Vec<_> = tree
+        .rows
+        .iter()
+        .filter_map(|row| match &row.kind {
+            RowKind::AgentSession(session) => Some((session.primary_node.clone(), session.live)),
+            _ => None,
+        })
+        .filter_map(|(node, live)| live.map(|cell| (node, cell.state)))
+        .collect();
+    assert_eq!(states, vec![(hosted(), LiveState::Error)]);
+}
+
+#[test]
+fn every_view_carries_the_count_of_agents_waiting_anywhere() {
+    // The hosted session waits; so do an agent in a pane no session
+    // matches and a session the views may not list. Ready, exited, and
+    // stale agents, and sessions without evidence, do not count.
+    let mut snapshot = world();
+    let other = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "unlisted"));
+    snapshot
+        .node_live
+        .insert(other, running(LiveState::Waiting, 2));
+    snapshot.node_live.insert(
+        NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "gone")),
+        running(LiveState::Exited, 1),
+    );
+    snapshot.pane_live.insert(
+        crate::model::LivePane::new(main_mux(), Some("%7".into())),
+        running(LiveState::Waiting, 1),
+    );
+    snapshot.pane_live.insert(
+        crate::model::LivePane::new(main_mux(), Some("%8".into())),
+        running(LiveState::Working, 1),
+    );
+    let mut stale = running(LiveState::Waiting, 30);
+    stale.liveness = Liveness::Unknown;
+    stale.observation.pid = None;
+    snapshot.node_live.insert(
+        NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "stale")),
+        stale,
+    );
+    for view in [
+        View::Sessions,
+        View::Mux,
+        View::Prs,
+        View::Pinned,
+        View::History,
+        View::Search,
+    ] {
+        assert_eq!(
+            built(&snapshot, view, NOW_MS).waiting_anywhere,
+            3,
+            "{view:?}"
+        );
+    }
+}
+
+#[test]
+fn the_waiting_count_follows_the_table_the_rows_read() {
+    let snapshot = world();
+    let mut tree = built(&snapshot, View::Sessions, NOW_MS);
+    assert_eq!(tree.waiting_anywhere, 1);
+    annotate(
+        &mut tree,
+        &snapshot,
+        &LiveValues::at(
+            &snapshot,
+            GraphSnapshot::empty().live_tables(),
+            NOW_MS,
+            crate::tui::rows::seen::SeenContext::nothing(),
+        ),
+    );
+    assert_eq!(tree.waiting_anywhere, 0, "nothing waits in an empty table");
+}
+
+#[test]
+fn a_cell_shows_its_subagents_until_the_session_exits_or_cannot_be_told() {
+    let with = |state, liveness| {
+        let mut binding = running(state, 1);
+        binding.observation = binding.observation.with_subagents(3);
+        binding.liveness = liveness;
+        LiveCell::of(&binding, NOW_MS)
+    };
+    assert_eq!(
+        with(LiveState::Working, Liveness::Alive).running_subagents(),
+        3
+    );
+    assert_eq!(
+        with(LiveState::Ready, Liveness::Alive).running_subagents(),
+        3
+    );
+    assert_eq!(
+        with(LiveState::Exited, Liveness::Alive).running_subagents(),
+        0
+    );
+    // A process found gone reads exited, whatever it last said.
+    assert_eq!(
+        with(LiveState::Working, Liveness::Dead).running_subagents(),
+        0
+    );
+    let mut stale = running(LiveState::Working, 30);
+    stale.observation = stale.observation.with_subagents(2);
+    stale.observation.pid = None;
+    stale.liveness = Liveness::Unknown;
+    let stale = LiveCell::of(&stale, NOW_MS);
+    assert_eq!(stale.state, LiveState::Unknown);
+    assert_eq!(stale.subagents, 2, "the cell keeps what was recorded");
+    assert_eq!(stale.running_subagents(), 0, "but shows none");
+}
+
+#[test]
+fn the_waiting_agents_are_the_ones_counted_the_longest_wait_first() {
+    use crate::tui::rows::seen::Agent;
+    let mut snapshot = world();
+    let waited = |state, since_minutes| {
+        let mut binding = running(state, 1);
+        binding.observation = binding
+            .observation
+            .with_since_ms(NOW_MS - since_minutes * MINUTE_MS);
+        binding
+    };
+    let older = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "older"));
+    let tied = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "aaa-tied"));
+    snapshot
+        .node_live
+        .insert(older.clone(), waited(LiveState::Waiting, 50));
+    snapshot
+        .node_live
+        .insert(tied.clone(), waited(LiveState::Waiting, 5));
+    snapshot.node_live.insert(
+        NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "ready")),
+        waited(LiveState::Ready, 90),
+    );
+    let pane = crate::model::LivePane::new(main_mux(), Some("%7".into()));
+    snapshot
+        .pane_live
+        .insert(pane.clone(), waited(LiveState::Waiting, 20));
+    let values = LiveValues::at(
+        &snapshot,
+        snapshot.live_tables(),
+        NOW_MS,
+        crate::tui::rows::seen::SeenContext::nothing(),
+    );
+    let order: Vec<(Agent, i64)> = values.waiting_agents();
+    assert_eq!(order.len(), values.waiting(), "the set the header counts");
+    assert_eq!(
+        order,
+        vec![
+            (Agent::Session(older), NOW_MS - 50 * MINUTE_MS),
+            (Agent::Pane(pane), NOW_MS - 20 * MINUTE_MS),
+            // The hosted session's wait and the tied one began together;
+            // the entity breaks the tie.
+            (Agent::Session(tied), NOW_MS - 5 * MINUTE_MS),
+            (Agent::Session(hosted()), NOW_MS - 5 * MINUTE_MS),
+        ]
+    );
+}

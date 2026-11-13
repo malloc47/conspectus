@@ -89,6 +89,11 @@ repo, or a checkout branch with an open PR and no known agent session.
   optional; the one-shot CLI must remain useful without a server running.
   Graph generation cost must not require the one-shot path to rebuild every
   link from scratch on each invocation.
+- Show what an active agent session or mux is doing now: waiting on the
+  operator, ready for a prompt, or working. Live state is a neutral,
+  payload-free observation carried by hooks and plugins, bound to the graph
+  through a sparse side table, and absent (not idle) where there is no
+  evidence. Conspectus observes it and never acts on it.
 
 ## Relationship To Atelier
 
@@ -395,6 +400,10 @@ The sane default is:
   durable user intent; when the daemon is available, it writes each hook
   observation to the spool and ingests it into the in-memory graph at once
   (ADR 0146)
+- read the live-state store and bind each entry to its agent session, or to
+  its tmux mux when no session matches yet, checking the recorded pid and
+  start time against the process table; binding never creates a node, and
+  the table is rebuilt on every discovery (ADR 0205)
 - read read-only harness state and log databases when the harness maintains
   them, using stable indexed fields to discover sessions and to derive live
   mux attribution; for Codex this is the `state_*.sqlite` threads/lineage
@@ -436,8 +445,11 @@ but they should carry provenance and confidence rather than silently becoming
 facts.
 
 Hook sidecar records are local, rebuildable observations written by opt-in
-harness hooks outside project trees. They may refine mux/session attribution
-when fresh, but stale records should not override active process evidence.
+harness hooks outside project trees. A record refines mux/session attribution
+for its pane until a fresher record for that pane supersedes it; a stale one,
+whose process is gone, whose mux was created after it, or whose mux's active
+pane runs another harness, is ignored rather than overriding process evidence.
+No time limit applies (ADR 0146).
 A record written from a harness's background process, such as opencode 2.x's
 shared service, carries no pane context and never produces mux links; opencode
 2.x pane attribution comes from the plugin's TUI entrypoint, which runs in the
@@ -633,6 +645,111 @@ the one it replaced (`rebuilt_from`), and each live mux's most recent
 hosted session holds its attribution as a `Cached` `linked_to_mux`
 fallback when current evidence drifts. Code that acts on a node checks
 presence first, so nothing attaches to, counts, or renames a ghost.
+
+## Live Agent State
+
+Per ADRs 0203 to 0207 (plan: `docs/plans/live-state/`), Conspectus shows what
+a running agent is doing, in the operator's three buckets: **waiting** on them
+(permission, question, plan, input), **ready** for a new prompt, and
+**working** (generating, running a tool, retrying, compacting, with
+subagents). Around those sit `error`, `starting`, `exited`, and `unknown`.
+The set is closed and harness-neutral; harness words stay in adapters.
+
+State is an observation, not a relationship. Emitters (the hook entries of
+Claude Code and Codex, the OpenCode plugin, the Pi extension) report events.
+`conspectus hook write` folds each event into a per-session entry in
+`$XDG_STATE_HOME/conspectus/live-state.json` (a category 2 observation, ADR
+0204). It never waits on a daemon, prints nothing, and keeps only enums,
+counts, ids, paths, and times. Entries are keyed by harness and session id
+and carry the tmux pane, so split panes do not collide. Plugin sources keep
+each session's state themselves and send it whole, ordered by their instance
+and a sequence number: the OpenCode plugin from each 1.x TUI and, for 2.x,
+from a server entrypoint in the shared service, which sees every session
+(ADR 0206; its records never take the attribution path), and the Pi
+extension from inside each Pi process, whose session starts still name the
+session for attribution.
+
+A discovery mutator binds entries to `AgentSession` nodes (by harness and
+native session id) into a sparse `node_live` snapshot table beside
+`node_presence`, and pane-only entries (an agent no session matches yet) to
+their pane of the tmux `MuxSession` in a sparse `pane_live` table, one entry
+per pane (ADR 0205). Each binding keeps whether the entry's process ran when
+it was bound. Unbound
+entries show nowhere, and binding never creates a node. The TUI re-binds from
+the store about once a second between snapshots, with or without a daemon: it
+stats the file each tick, reads and binds it only after a rewrite, binds
+every new snapshot before its rows are built, and between binds checks the
+bound agents' processes once a second, so a killed agent reads `exited`
+within a second. A mux has no state of its own:
+it has counts over what it hosts.
+
+The effective state is computed at read time from `now` and process liveness:
+a dead pid is `exited`; `working`, `compacting`, and `starting` that go quiet
+stay as they are and are flagged quiet; `waiting`, `ready`, and `error` do not
+age while the process lives; with no liveness evidence everything but
+`exited` becomes `unknown` after fifteen minutes. A session with no events has
+no live state. Hook-free sources (pane title, `claude agents --json`,
+transcript tails) need their own decisions (ADR 0207). The first is a
+Codex pane's title (ADR 0217): the mux probe's existing `list-sessions`
+call also returns each session's active pane title, which a Codex pane's
+adapter reduces at once to a mark (`waiting`, `working`, or neither,
+never kept as text), and the binding folds the marks in after the
+store's entries. With no hook entry for the pane a mark binds pane-only
+as `waiting/input` or `working` with source `pane_title` and no pid; a
+fresh hook entry wins, a quiet or stale one gives way, and a hook's wait
+turns `working` after two probes past it without the marker. The second is
+`claude agents --json` (ADR 0218), run only as a repair by the processes
+that discover in the background (the daemon, a daemonless TUI's refresh
+worker), at most every 30 s, while a Claude Code hook entry recorded
+`working` or `waiting` and has been silent for 10 s. Each listed session is
+reduced in memory to its pid, a plain session id, and a mapped state; the
+latest poll rides in the snapshot's `live_polls` (in `graph.bin`, not JSON),
+and the binding folds it in after the pane titles, so a hook entry silent
+for the settle window before the poll reads the poll's state for the same
+process with source `harness_poll`. A newer hook event wins, hook `ready`,
+`error`, and `exited` never change, and a session with no hook entry gets
+nothing. The CLI shows
+it as `node_live` in `graph --format json`, in opt-in `live` columns of
+`conspectus table` (a session's effective state, a mux's counts), in `node
+show`, and as a per-harness health line in `hook status` (events arriving, or
+an agent running with none). In the TUI the row models carry it: session rows
+the effective state with its detail, confidence, start, and subagents, mux
+rows the counts, and Pinned and History rows the value of the entity they
+stand for, filled for every view by one pass, so an entity carries the same
+value wherever it is listed. Session and mux rows draw it in a one-cell
+column right after the age (ADR 0209): `!` waiting, `»` working (also
+compacting and starting), `›` ready, `×` error, `?` unknown or stale, `·`
+no evidence or exited, a quiet state dimmed, in the theme's status colors,
+never animated. A mux shows the state of its agents that ranks first
+(waiting, error, ready, working, then the rest). Pinned spells a running
+session's live state as `waiting`, `working`, `ready`, or `error` in place
+of its link word. The cell never gives way on a narrow row. A group
+header counts the agents beneath it that wait, each once, as `! N` after
+its `(N)` (ADR 0210): its session rows, or in the Mux view every agent of
+its muxes. The header line counts every waiting agent anywhere, whatever
+the view shows, in the same chip before `▲ N` (ADR 0211). A session row
+shows the subagents its agent runs as a dim `+N` after its label, capped
+at `+9+`, never on a mux row (ADR 0212). The detail pane lists a
+session's `state` (led by its row's mark), `since`, `source`,
+`evidence` (fresh, quiet, or stale), and running `subagents`, and a mux's
+`agents` counts and `pane_agents`, read from the values the rows were
+filled with, and none of them without evidence (ADR 0213). A ready turn
+the operator has not seen draws its `›` bold, the shape unchanged (ADR
+0214): seen once a tmux client attached to its mux after it ended, or,
+for a session with no mux, once the cursor rested on its row for a
+second, and kept seen in the TUI's memory until a later turn ends;
+nothing is persisted. Controls can float the rows marked `!` above the
+rest of their group (Sessions) or above the other running muxes (Mux),
+and narrow the lists to one agent state (`agent state`, `--state` on
+`table`, `tui`, and `search`, `state` in the views' config filters); a
+mux matches through any agent it hosts. Both read every agent's state
+when the tree is built, never on a refill of the marks, so rows keep
+still between operator actions (ADR 0215). `W` moves the cursor to the
+agent waiting longest, then the next, wrapping, from any view: to its
+row in the view on screen (a pin on it, in Mux its mux's row, a pane's
+agent on its mux), else in Sessions or Mux, with the groups above it
+opened and the status line saying where it went (ADR 0216). No state
+grouping and no Attention view (the plan's section 7.1).
 
 ## Pin Slots
 
@@ -1615,6 +1732,10 @@ ADR 0082). The socket commands are:
   daemon's cycle output is cached as serialized bytes;
   consumers decode via `snapshot::from_bytes` and use the
   resulting `GraphSnapshot` directly.
+- `hook_ingest` — take one hook record from `conspectus hook
+  write`: write it to the hook spool, apply it to the live graph
+  (superseding the older hook link for its pane), re-resolve, and
+  publish (ADR 0146).
 
 The `conspectus refresh`, `conspectus status`, `conspectus
 table` / `node show` / `graph` CLI commands and the TUI all
@@ -1803,6 +1924,7 @@ migration helper and harmless if it fails.
   - cache/index: `$XDG_DATA_HOME/conspectus/`
   - pin slots: `$XDG_DATA_HOME/conspectus/pins.toml`
   - history: `$XDG_STATE_HOME/conspectus/history/`
+  - live agent state: `$XDG_STATE_HOME/conspectus/live-state.json`
 - Local declared-link files are write-on-demand only.
 - Declared links win over discovered links; conflicts are displayed, not fatal.
 - Durable declared state should be TOML; cache/index internals may use another
@@ -1827,10 +1949,12 @@ migration helper and harmless if it fails.
   they run (ADR 0142). The mutation envelope is ADR 0143.
 - Hook sidecar records are local rebuildable observations written through
   `conspectus hook write`. The spool, which holds only the latest record per
-  mux in `hooks-latest.json`, is the durable hook record and every refresh
-  replays it (ADR 0146). When the daemon is available, it writes the spool
+  pane in `hooks-latest.json` (at most 256, with no time limit), is the
+  durable hook record and every refresh replays it (ADR 0146). When the
+  daemon is available, it writes the spool
   root its discovery reads and ingests the record into `SnapshotState`; when
-  no daemon snapshot is available, the hook writer writes the spool under
+  no daemon snapshot is available, or the daemon does not answer within
+  2 s, the hook writer writes the spool under
   `$XDG_STATE_HOME/conspectus/hooks` or
   `$HOME/.local/state/conspectus/hooks`, with
   `$CONSPECTUS_HOOK_SIDECAR_STATE` as an override.

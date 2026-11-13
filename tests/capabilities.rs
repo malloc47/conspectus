@@ -5,10 +5,10 @@
 //!
 //! Each scenario runs one or more commands against a materialized
 //! showcase world, with a temporary home and XDG directories and
-//! stand-in `gh`, `tmux`, `zellij`, and `wt` scripts on `PATH`, so the
-//! run is deterministic and never touches the network or a real tmux
-//! server. Only what the Conspectus process itself does is checked;
-//! what the programs it starts do is theirs.
+//! stand-in `gh`, `tmux`, `zellij`, `wt`, and `claude` scripts on `PATH`,
+//! so the run is deterministic and never touches the network, a real
+//! tmux server, or a real harness. Only what the Conspectus process
+//! itself does is checked; what the programs it starts do is theirs.
 //!
 //! Without `strace` (or when ptrace isn't permitted) the test skips,
 //! unless `CONSPECTUS_REQUIRE_STRACE` is set, as CI sets it. Set
@@ -20,6 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -734,6 +735,13 @@ const SHIMS: &[(&str, &str)] = &[
         "echo 'No active zellij sessions found.' >&2\nexit 1\n",
     ),
     ("wt", "exit 0\n"),
+    (
+        "claude",
+        "# Lists no session, and leaves a mark that the daemon polled\n\
+         # (with shell builtins only: `PATH` holds no coreutils).\n\
+         : > \"$0.ran\"\n\
+         case \"$1 $2\" in\n  \"agents --json\") echo '[]' ;;\n  *) exit 2 ;;\nesac\n",
+    ),
 ];
 
 struct World {
@@ -820,6 +828,20 @@ impl World {
     /// Start `conspectus <args>` under strace, tracing into a new
     /// directory.
     fn spawn(&self, strace: &Path, label: &str, args: &[&str], cwd: &Path) -> (Child, PathBuf) {
+        self.spawn_with(strace, label, args, cwd, &[], false)
+    }
+
+    /// [`Self::spawn`] with `env` added to the world's environment, and
+    /// stdin a pipe the caller writes when `piped` is set.
+    fn spawn_with(
+        &self,
+        strace: &Path,
+        label: &str,
+        args: &[&str],
+        cwd: &Path,
+        env: &[(&str, &str)],
+        piped: bool,
+    ) -> (Child, PathBuf) {
         let dir = self.root.join("traces").join(label);
         fs::create_dir_all(&dir).expect("trace dir");
         let child = Command::new(strace)
@@ -841,12 +863,49 @@ impl World {
             .current_dir(cwd)
             .env_clear()
             .envs(self.env.iter().map(|(key, value)| (key, value)))
-            .stdin(Stdio::null())
+            .envs(env.iter().copied())
+            .stdin(if piped { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn strace");
         (child, dir)
+    }
+
+    /// Run `conspectus hook write <harness>` to completion under strace,
+    /// as a harness inside tmux pane `%1` runs it, with `payload` on
+    /// stdin. Like every hook write it must succeed silently.
+    fn hook_write(
+        &self,
+        strace: &Path,
+        label: &str,
+        harness: &str,
+        payload: &str,
+        cwd: &Path,
+    ) -> PathBuf {
+        let tmux = format!("{},1,0", self.root.join("tmux-sock").display());
+        let (mut child, dir) = self.spawn_with(
+            strace,
+            label,
+            &["hook", "write", harness],
+            cwd,
+            &[("TMUX", &tmux), ("TMUX_PANE", "%1")],
+            true,
+        );
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(payload.as_bytes())
+            .expect("write the payload");
+        let output = child.wait_with_output().expect("wait for strace");
+        assert!(
+            output.status.success() && output.stdout.is_empty() && output.stderr.is_empty(),
+            "`conspectus hook write {harness}` was not silent: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        dir
     }
 
     /// Run `conspectus <args>` to completion under strace. The command
@@ -882,6 +941,18 @@ fn traced_root(dir: &Path) -> Option<i32> {
                     .ok()
             })?
     })
+}
+
+/// A synthetic Claude Code hook payload for `event`.
+fn hook_payload(event: &str) -> String {
+    serde_json::json!({
+        "session_id": "5e1f0c3a-7d2b-4a9e-8c61-2f4b9d0e7a33",
+        "cwd": "/work/project",
+        "transcript_path": "/work/project/5e1f0c3a.jsonl",
+        "hook_event_name": event,
+        "source": "startup",
+    })
+    .to_string()
 }
 
 fn wait_for(path: &Path, timeout: Duration) {
@@ -1022,7 +1093,23 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
     );
 
     // The daemon, with clients asking it for a snapshot and a forge
-    // refresh.
+    // refresh. A Claude Code session whose turn the hooks left working
+    // a minute ago has the daemon poll `claude agents --json` (ADR 0218).
+    let pid = i64::from(std::process::id());
+    let stuck = conspectus::live_store::LiveEvent::new(
+        "claude-code",
+        "showcase-claude",
+        conspectus::live_store::now_ms() - 60_000,
+        conspectus::live_store::LiveEventKind::TurnStarted,
+    )
+    .with_context(conspectus::live_store::LiveContext {
+        pid: Some(pid),
+        pid_start: conspectus::live_store::process_start_time(pid),
+        ..Default::default()
+    });
+    conspectus::live_store::LiveStore::at(world.root.join("xdg/state/conspectus"))
+        .apply_event(&stuck)
+        .expect("seed the live-state store");
     let (serve, serve_dir) = world.spawn(&strace, "serve", &["serve"], project);
     let socket = world.root.join("xdg/run/conspectus/server.sock");
     wait_for(&socket, Duration::from_secs(60));
@@ -1035,7 +1122,16 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             project,
         ),
         world.run(&strace, "client-table", &["table", "mux"], project),
+        // A session start goes to the daemon's hook ingest.
+        world.hook_write(
+            &strace,
+            "hook-write-daemon",
+            "claude-code",
+            &hook_payload("SessionStart"),
+            project,
+        ),
     ];
+    wait_for(&world.root.join("bin/claude.ran"), Duration::from_secs(60));
     let pid = traced_root(&serve_dir).expect("traced serve pid");
     // SAFETY: `kill` with a pid this test spawned and a valid signal.
     unsafe {
@@ -1051,6 +1147,13 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         fs::read_to_string(&pins).expect("pins.toml"),
         "[pins]\nschema_version = 2\n\n[[pins.slots]]\nid = \"seeded\"\nkind = \"mux\"\n",
         "the daemon left the slot store byte for byte alone"
+    );
+    let polled = conspectus_events(&serve_dir, project)
+        .into_iter()
+        .any(|event| matches!(&event, Event::Exec { argv, .. } if argv == &["claude", "agents", "--json"]));
+    assert!(
+        polled,
+        "the daemon's poll of `claude agents --json` was traced"
     );
     let mut daemon = clients;
     daemon.push(serve_dir);
@@ -1273,6 +1376,47 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             pager: None,
         },
         &hooks,
+        project,
+    );
+
+    // Hook writes with no daemon: a session start asks tmux for the
+    // pane's session and writes the live state and the spool; a state
+    // event of the same session after it writes only the live state.
+    let start = world.hook_write(
+        &strace,
+        "hook-write-start",
+        "claude-code",
+        &hook_payload("SessionStart"),
+        project,
+    );
+    let state = world.hook_write(
+        &strace,
+        "hook-write-state",
+        "claude-code",
+        &hook_payload("Stop"),
+        project,
+    );
+    let quiet: Vec<Event> = conspectus_events(&state, project)
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event,
+                Event::Exec { .. } | Event::Socket { .. } | Event::Connect { .. }
+            )
+        })
+        .collect();
+    assert!(
+        quiet.is_empty(),
+        "a state event after the session's first started a process or opened a socket: {quiet:?}"
+    );
+    record(
+        &Scenario {
+            name: "hook write",
+            contexts: &["read"],
+            vars: &vars,
+            pager: None,
+        },
+        &[start, state],
         project,
     );
 

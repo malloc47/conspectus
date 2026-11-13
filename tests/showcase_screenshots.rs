@@ -75,12 +75,14 @@ fn the_showcase_screens_render_real_previews_with_stable_paths_and_ages() {
     let session = frame(scratch.path(), "jjjjjljjjj");
     assert!(session.contains("~/repos/project"), "{session}");
     assert!(session.contains("active · last 1h ago"), "{session}");
+    assert!(session.contains("! waiting · question"), "{session}");
     assert!(
-        session.contains("What's on feature/extra that isn't on main yet?"),
+        session.contains("Expand the notes into a release summary"),
         "{session}"
     );
 
-    let related = frame(scratch.path(), "jjjjjljjjj<Tab>jjjjj");
+    // Past the session's ten fields, its live state among them.
+    let related = frame(scratch.path(), "jjjjjljjjj<Tab>jjjjjjjjjj");
     assert!(related.contains("feature/extra"), "{related}");
     assert!(related.contains(" M notes.md"), "{related}");
 
@@ -189,7 +191,8 @@ fn a_content_query_narrows_the_showcase_sessions_and_marks_their_hits() {
     );
     assert!(filtered.contains("2 hits"), "{filtered}");
     assert!(filtered.contains("1/11 sessions"), "{filtered}");
-    assert!(filtered.contains("a release summary and"), "{filtered}");
+    // The row's snippet shows the match, after its hit count.
+    assert!(filtered.contains("2 hits  …release summary"), "{filtered}");
     assert!(plain.contains("11 sessions"), "{plain}");
 
     // A query nothing matches says so.

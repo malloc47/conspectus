@@ -25,7 +25,7 @@ use tuikit::property_grid::PropertyGrid;
 
 use super::{EdgeStateLabel, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, grid};
 use crate::model::{GraphSnapshot, NodeId};
-use crate::tui::rows::RowId;
+use crate::tui::rows::{LiveValues, RowId};
 use crate::tui::theme::Theme;
 
 /// The explorer's model over the graph: nodes by id, rows by
@@ -57,6 +57,9 @@ pub struct GraphSource<'a> {
     pub edge_meta: bool,
     /// The left pane's selection, which a frame keeps.
     pub left: Option<&'a RowId>,
+    /// The live values the left pane's rows were filled with, which a
+    /// node's live fields read.
+    pub live: &'a LiveValues,
 }
 
 impl ExplorerSource for GraphSource<'_> {
@@ -68,6 +71,7 @@ impl ExplorerSource for GraphSource<'_> {
             target: id,
             home: self.home.as_deref(),
             now: Some(crate::tui::rows::tree_current_unix_epoch()),
+            live: self.live,
         })
     }
 

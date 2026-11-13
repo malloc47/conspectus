@@ -163,6 +163,7 @@ fn current_items() -> Vec<crate::tui::rows::Row> {
                 primary_node: primary,
                 pin_id: None,
                 content_hit: None,
+                live: None,
             }),
         }
     })

@@ -104,6 +104,8 @@ fn parser_extracts_name_path_activity_and_created_epoch() {
             active_pane_start_command: None,
             client_attached: None,
             session_id: None,
+            active_pane_id: None,
+            active_pane_title: None,
         }]
     );
 }
@@ -846,4 +848,35 @@ fn a_cached_listing_hides_a_killed_mux_until_the_mux_cache_is_cleared() {
     let fragment = discovery.discover(&context).unwrap();
     assert!(mux_names(&fragment).is_empty());
     assert_eq!(probes(&fragment)["tmux"], MuxProbeStatus::NoServer);
+}
+
+#[test]
+fn the_context_probe_asks_about_the_pane_it_is_given() {
+    assert_eq!(
+        display_message_args(Some("%3"), "#{pane_id}"),
+        ["display-message", "-p", "-t", "%3", "#{pane_id}"]
+    );
+    assert_eq!(
+        display_message_args(None, "#{session_name}"),
+        ["display-message", "-p", "#{session_name}"]
+    );
+}
+
+#[test]
+fn only_a_pane_id_is_a_context_probe_target() {
+    for pane in ["%0", "%3", "%120"] {
+        assert!(is_pane_id(pane), "{pane}");
+    }
+    for value in ["", "%", "3", "%3a", "% 3", "work:1.0", "%-1"] {
+        assert!(!is_pane_id(value), "{value:?}");
+    }
+}
+
+#[test]
+fn outside_tmux_the_context_probe_starts_nothing() {
+    let runner = SystemTmux::with_binary("/definitely/not/here/tmux");
+    assert_eq!(
+        runner.session_context_of(None, Some("%3".to_string())),
+        None
+    );
 }

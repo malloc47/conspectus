@@ -16,7 +16,8 @@
 
 use std::collections::BTreeSet;
 
-use conspectus::model::{GraphSnapshot, RelationKind};
+use conspectus::model::live::LiveState;
+use conspectus::model::{GraphSnapshot, NodeId, RelationKind};
 
 #[cfg(debug_assertions)]
 #[test]
@@ -118,6 +119,83 @@ fn assert_layer_coverage(snapshot: &GraphSnapshot) {
     assert!(has_forge_pr, "showcase missing forge_pr coverage");
     assert!(has_fork, "showcase missing fork coverage");
     assert!(has_mux, "showcase missing mux coverage");
+
+    // Live state for every mark the TUI draws: a session waiting, one
+    // working, one ready, one failed, one exited, and agents in a mux's
+    // panes that no session matches yet.
+    let live: BTreeSet<LiveState> = snapshot
+        .node_live
+        .values()
+        .map(|binding| binding.observation.state)
+        .collect();
+    for state in [
+        LiveState::Waiting,
+        LiveState::Working,
+        LiveState::Ready,
+        LiveState::Error,
+        LiveState::Exited,
+    ] {
+        assert!(
+            live.contains(&state),
+            "showcase missing a session in live state `{}`; have: {live:?}",
+            state.name()
+        );
+    }
+    assert!(
+        !snapshot.pane_live.is_empty(),
+        "showcase missing a pane-only live agent"
+    );
+    // Two waiting sessions, so a group header counts more than one.
+    let waiting = snapshot
+        .node_live
+        .values()
+        .filter(|binding| binding.observation.state == LiveState::Waiting)
+        .count();
+    assert!(
+        waiting >= 2,
+        "showcase needs two waiting sessions; has {waiting}"
+    );
+    // A session running subagents, and one whose wait is a subagent's.
+    assert!(
+        snapshot
+            .node_live
+            .values()
+            .any(|binding| binding.observation.subagents > 1),
+        "showcase missing a session running subagents"
+    );
+    assert!(
+        snapshot
+            .node_live
+            .values()
+            .any(|binding| binding.observation.via_subagent),
+        "showcase missing a session waiting through a subagent"
+    );
+    // A finished turn seen (a client attached to its mux after it ended)
+    // and one in no mux, so unseen.
+    let ready: Vec<(&NodeId, i64)> = snapshot
+        .node_live
+        .iter()
+        .filter(|(_, binding)| binding.observation.state == LiveState::Ready)
+        .map(|(id, binding)| (id, binding.observation.since_ms))
+        .collect();
+    let attached_after = |id: &NodeId, since_ms: i64| {
+        snapshot.preferred_mux_for(id).is_some_and(|mux| {
+            snapshot.nodes.iter().any(|node| {
+                matches!(node, GraphNode::MuxSession(node) if node.id == mux
+                    && node.last_attached_epoch.is_some_and(|at| at * 1000 >= since_ms))
+            })
+        })
+    };
+    assert!(
+        ready.iter().any(|(id, since)| attached_after(id, *since)),
+        "showcase missing a ready turn whose mux was attached after it ended: {ready:?}"
+    );
+    assert!(
+        ready
+            .iter()
+            .any(|(id, _)| snapshot.preferred_mux_for(id).is_none()),
+        "showcase missing a ready turn of a session with no mux: {ready:?}"
+    );
 
     // Lineage relation: codex parent → child fork chain.
     let has_lineage = snapshot

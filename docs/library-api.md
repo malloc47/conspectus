@@ -37,9 +37,10 @@ inputs.
 | Module | Classification | Stable entry points |
 | --- | --- | --- |
 | `model` | pure data model | `GraphSnapshot`, `GraphNode`, `GraphLink`, typed IDs, relation/provenance/confidence enums |
+| `model::live` | pure data model | `LiveState`, `LiveDetail`, `LiveSource` (`hook`, `pane_title` for a state read from an agent's pane title, or `harness_poll` for one read from a harness's own list of its sessions), `TitleMark` and `PaneTitle` (what a mux probe read from a session's active pane title, kept on `MuxProbe::titles` as a mark, never the title), `LivePoll` and `PolledAgent` (what a repair poll of a harness's own list of its sessions read: each listed session's pid, its start time, a plain session id, and a mapped state, kept by harness key in `GraphSnapshot::live_polls`, which rides in `graph.bin` and stays out of JSON), `LiveObservation` (its `effective` read rule), `Liveness`, `LiveBinding` (an observation with the liveness found when it was bound), `LiveConfidence`, `EffectiveLive`, `LiveCounts`; a snapshot's `node_live` table of `LiveBinding`s (by agent session) and its `pane_live` table (by `LivePane`, a tmux mux and pane, for agents no session matches yet) are read through `GraphSnapshot::live_state_of`, `GraphSnapshot::live_panes_of`, and `GraphSnapshot::live_counts_of_mux`, which apply the bound liveness; `GraphSnapshot::live_tables` borrows both as `LiveTables`; the read rule's windows are the constants `QUIET_WINDOW_MS`, `QUIET_HEARTBEATS`, `UNKNOWN_LIVENESS_WINDOW_MS`, and `STARTING_WINDOW_MS`, and `LiveCounts::dominant` picks a mux's most urgent state by `LiveState::default_precedence` (`dominant_by` takes a viewer's own ranking) |
 | `resolve` | pure resolver | `resolve_snapshot`, `resolve_links`, `explain_resolved_relationships` |
 | `output` | pure renderer | `render_graph_json` |
-| `output::table` | pure renderer | `render`, `render_with`, `Projection` re-export |
+| `output::table` | pure renderer | `render`, `render_with`, `Projection` re-export; the opt-in `live` columns read live state at `RenderOptions::now_epoch`, or at the current time when it is `None` (as the `activity` columns always do) |
 | `discovery::cross_link` | pure graph enrichment | `infer` |
 | `discovery::declared` | pure graph enrichment when loader is injected | `apply_declared_links` |
 | `discovery::forge::github` | pure parser/fragment builder except tests | `GhPullRequestParser`, `RepoContext`, `fragment_for_repo`, `parse_github_remote` |
@@ -63,6 +64,7 @@ where possible.
 | `discovery::git` | `GitProbe` shells out to `git`; `GitDiscovery` uses probes over explicit roots | call `fragment_from_probe` for pure tests, or run `GitDiscovery` only where `git` is allowed |
 | `discovery::tmux` | `SystemTmux` shells out to `tmux` | inject a `TmuxRunner`; parse rows with `parse_list_sessions` for pure tests |
 | `history` | `HistoryStore::at(dir)` reads and writes the history files under an advisory lock; `HistoryStore::from_env` reads `$XDG_STATE_HOME` | construct a store over a temp directory in tests; `merge::merge` and `project::project_into` are pure |
+| `discovery::live_state` | `apply_live_state` reads the live-state store in a directory and checks recorded pids through a `PidProbe` (`/proc` on Linux); `LocalDiscoveryConfig::from_env` binds `$XDG_STATE_HOME/conspectus` | `bind_live` is pure over a snapshot, the store's file, and a probe, and returns both tables as a `BoundLive`; the file (`LiveFile`, read with `LiveStore::at(dir).read()`) and the probe (the `PidProbe` trait, with `ProcProbe` over `/proc`) come from the doc-hidden `live_store`; `LocalDiscoveryConfig::empty` binds nothing, `with_live_state_root` points at a temp directory |
 | `pin_slots` | `SlotStore::at(path)` reads and writes `pins.toml` atomically; `SlotStore::from_env` reads `$XDG_DATA_HOME` | construct a store over a temp path in tests; `parse_slots` is pure |
 | `pin_ops`, `pin_migrate` | slot gestures and legacy conversion over a `SlotStore` and a `HistoryWriter` | inject temp stores; `pin_migrate::plan` is pure |
 | `rebuild` | `plan` is pure over a snapshot and an `Env` of injected backends; `execute` runs the plan through those backends | inject a mux backend, worktree backend, and `Cloner`; print `Plan::render` for dry runs |
@@ -78,7 +80,9 @@ These modules are not part of the library contract (ADR 0015, amended
   readers for the earlier pin model, kept until `pin migrate` is retired).
 - `pub` but `#[doc(hidden)]`, reachable only because the binary,
   integration tests, or the widget preview example use them: `cli`,
-  `tui`, `snapshot`, `hook`, `filter`, `dev_scenarios`.
+  `tui`, `snapshot`, `hook`, `live_store` (the live-state store that
+  hook writers fold events into; library consumers read live state
+  through `model::live` on a snapshot), `filter`, `dev_scenarios`.
 
 ## Stable Entry Points
 
@@ -123,6 +127,7 @@ failing provider (`DiscoveryError::Provider` names the provider's keys).
   (see `docs/operations.md`)
 - `CONSPECTUS_DISABLE_TMUX`
 - `CONSPECTUS_DISABLE_FORGE`
+- `XDG_STATE_HOME` (the history and live-state stores)
 - `HOME`
 - `XDG_CONFIG_HOME` through `ConfigLoader::from_env`
 

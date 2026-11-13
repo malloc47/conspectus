@@ -117,6 +117,11 @@ pub(super) struct SearchArgs {
     /// Comma-separated or repeatable.
     #[arg(long = "mux-state", value_name = "STATE", value_delimiter = ',')]
     mux_state: Vec<String>,
+    /// Narrow by what each session's agent is doing now: `waiting`,
+    /// `ready`, `working`, `error`, `unknown`, or `none`.
+    /// Comma-separated or repeatable.
+    #[arg(long = "state", value_name = "STATE", value_delimiter = ',')]
+    state: Vec<String>,
     /// Print at most this many results.
     #[arg(long, value_name = "N", value_parser = parse_limit)]
     limit: Option<usize>,
@@ -271,6 +276,7 @@ impl SearchArgs {
             harness: self.harness.clone(),
             max_age: self.max_age.clone(),
             mux_state: self.mux_state.clone(),
+            state: self.state.clone(),
             ..FilterArgs::default()
         }
         .to_row_filter()?;

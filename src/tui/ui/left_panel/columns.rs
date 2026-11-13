@@ -17,10 +17,12 @@ use tuikit::tree::{self, RowColumns, RowCtx, RowMark};
 
 use super::*;
 use crate::tui::rows::{
-    EntityState, HitRow, MixedRow, MixedTone, PaneHitRow, PaneRow, PinMarker, Row,
+    EntityState, HitRow, LiveSign, MixedLive, MixedRow, MixedTone, PaneHitRow, PaneRow, PinMarker,
+    Row,
 };
 use crate::tui::widgets::badge::{
-    command_badge, harness_badge, hits_chip, no_agent_chip, was_in_chip,
+    command_badge, harness_badge, hits_chip, no_agent_chip, subagents_chip, waiting_count_chip,
+    was_in_chip,
 };
 use crate::tui::widgets::search::{
     Hit, HitChip, HitCol, HitShape, hit_columns, hits_tag, line_tag, snippet_cell, turn_tag,
@@ -48,6 +50,8 @@ pub(super) enum Col {
     Detail,
     /// A group header's session count.
     Count,
+    /// How many agents beneath a group header wait on the operator.
+    Waiting,
     /// A group header's ambiguous-link warning.
     Warning,
     /// A session's harness key.
@@ -56,10 +60,14 @@ pub(super) enum Col {
     Chip,
     /// A session's age.
     Age,
+    /// What a session's agent is doing now: its live-state mark.
+    Live,
     /// A session's mux link glyph.
     State,
     /// A session's alias, title, or mux name.
     Label,
+    /// The `+N` note of the subagents a session's agent runs.
+    Subagents,
     /// The `was in <mux>` note.
     WasIn,
     /// A flat session's project.
@@ -74,6 +82,8 @@ pub(super) enum Col {
     MuxChips,
     /// A mux's age.
     MuxAge,
+    /// The live-state mark of what a mux's agents are doing, rolled up.
+    MuxLive,
     /// A mux's client glyph, or a stopped mux's state.
     MuxState,
     /// The `N hits` note on a mux whose agent a content search matched.
@@ -177,13 +187,16 @@ impl Schemas {
             // The label ends in one column at every depth (a nested
             // header's is narrower by its indent), so the path after it
             // starts where its parent's does, and the path spaces the
-            // counts, so every count in the tree is in one column.
+            // counts, so every count in the tree is in one column. The
+            // waiting count keeps its mark in one column after them; like
+            // the count and the warning, it never gives way.
             Column::cap(Col::HeaderLabel, usize::MAX).absorbs_lead(),
             Column::cap(Col::Detail, usize::MAX)
                 .ragged()
                 .shrinks(0, DETAIL_FLOOR)
                 .drops(0),
             Column::cap(Col::Count, usize::MAX).right(),
+            Column::cap(Col::Waiting, usize::MAX),
             Column::cap(Col::Warning, 1),
         ]);
         let mut session = prefix(Some(Col::Glyph), Col::Marker);
@@ -191,15 +204,27 @@ impl Schemas {
             Column::fixed(Col::Key, SESSION_KEY_CELLS).drops(1),
             Column::fixed(Col::Chip, chip::width(theme)).drops(2),
             Column::fixed(Col::Age, tuikit::age::CELL_WIDTH).drops(3),
+            // The live mark and the link glyph are the row's state, so
+            // neither gives way.
+            Column::fixed(Col::Live, 1),
             Column::fixed(Col::State, 1),
+            // After the label, what follows it gives way first: the
+            // preview, the `was in` note, the project, the subagents
+            // note, and the hit count; then the label narrows and leaves.
             Column::hug(Col::Label, SESSION_LABEL_CELLS)
-                .shrinks(4, LABEL_FLOOR)
-                .drops(4),
+                .shrinks(5, LABEL_FLOOR)
+                .drops(5),
+            // As wide as the widest the chip reads, its cap.
+            Column::hug(
+                Col::Subagents,
+                text::width(&subagents_chip(u16::MAX, theme).content),
+            )
+            .drops(3),
             Column::hug(Col::WasIn, usize::MAX).drops(1),
             Column::fixed(Col::Project, PROJECT_CELLS)
                 .shrinks(2, LABEL_FLOOR)
                 .drops(2),
-            Column::hug(Col::Hits, usize::MAX).drops(3),
+            Column::hug(Col::Hits, usize::MAX).drops(4),
             Column::fill(Col::Preview).drops(0),
         ]);
         // A mux's chips are up to two of its agents' and a count of the
@@ -215,6 +240,7 @@ impl Schemas {
                 .shrinks(1, chip + more)
                 .drops(4),
             Column::fixed(Col::MuxAge, tuikit::age::CELL_WIDTH).drops(3),
+            Column::fixed(Col::MuxLive, 1),
             Column::fixed(Col::MuxState, 1),
             Column::hug(Col::MuxHits, usize::MAX).drops(1),
             Column::fill(Col::MuxContent).drops(0),
@@ -444,8 +470,9 @@ impl LeftColumns<'_> {
 impl LeftColumns<'_> {
     /// A group header's cells after its prefix: the bold label, the path
     /// or members (with `(cwd)` on the launch directory's group), the
-    /// count of sessions beneath it, and `▲` when one of them has an
-    /// ambiguous mux link.
+    /// count of sessions beneath it, `! N` when N agents beneath it wait
+    /// on the operator, and `▲` when one of the sessions has an ambiguous
+    /// mux link.
     fn header_cells(&self, group: &GroupRow, summary: GroupSummary) -> Cells<Col> {
         let theme = self.theme;
         let cwd_style = Style::default()
@@ -475,26 +502,34 @@ impl LeftColumns<'_> {
                     Style::default().add_modifier(theme.muted),
                 ),
             ));
-            if summary.ambiguous > 0 {
-                cells.push((
-                    Col::Warning,
-                    Cell::text(
-                        marks::WARNING,
-                        Style::default()
-                            .fg(theme.warning)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ));
-            }
+        }
+        // A Mux view header counts its muxes' agents, which need not be
+        // listed as rows, so it can wait without a session count.
+        if summary.waiting > 0 {
+            cells.push((
+                Col::Waiting,
+                Cell::chip(waiting_count_chip(summary.waiting, theme)),
+            ));
+        }
+        if summary.agents > 0 && summary.ambiguous > 0 {
+            cells.push((
+                Col::Warning,
+                Cell::text(
+                    marks::WARNING,
+                    Style::default()
+                        .fg(theme.warning)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ));
         }
         cells
     }
 
     /// A session row's cells after its prefix: the harness key, the
-    /// harness chip, the age, the mux link glyph (a spinner while the row
-    /// awaits the hand-off), and then the label, the `was in` note, the
-    /// project in flat grouping, and the last message or what a content
-    /// search found.
+    /// harness chip, the age, the live-state mark, the mux link glyph (a
+    /// spinner while the row awaits the hand-off), and then the label, the
+    /// subagents its agent runs, the `was in` note, the project in flat
+    /// grouping, and the last message or what a content search found.
     fn session_cells(&self, session: &AgentSessionRow, pending: bool) -> Cells<Col> {
         let theme = self.theme;
         let secondary = Style::default().fg(theme.inert);
@@ -515,6 +550,10 @@ impl LeftColumns<'_> {
                 Col::Age,
                 age_cell(session.recency.as_deref(), session.activity_epoch, self.now),
             ),
+            (
+                Col::Live,
+                live_cell(LiveSign::of_session(session.live), theme),
+            ),
             (Col::State, state),
         ];
         // The alias shows always and bold; a title only when it tells the
@@ -530,6 +569,10 @@ impl LeftColumns<'_> {
                 Style::default()
             };
             cells.push((Col::Label, Cell::text(label, style)));
+        }
+        let subagents = session.live.map_or(0, |cell| cell.running_subagents());
+        if subagents > 0 {
+            cells.push((Col::Subagents, Cell::chip(subagents_chip(subagents, theme))));
         }
         if let Some(mux) = session.gone_mux_name() {
             // An untitled session is already named after its mux, so the
@@ -568,9 +611,10 @@ impl LeftColumns<'_> {
 impl LeftColumns<'_> {
     /// A mux row's cells after its prefix: the name, the chips of its
     /// agents (or of the harness or program its pane runs, or `no
-    /// agent`), its own age, whether a client is attached (a spinner while
-    /// the row awaits the hand-off), and its one agent's last message or
-    /// what a content search found in it.
+    /// agent`), its own age, the live-state mark its agents roll up to,
+    /// whether a client is attached (a spinner while the row awaits the
+    /// hand-off), and its one agent's last message or what a content
+    /// search found in it.
     fn mux_cells(&self, mux: &MuxSessionRow, pending: bool) -> Cells<Col> {
         let theme = self.theme;
         let chips = if mux.agent_labels.is_empty() {
@@ -607,6 +651,7 @@ impl LeftColumns<'_> {
                 Col::MuxAge,
                 age_cell(mux.recency.as_deref(), mux.activity_epoch, self.now),
             ),
+            (Col::MuxLive, live_cell(LiveSign::of_mux(mux.live), theme)),
             (Col::MuxState, state),
         ];
         match &mux.content_hit {
@@ -687,21 +732,25 @@ impl LeftColumns<'_> {
     }
 
     /// A Pinned or History row's cells after its prefix: the bold label,
-    /// the state word (a spinner while the row awaits the hand-off, as wide
-    /// as the word, so its column holds still), the age, the chip, and the
+    /// the state word (a session's live word in place of its link word,
+    /// and a spinner while the row awaits the hand-off, as wide as the
+    /// word, so its column holds still), the age, the chip, and the
     /// content. A row for something stopped, removed, missing, planned, or
     /// unknown is dimmed from its label on when it is drawn.
     fn mixed_cells(&self, mixed: &MixedRow, pending: bool) -> Cells<Col> {
         let theme = self.theme;
-        // A pull request's word takes the style of its state glyph, so the
-        // two read as one signal; other live words share the attached
-        // color.
-        let status_style = match (mixed.tone, mixed.pr_status) {
-            (MixedTone::Dim, _) => Style::default(),
-            (MixedTone::Normal, Some(status)) => status.mark(theme).1,
-            (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached()),
+        let live = live_word_sign(mixed);
+        // A live session's word and a pull request's word take the style
+        // of their glyphs, so the word reads as the glyph does in the
+        // views of one kind; other live words share the attached color.
+        let status_style = match (mixed.tone, live, mixed.pr_status) {
+            (MixedTone::Dim, _, _) => Style::default(),
+            (MixedTone::Normal, Some(sign), _) => sign.style(theme),
+            (MixedTone::Normal, None, Some(status)) => status.mark(theme).1,
+            (MixedTone::Normal, None, None) => Style::default().fg(theme.mux_attached()),
         };
-        let word = text::truncate_end(&mixed.status, MIXED_STATUS_CELLS);
+        let status = live.and_then(LiveSign::word).unwrap_or(&mixed.status);
+        let word = text::truncate_end(status, MIXED_STATUS_CELLS);
         let status = match self.spinner.filter(|_| pending) {
             Some(glyph) => text::pad(glyph, text::width(&word)),
             None => word,
@@ -729,9 +778,9 @@ impl LeftColumns<'_> {
 
     /// A stopped mux's cells, in the running ones' columns: the name, the
     /// harness it last ran (or `no agent`), the time since it was last
-    /// seen running, its state glyph (a spinner while the row awaits the
-    /// hand-off), and the directory it ran in. The tree draws the row as a
-    /// ghost.
+    /// seen running, the live-state mark of the agents it still counts,
+    /// its state glyph (a spinner while the row awaits the hand-off), and
+    /// the directory it ran in. The tree draws the row as a ghost.
     fn stopped_mux_cells(&self, mixed: &MixedRow, pending: bool) -> Cells<Col> {
         let theme = self.theme;
         let chip = mixed
@@ -761,6 +810,10 @@ impl LeftColumns<'_> {
                 Col::MuxAge,
                 age_cell(mixed.age.as_deref(), mixed.age_epoch, self.now),
             ),
+            (
+                Col::MuxLive,
+                live_cell(LiveSign::of_mixed(mixed.live), theme),
+            ),
             (Col::MuxState, state),
             (
                 Col::MuxContent,
@@ -768,6 +821,20 @@ impl LeftColumns<'_> {
             ),
         ]
     }
+}
+
+/// The live sign whose word a Pinned or History row prints in place of
+/// its status: the row stands for a running session (its word says
+/// whether it runs in a mux) whose agent is waiting, working, ready, or in
+/// error. A session with no evidence, or whose evidence can't be trusted,
+/// keeps its word, and the detail pane still says whether it is in a mux.
+fn live_word_sign(mixed: &MixedRow) -> Option<LiveSign> {
+    let MixedLive::Session(cell) = mixed.live else {
+        return None;
+    };
+    let running_session =
+        mixed.node_kind == NodeKind::AgentSession && mixed.tone == MixedTone::Normal;
+    Some(LiveSign::of_session(Some(cell))).filter(|sign| running_session && sign.word().is_some())
 }
 
 /// Whether a mixed-kind row is a stopped mux in the Mux view: a row that
@@ -804,6 +871,13 @@ fn age_cell(age: Option<&str>, epoch: Option<i64>, now: i64) -> Cell {
         age.map(str::to_string),
         Age::of(epoch, Some(now)).map(Age::recency),
     )
+}
+
+/// The live-state cell: the mark, in its style. It keeps its mark while
+/// the row awaits a hand-off's refresh, since that refresh does not
+/// decide it: the TUI reads live state from its store on its own.
+fn live_cell(sign: LiveSign, theme: &Theme) -> Cell {
+    Cell::text(sign.glyph(), sign.style(theme))
 }
 
 /// A last-message preview: inert italics, cut at the end.

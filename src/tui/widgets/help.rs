@@ -68,6 +68,7 @@ pub(crate) fn annotations(theme: &Theme) -> Vec<HelpAnnotation> {
             " (Tab searches all of them). S-Tab switches between listing sessions and listing messages; Ctrl-O opens the options (tool calls, thinking, pane scrollback); Ctrl-S keeps the search in the Search view and goes there; Ctrl-F keeps the query as a filter on the lists. `s` works in every terminal",
         ),
         HelpAnnotation::section(icon_legend(theme)),
+        HelpAnnotation::section(live_state_legend(theme)),
         HelpAnnotation::section(mux_state_legend(theme)),
         HelpAnnotation::section(pr_state_legend(theme)),
         HelpAnnotation::section(pin_marker_legend(theme)),
@@ -92,6 +93,77 @@ fn icon_legend(theme: &Theme) -> HelpSection {
                 node_kind_help_blurb(kind),
             )
         })
+}
+
+/// Legend for the live-state marks: what an agent is doing now, in the
+/// column after the age of session and mux rows. The Pinned and History
+/// views spell the first four as words instead. Then the count of the
+/// waiting agents beneath a group header, and anywhere in the header, and
+/// the note of the subagents a session runs.
+fn live_state_legend(theme: &Theme) -> HelpSection {
+    use crate::tui::rows::LiveMark;
+    LiveMark::ALL.into_iter().fold(
+        HelpSection::new("Agent state"),
+        |section, mark| {
+            let (name, blurb): (&str, std::borrow::Cow<'static, str>) = match mark {
+                LiveMark::Waiting => (
+                    "Waiting on you",
+                    format!(
+                        "a permission prompt, a question, a plan, or other input; attach to answer it. {} goes to the one waiting longest; Controls can float these to the top, or list only the sessions in one state (agent state)",
+                        crate::tui::keybindings::key_name("waiting.next")
+                    )
+                    .into(),
+                ),
+                LiveMark::Working => (
+                    "Working",
+                    "a turn, a compaction, or a start is under way; dimmed when nothing has been heard for a while"
+                        .into(),
+                ),
+                LiveMark::Ready => (
+                    "Ready",
+                    "the turn is over and the agent takes a prompt".into(),
+                ),
+                LiveMark::Error => ("Error", "the turn ended on an error".into()),
+                LiveMark::Unknown => (
+                    "Can't tell",
+                    "nothing heard for too long from a process that can't be checked".into(),
+                ),
+                LiveMark::None => (
+                    "No state",
+                    format!(
+                        "the session has ended, or its harness's hooks are off ({} hook init <harness> turns them on); a mux shows its most urgent agent's state, and this when none has one",
+                        crate::invocation::invoked_name()
+                    )
+                    .into(),
+                ),
+            };
+            let section = section.legend(Span::styled(mark.glyph(), mark.style(theme)), name, blurb);
+            if mark == LiveMark::Ready {
+                let unseen = crate::tui::rows::LiveSign {
+                    mark,
+                    quiet: false,
+                    unseen: true,
+                };
+                section.legend(
+                    Span::styled(mark.glyph(), unseen.style(theme)),
+                    "Ready, unseen",
+                    "bold: a finished turn you haven't seen, until you attach to its mux or, for a session with no mux, rest the cursor on its row for a second",
+                )
+            } else {
+                section
+            }
+        },
+    )
+    .legend(
+        crate::tui::widgets::badge::waiting_chip("N", theme),
+        "Waiting count",
+        "on a group header, how many agents beneath it wait on you; in the header line, how many wait anywhere, whatever the view shows",
+    )
+    .legend(
+        crate::tui::widgets::badge::subagents_chip(1, theme),
+        "Subagents",
+        "after a session's label: how many subagents its agent runs now, +9+ for ten or more",
+    )
 }
 
 /// Legend for the glyphs in the row tree's attach-state column plus the

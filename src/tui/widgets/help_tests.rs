@@ -191,6 +191,103 @@ fn help_body_includes_mux_state_legend() {
 }
 
 #[test]
+fn help_body_includes_the_agent_state_legend_in_the_marks_styles() {
+    let theme = Theme::default();
+    let lines = body_lines(&theme);
+    let texts: Vec<String> = lines.iter().map(line_text).collect();
+    let header = texts
+        .iter()
+        .position(|t| t == "Agent state")
+        .expect("agent state section header");
+    for mark in crate::tui::rows::LiveMark::ALL {
+        let row = lines[header + 1..]
+            .iter()
+            .find(|line| line_text(line).starts_with(&format!("  {} ", mark.glyph())))
+            .unwrap_or_else(|| {
+                panic!(
+                    "no legend row for {mark:?} in:\n{}",
+                    texts[header..].join("\n")
+                )
+            });
+        let glyph = row
+            .spans
+            .iter()
+            .find(|span| span.content.trim() == mark.glyph())
+            .expect("the mark's own span");
+        assert_eq!(glyph.style, mark.style(&theme), "{mark:?}");
+    }
+    let none = texts[header..]
+        .iter()
+        .find(|t| t.contains("No state"))
+        .expect("the no-state row");
+    assert!(
+        none.contains(&format!("{} hook init", crate::invocation::invoked_name())),
+        "the no-state row says how to turn hooks on: {none}"
+    );
+}
+
+#[test]
+fn the_agent_state_legend_explains_the_waiting_count() {
+    let theme = Theme::default();
+    let lines = body_lines(&theme);
+    let texts: Vec<String> = lines.iter().map(line_text).collect();
+    let header = texts
+        .iter()
+        .position(|t| t == "Agent state")
+        .expect("agent state section header");
+    let at = texts[header..]
+        .iter()
+        .position(|t| t.contains("Waiting count"))
+        .map(|at| header + at)
+        .expect("the waiting count row");
+    assert!(texts[at].starts_with("  ! N "), "{}", texts[at]);
+    let blurb = texts[at..(at + 3).min(texts.len())]
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(blurb.contains("group header"), "{blurb}");
+    assert!(blurb.contains("header line"), "{blurb}");
+    let chip = lines[at]
+        .spans
+        .iter()
+        .find(|span| span.content.trim() == "! N")
+        .expect("the count's own span");
+    assert_eq!(
+        chip.style,
+        crate::tui::rows::LiveMark::Waiting.style(&theme),
+        "drawn as the headers draw it"
+    );
+}
+
+#[test]
+fn the_agent_state_legend_explains_the_subagent_chip() {
+    let theme = Theme::default();
+    let lines = body_lines(&theme);
+    let texts: Vec<String> = lines.iter().map(line_text).collect();
+    let header = texts
+        .iter()
+        .position(|t| t == "Agent state")
+        .expect("agent state section header");
+    let at = texts[header..]
+        .iter()
+        .position(|t| t.contains("Subagents"))
+        .map(|at| header + at)
+        .expect("the subagents row");
+    assert!(texts[at].starts_with("  +1 "), "{}", texts[at]);
+    let chip = lines[at]
+        .spans
+        .iter()
+        .find(|span| span.content.trim() == "+1")
+        .expect("the chip's own span");
+    assert_eq!(
+        chip.style,
+        crate::tui::widgets::badge::subagents_chip(1, &theme).style,
+        "drawn as the rows draw it"
+    );
+}
+
+#[test]
 fn esc_closes_help_overlay() {
     let mut help = open(&Theme::default());
     assert_eq!(help.handle_key(press(KeyCode::Esc)), Outcome::Close);

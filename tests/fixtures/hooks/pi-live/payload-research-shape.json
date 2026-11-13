@@ -1,0 +1,19 @@
+{
+  "session_id": "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d",
+  "cwd": "/home/user/projects/my-project",
+  "transcript_path": "/home/user/.pi/agent/sessions/--home-user-projects-my-project--/2026-11-11T10-00-00-000Z_0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d.jsonl",
+  "hook_event_name": "live:session_shutdown",
+  "pid": 48213,
+  "instance": "mhv8k2b3-0b2d4f6a8c0e2a37",
+  "seq": 42,
+  "observed_ms": 1794400000000,
+  "extension_version": "2",
+  "live": {
+    "state": "detached",
+    "detail": "subagents",
+    "tools_in_flight": 2,
+    "subagents_in_flight": 0,
+    "error_class": "rate_limit",
+    "since_ms": 1794399990000
+  }
+}

@@ -136,7 +136,15 @@ fn pinned_and_history_rows_draw_the_agent_name_as_the_same_chip() {
             .lines()
             .find(|l| l.contains(row) && l.contains("claude"))
             .expect("row");
-        assert!(!line.contains(" · "), "{view:?}: no dot delimiter: {line}");
+        // The chip is a cell of its own; no dot joins it to what follows
+        // (the live cell's no-state mark is a cell of its own too).
+        let after_chip = line
+            .split_once("claude")
+            .map_or("", |(_, rest)| rest.trim_start());
+        assert!(
+            !after_chip.starts_with(tuikit::glyphs::marks::SEPARATOR),
+            "{view:?}: no dot delimiter: {line}"
+        );
     }
 }
 

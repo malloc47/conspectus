@@ -9,7 +9,7 @@
 //! recover from poisoning: the caches are best-effort, so a panic
 //! elsewhere shouldn't make discovery fail.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -17,6 +17,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use super::harness::{claude_code, codex, opencode, pi};
 use super::{GraphFragment, codex_log, forge, git, tmux, zellij};
+use crate::model::live::PaneTitle;
 
 /// Results that discovery reuses across runs while their inputs are
 /// unchanged. The daemon and the TUI keep one for their lifetime and
@@ -37,6 +38,11 @@ pub struct DiscoveryCaches {
     /// Fingerprint of the last mux/harness slice, used to skip the
     /// process-tree walk when that slice hasn't changed.
     pub(crate) process_tree_fingerprint: Mutex<Option<u64>>,
+    /// The pane-title marks the last probe of each mux server read, by
+    /// probe key and session name (ADR 0217), so the next probe can tell
+    /// how long a pane's title has read the same mark. Marks only, never
+    /// a title.
+    pub(crate) pane_titles: Mutex<BTreeMap<String, BTreeMap<String, PaneTitle>>>,
 }
 
 impl Default for DiscoveryCaches {
@@ -52,6 +58,7 @@ impl Default for DiscoveryCaches {
             pi_sessions: StampedMap::new(),
             codex_log: codex_log::QueryCache::default(),
             process_tree_fingerprint: Mutex::new(None),
+            pane_titles: Mutex::new(BTreeMap::new()),
         }
     }
 }
@@ -87,6 +94,29 @@ impl DiscoveryCaches {
             *last = current;
         }
         previous
+    }
+
+    /// `titles`, what this probe of the mux server `key` read, each
+    /// carried on from the last probe's reading of the same session
+    /// ([`PaneTitle::after`]). They replace the last probe's, so a
+    /// session the probe did not list starts a new run when it is listed
+    /// again.
+    pub(crate) fn carry_pane_titles(
+        &self,
+        key: &str,
+        titles: BTreeMap<String, PaneTitle>,
+    ) -> BTreeMap<String, PaneTitle> {
+        let mut last = lock(&self.pane_titles);
+        let previous = last.remove(key).unwrap_or_default();
+        let carried: BTreeMap<String, PaneTitle> = titles
+            .into_iter()
+            .map(|(session, title)| {
+                let carried = title.after(previous.get(&session));
+                (session, carried)
+            })
+            .collect();
+        last.insert(key.to_string(), carried.clone());
+        carried
     }
 }
 

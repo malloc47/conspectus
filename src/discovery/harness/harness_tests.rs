@@ -369,3 +369,31 @@ fn adapter_in_command_finds_the_harness_behind_a_launch_wrapper() {
     assert_eq!(key("atelier exec -- npm run dev"), None);
     assert_eq!(key(""), None);
 }
+
+#[test]
+fn adapters_without_a_live_mapping_attribute_every_payload_and_say_no_live_state() {
+    let payload = serde_json::json!({
+        "hook_event_name": "session.status",
+        "session_id": "s-1",
+        "cwd": "/work",
+    });
+    let context = crate::live_store::LiveContext::default();
+    for key in ["opencode", "pi", "aider"] {
+        let adapter = registered_adapters()
+            .find(|adapter| adapter.harness_key() == key)
+            .expect("registered");
+        assert!(adapter.is_attribution_event(&payload), "{key}");
+        assert!(
+            adapter
+                .live_events_from_payload(&payload, &context, 1)
+                .is_empty(),
+            "{key}"
+        );
+        assert!(
+            adapter
+                .live_snapshot_from_payload(&payload, &context, 1)
+                .is_none(),
+            "{key}"
+        );
+    }
+}

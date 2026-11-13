@@ -49,6 +49,7 @@ pub fn build_pr_rows_from_snapshot(
     let candidate_counts = crate::model::SnapshotIndex::new(snapshot)
         .agent_mux_candidate_counts()
         .clone();
+    let live = super::live::filter_states(snapshot, options);
 
     let body_full_ids: Vec<String> = prs
         .iter()
@@ -80,7 +81,9 @@ pub fn build_pr_rows_from_snapshot(
         }
         let attached = branch
             .and_then(|b| checkout_roots_per_branch.get(b))
-            .map(|roots| attached_agents_for_roots(&agents, roots, &candidate_counts, options))
+            .map(|roots| {
+                attached_agents_for_roots(&agents, roots, &candidate_counts, options, &live)
+            })
             .unwrap_or_default();
         if filter_active && attached.is_empty() {
             continue;
@@ -102,6 +105,7 @@ fn attached_agents_for_roots(
     roots: &[String],
     candidate_counts: &HashMap<String, usize>,
     options: &RenderOptions,
+    live: &crate::filter::LiveStates,
 ) -> Vec<String> {
     let filter_active = options.filter.has_narrowing_predicates();
     let mut labels: Vec<String> = Vec::new();
@@ -124,6 +128,8 @@ fn attached_agents_for_roots(
                 now_epoch: options.now_epoch,
                 last_active_epoch: agent.node.last_active_epoch,
                 mux_state: MuxStateKey::from_candidate_count(candidate_count),
+                live_state: live
+                    .session(&crate::model::NodeId::AgentSession(agent.node.id.clone())),
             });
             if !matches {
                 continue;

@@ -1,0 +1,10 @@
+[
+  {
+    "id": "bg-placeholder-3",
+    "pid": 52003,
+    "cwd": "/home/user/projects/my-project",
+    "kind": "background",
+    "startedAt": 1794540000000,
+    "state": "failed"
+  }
+]

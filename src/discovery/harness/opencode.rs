@@ -25,6 +25,10 @@
 //! pattern heuristic as fallback when the column is absent. Subagent
 //! sessions carry `session_kind: Subagent` on their `AgentSessionNode` so
 //! downstream TUI and resolver code can nest, filter, or suppress them.
+//!
+//! What each session is doing now comes from the Conspectus plugin's
+//! snapshots, which `conspectus hook write opencode` reads through
+//! `opencode_live.rs` into the live-state store.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -38,6 +42,7 @@ use serde_json::json;
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{SqliteStamp, StampedMap};
 use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
+use crate::live_store::{LiveContext, LiveSnapshot};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SessionKind, SourceMetadata,
@@ -158,6 +163,29 @@ impl HarnessAdapter for OpenCodeAdapter {
         })
     }
 
+    /// A payload the plugin marks for attribution, or one with no live
+    /// state (plugin 0.2.0, the 2.x TUI entrypoint); live-state snapshots
+    /// and heartbeats reach only the live-state store. See
+    /// `opencode_live.rs`.
+    fn is_attribution_event(&self, payload: &serde_json::Value) -> bool {
+        live::is_attribution_event(payload)
+    }
+
+    /// The plugin's snapshot of one session; see `opencode_live.rs` for
+    /// the fields read and the known gaps.
+    fn live_snapshot_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        context: &LiveContext,
+        observed_ms: i64,
+    ) -> Option<LiveSnapshot> {
+        live::live_snapshot(payload, context, observed_ms)
+    }
+
+    fn reports_live_state(&self) -> bool {
+        true
+    }
+
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         vec![std::ffi::OsString::from("opencode")]
     }
@@ -179,6 +207,9 @@ impl HarnessAdapter for OpenCodeAdapter {
         ])
     }
 }
+
+#[path = "opencode_live.rs"]
+mod live;
 
 fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFragment> {
     let state_scope = state_root.to_string_lossy().to_string();

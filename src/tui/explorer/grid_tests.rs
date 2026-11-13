@@ -38,6 +38,8 @@ fn field(label: &'static str, value: &str) -> CoreField {
         annotation: None,
         cut_at: None,
         kind_chip: None,
+        live_mark: None,
+        receding: false,
         preview: None,
     }
 }

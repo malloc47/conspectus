@@ -8,7 +8,7 @@ use super::render::{
 };
 use super::table::agent_session_key_for_label;
 use crate::discovery::current_epoch;
-use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
+use crate::filter::{LiveStates, MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode,
     NodeId, RelationKind, pick_preferred,
@@ -39,6 +39,8 @@ struct AttachedAgent {
     confidence: String,
     preview: Option<String>,
     session_key: SessionKey,
+    /// The session's node, whose live state the filter reads.
+    node: NodeId,
     last_active_epoch: Option<i64>,
 }
 
@@ -54,6 +56,8 @@ pub fn build_mux_rows_from_snapshot(
     let muxes = collect_mux_rows(snapshot);
     let attachments = collect_attachment_lookup(snapshot);
     let ambiguity = collect_per_agent_ambiguity(snapshot);
+    let live_now_ms = super::live::read_time_ms(options.now_epoch);
+    let live = super::live::filter_states(snapshot, options);
 
     let body_full_ids: Vec<String> = muxes
         .iter()
@@ -77,13 +81,16 @@ pub fn build_mux_rows_from_snapshot(
             .unwrap_or(&empty_attached);
         let visible_attached: Vec<AttachedAgent> = all_attached
             .iter()
-            .filter(|agent| agent_matches_filter(agent, &ambiguity, options, &options.filter))
+            .filter(|agent| agent_matches_filter(agent, &ambiguity, options, &live))
             .cloned()
             .collect();
-        if !mux_matches_filter(all_attached, &visible_attached, &options.filter) {
+        let counted = live.mux_agents(&row.node.id);
+        if !mux_matches_filter(all_attached, &visible_attached, counted, &options.filter) {
             continue;
         }
         let ctx = CellCtx {
+            snapshot,
+            live_now_ms,
             row,
             short_id,
             attached: if visible_attached.is_empty() {
@@ -103,8 +110,9 @@ fn agent_matches_filter(
     agent: &AttachedAgent,
     ambiguity: &HashMap<SessionKey, usize>,
     options: &RenderOptions,
-    filter: &RowFilter,
+    live: &LiveStates,
 ) -> bool {
+    let filter = &options.filter;
     if !filter.has_narrowing_predicates() {
         return true;
     }
@@ -115,12 +123,19 @@ fn agent_matches_filter(
         now_epoch: options.now_epoch,
         last_active_epoch: agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
+        live_state: live.session(&agent.node),
     })
 }
 
+/// Whether a mux row is printed under `filter`: as in the TUI's Mux view,
+/// when one of its attached agents passes, when the live state is the
+/// only predicate and an agent its `live` cell counts (`counted`) passes
+/// it, or, for a mux with no agent, under a lone `unmuxed` mux-state
+/// filter.
 fn mux_matches_filter(
     all_attached: &[AttachedAgent],
     visible_attached: &[AttachedAgent],
+    counted: &std::collections::BTreeSet<crate::filter::LiveStateKey>,
     filter: &RowFilter,
 ) -> bool {
     if !filter.has_narrowing_predicates() {
@@ -129,12 +144,17 @@ fn mux_matches_filter(
     if !visible_attached.is_empty() {
         return true;
     }
+    if filter.admits_mux_agents(counted) {
+        return true;
+    }
     let RowFilter {
         harness,
         max_age,
         mux_state,
+        live_state,
         float_muxed_sessions_top: _,
         float_attached_muxes_top: _,
+        float_waiting_top: _,
         pr_branch: _,
         pr_state: _,
         float_tracked_prs_top: _,
@@ -142,10 +162,12 @@ fn mux_matches_filter(
         show_stopped_muxes: _,
         pinned_only: _,
         show_pinned_history: _,
+        live: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()
         && content.is_none()
+        && live_state.is_none()
         && mux_state
             .as_ref()
             .is_some_and(|mux_state| mux_state.values().contains(&MuxStateKey::Unmuxed))
@@ -153,6 +175,9 @@ fn mux_matches_filter(
 }
 
 struct CellCtx<'a> {
+    snapshot: &'a GraphSnapshot,
+    /// When the `live` cell reads live state, Unix epoch milliseconds.
+    live_now_ms: i64,
     row: &'a MuxRow<'a>,
     short_id: &'a str,
     attached: Option<&'a [AttachedAgent]>,
@@ -195,6 +220,9 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
             .attached
             .and_then(|entries| entries.iter().find_map(|a| a.preview.clone()))
             .unwrap_or_else(dash),
+        "live" => {
+            super::live::mux_cell(ctx.snapshot, &mux.id, ctx.live_now_ms).unwrap_or_else(dash)
+        }
         _ => dash(),
     }
 }
@@ -312,6 +340,7 @@ fn collect_attachment_lookup(snapshot: &GraphSnapshot) -> HashMap<String, Vec<At
             confidence: best.confidence.snake_case().to_string(),
             preview: agent.last_message_preview.clone(),
             session_key: session_key_of(agent),
+            node: NodeId::AgentSession(agent.id.clone()),
             last_active_epoch: agent.last_active_epoch,
         });
     }

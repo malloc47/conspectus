@@ -1447,3 +1447,209 @@ fn repo_buckets_do_not_depend_on_which_checkout_was_probed_first() {
     assert_eq!(rows_for(true), expected);
     assert_eq!(rows_for(false), expected);
 }
+
+/// Five muxes: `alpha` hosts a working agent, `beta` an agent waiting on
+/// the operator, `gamma` none, `delta` two agents (working and waiting),
+/// and `epsilon` a waiting agent in a pane no session matches.
+fn waiting_muxes() -> GraphSnapshot {
+    use crate::model::LivePane;
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    let mut snapshot = GraphSnapshot::empty();
+    for native in ["alpha", "beta", "gamma", "delta", "epsilon"] {
+        snapshot.nodes.push(mux_node(native));
+    }
+    let running = |state| {
+        LiveBinding::new(
+            LiveObservation::new(state, LiveSource::Hook, 1_000_000),
+            Liveness::Alive,
+        )
+    };
+    for (key, native, state) in [
+        ("alpha-agent", "alpha", LiveState::Working),
+        ("beta-agent", "beta", LiveState::Waiting),
+        ("delta-busy", "delta", LiveState::Working),
+        ("delta-asks", "delta", LiveState::Waiting),
+    ] {
+        snapshot
+            .nodes
+            .push(session_node(key, &format!("/p/{native}")));
+        let agent = crate::model::NodeId::AgentSession(AgentSessionId::new("codex", "/state", key));
+        snapshot.candidate_links.push(GraphLink {
+            id: format!("session-{key}"),
+            source: agent.clone(),
+            target: LinkEndpoint::Node {
+                id: crate::model::NodeId::MuxSession(MuxSessionId::new(format!("tmux:{native}"))),
+            },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        snapshot.node_live.insert(agent, running(state));
+    }
+    snapshot.pane_live.insert(
+        LivePane::new(MuxSessionId::new("tmux:epsilon"), Some("%2".into())),
+        running(LiveState::Waiting),
+    );
+    resolve_snapshot(snapshot)
+}
+
+/// The mux rows `filter` lists, each with the agents listed under it,
+/// with the snapshot's live states read into the filter as a build does.
+fn mux_listing(snapshot: &GraphSnapshot, filter: RowFilter) -> Vec<(String, Vec<String>)> {
+    let filter = RowFilter {
+        live: crate::filter::LiveStates::read(snapshot, snapshot.live_tables(), 2_000_000),
+        ..filter
+    };
+    let tree = build_mux_tree(MuxBuildInputs {
+        snapshot,
+        home: None,
+        now: Some(1_700_000_160),
+        filter,
+        grouping: MuxGrouping::Session,
+        sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+    let mut listed: Vec<(String, Vec<String>)> = Vec::new();
+    for row in &tree.rows {
+        match &row.kind {
+            RowKind::MuxSession(mux) => listed.push((mux.native_id.clone(), Vec::new())),
+            RowKind::AgentSession(agent) => listed
+                .last_mut()
+                .expect("an agent row follows its mux")
+                .1
+                .push(agent.session.session_key.clone()),
+            _ => {}
+        }
+    }
+    listed
+}
+
+fn names(listed: &[(String, Vec<String>)]) -> Vec<&str> {
+    listed.iter().map(|(name, _)| name.as_str()).collect()
+}
+
+#[test]
+fn float_waiting_lifts_the_muxes_an_agent_waits_in_above_the_rest() {
+    let snapshot = waiting_muxes();
+    assert_eq!(
+        names(&mux_listing(&snapshot, RowFilter::default())),
+        ["alpha", "beta", "delta", "epsilon", "gamma"]
+    );
+    let floated = RowFilter {
+        float_waiting_top: true,
+        ..RowFilter::default()
+    };
+    assert_eq!(
+        names(&mux_listing(&snapshot, floated.clone())),
+        ["beta", "delta", "epsilon", "alpha", "gamma"],
+        "a waiting agent, one of several, or in a pane lifts its mux; each part keeps its order"
+    );
+    let with_attached = RowFilter {
+        float_attached_muxes_top: true,
+        ..floated
+    };
+    assert_eq!(
+        names(&mux_listing(&snapshot, with_attached)),
+        ["beta", "delta", "epsilon", "alpha", "gamma"],
+        "waiting first, then the attached float within the rest"
+    );
+}
+
+#[test]
+fn the_live_state_filter_keeps_a_mux_through_any_agent_it_hosts() {
+    use crate::filter::{HarnessFilter, LiveStateFilter, LiveStateKey};
+    let snapshot = waiting_muxes();
+    let waiting = RowFilter {
+        live_state: Some(LiveStateFilter::from_values([LiveStateKey::Waiting])),
+        ..RowFilter::default()
+    };
+    assert_eq!(
+        mux_listing(&snapshot, waiting.clone()),
+        [
+            ("beta".to_string(), vec![]),
+            ("delta".to_string(), vec![]),
+            ("epsilon".to_string(), vec![]),
+        ],
+        "a mux stays for a waiting agent, attached or in a pane, and lists only its matching agents"
+    );
+    let codex_waiting = RowFilter {
+        harness: Some(HarnessFilter::from_values(["codex"])),
+        ..waiting
+    };
+    assert_eq!(
+        names(&mux_listing(&snapshot, codex_waiting)),
+        ["beta", "delta"],
+        "an agent no session matches has no harness, so another predicate drops its mux"
+    );
+    let working = RowFilter {
+        live_state: Some(LiveStateFilter::from_values([
+            LiveStateKey::Working,
+            LiveStateKey::Waiting,
+        ])),
+        ..RowFilter::default()
+    };
+    assert_eq!(
+        mux_listing(&snapshot, working)
+            .into_iter()
+            .find(|(name, _)| name == "delta")
+            .map(|(_, agents)| agents),
+        Some(vec!["delta-asks".to_string(), "delta-busy".to_string()]),
+        "both of delta's agents match and are listed under it"
+    );
+}
+
+#[test]
+fn a_mux_an_agent_waits_in_stays_under_the_waiting_filter_though_no_link_attaches_it() {
+    use crate::filter::{LiveStateFilter, LiveStateKey};
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    // `torn` has two equal candidate muxes: the Mux view attaches it to
+    // neither, but its live state counts on the one it prefers, whose
+    // mark reads `!`.
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(mux_node("eta"));
+    snapshot.nodes.push(mux_node("zeta"));
+    snapshot.nodes.push(session_node("torn", "/p/eta"));
+    let torn = crate::model::NodeId::AgentSession(AgentSessionId::new("codex", "/state", "torn"));
+    for native in ["eta", "zeta"] {
+        snapshot.candidate_links.push(GraphLink {
+            id: format!("session-torn-{native}"),
+            source: torn.clone(),
+            target: LinkEndpoint::Node {
+                id: crate::model::NodeId::MuxSession(MuxSessionId::new(format!("tmux:{native}"))),
+            },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+    }
+    snapshot.node_live.insert(
+        torn.clone(),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 1_000_000),
+            Liveness::Alive,
+        ),
+    );
+    let snapshot = resolve_snapshot(snapshot);
+    let preferred = snapshot
+        .preferred_mux_for(&torn)
+        .expect("a preferred mux")
+        .native_id;
+    let listed = mux_listing(
+        &snapshot,
+        RowFilter {
+            live_state: Some(LiveStateFilter::from_values([LiveStateKey::Waiting])),
+            ..RowFilter::default()
+        },
+    );
+    assert_eq!(
+        names(&listed),
+        [preferred.trim_start_matches("tmux:")],
+        "the mux whose mark is ! stays, and only it"
+    );
+}

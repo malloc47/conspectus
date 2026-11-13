@@ -29,6 +29,9 @@ fn isolated_cmd(home: &Path) -> Command {
     cmd.env("XDG_CACHE_HOME", home.join(".cache"));
     cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
+    // `hook init codex` writes under `CODEX_HOME`; one inherited from the
+    // host would point it at the developer's real Codex config.
+    cmd.env("CODEX_HOME", home.join(".codex"));
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
     cmd.env_remove("CONSPECTUS_CLAUDE_CODE_STATE");
     cmd.env_remove("CONSPECTUS_OPENCODE_STATE");
@@ -590,10 +593,12 @@ fn hook_write_pi_writes_latest_observation() {
 }
 
 #[test]
-fn hook_write_opencode_rejects_empty_payload() {
+fn hook_write_opencode_drops_an_empty_payload_silently() {
     let home = tempfile::TempDir::new().expect("home temp");
     let state = tempfile::TempDir::new().expect("state temp");
 
+    // The harness waits on its hook, so a bad payload is dropped
+    // without a word or a failing exit status.
     isolated_cmd(home.path())
         .arg("hook")
         .arg("write")
@@ -602,8 +607,10 @@ fn hook_write_opencode_rejects_empty_payload() {
         .arg(state.path())
         .write_stdin("")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("opencode hook payload was empty"));
+        .success()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::is_empty());
+    assert!(!state.path().join("hooks-latest.json").exists());
 }
 
 #[test]
@@ -611,119 +618,943 @@ fn hook_init_status_remove_claude_code_preserves_existing_settings() {
     let home = tempfile::TempDir::new().expect("home temp");
     let settings = home.path().join(".claude/settings.json");
     fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
-    fs::write(
-        &settings,
-        r#"{
-          "theme": "dark",
-          "hooks": {
+    let original = serde_json::json!({
+        "theme": "dark",
+        "permissions": { "allow": ["Bash(git status)"] },
+        "hooks": {
             "SessionStart": [
-              {
-                "matcher": "startup",
-                "hooks": [
-                  { "type": "command", "command": "echo existing" }
-                ]
-              }
+                { "matcher": "startup", "hooks": [{ "type": "command", "command": "echo existing" }] }
+            ],
+            "Stop": [
+                { "hooks": [{ "type": "command", "command": "/home/me/bin/notify-done", "timeout": 30 }] }
             ]
-          }
-        }"#,
-    )
-    .expect("write settings");
+        }
+    });
+    fs::write(&settings, original.to_string()).expect("write settings");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
 
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("init")
-        .arg("claude-code")
-        .arg("--command")
-        .arg("conspectus hook write claude-code")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("installed Claude Code hook"));
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("not-installed\tclaude-code\t"))
+        .stdout(predicate::str::contains("missing\tclaude-code\t").count(14));
 
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("status")
-        .arg("claude-code")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("installed\tclaude-code"));
-
-    let installed: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&settings).expect("read")).expect("json");
-    assert_eq!(installed["theme"], "dark");
-    assert!(
-        fs::read_to_string(&settings)
-            .expect("read")
-            .contains("echo existing")
+    hook(&["init", "claude-code", "--dry-run"])
+        .stdout(predicate::str::contains("would install Claude Code hooks"));
+    assert_eq!(
+        read_settings(&settings),
+        original,
+        "a dry run writes nothing"
     );
 
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("remove")
-        .arg("claude-code")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("removed Claude Code hook"));
+    hook(&[
+        "init",
+        "claude-code",
+        "--command",
+        "conspectus hook write claude-code",
+    ])
+    .stdout(predicate::str::contains("installed Claude Code hooks"))
+    .stdout(predicate::str::contains("(14 added, 0 updated)"));
 
-    let removed = fs::read_to_string(&settings).expect("read");
-    assert!(removed.contains("echo existing"));
-    assert!(!removed.contains("hook write claude-code"));
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("installed\tclaude-code\t"))
+        .stdout(predicate::str::contains("installed\tclaude-code\t").count(15))
+        .stdout(predicate::str::contains("\tSessionStart\n"))
+        .stdout(predicate::str::contains("\tSessionEnd\n"))
+        .stderr(predicate::str::is_empty());
+
+    let installed = read_settings(&settings);
+    assert_eq!(installed["theme"], "dark");
+    assert_eq!(installed["permissions"], original["permissions"]);
+    assert_eq!(
+        installed["hooks"]["SessionStart"][0],
+        original["hooks"]["SessionStart"][0]
+    );
+    assert_eq!(installed["hooks"]["Stop"][0], original["hooks"]["Stop"][0]);
+    let events = installed["hooks"].as_object().expect("hooks");
+    assert_eq!(events.len(), 14, "{installed}");
+    for (event, groups) in events {
+        let own = groups
+            .as_array()
+            .expect("groups")
+            .last()
+            .expect("Conspectus's group");
+        assert_eq!(
+            own["hooks"][0]["command"],
+            "conspectus hook write claude-code"
+        );
+        assert_eq!(own["hooks"][0]["timeout"], 5, "{event}");
+    }
+
+    hook(&["init", "claude-code"]).stdout(predicate::str::contains(
+        "Claude Code hooks already installed",
+    ));
+    assert_eq!(read_settings(&settings), installed);
+
+    hook(&["remove", "claude-code"]).stdout(predicate::str::contains("removed Claude Code hooks"));
+    assert_eq!(read_settings(&settings), original);
+    hook(&["remove", "claude-code"])
+        .stdout(predicate::str::contains("Claude Code hooks not installed"));
 }
 
 #[test]
-fn hook_init_status_remove_codex_preserves_existing_config() {
+fn hook_init_claude_code_upgrades_a_session_start_only_install() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    // What `hook init claude-code` wrote when it installed one entry.
+    let old = serde_json::json!({
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "resume|startup|clear|compact",
+                    "hooks": [{ "type": "command", "command": "/old/bin/conspectus hook write claude-code" }]
+                }
+            ]
+        }
+    });
+    fs::write(&settings, old.to_string()).expect("write settings");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
+
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("partial\tclaude-code\t"))
+        .stdout(predicate::str::contains("outdated\tclaude-code\t").count(1))
+        .stdout(predicate::str::contains("\tSessionStart\n"))
+        .stdout(predicate::str::contains("missing\tclaude-code\t").count(13))
+        .stderr(predicate::str::contains("conspectus hook init claude-code"));
+
+    hook(&["init", "claude-code"]).stdout(predicate::str::contains("(13 added, 1 updated)"));
+    let upgraded = read_settings(&settings);
+    let session_start = upgraded["hooks"]["SessionStart"]
+        .as_array()
+        .expect("groups");
+    assert_eq!(session_start.len(), 1, "never duplicated: {upgraded}");
+    assert_eq!(
+        session_start[0],
+        serde_json::json!({
+            "matcher": "startup|resume|clear|compact|fork",
+            "hooks": [{
+                "type": "command",
+                "command": "/old/bin/conspectus hook write claude-code",
+                "timeout": 5
+            }]
+        })
+    );
+    // New events run the command the old install ran.
+    assert_eq!(
+        upgraded["hooks"]["Notification"][0]["hooks"][0]["command"],
+        "/old/bin/conspectus hook write claude-code"
+    );
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("installed\tclaude-code\t"))
+        .stdout(predicate::str::contains("installed\tclaude-code\t").count(15));
+
+    hook(&["remove", "claude-code"]);
+    assert_eq!(read_settings(&settings), serde_json::json!({}));
+}
+
+#[test]
+fn hook_init_claude_code_project_scope_leaves_the_user_settings_alone() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = tempfile::TempDir::new().expect("project temp");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .current_dir(project.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
+
+    hook(&["init", "claude-code", "--scope", "project"])
+        .stdout(predicate::str::contains("(14 added, 0 updated)"));
+    let settings = project.path().join(".claude/settings.json");
+    assert_eq!(
+        read_settings(&settings)["hooks"]
+            .as_object()
+            .expect("hooks")
+            .len(),
+        14
+    );
+    assert!(!home.path().join(".claude").exists());
+
+    hook(&["status", "claude-code", "--scope", "project"])
+        .stdout(predicate::str::starts_with("installed\tclaude-code\t"));
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("not-installed\tclaude-code\t"));
+    hook(&["remove", "claude-code", "--scope", "project"]);
+    assert_eq!(read_settings(&settings), serde_json::json!({}));
+}
+
+#[test]
+fn hook_init_claude_code_refuses_a_hooks_table_it_would_replace() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    let text = r#"{"hooks": {"Stop": {"not": "a list"}}}"#;
+    fs::write(&settings, text).expect("write settings");
+
+    isolated_cmd(home.path())
+        .args(["hook", "init", "claude-code"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("hooks.Stop"));
+    assert_eq!(fs::read_to_string(&settings).expect("read"), text);
+}
+
+/// A settings file kept by hand: keys in no order, four-space
+/// indentation, an escape and a literal non-ASCII character, a number in
+/// exponent form, objects kept on one line, and no trailing newline.
+const HAND_KEPT_SETTINGS: &str = r#"{
+    "statusLine": {"type": "command", "command": "~/.claude/statusline.sh"},
+    "model": "opus",
+    "env": {
+        "GREETING": "caf\u00e9 ☕ naïve",
+        "RETRIES": 1e1
+    },
+    "permissions": {
+        "deny": [],
+        "allow": ["Bash(git status)", "Read(~/notes/**)"]
+    },
+    "theme": "dark"
+}"#;
+
+/// Runs `conspectus hook <args>` in a scratch home, from `cwd`.
+fn hook_in(home: &Path, cwd: &Path, args: &[&str]) -> assert_cmd::assert::Assert {
+    isolated_cmd(home)
+        .current_dir(cwd)
+        .arg("hook")
+        .args(args)
+        .assert()
+}
+
+#[test]
+fn hook_init_claude_code_adds_only_its_entries_and_remove_gives_the_file_back() {
+    let variants = [
+        ("    ", "\n", HAND_KEPT_SETTINGS.to_string()),
+        ("\t", "\n", HAND_KEPT_SETTINGS.replace("    ", "\t") + "\n"),
+        (
+            "  ",
+            "\r\n",
+            HAND_KEPT_SETTINGS
+                .replace("    ", "  ")
+                .replace('\n', "\r\n")
+                + "\r\n",
+        ),
+    ];
+    for project_scope in [false, true] {
+        for (unit, newline, original) in &variants {
+            let home = tempfile::TempDir::new().expect("home temp");
+            let project = tempfile::TempDir::new().expect("project temp");
+            let (root, scope) = if project_scope {
+                (project.path(), &["--scope", "project"][..])
+            } else {
+                (home.path(), &[][..])
+            };
+            let settings = root.join(".claude/settings.json");
+            fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+            fs::write(&settings, original).expect("write settings");
+            let hook = |args: &[&str]| {
+                hook_in(home.path(), project.path(), &[args, scope].concat()).success()
+            };
+
+            hook(&[
+                "init",
+                "claude-code",
+                "--command",
+                "conspectus hook write claude-code",
+            ])
+            .stdout(predicate::str::contains("(14 added, 0 updated)"));
+            let installed = fs::read_to_string(&settings).expect("read settings");
+            // The original's bytes run up to the end of its last value and
+            // resume at the line ending before its closing brace; the hooks
+            // go between, in the file's own indentation and line ending.
+            let end = original.rfind("\"dark\"").expect("last value") + "\"dark\"".len();
+            assert!(installed.starts_with(&original[..end]), "{installed:?}");
+            assert!(installed.ends_with(&original[end..]), "{installed:?}");
+            let inserted = &installed[end..installed.len() - (original.len() - end)];
+            assert!(
+                inserted.starts_with(&format!(
+                    ",{newline}{unit}\"hooks\": {{{newline}{unit}{unit}\""
+                )),
+                "{inserted:?}"
+            );
+            assert!(
+                inserted.contains(&format!("{newline}{unit}{unit}\"PostCompact\": [{newline}")),
+                "{inserted:?}"
+            );
+            assert_eq!(
+                inserted.matches('\n').count(),
+                inserted.matches(newline).count(),
+                "one line ending throughout: {inserted:?}"
+            );
+            assert!(!home.path().join(".claude").exists() || !project_scope);
+
+            hook(&["status", "claude-code"])
+                .stdout(predicate::str::starts_with("installed\tclaude-code\t"));
+            hook(&["init", "claude-code"]).stdout(predicate::str::contains(
+                "Claude Code hooks already installed",
+            ));
+            assert_eq!(fs::read_to_string(&settings).expect("read"), installed);
+
+            hook(&["remove", "claude-code", "--dry-run"])
+                .stdout(predicate::str::contains("would remove Claude Code hooks"));
+            assert_eq!(fs::read_to_string(&settings).expect("read"), installed);
+            hook(&["remove", "claude-code"])
+                .stdout(predicate::str::contains("removed Claude Code hooks"));
+            assert_eq!(
+                &fs::read_to_string(&settings).expect("read"),
+                original,
+                "remove gives back the file byte for byte"
+            );
+        }
+    }
+}
+
+#[test]
+fn hook_init_claude_code_leaves_the_operators_hooks_byte_for_byte() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    let stop = r#"
+      {
+        "hooks": [
+          { "type": "command", "command": "/home/me/bin/notify-done", "timeout": 30 }
+        ]
+      }"#;
+    let guard = r#"
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "/home/me/bin/guard"}]
+      }"#;
+    let original = format!(
+        "{{\n  \"hooks\": {{\n    \"Stop\": [{stop}\n    ],\n    \"PreToolUse\": [{guard}\n    ]\n  }},\n  \"theme\": \"dark\"\n}}\n"
+    );
+    fs::write(&settings, &original).expect("write settings");
+    let hook = |args: &[&str]| hook_in(home.path(), home.path(), args).success();
+
+    hook(&[
+        "init",
+        "claude-code",
+        "--command",
+        "conspectus hook write claude-code",
+    ])
+    .stdout(predicate::str::contains("(14 added, 0 updated)"));
+    let installed = fs::read_to_string(&settings).expect("read settings");
+    // Each of the operator's groups is still there, as written, with
+    // Conspectus's after it; the events Conspectus adds follow theirs.
+    for operator in [stop, guard] {
+        assert!(
+            installed.contains(&format!("{operator},\n      {{\n        \"hooks\": [\n")),
+            "{installed}"
+        );
+    }
+    assert!(installed.starts_with(&format!("{{\n  \"hooks\": {{\n    \"Stop\": [{stop},")));
+    assert!(
+        installed.contains("\n    ],\n    \"Notification\": ["),
+        "{installed}"
+    );
+    assert!(
+        installed.ends_with("\n  },\n  \"theme\": \"dark\"\n}\n"),
+        "{installed}"
+    );
+    let value = read_settings(&settings);
+    assert_eq!(value["hooks"]["Stop"].as_array().expect("groups").len(), 2);
+    assert_eq!(
+        value["hooks"]["Stop"][1]["hooks"][0]["command"],
+        "conspectus hook write claude-code"
+    );
+
+    hook(&["remove", "claude-code"]);
+    assert_eq!(fs::read_to_string(&settings).expect("read"), original);
+}
+
+#[test]
+fn hook_init_claude_code_upgrades_an_old_entry_where_it_stands() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    // What an older `hook init claude-code` wrote, as a formatter later
+    // left it: four spaces, `hooks` before `matcher`, `command` first.
+    let original = r#"{
+    "model": "opus",
+    "hooks": {
+        "SessionStart": [
+            {
+                "hooks": [
+                    {
+                        "command": "/old/bin/conspectus hook write claude-code",
+                        "type": "command"
+                    }
+                ],
+                "matcher": "resume|startup|clear|compact"
+            }
+        ]
+    },
+    "theme": "dark"
+}"#;
+    fs::write(&settings, original).expect("write settings");
+    let hook = |args: &[&str]| hook_in(home.path(), home.path(), args).success();
+
+    hook(&["init", "claude-code"]).stdout(predicate::str::contains("(13 added, 1 updated)"));
+    let installed = fs::read_to_string(&settings).expect("read settings");
+    // The old entry gains a timeout and the full matcher where they
+    // belong, and nothing else in it moves.
+    let upgraded = original
+        .replace(
+            "\"type\": \"command\"\n",
+            "\"type\": \"command\",\n                        \"timeout\": 5\n",
+        )
+        .replace(
+            "\"resume|startup|clear|compact\"",
+            "\"startup|resume|clear|compact|fork\"",
+        );
+    let split = upgraded.find("\n    },\n").expect("the end of the hooks");
+    assert!(
+        installed.starts_with(&format!(
+            "{},\n        \"Notification\": [\n",
+            &upgraded[..split]
+        )),
+        "{installed}"
+    );
+    assert!(installed.ends_with(&upgraded[split..]), "{installed}");
+    hook(&["status", "claude-code"])
+        .stdout(predicate::str::starts_with("installed\tclaude-code\t"));
+
+    // Remove takes the whole entry out, and the hooks with it.
+    hook(&["remove", "claude-code"]);
+    assert_eq!(
+        fs::read_to_string(&settings).expect("read"),
+        "{\n    \"model\": \"opus\",\n    \"theme\": \"dark\"\n}"
+    );
+}
+
+#[test]
+fn hook_init_claude_code_refuses_a_file_it_cannot_edit_exactly() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    for (text, error) in [
+        (
+            "{\n  // my theme\n  \"theme\": \"dark\"\n}\n",
+            "failed to parse JSON",
+        ),
+        ("{\"theme\": \"dark\",}\n", "failed to parse JSON"),
+        (
+            "{\"hooks\": {}, \"theme\": \"dark\", \"hooks\": {}}\n",
+            "appears twice",
+        ),
+    ] {
+        fs::write(&settings, text).expect("write settings");
+        for dry_run in [true, false] {
+            let mut args = vec!["init", "claude-code"];
+            if dry_run {
+                args.push("--dry-run");
+            }
+            hook_in(home.path(), home.path(), &args)
+                .failure()
+                .stderr(predicate::str::contains(error));
+            assert_eq!(fs::read_to_string(&settings).expect("read"), text);
+        }
+    }
+}
+
+/// The last line `hook status <harness>` prints: the live-state health.
+fn health_line(home: &Path, harness: &str) -> String {
+    let assert = isolated_cmd(home)
+        .env("CODEX_HOME", home.join(".codex"))
+        .args(["hook", "status", harness])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    stdout.lines().last().expect("a health line").to_string()
+}
+
+fn install_claude_hooks(home: &Path) {
+    isolated_cmd(home)
+        .args([
+            "hook",
+            "init",
+            "claude-code",
+            "--command",
+            "conspectus hook write claude-code",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn hook_status_says_how_to_turn_live_state_on_when_the_hooks_are_not_installed() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let store = home.path().join(".local/state/conspectus/live-state.json");
+    assert_eq!(
+        health_line(home.path(), "claude-code"),
+        format!(
+            "off\tclaude-code\t{}\tlive state: off; `conspectus hook init claude-code` installs \
+             the hooks that report it",
+            store.display()
+        )
+    );
+}
+
+#[test]
+fn hook_status_counts_the_sessions_whose_hooks_report_live_state() {
+    use conspectus::live_store::{LiveEvent, LiveEventKind, LiveStore, now_ms};
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    install_claude_hooks(home.path());
+    assert!(
+        health_line(home.path(), "claude-code").starts_with("no-events\tclaude-code\t"),
+        "installed, with nothing heard and no agent running"
+    );
+
+    let store = LiveStore::at(home.path().join(".local/state/conspectus"));
+    for session in ["alpha", "beta"] {
+        store
+            .apply_event(&LiveEvent::new(
+                "claude-code",
+                session,
+                now_ms(),
+                LiveEventKind::TurnStarted,
+            ))
+            .expect("write live state");
+    }
+    let line = health_line(home.path(), "claude-code");
+    assert!(
+        line.starts_with(&format!(
+            "receiving\tclaude-code\t{}\tlive state: 2 sessions, newest event ",
+            store.path().display()
+        )),
+        "{line}"
+    );
+    assert!(line.ends_with(" ago"), "{line}");
+}
+
+#[test]
+fn hook_status_calls_an_installed_hook_silent_when_its_agent_runs_without_events() {
+    use conspectus::model::{
+        GraphNode, GraphSnapshot, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole,
+    };
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    install_claude_hooks(home.path());
+    // The graph the last discovery saved holds a Claude Code agent: this
+    // test's own process, which runs while `hook status` looks.
+    let agent = GraphSnapshot {
+        nodes: vec![GraphNode::RuntimeProcess(RuntimeProcessNode {
+            id: RuntimeProcessId::new("mux_session:tmux:work:root:1:pid:2"),
+            observation_key: "mux_session:tmux:work:root:1:pid:2".to_string(),
+            pid: Some(i64::from(std::process::id())),
+            parent_pid: None,
+            root_pane_pid: None,
+            command: Some("claude".to_string()),
+            cwd: None,
+            harness_key: Some("claude-code".to_string()),
+            role: Some(RuntimeProcessRole::HumanAgent),
+            depth: Some(0),
+            observed_epoch: None,
+        })],
+        ..GraphSnapshot::empty()
+    };
+    conspectus::snapshot::write_atomic(
+        &home.path().join(".local/share/conspectus/graph.bin"),
+        &agent,
+    )
+    .expect("write graph.bin");
+
+    let line = health_line(home.path(), "claude-code");
+    assert!(
+        line.starts_with("silent\tclaude-code\t"),
+        "an installed hook with a running agent and no events: {line}"
+    );
+    assert!(
+        line.ends_with(
+            "\tlive state: active but no events: hooks may be untrusted, disabled, or the \
+             agent was started before they were installed"
+        ),
+        "{line}"
+    );
+
+    // Not installed, the same agent is told how to install the hooks.
+    isolated_cmd(home.path())
+        .args(["hook", "remove", "claude-code"])
+        .assert()
+        .success();
+    assert!(health_line(home.path(), "claude-code").starts_with("off\tclaude-code\t"));
+}
+
+#[test]
+fn hook_status_reports_codex_live_state_health() {
+    use conspectus::live_store::{LiveEvent, LiveEventKind, LiveStore, now_ms};
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    assert!(
+        health_line(home.path(), "codex").starts_with("off\tcodex\t"),
+        "not installed"
+    );
+    isolated_cmd(home.path())
+        .args([
+            "hook",
+            "init",
+            "codex",
+            "--command",
+            "conspectus hook write codex",
+        ])
+        .assert()
+        .success();
+    assert!(
+        health_line(home.path(), "codex").starts_with("no-events\tcodex\t"),
+        "installed, with nothing heard and no agent running"
+    );
+
+    let store = LiveStore::at(home.path().join(".local/state/conspectus"));
+    store
+        .apply_event(&LiveEvent::new(
+            "codex",
+            "019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37",
+            now_ms(),
+            LiveEventKind::TurnStarted,
+        ))
+        .expect("write live state");
+    let line = health_line(home.path(), "codex");
+    assert!(
+        line.starts_with(&format!(
+            "receiving\tcodex\t{}\tlive state: 1 session, newest event ",
+            store.path().display()
+        )),
+        "{line}"
+    );
+}
+
+#[test]
+fn hook_status_reports_pi_live_state_health() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let store = home.path().join(".local/state/conspectus/live-state.json");
+    assert_eq!(
+        health_line(home.path(), "pi"),
+        format!(
+            "off\tpi\t{}\tlive state: off; `conspectus hook init pi` installs the hooks that \
+             report it",
+            store.display()
+        )
+    );
+    isolated_cmd(home.path())
+        .args(["hook", "init", "pi"])
+        .assert()
+        .success();
+    assert!(
+        health_line(home.path(), "pi").starts_with("no-events\tpi\t"),
+        "installed, with nothing heard and no agent running"
+    );
+
+    // A snapshot the extension sends, through the writer.
+    let snapshot = serde_json::json!({
+        "session_id": "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d",
+        "cwd": "/home/user/projects/my-project",
+        "hook_event_name": "live:agent_start",
+        "live": {
+            "instance": "mhv8k2b5-2c4e6a8b0d2f4a63", "seq": 2,
+            "observed_ms": conspectus::live_store::now_ms(), "heartbeat_s": 60,
+            "state": "working", "detail": "generating", "subagents": 0,
+            "since_ms": conspectus::live_store::now_ms(),
+        },
+    });
+    isolated_cmd(home.path())
+        .args(["hook", "write", "pi"])
+        .write_stdin(snapshot.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::is_empty());
+    let line = health_line(home.path(), "pi");
+    assert!(
+        line.starts_with(&format!(
+            "receiving\tpi\t{}\tlive state: 1 session, newest event ",
+            store.display()
+        )),
+        "{line}"
+    );
+    assert!(
+        !home
+            .path()
+            .join(".local/state/conspectus/hooks/hooks-latest.json")
+            .exists(),
+        "a live-state snapshot is no attribution record"
+    );
+}
+
+fn read_settings(path: &std::path::Path) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(path).expect("read settings")).expect("settings json")
+}
+
+/// A Codex install case from `tests/fixtures/hooks/codex/install/`.
+fn codex_case(name: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/hooks/codex/install")
+        .join(name);
+    fs::read_to_string(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()))
+}
+
+/// The events `hook init codex` installs.
+const CODEX_EVENTS: usize = 11;
+
+/// A scratch home whose `~/.codex/config.toml` holds `text`.
+fn codex_home(text: &str) -> (tempfile::TempDir, PathBuf) {
     let home = tempfile::TempDir::new().expect("home temp");
     let config = home.path().join(".codex/config.toml");
     fs::create_dir_all(config.parent().expect("parent")).expect("config parent");
-    fs::write(
-        &config,
-        r#"
-model = "gpt-5.4-mini"
+    fs::write(&config, text).expect("write config");
+    (home, config)
+}
 
-[hooks]
-SessionStart = [
-  { hooks = [
-      { type = "command", command = "echo existing", async = false },
-    ] },
-]
-"#,
+fn codex_hook(home: &Path, args: &[&str]) -> assert_cmd::assert::Assert {
+    isolated_cmd(home).arg("hook").args(args).assert()
+}
+
+#[test]
+fn hook_init_status_remove_codex_keeps_an_operators_tables_byte_for_byte() {
+    let original = codex_case("operator-array-of-tables.toml");
+    let (home, config) = codex_home(&original);
+    let home = home.path();
+
+    codex_hook(home, &["status", "codex"])
+        .success()
+        .stdout(predicate::str::starts_with("not-installed\tcodex\t"))
+        .stdout(predicate::str::contains("missing\tcodex\t").count(CODEX_EVENTS));
+    codex_hook(home, &["init", "codex", "--dry-run"])
+        .success()
+        .stdout(predicate::str::contains("would install Codex hooks"));
+    assert_eq!(
+        fs::read_to_string(&config).expect("read"),
+        original,
+        "a dry run writes nothing"
+    );
+
+    codex_hook(
+        home,
+        &["init", "codex", "--command", "conspectus hook write codex"],
     )
-    .expect("write config");
-
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("init")
-        .arg("codex")
-        .arg("--command")
-        .arg("conspectus hook write codex")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("installed Codex hook"));
-
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("status")
-        .arg("codex")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("installed\tcodex"));
-
+    .success()
+    .stdout(predicate::str::contains(format!(
+        "installed Codex hooks in {} ({CODEX_EVENTS} added, 0 updated)",
+        config.display()
+    )))
+    .stdout(predicate::str::contains("open /hooks in Codex"))
+    .stderr(predicate::str::is_empty());
     let installed = fs::read_to_string(&config).expect("read");
-    assert!(installed.contains("model = \"gpt-5.4-mini\""));
-    assert!(installed.contains("echo existing"));
-    assert!(installed.contains("hook write codex"));
-    assert!(installed.contains("async = false"));
+    for line in original.lines() {
+        assert!(installed.contains(line), "lost {line:?}:\n{installed}");
+    }
+    assert!(
+        installed.contains(
+            "[[hooks.SessionStart]]\nhooks = [{ type = \"command\", command = \"conspectus hook \
+             write codex\", timeout = 5 }]\n"
+        ),
+        "{installed}"
+    );
 
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("remove")
-        .arg("codex")
-        .assert()
+    codex_hook(home, &["status", "codex"])
         .success()
-        .stdout(predicate::str::contains("removed Codex hook"));
+        .stdout(predicate::str::starts_with("installed\tcodex\t"))
+        .stdout(predicate::str::contains("installed\tcodex\t").count(CODEX_EVENTS + 1))
+        .stdout(predicate::str::contains("\tSessionStart\n"))
+        .stderr(predicate::str::is_empty());
+    codex_hook(home, &["init", "codex"])
+        .success()
+        .stdout(predicate::str::contains("Codex hooks already installed"))
+        .stdout(predicate::str::contains("/hooks"));
+    assert_eq!(fs::read_to_string(&config).expect("read"), installed);
 
+    codex_hook(home, &["remove", "codex"])
+        .success()
+        .stdout(predicate::str::contains("removed Codex hooks"))
+        .stderr(predicate::str::is_empty());
+    assert_eq!(fs::read_to_string(&config).expect("read"), original);
+    codex_hook(home, &["remove", "codex"])
+        .success()
+        .stdout(predicate::str::contains("Codex hooks not installed"));
+}
+
+#[test]
+fn hook_init_codex_upgrades_an_older_install_in_place() {
+    let original = codex_case("inline-lists.toml");
+    let (home, config) = codex_home(&original);
+    let home = home.path();
+
+    codex_hook(home, &["status", "codex"])
+        .success()
+        .stdout(predicate::str::starts_with("partial\tcodex\t"))
+        .stdout(predicate::str::contains("outdated\tcodex\t").count(1))
+        .stderr(predicate::str::contains("conspectus hook init codex"));
+    codex_hook(home, &["init", "codex"])
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "({} added, 1 updated)",
+            CODEX_EVENTS - 1
+        )));
+    let upgraded = fs::read_to_string(&config).expect("read");
+    assert_eq!(
+        upgraded.matches("hook write codex").count(),
+        CODEX_EVENTS,
+        "never duplicated: {upgraded}"
+    );
+    assert!(upgraded.contains("echo existing"));
+    codex_hook(home, &["status", "codex"])
+        .success()
+        .stdout(predicate::str::starts_with("installed\tcodex\t"));
+}
+
+#[test]
+fn hook_init_codex_keeps_inline_and_dotted_hooks_and_the_recorded_trust() {
+    for name in ["inline-hooks.toml", "dotted-keys.toml", "hooks-state.toml"] {
+        let original = codex_case(name);
+        let (home, config) = codex_home(&original);
+        let home = home.path();
+        codex_hook(
+            home,
+            &["init", "codex", "--command", "conspectus hook write codex"],
+        )
+        .success();
+        let installed = fs::read_to_string(&config).expect("read");
+        assert!(installed.contains("hook write codex"), "{name}");
+        assert_eq!(
+            installed.matches("trusted_hash").count(),
+            original.matches("trusted_hash").count(),
+            "{name}: no trust written"
+        );
+        codex_hook(home, &["remove", "codex"]).success();
+        assert_eq!(
+            fs::read_to_string(&config).expect("read"),
+            original,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn hook_remove_codex_takes_its_group_from_between_the_operators() {
+    let original = codex_case("conspectus-between-operator-groups.toml");
+    let (home, config) = codex_home(&original);
+    codex_hook(home.path(), &["remove", "codex"])
+        .success()
+        .stdout(predicate::str::contains("removed Codex hooks"))
+        .stderr(predicate::str::contains("review the hooks that came after"))
+        .stderr(predicate::str::contains("/hooks"));
     let removed = fs::read_to_string(&config).expect("read");
-    assert!(removed.contains("echo existing"));
-    assert!(!removed.contains("hook write codex"));
+    assert!(!removed.contains("hook write codex"), "{removed}");
+    assert!(removed.contains("echo first") && removed.contains("echo third"));
+}
+
+#[test]
+fn hook_init_codex_installs_beside_a_hooks_json_and_leaves_it_alone() {
+    let (home, config) = codex_home("model = \"gpt-5.4\"\n");
+    let hooks_json = config.with_file_name("hooks.json");
+    let json = codex_case("hooks.json");
+    fs::write(&hooks_json, &json).expect("hooks.json");
+
+    codex_hook(home.path(), &["init", "codex"])
+        .success()
+        .stdout(predicate::str::contains("installed Codex hooks"))
+        .stderr(predicate::str::contains(format!(
+            "{} also holds Codex hooks",
+            hooks_json.display()
+        )));
+    assert!(
+        fs::read_to_string(&config)
+            .expect("read")
+            .contains("hook write codex")
+    );
+    codex_hook(home.path(), &["status", "codex"])
+        .success()
+        .stdout(predicate::str::starts_with("installed\tcodex\t"))
+        .stderr(predicate::str::contains("hooks.json"));
+    codex_hook(home.path(), &["remove", "codex"]).success();
+    assert_eq!(fs::read_to_string(&hooks_json).expect("read"), json);
+    assert_eq!(
+        fs::read_to_string(&config).expect("read"),
+        "model = \"gpt-5.4\"\n"
+    );
+}
+
+#[test]
+fn hook_init_codex_refuses_a_hooks_value_it_would_replace() {
+    let text = "[hooks.SessionStart]\nmatcher = \"startup\"\n";
+    let (home, config) = codex_home(text);
+    codex_hook(home.path(), &["init", "codex"])
+        .failure()
+        .stderr(predicate::str::contains("hooks.SessionStart"));
+    assert_eq!(fs::read_to_string(&config).expect("read"), text);
+}
+
+#[test]
+fn hook_init_codex_writes_through_a_symlink_and_keeps_the_files_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    let dotfiles = home.path().join("dotfiles");
+    fs::create_dir_all(&dotfiles).expect("dotfiles");
+    let target = dotfiles.join("codex-config.toml");
+    fs::write(&target, "model = \"gpt-5.4\"\n").expect("target");
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).expect("chmod");
+    let link = home.path().join(".codex/config.toml");
+    fs::create_dir_all(link.parent().expect("parent")).expect("codex dir");
+    std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+    codex_hook(home.path(), &["init", "codex"]).success();
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("link")
+            .file_type()
+            .is_symlink()
+    );
+    assert!(
+        fs::read_to_string(&target)
+            .expect("target")
+            .contains("hook write codex")
+    );
+    assert_eq!(
+        fs::metadata(&target).expect("target").permissions().mode() & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn hook_init_codex_project_scope_leaves_the_user_config_alone() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = tempfile::TempDir::new().expect("project temp");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .current_dir(project.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
+    hook(&["init", "codex", "--scope", "project"]).stdout(predicate::str::contains(format!(
+        "({CODEX_EVENTS} added, 0 updated)"
+    )));
+    let config = project.path().join(".codex/config.toml");
+    assert!(
+        fs::read_to_string(&config)
+            .expect("read")
+            .contains("hook write codex")
+    );
+    assert!(!home.path().join(".codex").exists());
+    hook(&["status", "codex", "--scope", "project"])
+        .stdout(predicate::str::starts_with("installed\tcodex\t"));
+    hook(&["status", "codex"]).stdout(predicate::str::starts_with("not-installed\tcodex\t"));
+    hook(&["remove", "codex", "--scope", "project"]);
+    assert_eq!(fs::read_to_string(&config).expect("read"), "");
 }
 
 #[test]
@@ -750,14 +1581,51 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     let body = fs::read_to_string(&installed).expect("installed extension");
     assert!(body.starts_with("// conspectus-hook:"));
     assert!(body.contains(r#"["hook", "write", "pi"]"#));
-    hook(&["status", "pi"]).stdout(predicate::str::contains("installed\tpi"));
+    assert!(body.contains(r#"const EXTENSION_VERSION = "2";"#));
+    hook(&["status", "pi"])
+        .stdout(predicate::str::contains("installed\tpi"))
+        .stdout(predicate::str::contains("no-events\tpi"))
+        .stderr(predicate::str::contains("waiting needs Pi 0.84.4 or later"))
+        .stderr(predicate::str::contains("1.1.0"))
+        .stderr(predicate::str::contains("outdated").not());
     hook(&["init", "pi"]).stdout(predicate::str::contains("already installed"));
 
     // An older copy is reported and replaced.
     fs::write(&installed, "// conspectus-hook: an older version\n").expect("downgrade");
-    hook(&["status", "pi"]).stdout(predicate::str::contains("outdated\tpi"));
+    hook(&["status", "pi"])
+        .stdout(predicate::str::contains("outdated\tpi"))
+        .stderr(predicate::str::contains("is an older version"))
+        .stderr(predicate::str::contains(
+            "`conspectus hook init pi` replaces it",
+        ))
+        .stderr(predicate::str::contains("no live state"))
+        .stderr(predicate::str::contains("0.84.4"));
+    // The first version reports sessions only, so live state is off.
+    fs::write(
+        &installed,
+        "// conspectus-hook: installed by `conspectus hook init pi`\nconst EXTENSION_VERSION = \"1\";\n",
+    )
+    .expect("the first version");
+    hook(&["status", "pi"])
+        .stdout(predicate::str::contains("outdated\tpi"))
+        .stdout(predicate::str::contains("off\tpi"))
+        .stderr(predicate::str::contains(
+            "is version 1 and this build installs version 2",
+        ));
     hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
     assert_eq!(fs::read_to_string(&installed).expect("reinstalled"), body);
+    // A newer version than this build's still reports live state.
+    fs::write(
+        &installed,
+        "// conspectus-hook: installed\nconst EXTENSION_VERSION = \"9\";\n",
+    )
+    .expect("a newer version");
+    hook(&["status", "pi"])
+        .stdout(predicate::str::contains("outdated\tpi"))
+        .stdout(predicate::str::contains("no-events\tpi"))
+        .stderr(predicate::str::contains("is version 9"))
+        .stderr(predicate::str::contains("no live state").not());
+    hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
 
     hook(&["remove", "pi"]).stdout(predicate::str::contains("removed Pi hook extension"));
     assert!(!installed.exists());
@@ -1812,6 +2680,61 @@ fn columns_lists_every_row_type_with_default_marker() {
             "missing {expected_optional} column for {row_type}:\n{output}",
         );
     }
+}
+
+#[test]
+fn the_live_columns_are_listed_opt_in_and_chosen_by_flag_or_config() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    for row_type in ["sessions", "mux"] {
+        let assert = isolated_cmd(home.path())
+            .current_dir(temp.path())
+            .args(["columns", row_type])
+            .assert()
+            .success();
+        let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+        let line = output
+            .lines()
+            .find(|line| line.starts_with("live "))
+            .unwrap_or_else(|| panic!("no live column for {row_type}:\n{output}"));
+        assert!(!line.contains("(default)"), "{line}");
+
+        let assert = isolated_cmd(home.path())
+            .current_dir(temp.path())
+            .args(["table", row_type, "--no-cache", "--columns", "id,live"])
+            .assert()
+            .success();
+        let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+        assert_eq!(
+            output
+                .lines()
+                .next()
+                .map(str::split_whitespace)
+                .map(Iterator::collect::<Vec<_>>),
+            Some(vec!["ID", "LIVE"]),
+            "{output}"
+        );
+    }
+
+    let config = home.path().join(".config/conspectus/config.toml");
+    fs::create_dir_all(config.parent().expect("parent")).expect("config dir");
+    fs::write(&config, "[table.mux]\ncolumns = [\"mux\", \"live\"]\n").expect("config");
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .args(["table", "mux", "--no-cache"])
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert_eq!(
+        output
+            .lines()
+            .next()
+            .map(str::split_whitespace)
+            .map(Iterator::collect::<Vec<_>>),
+        Some(vec!["MUX", "LIVE"]),
+        "{output}"
+    );
 }
 
 #[test]

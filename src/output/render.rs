@@ -77,9 +77,10 @@ pub struct RenderOptions {
     /// land.
     pub filter: crate::filter::RowFilter,
     /// Wall-clock epoch (Unix seconds) used as the recency anchor
-    /// when evaluating `max-age`. `None` disables age-based
-    /// filtering (the predicate admits the row). Callers pass a
-    /// fixed value in tests for determinism.
+    /// when evaluating `max-age`, and the time the `live` columns read
+    /// live state at. `None` disables age-based filtering (the
+    /// predicate admits the row) and reads live state at the current
+    /// time. Callers pass a fixed value in tests for determinism.
     pub now_epoch: Option<i64>,
 }
 
@@ -346,6 +347,12 @@ pub const SESSIONS_COLUMNS: &[ColumnSpec] = &[
         description: "Relative recency from `AgentSessionNode.last_active_epoch` (e.g. `2h`, `3d`).",
         default: false,
     },
+    ColumnSpec {
+        key: "live",
+        header: "LIVE",
+        description: "What the agent is doing now, from its hooks: state and detail, `+N` running subagents, `quiet` after a long silence, and how long ago the state began (e.g. `waiting:permission 3m`). `—` without live state.",
+        default: false,
+    },
 ];
 
 pub const MUX_COLUMNS: &[ColumnSpec] = &[
@@ -395,6 +402,12 @@ pub const MUX_COLUMNS: &[ColumnSpec] = &[
         key: "created",
         header: "CREATED",
         description: "Relative age from `MuxSessionNode.created_epoch` (e.g. `2h`, `3d`).",
+        default: false,
+    },
+    ColumnSpec {
+        key: "live",
+        header: "LIVE",
+        description: "How many of the mux's agents are in each live state, most urgent first (e.g. `1 waiting, 2 working`). `—` without live state.",
         default: false,
     },
 ];

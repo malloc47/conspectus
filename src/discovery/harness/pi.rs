@@ -14,11 +14,20 @@
 //! last-message preview is the Tier 2 read, capped and normalized by
 //! [`normalize_last_message_preview`] (ADR 0023).
 //!
+//! A session's last activity is the timestamp of its newest entry that
+//! is not a `usage` entry, which Pi's idle cache warming appends while
+//! nothing happens. A file whose tail has no such entry falls back to
+//! the header's timestamp, then to the file's mtime.
+//!
 //! `/fork`, `/clone`, and `pi --fork` record the parent's file path as the
 //! header's `parentSession`. Each one becomes an ADR 0018
 //! `parent_session` candidate from the child, with `lineage_kind = fork`
 //! (the header doesn't say which command ran). In-file `/tree` branches
 //! are one session and produce no lineage.
+//!
+//! What the session is doing now comes from the Conspectus extension's
+//! snapshots, which `conspectus hook write pi` reads through `pi_live.rs`
+//! into the live-state store.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -33,6 +42,7 @@ use serde_json::json;
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{FileStamp, StampedMap};
 use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
+use crate::live_store::{LiveContext, LiveSnapshot};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
@@ -123,6 +133,55 @@ impl HarnessAdapter for PiAdapter {
         let dir = path.parent()?;
         let root = if is_cwd_dir(dir) { dir.parent()? } else { dir };
         Some(root.to_string_lossy().to_string())
+    }
+
+    /// The extension reports the Pi process it runs in, which replaces
+    /// the one the writer found by walking its parents (the walk finds Pi
+    /// only by its process name). See `pi_live.rs`.
+    fn hook_record_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        pid: Option<i64>,
+        ppid: Option<i64>,
+        tmux: Option<crate::hook::HookTmuxRecord>,
+        harness_version: Option<String>,
+        observed_epoch: i64,
+    ) -> Result<crate::hook::HookRecord> {
+        let (pid, ppid) = match live::reported_pid(payload) {
+            Some(reported) if Some(reported) != pid => (Some(reported), None),
+            _ => (pid, ppid),
+        };
+        super::session_hook_record(
+            self,
+            payload,
+            pid,
+            ppid,
+            tmux,
+            harness_version,
+            observed_epoch,
+        )
+    }
+
+    /// A session start, or a payload of the first extension version;
+    /// live-state snapshots and heartbeats reach only the live-state
+    /// store. See `pi_live.rs`.
+    fn is_attribution_event(&self, payload: &serde_json::Value) -> bool {
+        live::is_attribution_event(payload)
+    }
+
+    /// The extension's snapshot of the session; see `pi_live.rs` for the
+    /// fields read and the known gaps.
+    fn live_snapshot_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        context: &LiveContext,
+        observed_ms: i64,
+    ) -> Option<LiveSnapshot> {
+        live::live_snapshot(payload, context, observed_ms)
+    }
+
+    fn reports_live_state(&self) -> bool {
+        true
     }
 
     fn launch_argv(&self) -> Vec<OsString> {
@@ -461,9 +520,16 @@ struct Block {
     text: Option<String>,
 }
 
-/// The newest entry timestamp and the last-message preview, read from
-/// the tail of the file. Entries are appended in time order, so the
-/// last timestamped line is the newest.
+/// Entry type Pi writes on its own while the session sits idle: with
+/// cache warming on (the default), it appends `usage` entries to keep
+/// the prompt cache warm for up to half an hour after a run.
+const IDLE_ENTRY_TYPE: &str = "usage";
+
+/// The newest activity timestamp and the last-message preview, read
+/// from the tail of the file. Entries are appended in time order, so the
+/// last timestamped line is the newest. `usage` entries are not
+/// activity and are passed over, so an idle session keeps the time of
+/// its last real entry.
 fn read_tail(path: &Path) -> (Option<i64>, Option<String>) {
     let Some(buf) = read_tail_bytes(path) else {
         return (None, None);
@@ -477,7 +543,7 @@ fn read_tail(path: &Path) -> (Option<i64>, Option<String>) {
         let Ok(entry) = serde_json::from_slice::<TailEntry>(line) else {
             continue;
         };
-        if newest.is_none() {
+        if newest.is_none() && entry.entry_type.as_deref() != Some(IDLE_ENTRY_TYPE) {
             newest = entry.timestamp.as_deref().and_then(parse_epoch);
         }
         if preview.is_none() {
@@ -637,6 +703,9 @@ fn build_lineage_link(
         state: LinkState::Active,
     }
 }
+
+#[path = "pi_live.rs"]
+mod live;
 
 #[cfg(test)]
 #[path = "pi_tests.rs"]

@@ -27,6 +27,7 @@ fn snapshot(nodes: Vec<GraphNode>) -> GraphSnapshot {
                 status: MuxProbeStatus::Listed,
                 epoch: 1_000,
                 exited: Vec::new(),
+                titles: Default::default(),
             },
         )]),
         ..GraphSnapshot::empty()

@@ -351,7 +351,7 @@ fn claude_system_record_as_first_uuid_bearing_does_not_break_discovery() {
 #[test]
 fn claude_hook_payload_converts_to_record() {
     let payload: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(fixture_path("hooks/claude-sessionstart.json")).unwrap(),
+        &fs::read_to_string(fixture_path("hooks/claude-code/sessionstart-startup.json")).unwrap(),
     )
     .unwrap();
 
@@ -372,11 +372,11 @@ fn claude_hook_payload_converts_to_record() {
     .expect("convert claude hook payload");
 
     assert_eq!(record.harness_key, "claude-code");
-    assert_eq!(record.session_key, "cccccccc-1111-2222-3333-444444444444");
+    assert_eq!(record.session_key, "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f");
     assert_eq!(
         record.transcript_path.as_deref(),
         Some(
-            "/home/user/.claude/projects/home-user-projects-my-project/cccccccc-1111-2222-3333-444444444444.jsonl"
+            "/home/user/.claude/projects/-home-user-projects-my-project/3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f.jsonl"
         )
     );
     assert_eq!(
@@ -387,9 +387,12 @@ fn claude_hook_payload_converts_to_record() {
 }
 
 #[test]
-fn claude_ephemeral_hook_handles_null_transcript_path() {
+fn claude_hook_without_a_transcript_handles_null_transcript_path() {
     let payload: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(fixture_path("hooks/claude-ephemeral.json")).unwrap(),
+        &fs::read_to_string(fixture_path(
+            "hooks/claude-code/sessionstart-no-transcript.json",
+        ))
+        .unwrap(),
     )
     .unwrap();
 
@@ -408,13 +411,13 @@ fn claude_ephemeral_hook_handles_null_transcript_path() {
         record.transcript_path.is_none(),
         "null transcript_path should be None"
     );
-    assert_eq!(record.session_key, "dddddddd-1111-2222-3333-444444444444");
+    assert_eq!(record.session_key, "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f");
 }
 
 #[test]
 fn codex_hook_payload_converts_to_record() {
     let payload: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(fixture_path("hooks/codex-sessionstart.json")).unwrap(),
+        &fs::read_to_string(fixture_path("hooks/codex/sessionstart-startup.json")).unwrap(),
     )
     .unwrap();
 
@@ -430,10 +433,17 @@ fn codex_hook_payload_converts_to_record() {
     .expect("convert codex hook payload");
 
     assert_eq!(record.harness_key, "codex");
-    assert_eq!(record.session_key, "eeeeeeee-1111-2222-3333-444444444444");
+    assert_eq!(record.session_key, "019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37");
     assert_eq!(
         record.cwd.as_deref(),
-        Some("/home/user/projects/another-project")
+        Some("/home/user/projects/my-project")
+    );
+    assert_eq!(
+        record.transcript_path.as_deref(),
+        Some(
+            "/home/user/.codex/sessions/2026/11/12/\
+             rollout-2026-11-12T09-14-03-019a7c3e-5b2d-7f41-9c8e-2d4b6a1f0e37.jsonl"
+        )
     );
     assert_eq!(record.hook_event_name.as_deref(), Some("SessionStart"));
 }
@@ -701,4 +711,26 @@ fn pi_branched_session_with_every_entry_type_discovers_session() {
         session.last_message_preview.as_deref(),
         Some("Approach B is done.")
     );
+}
+
+#[test]
+fn pi_cache_warming_after_a_finished_turn_keeps_the_turn_as_last_activity() {
+    let (_temp, fragment) = pi_fixture_scenario(&[(
+        "pi/session-cache-warm.jsonl",
+        "--home-user-projects-my-project--",
+        "2026-10-16T12-00-00-000Z_0199f0c3-0000-7000-8000-00000000c0a1.jsonl",
+    )]);
+
+    let session = fragment
+        .nodes
+        .iter()
+        .find_map(|n| match n {
+            GraphNode::AgentSession(s) => Some(s),
+            _ => None,
+        })
+        .expect("cache-warm session");
+    // The assistant's stop at 12:01:00, not the last `usage` entry at
+    // 12:14:00 that idle cache warming appended.
+    assert_eq!(session.last_active_epoch, Some(1_792_152_060));
+    assert_eq!(session.last_message_preview.as_deref(), Some("Renamed."));
 }

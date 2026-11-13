@@ -1,0 +1,45 @@
+---
+source: tests/live_state_output.rs
+expression: "render_node_show_at(&snapshot, &id, false, FIXTURE_NOW_MS)"
+---
+node f79e7d88bb0dde09
+  kind: mux_session
+  id:   mux_session:tmux:main
+  backend:   tmux
+  native_id: main
+  cwd:       /workspace
+
+live state
+  counts:     1 waiting, 1 ready, 1 working
+  pane agent with no session (%2):
+    state:      working
+    detail:     generating
+    since:      2026-09-30T11:58:20Z
+    age:        1m
+    last event: 2026-09-30T11:58:20Z
+    confidence: quiet
+    source:     hook
+    process:    unknown
+  pane agent with no session (%3):
+    state:      ready
+    detail:     finished
+    since:      2026-09-30T11:58:40Z
+    age:        1m
+    last event: 2026-09-30T11:59:00Z
+    confidence: fresh
+    source:     hook
+    process:    pid 4343, alive
+
+outgoing candidate links: 0
+
+incoming candidate links: 2
+  - linked_to_mux   ← codex:session-a [SD/M, active] (link=mux-session-a)
+      adapter: process
+  - linked_to_mux   ← codex:session-quiet [SD/M, active] (link=mux-session-quiet)
+      adapter: process
+
+resolved relationships: 2
+  - linked_to_mux   codex:session-a → tmux:main (selected=mux-session-a)
+  - linked_to_mux   codex:session-quiet → tmux:main (selected=mux-session-quiet)
+
+diagnostics: 0

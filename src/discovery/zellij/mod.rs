@@ -285,6 +285,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
                 status,
                 epoch,
                 exited,
+                titles: Default::default(),
             },
         );
 

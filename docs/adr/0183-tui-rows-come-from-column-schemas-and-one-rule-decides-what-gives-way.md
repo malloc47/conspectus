@@ -34,7 +34,10 @@ cells do not fit in, the width rules counting the whole and the policy
 fitting the cells. Amended by
 [ADR 0196](0196-tui-quick-selects-entity-rows-come-from-a-column-schema.md):
 a column can take a share of what the other columns leave, and a fill that
-does not show can hand its cells to a column it names.
+does not show can hand its cells to a column it names. Amended by
+[ADR 0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md):
+the session and mux rows gain a lined-up live-state column after the age
+that, like the state glyph, never gives way.
 
 ## Context
 

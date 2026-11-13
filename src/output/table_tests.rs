@@ -612,7 +612,94 @@ fn parse_columns_all_resets_to_every_registered_column() {
             "attached-count",
             "activity",
             "created",
+            "live",
         ],
+    );
+}
+
+#[test]
+fn the_live_column_is_opt_in_and_listed_for_sessions_and_mux() {
+    for projection in [Projection::Agent, Projection::Mux] {
+        assert!(
+            !default_columns(projection).contains(&"live"),
+            "{projection:?} shows live state only when asked"
+        );
+        let listing = render_columns_listing(projection, false);
+        let line = listing
+            .lines()
+            .find(|line| line.starts_with("live "))
+            .unwrap_or_else(|| panic!("{projection:?} lists no live column:\n{listing}"));
+        assert!(!line.contains("(default)"), "{line}");
+        assert_eq!(
+            parse_columns_spec(projection, "+live").expect("+live"),
+            [default_columns(projection), vec!["live"]].concat()
+        );
+        assert_eq!(
+            resolve_explicit_columns(projection, &["id".to_string(), "live".to_string()])
+                .expect("config list"),
+            vec!["id", "live"]
+        );
+    }
+}
+
+#[test]
+fn the_live_columns_read_live_state_at_the_pinned_time() {
+    use crate::model::live::{
+        LiveBinding, LiveDetail, LiveObservation, LiveSource, LiveState, Liveness,
+    };
+
+    let now = 1_790_769_600;
+    let waiting = AgentSessionId::new("claude-code", "global", "waiter");
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            agent_session("claude-code", "waiter", Some("/work")),
+            agent_session("claude-code", "silent", Some("/work")),
+            mux_session("tmux", "editor", Some("/work")),
+            mux_session("tmux", "spare", Some("/spare")),
+        ],
+        candidate_links: vec![linked_to_mux_link(
+            "mux-waiter",
+            waiting.clone(),
+            MuxSessionId::new("tmux:editor"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+        )],
+        ..GraphSnapshot::empty()
+    };
+    snapshot.node_live.insert(
+        NodeId::AgentSession(waiting),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Waiting, LiveSource::Hook, (now - 60) * 1000)
+                .with_detail(LiveDetail::Permission)
+                .with_since_ms((now - 180) * 1000),
+            Liveness::Alive,
+        ),
+    );
+    let options = RenderOptions::wide().with_now_epoch(Some(now));
+
+    let sessions = render_with(
+        &snapshot,
+        Projection::Agent,
+        &options.clone().with_columns(vec!["id", "live"]),
+    );
+    assert_eq!(
+        sessions,
+        "ID      LIVE\n\
+         ------  ---------------------\n\
+         silent  —\n\
+         waiter  waiting:permission 3m\n"
+    );
+    let mux = render_with(
+        &snapshot,
+        Projection::Mux,
+        &options.with_columns(vec!["mux", "live"]),
+    );
+    assert_eq!(
+        mux,
+        "MUX          LIVE\n\
+         -----------  ---------\n\
+         tmux:editor  1 waiting\n\
+         tmux:spare   —\n"
     );
 }
 

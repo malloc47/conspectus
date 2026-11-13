@@ -168,9 +168,9 @@ a `--no-mux` flag to decouple. The lockstep rule:
 Because the alias overlay never mutates harness state, renaming a session
 is safe whether the session is live or dormant. The TUI surfaces an
 informational status-bar advisory when the target is live (mux indicator
-`Attached` or `Ambiguous` with fresh hook-sidecar evidence per ADR 0028's
-`ACTIVE_TTL_SECONDS`) so the operator understands the alias overlays the
-harness title rather than replacing it.
+`Attached` or `Ambiguous`, which needs an Active mux link such as a
+hook-sidecar one per ADR 0028) so the operator understands the alias
+overlays the harness title rather than replacing it.
 
 Future write-back to harness state (where the harness supports it, e.g.
 opencode sqlite) is intentionally deferred to a follow-on ADR. That ADR will

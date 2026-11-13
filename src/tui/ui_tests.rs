@@ -337,7 +337,7 @@ fn render_at_default_size_shows_header_tree_and_detail() {
         "session harness label missing: {text}"
     );
     assert!(
-        text.contains("could you give me"),
+        text.contains("could you give"),
         "same-line preview missing: {text}"
     );
     assert!(
@@ -1009,6 +1009,8 @@ fn a_field_row_places_its_kind_chip_before_the_value() {
         annotation: None,
         cut_at: None,
         kind_chip: Some(crate::model::NodeKind::Workspace),
+        live_mark: None,
+        receding: false,
         preview: None,
     };
     let line = explorer_line(field_row(&field, &theme), 80, &theme);
@@ -1087,6 +1089,7 @@ fn session_under_group_with(key: &str, mux_state: MuxIndicator) -> crate::tui::r
             primary_node: NodeId::AgentSession(id),
             pin_id: None,
             content_hit: None,
+            live: None,
         }),
     }
 }
@@ -2106,6 +2109,7 @@ fn session_harness_span_renders_as_filled_badge() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
     let spans = session_spans(&row, &theme, now);
     let badge = spans
@@ -2159,6 +2163,7 @@ fn a_pinned_pr_draws_its_kind_glyph_and_word_in_one_style() {
         )),
         pr_status: status,
         marker: PinMarker::None,
+        live: crate::tui::rows::MixedLive::None,
     };
     let mut wrong = Vec::new();
     for (state, draft, _, word, style) in pr_state_cases(&theme) {
@@ -2282,6 +2287,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     });
     assert!(
         row_kind_glyph_span(&agent, &theme).is_some(),
@@ -2307,6 +2313,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("project")),
         content_hit: None,
+        live: Default::default(),
     });
     assert_eq!(
         row_kind_glyph_span(&mux, &theme)
@@ -2338,6 +2345,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let spans = session_spans(&row, &theme, now);
@@ -2380,6 +2388,7 @@ fn a_session_last_hosted_by_a_gone_mux_carries_a_was_in_chip() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
     let text = |row: &AgentSessionRow| -> String {
         session_spans(row, &theme, now)
@@ -2442,6 +2451,7 @@ fn session_id_is_strictly_truncated_in_left_row() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id)),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let spans = session_spans(&row, &theme, now);
@@ -2481,6 +2491,7 @@ fn session_display_label_is_truncated_in_left_row() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let spans = session_spans(&row, &theme, now);
@@ -2522,6 +2533,7 @@ fn mux_session_row_mirrors_session_column_order() {
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
         content_hit: None,
+        live: Default::default(),
     };
 
     let spans = mux_spans_in(&row, &theme, now, 100, None);
@@ -2594,6 +2606,7 @@ fn session_project_column_renders_before_inline_preview() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let spans = session_spans_at(&row, &theme, now, 120);
@@ -2646,6 +2659,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
         content_hit: None,
+        live: None,
     };
 
     let fresh = make_row(Some("1m"), Some(now - 60));
@@ -4149,27 +4163,32 @@ fn row_text_at(row: &crate::tui::rows::Row, width: usize) -> String {
 
 #[test]
 fn a_narrow_session_row_gives_way_key_first_and_keeps_its_state() {
-    // A session's lined-up cells (key, chip, age, state) give way key
-    // first, then the chip, then the age; the state glyph stays. The
-    // label after them narrows with `…`, and leaves once it cannot keep
-    // eight cells.
+    // A session's lined-up cells (key, chip, age, live mark, state) give
+    // way key first, then the chip, then the age; the live mark and the
+    // state glyph stay. The label after them narrows with `…`, and leaves
+    // once it cannot keep eight cells.
     let mut session = session_under_group("0199a3f2-ab");
     session.depth = 0;
     if let RowKind::AgentSession(row) = &mut session.kind {
         row.alias = Some("a label of some length".into());
     }
-    // The prefix is 4 cells; the lined-up cells take 29 more.
+    let marks = format!(
+        "{}  {}",
+        crate::tui::icons::live::NONE,
+        crate::tui::icons::state::UNLINKED
+    );
+    // The prefix is 4 cells; the lined-up cells take 32 more.
     let wide = row_text_at(&session, 60);
     assert!(
         wide.contains("0199a3f2  ") && wide.contains("a label of some length"),
         "{wide}"
     );
-    let cut = row_text_at(&session, 4 + 29 + 2 + 10);
+    let cut = row_text_at(&session, 4 + 32 + 2 + 10);
     assert!(
         cut.ends_with("a label o…"),
         "the label narrows with the mark: {cut:?}"
     );
-    let gone = row_text_at(&session, 4 + 29 + 2 + 7);
+    let gone = row_text_at(&session, 4 + 32 + 2 + 7);
     assert!(
         !gone.contains("label"),
         "a label under eight cells leaves: {gone:?}"
@@ -4178,27 +4197,23 @@ fn a_narrow_session_row_gives_way_key_first_and_keeps_its_state() {
         gone.contains("0199a3f2"),
         "the key stays while the rest fits: {gone:?}"
     );
-    let keyless = row_text_at(&session, 30);
+    let keyless = row_text_at(&session, 33);
     assert!(
         !keyless.contains("0199a3f2") && keyless.contains("claude"),
         "{keyless:?}"
     );
+    assert!(keyless.trim_end().ends_with(&marks), "{keyless:?}");
+    let chipless = row_text_at(&session, 15);
     assert!(
-        keyless
-            .trim_end()
-            .ends_with(crate::tui::icons::state::UNLINKED),
-        "{keyless:?}"
+        !chipless.contains("claude") && chipless.contains('—'),
+        "the chip leaves before the age: {chipless:?}"
     );
-    let ageless = row_text_at(&session, 12);
+    assert!(chipless.trim_end().ends_with(&marks), "{chipless:?}");
+    let ageless = row_text_at(&session, 9);
+    assert!(!ageless.contains('—'), "then the age: {ageless:?}");
     assert!(
-        !ageless.contains("claude"),
-        "the chip leaves before the age: {ageless:?}"
-    );
-    assert!(
-        ageless
-            .trim_end()
-            .ends_with(crate::tui::icons::state::UNLINKED),
-        "{ageless:?}"
+        ageless.trim_end().ends_with(&marks),
+        "the live mark and the state stay: {ageless:?}"
     );
 }
 
@@ -4217,40 +4232,43 @@ fn a_narrow_mux_row_narrows_its_chips_and_name_before_its_age_leaves() {
             .collect()
     };
     // Room for the name's step (20 from 39 cells), two chips and a count
-    // (24), the age, and the state.
-    let wide = text(80);
+    // (24), the age, the live mark, and the state.
+    let wide = text(83);
     assert!(
         wide.contains("claude") && wide.contains("codex") && wide.contains("+1"),
         "{wide}"
     );
     // Then one chip and a count of the rest.
-    let one = text(50);
+    let one = text(53);
     assert!(
         one.contains("claude") && one.contains("+2") && !one.contains("codex"),
         "{one}"
     );
     assert!(one.contains("2m"), "{one}");
     // Then the name narrows, cut with the mark, and the age stays.
-    let narrow = text(36);
+    let narrow = text(39);
     assert!(
         narrow.contains('…') && narrow.contains("2m") && narrow.contains("claude"),
         "{narrow}"
     );
     // Then the age leaves, then the chips; the name and the state stay.
-    let ageless = text(29);
+    let ageless = text(32);
     assert!(
         !ageless.contains("2m") && ageless.contains("claude"),
         "{ageless}"
     );
-    let bare = text(16);
+    let bare = text(19);
     assert!(
         !bare.contains("claude") && bare.starts_with("a-rather"),
         "{bare}"
     );
     assert!(
-        bare.trim_end()
-            .ends_with(crate::tui::icons::state::UNLINKED),
-        "{bare}"
+        bare.trim_end().ends_with(&format!(
+            "{}  {}",
+            crate::tui::icons::live::NONE,
+            crate::tui::icons::state::UNLINKED
+        )),
+        "the live mark and the state stay: {bare}"
     );
 }
 
@@ -4296,6 +4314,7 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:build")),
         content_hit: None,
+        live: Default::default(),
     }
 }
 
@@ -4413,6 +4432,7 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
         content_hit: None,
+        live: Default::default(),
     };
     let settled: String = mux_spans_in(&row, &theme, 0, 100, None)
         .iter()
@@ -4423,6 +4443,54 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         .map(|s| s.content.to_string())
         .collect();
     assert_eq!(settled.replace('⊸', "⠋"), pending);
+}
+
+#[test]
+fn a_pending_row_keeps_its_live_mark_and_spins_the_link_cell() {
+    use crate::model::live::{LiveConfidence, LiveState};
+    let theme = Theme::default();
+    let mut session = session_under_group_with("0199a3f2", MuxIndicator::Attached);
+    if let RowKind::AgentSession(row) = &mut session.kind {
+        row.live = Some(crate::tui::rows::LiveCell {
+            state: LiveState::Waiting,
+            detail: None,
+            confidence: LiveConfidence::Fresh,
+            since_ms: 0,
+            subagents: 0,
+            source: crate::model::live::LiveSource::Hook,
+            unseen: false,
+        });
+    }
+    let draw =
+        |spinner| line_text(&lay_out(std::slice::from_ref(&session), &theme, 0, 80, spinner)[0]);
+    let settled = draw(None);
+    assert!(settled.contains("!  ⊸"), "{settled}");
+    let pending = draw(Some("⠋"));
+    assert_eq!(
+        settled.replace('⊸', "⠋"),
+        pending,
+        "only the link cell spins; the live mark stays"
+    );
+
+    let mux = MuxSessionRow {
+        live: [LiveState::Ready, LiveState::Working]
+            .into_iter()
+            .collect::<crate::model::live::LiveCounts>()
+            .into(),
+        ..agentless_mux_row(None)
+    };
+    let text = |spinner| -> String {
+        mux_spans_in(&mux, &theme, 0, 100, spinner)
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect()
+    };
+    let settled = text(None);
+    assert!(
+        settled.contains("›  ∘"),
+        "ready ranks before working: {settled}"
+    );
+    assert_eq!(settled.replace('∘', "⠋"), text(Some("⠋")));
 }
 
 /// A transcript of `turns` alternating user and assistant messages,
@@ -4936,6 +5004,7 @@ fn branch_ref_and_commit_fields_preview_git_history() {
         target: &NodeId::Branch(branch),
         home: None,
         now: None,
+        live: &crate::tui::rows::LiveValues::default(),
     })
     .expect("branch view");
     let preview = |label: &str| {
@@ -5005,6 +5074,7 @@ fn processes_and_pid_fields_preview_process_trees() {
         target: &node_id,
         home: None,
         now: None,
+        live: &crate::tui::rows::LiveValues::default(),
     })
     .expect("process view");
     let preview = |label: &str| {
@@ -5115,6 +5185,7 @@ fn a_field_naming_another_node_previews_that_node() {
         target: &NodeId::Checkout(CheckoutId::new(RepoId::new("/r/.git"), "/r")),
         home: None,
         now: None,
+        live: &crate::tui::rows::LiveValues::default(),
     })
     .expect("checkout view");
     let preview = |label: &str| {
@@ -5859,6 +5930,7 @@ fn mixed_row_for_layout(
             primary_node: NodeId::MuxSession(MuxSessionId::new(format!("tmux:{label}"))),
             pr_status: None,
             marker: PinMarker::None,
+            live: crate::tui::rows::MixedLive::None,
         }),
     }
 }
@@ -6367,6 +6439,7 @@ fn ghost_world_with(pinned: bool) -> GraphSnapshot {
             status: crate::model::MuxProbeStatus::Listed,
             epoch: 1_700_000_000,
             exited: Vec::new(),
+            titles: Default::default(),
         },
     );
     let mut history = std::mem::take(&mut snapshot.history);
@@ -6510,6 +6583,8 @@ fn native_app(view: View, filter: RowFilter) -> App {
     let mut app = App::new(config);
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
         snapshot: &snapshot,
+        live: snapshot.live_tables(),
+        seen: crate::tui::rows::seen::SeenContext::nothing(),
         view,
         grouping: crate::tui::Grouping::default_for(view),
         filter,
@@ -7157,6 +7232,7 @@ fn every_value_of_a_state_has_its_own_glyph() {
         primary_node: NodeId::MuxSession(MuxSessionId::new("m")),
         pr_status: None,
         marker: PinMarker::None,
+        live: crate::tui::rows::MixedLive::None,
     };
     let mut drawn = Vec::new();
     for entity in [
@@ -7310,6 +7386,7 @@ fn a_chip_keeps_its_look_on_the_selected_row() {
                 primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:main")),
                 pr_status: None,
                 marker: PinMarker::None,
+                live: crate::tui::rows::MixedLive::None,
             }),
         };
         let draw = |selected: bool| {
@@ -7491,6 +7568,7 @@ fn the_tree_window_follows_the_copy_of_a_duplicated_row_the_cursor_is_on() {
         tree: RowTree {
             rows,
             view: ViewLabel::Mux,
+            ..Default::default()
         },
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,

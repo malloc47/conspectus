@@ -26,6 +26,8 @@ pub mod forge;
 pub mod git;
 pub mod harness;
 pub mod hook_sidecar;
+pub mod live_poller;
+pub mod live_state;
 pub(crate) mod memo;
 pub mod orchestrator;
 pub mod pins;
@@ -326,12 +328,34 @@ impl GraphFragment {
 /// / `GraphFragment::from(snapshot)`.
 impl From<GraphSnapshot> for GraphFragment {
     fn from(snapshot: GraphSnapshot) -> Self {
+        // A fragment holds what providers emit. The rest of a snapshot
+        // is named here, so a new field has to be placed on one side or
+        // the other: the resolver re-derives `resolved_relationships`,
+        // the overlays reload `aliases` and `pins`, and `node_presence`,
+        // `node_live`, `pane_live`, `live_polls`, and `history` are
+        // rebuilt after the merge by the passes that own them (ADRs 0140,
+        // 0205, and 0218).
+        let GraphSnapshot {
+            nodes,
+            candidate_links,
+            resolved_relationships: _,
+            diagnostics,
+            aliases: _,
+            pins: _,
+            node_provenance,
+            node_presence: _,
+            node_live: _,
+            pane_live: _,
+            mux_probes,
+            live_polls: _,
+            history: _,
+        } = snapshot;
         GraphFragment {
-            nodes: snapshot.nodes,
-            candidate_links: snapshot.candidate_links,
-            diagnostics: snapshot.diagnostics,
-            node_provenance: snapshot.node_provenance,
-            mux_probes: snapshot.mux_probes,
+            nodes,
+            candidate_links,
+            diagnostics,
+            node_provenance,
+            mux_probes,
         }
     }
 }
@@ -641,8 +665,11 @@ pub fn discover_local_warm_with(
     }
 
     if let Some(runner) = tmux_runner {
-        providers = providers
-            .with_keyed_provider(&[providers::TMUX], tmux::TmuxDiscovery::with_runner(runner));
+        let mut tmux = tmux::TmuxDiscovery::with_runner(runner);
+        if !config.pane_titles {
+            tmux = tmux.without_pane_titles();
+        }
+        providers = providers.with_keyed_provider(&[providers::TMUX], tmux);
     }
 
     if let Some(runner) = zellij_runner {
@@ -882,9 +909,10 @@ fn fingerprint_normalized_node(node: &GraphNode) -> GraphNode {
 /// Always-rerun mutator block extracted from
 /// [`discover_local_warm_with`]. Runs against the merged
 /// (fresh + prior backstop) snapshot so cross-references,
-/// codex-log attribution, hook sidecar replay, and the declared
-/// link/alias/pin overlays land against the canonical merged
-/// state regardless of which heavy providers were skipped.
+/// codex-log attribution, hook sidecar replay, the live-state
+/// binding, and the declared link/alias/pin overlays land against
+/// the canonical merged state regardless of which heavy providers
+/// were skipped.
 ///
 /// The corresponding slices in `prior` are pre-evicted by
 /// [`discover_local_warm_with`]'s gate, so each mutator stamps
@@ -937,6 +965,17 @@ fn apply_mutators(
     if let Some(root) = &config.hook_sidecar_root {
         hook_sidecar::apply_hook_sidecars(snapshot, root, current_epoch());
     }
+    // After the hook sidecar, whose sessions an entry may name (ADR
+    // 0205). The table is replaced, never merged, so it is rebuilt on
+    // every cycle.
+    if let Some(root) = &config.live_state_root {
+        live_state::apply_live_state(
+            snapshot,
+            root,
+            &crate::live_store::ProcProbe::system(),
+            &config.live_pollers,
+        );
+    }
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(snapshot, context, loader);
         aliases::apply_aliases(snapshot, context, loader);
@@ -984,6 +1023,25 @@ pub struct LocalDiscoveryConfig {
     pub forge_adapters: Vec<Box<dyn forge::ForgeAdapter>>,
     pub process_tree_enabled: bool,
     pub hook_sidecar_root: Option<PathBuf>,
+    /// The directory of the live-state store (ADR 0204), whose entries
+    /// the `live_state` pass binds to sessions and muxes (ADR 0205).
+    /// `None` binds no live state (tests, headless fixtures);
+    /// [`Self::from_env`] uses `$XDG_STATE_HOME/conspectus`, else
+    /// `$HOME/.local/state/conspectus`, and the dev scenario builder its
+    /// world's own state directory.
+    pub live_state_root: Option<PathBuf>,
+    /// Whether the tmux probe reads the active panes' titles for the live
+    /// state of the harnesses that classify them (ADR 0217). On by
+    /// default; [`Self::from_env`] turns it off when
+    /// `CONSPECTUS_DISABLE_PANE_TITLES` is set.
+    pub pane_titles: bool,
+    /// The repair polls the `live_state` pass may run (ADR 0218). Empty
+    /// from [`Self::from_env`] and [`Self::empty`], so a one-shot command
+    /// never polls; the daemon and a daemonless TUI's background refresh
+    /// build them once ([`live_poller::from_env`]) and pass them to every
+    /// discovery through [`Self::with_live_pollers`], which keeps what each
+    /// remembers between discoveries.
+    pub live_pollers: Vec<Arc<live_poller::LivePoller>>,
     /// Registered orchestrator adapter roots.
     /// Keyed by orchestrator descriptor key
     /// (`agent_deck` today; dmux / herdr / pertmux / workmux
@@ -1113,6 +1171,10 @@ impl LocalDiscoveryConfig {
             forge_adapters,
             process_tree_enabled: env::var_os("CONSPECTUS_DISABLE_PROCTREE").is_none(),
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
+            live_state_root: crate::live_store::LiveStore::from_env()
+                .map(|store| store.dir().to_path_buf()),
+            pane_titles: env::var_os("CONSPECTUS_DISABLE_PANE_TITLES").is_none(),
+            live_pollers: Vec::new(),
             orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
             pin_slots: crate::pin_slots::SlotStore::from_env(),
@@ -1138,6 +1200,9 @@ impl LocalDiscoveryConfig {
             forge_adapters: Vec::new(),
             process_tree_enabled: false,
             hook_sidecar_root: None,
+            live_state_root: None,
+            pane_titles: true,
+            live_pollers: Vec::new(),
             orchestrator_roots: BTreeMap::new(),
             worktree_backend: None,
             declared_config_loader: None,
@@ -1302,6 +1367,33 @@ impl LocalDiscoveryConfig {
         self
     }
 
+    /// Bind the live-state store in `root` (the directory that holds
+    /// `live-state.json`) on every discovery.
+    pub fn with_live_state_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.live_state_root = Some(root.into());
+        self
+    }
+
+    /// Bind no live state: `node_live` and `pane_live` stay empty.
+    pub fn without_live_state(mut self) -> Self {
+        self.live_state_root = None;
+        self
+    }
+
+    /// Read no pane title: the tmux probe leaves them out of its listing.
+    pub fn without_pane_titles(mut self) -> Self {
+        self.pane_titles = false;
+        self
+    }
+
+    /// Let the `live_state` pass run `pollers` (ADR 0218). Pass the same
+    /// pollers to every discovery of a process: each remembers when it
+    /// last ran and what it read.
+    pub fn with_live_pollers(mut self, pollers: &[Arc<live_poller::LivePoller>]) -> Self {
+        self.live_pollers = pollers.to_vec();
+        self
+    }
+
     /// Register an orchestrator's on-disk root.
     /// `key` is the descriptor key
     /// (`orchestrator::OrchestratorDescriptor::key`); `root` is
@@ -1395,7 +1487,10 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
         pins: Vec::new(),
         node_provenance,
         node_presence: BTreeMap::new(),
+        node_live: BTreeMap::new(),
+        pane_live: BTreeMap::new(),
         mux_probes,
+        live_polls: BTreeMap::new(),
         history: Default::default(),
     };
     snapshot.canonicalize();
@@ -1415,16 +1510,25 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
 /// `pins`, and `aliases` from the prior snapshot are intentionally
 /// dropped: the resolver re-runs on the merged candidate set, and
 /// pin slots / aliases reload from disk alongside the fresh
-/// discovery pass. Per-provider freshness is handled before
+/// discovery pass. The live-state tables (ADR 0205) are fresh's
+/// alone: the prior's observations are a cycle old, and the
+/// live-state pass rebinds the tables from its store after the
+/// merge, so carrying them would show a state for a session that
+/// may have ended. Per-provider freshness is handled before
 /// this merge: [`discover_local_warm_with`] evicts stale slices from
 /// `prior` first.
-pub fn merge_with_prior(fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnapshot {
+pub fn merge_with_prior(mut fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnapshot {
     // `merge_fragments` already drops `resolved_relationships`,
     // `pins`, and `aliases` on the returned snapshot; the CLI
     // re-resolves and reloads pins/aliases from the live config
     // loader after this helper returns. Keeping that off the
     // warm-start path avoids round-tripping stale derived state.
-    merge_fragments([GraphFragment::from(fresh), GraphFragment::from(prior)])
+    let node_live = std::mem::take(&mut fresh.node_live);
+    let pane_live = std::mem::take(&mut fresh.pane_live);
+    let mut merged = merge_fragments([GraphFragment::from(fresh), GraphFragment::from(prior)]);
+    merged.node_live = node_live;
+    merged.pane_live = pane_live;
+    merged
 }
 
 fn observed_cwd_git_fragment(snapshot: &GraphSnapshot, caches: &DiscoveryCaches) -> GraphFragment {

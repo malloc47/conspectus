@@ -103,8 +103,9 @@ screenshots:
     }
     # A session and its transcript.
     shot session-transcript "jjjjjljjjj"
-    # The same session's Related row: the evidence, then the checkout's git status.
-    shot related-preview "jjjjjljjjj<Tab>jjjjj"
+    # The same session's Related row (past its ten fields, live state among
+    # them): the evidence, then the checkout's git status.
+    shot related-preview "jjjjjljjjj<Tab>jjjjjjjjjj"
     # A repo row: its recent commits and remotes.
     shot repo-history "jjjjj"
     # The mux view: a tmux session and its pane.
@@ -137,3 +138,42 @@ scratch *args='shell':
 # change to the left panel; edit the document's prose by hand.
 tui-columns:
     UPDATE_TUI_COLUMNS=1 cargo nextest run --all-features --test tui_columns_doc
+
+# The opencode plugin's live-state tests (ADR 0206): its reducer replays
+# the event scripts in tests/fixtures/hooks/opencode-live/. They need
+# Node 22.6 or later, which the dev shell does not provide. Without it the
+# recipe says so and fails, since a test run that could not run is no
+# pass; `check` does not run it.
+opencode-plugin-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v node >/dev/null 2>&1; then
+        echo "opencode-plugin-test: node not found on PATH; the plugin tests need Node 22.6 or later" >&2
+        exit 1
+    fi
+    if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 6) ? 0 : 1)'; then
+        echo "opencode-plugin-test: node $(node --version) is too old; the plugin tests need Node 22.6 or later" >&2
+        exit 1
+    fi
+    cd plugins/opencode-hook
+    node --experimental-strip-types --test test/*.test.ts
+
+# The Pi extension's live-state tests (ADR 0206): its state machine
+# replays the event scripts in tests/fixtures/hooks/pi-live/, and its
+# handlers run against a stand-in Pi and a stand-in writer. Like the
+# opencode tests they need Node 22.6 or later, which the dev shell does not
+# provide; without it the recipe says so and fails, and `check` does not
+# run it.
+pi-plugin-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v node >/dev/null 2>&1; then
+        echo "pi-plugin-test: node not found on PATH; the extension tests need Node 22.6 or later" >&2
+        exit 1
+    fi
+    if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 6) ? 0 : 1)'; then
+        echo "pi-plugin-test: node $(node --version) is too old; the extension tests need Node 22.6 or later" >&2
+        exit 1
+    fi
+    cd plugins/pi-hook
+    node --experimental-strip-types --test test/*.test.ts

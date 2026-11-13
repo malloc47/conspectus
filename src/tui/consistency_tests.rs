@@ -36,6 +36,12 @@
 //! - **Feedback says how much it matters**: the status line, toasts, and
 //!   the Messages log style each report by its severity, and a refused or
 //!   failed gesture never reports like a success (`feedback`).
+//! - **Rows keep still between operator actions**: the order and the
+//!   rows a list shows by live state are read when its tree is built, so
+//!   a store change refills the marks and moves nothing (`live_order`).
+//! - **One key reaches what waits, from every view**: `W` lands on the
+//!   row standing for the agent waiting longest, in this view or the one a
+//!   reveal lands in, and says where it went (`jump`).
 //!
 //! # Diagnosis of the reported defects
 //!
@@ -100,21 +106,28 @@ mod forms;
 mod freshness;
 mod glyphs;
 mod help;
+mod jump;
 mod keys;
 mod layout;
 mod lifecycle;
+mod live;
+mod live_detail;
+mod live_order;
 mod marks;
 mod menus;
 mod parity;
 mod registry;
 mod rendering;
+mod rollup;
 mod scrolling;
 mod search_flat;
 mod search_quick;
 mod search_view;
+mod seen;
 mod selection;
 mod state;
 mod styling;
+mod subagents;
 mod text;
 mod text_entry;
 mod undo;

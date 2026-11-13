@@ -529,8 +529,9 @@ section of the Preview zone). Renderers can show more when terminal
 height allows; this table is the comparison surface.
 
 Surfaces represent fields from `src/model/mod.rs` plus the alias
-overlay (ADR 0029) and the existing `last_active_epoch`-derived
-status string.
+overlay (ADR 0029), the existing `last_active_epoch`-derived
+status string, and a session's or mux's live state (ADR 0213), which
+adds its fields to the core picks only when there is live state.
 
 ### Repo (`RepoNode`)
 
@@ -574,6 +575,11 @@ top 5.
 | `alias` | aliases overlay | ✓ | When set; precedes title per ADR 0029 |
 | `cwd` | `cwd` | ✓ | `~`-shortened |
 | `status` | derived from `last_active_epoch` | ✓ | Relative recency string (`active · last 2m`) |
+| `state` | live state (ADR 0213) | ✓ | The row's live mark, then the state and detail (`waiting · permission`); words recede when quiet or stale. Only with live state |
+| `since` | live state | ✓ | When the shown state began (`5m ago`). Only with live state |
+| `source` | live state | ✓ | What reported it (`hook`). Only with live state |
+| `evidence` | live state | ✓ | `fresh`, `quiet`, or `stale`; the last two recede. Only with live state |
+| `subagents` | live state | ✓ | `N active`, while the row shows its `+N` chip |
 | `title` | `title` |   | Shown only when no alias overrides it |
 | `last_active_epoch` | `last_active_epoch` |   | Raw epoch behind the status string |
 | `last_message_preview` | `last_message_preview` |   | Shown in the Preview zone, not the inspector |
@@ -590,6 +596,8 @@ top 5.
 | `cwd` | `cwd` | ✓ | `~`-shortened |
 | `attached` | `client_attached` | ✓ | `yes` / `no` from client-attached state |
 | `last_active` | `activity_epoch` | ✓ | Relative recency string |
+| `agents` | live state counts (ADR 0213) | ✓ | The row's live mark, then its agents' counts, most urgent first (`1 waiting · 1 error`). Only with live state |
+| `pane_agents` | `pane_live` | ✓ | Agents in its panes no session matches (`%4 waiting · input`). Only when there are some |
 | `created` | `created_epoch` |   | Relative; less load-bearing than last_active |
 | `active_pane_command` | `active_pane_command` |   | Live pane hint — Preview-relevant |
 | `active_pane_pid` | `active_pane_pid` |   | Resolver input |

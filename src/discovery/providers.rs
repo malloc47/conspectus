@@ -118,6 +118,12 @@ pub const CODEX_LOG: &str = "codex_log";
 /// (`discovery::hook_sidecar::apply_hook_sidecars`).
 pub const HOOK_SIDECAR: &str = "hook_sidecar";
 
+/// Live-state binding pass (`discovery::live_state::apply_live_state`,
+/// ADR 0205). It writes only the snapshot's `node_live` and `pane_live`
+/// tables and stamps no node or link, so evicting it removes nothing;
+/// the tables are rebuilt on every cycle instead.
+pub const LIVE_STATE: &str = "live_state";
+
 /// Operator-authored declared link / alias overlay
 /// (`discovery::declared::apply_declared_links` + peers).
 pub const DECLARED: &str = "declared";
@@ -269,6 +275,10 @@ pub const REGISTRY: &[ProviderDescriptor] = &[
     },
     ProviderDescriptor {
         key: HOOK_SIDECAR,
+        kind: ProviderKind::Mutator,
+    },
+    ProviderDescriptor {
+        key: LIVE_STATE,
         kind: ProviderKind::Mutator,
     },
     ProviderDescriptor {

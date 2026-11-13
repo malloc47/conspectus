@@ -29,6 +29,10 @@ selection showed at. Amended by
 the expanded set and the selection of every view but Search also outlive
 the process in `tui-state.json`, beside the filter and grouping, and each
 view reopens with them the first time it lists rows.
+Amended by
+[ADR 0215](0215-tui-rows-float-and-filter-by-live-state-only-when-the-tree-is-built.md):
+the filter gains the agents' live state as a narrowing dimension and a
+float-waiting-first ordering toggle, both read when the tree is built.
 
 ## Context
 

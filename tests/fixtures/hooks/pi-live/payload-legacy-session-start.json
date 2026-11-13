@@ -1,0 +1,6 @@
+{
+  "session_id": "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d",
+  "cwd": "/home/user/projects/my-project",
+  "transcript_path": "/home/user/.pi/agent/sessions/--home-user-projects-my-project--/2026-11-11T10-00-00-000Z_0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d.jsonl",
+  "hook_event_name": "session_start:resume"
+}

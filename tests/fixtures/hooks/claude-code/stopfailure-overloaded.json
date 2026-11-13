@@ -1,0 +1,10 @@
+{
+  "session_id": "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f",
+  "transcript_path": "/home/user/.claude/projects/-home-user-projects-my-project/3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f.jsonl",
+  "cwd": "/home/user/projects/my-project",
+  "permission_mode": "default",
+  "hook_event_name": "StopFailure",
+  "error": "overloaded",
+  "error_details": "529 overloaded_error: the service is overloaded",
+  "last_assistant_message": "API Error: 529 overloaded_error: the service is overloaded"
+}

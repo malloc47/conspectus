@@ -1,0 +1,74 @@
+//! Live state on the rows between snapshots (ADR 0205).
+//!
+//! The App holds the live overlay; the runtime drives it, since it reads
+//! the store and `/proc`: [`App::rebind_live`] before each new snapshot's
+//! rows are built, [`App::poll_live`] once a tick. When the overlay's
+//! table changes (a store rewrite, or an agent's process found gone), or
+//! time alone moves a state, the rows already built take their new live
+//! values in place, and so do the detail pane's live fields. Nothing else
+//! about a row depends on its live state, so the tree is not rebuilt, and
+//! the selection and folds stay as they are; once rows are sorted,
+//! filtered, or grouped by live state, a change has to rebuild the tree
+//! instead.
+
+use super::*;
+use crate::tui::live_overlay::LiveOverlay;
+
+impl App {
+    /// Read live state through `overlay` from now on: the live runtime's
+    /// overlay over the store. Until it is set, rows read each
+    /// snapshot's own table.
+    pub(crate) fn set_live_overlay(&mut self, overlay: LiveOverlay) {
+        self.live = overlay;
+    }
+
+    /// The live tables the rows of `snapshot` read.
+    pub(crate) fn live_table<'a>(
+        &'a self,
+        snapshot: &'a GraphSnapshot,
+    ) -> crate::model::LiveTables<'a> {
+        self.live.table(snapshot)
+    }
+
+    /// Bind the overlay to `snapshot` before its rows are built and it
+    /// replaces the snapshot on screen.
+    pub(crate) fn rebind_live(&mut self, snapshot: &GraphSnapshot, now: Instant) {
+        self.live.rebind(snapshot, now);
+    }
+
+    /// One tick of the overlay at `now` (`now_ms` by the wall clock):
+    /// pick up a rewritten store, an agent whose process ended, or a
+    /// state time alone moved, and fill the rows on screen with it; and of
+    /// the cursor's rest, which can see a finished turn
+    /// ([`App::note_cursor_rest`]).
+    pub(crate) fn poll_live(&mut self, now: Instant, now_ms: i64) {
+        self.note_cursor_rest(now);
+        let snapshot = self.handle.as_ref().map(SnapshotHandle::snapshot);
+        let rebound = self.live.poll(now, snapshot);
+        let rechecked = self.live.recheck(now);
+        let aged = snapshot.is_some_and(|snapshot| self.live.aged(snapshot, now, now_ms));
+        if rebound || rechecked || aged {
+            self.refill_live(now_ms);
+        }
+    }
+
+    /// Give the rows on screen their live values at `now_ms`, and the
+    /// detail pane's node its live fields from them, in place: the
+    /// explorer keeps its cursor, fold, and frames. The ready turns they
+    /// find seen are remembered.
+    pub(super) fn refill_live(&mut self, now_ms: i64) {
+        let Some(handle) = &self.handle else {
+            return;
+        };
+        let snapshot = handle.snapshot();
+        let values = crate::tui::rows::live::LiveValues::at(
+            snapshot,
+            self.live.table(snapshot),
+            now_ms,
+            self.seen_context(),
+        );
+        crate::tui::rows::live::annotate(&mut self.tree, snapshot, &values);
+        self.remember_seen_turns();
+        self.with_explorer(|explorer, source| explorer.refresh(source));
+    }
+}

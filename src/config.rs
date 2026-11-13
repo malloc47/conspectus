@@ -19,8 +19,8 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use crate::filter::{
-    HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
-    RowFilter,
+    HarnessFilter, LiveStateFilter, LiveStateKey, MuxStateFilter, MuxStateKey, PrBranchFilter,
+    PrStateFilter, PrStateKey, RowFilter,
 };
 use crate::tui::icons::parse_icon_override;
 use crate::tui::theme::{OverrideError, OverrideProblem, OverrideValue, Theme};
@@ -658,6 +658,9 @@ struct TuiViewFilterEntry {
     max_age: Option<String>,
     #[serde(default)]
     mux_state: Option<Vec<String>>,
+    /// The agents' live states to keep (ADR 0215), as `--state` takes.
+    #[serde(default)]
+    state: Option<Vec<String>>,
     #[serde(default)]
     pr_branch: Option<Vec<String>>,
     #[serde(default)]
@@ -1549,6 +1552,7 @@ fn merge_view_filter_entries(
     let mut harnesses: Vec<String> = Vec::new();
     let mut max_age_secs: Option<u64> = None;
     let mut mux_states: Vec<MuxStateKey> = Vec::new();
+    let mut live_states: Vec<LiveStateKey> = Vec::new();
     let mut pr_branches: std::collections::BTreeSet<PrBranchFilter> = Default::default();
     let mut float_tracked_prs_top = false;
     let mut pr_states: Vec<PrStateKey> = Vec::new();
@@ -1621,12 +1625,29 @@ fn merge_view_filter_entries(
                 }
             }
         }
+        if let Some(values) = entry.state {
+            for raw in values {
+                match LiveStateKey::from_str_ci(&raw) {
+                    Some(key) => live_states.push(key),
+                    None => diagnostics.push(ConfigDiagnostic {
+                        path: path.to_path_buf(),
+                        message: format!(
+                            "invalid `[tui.views.{}.filters].state` value `{raw}`; \
+                             expected one of {}",
+                            view_config_key(view),
+                            LiveStateKey::spellings()
+                        ),
+                    }),
+                }
+            }
+        }
     }
 
     RowFilter {
         harness: (!harnesses.is_empty()).then(|| HarnessFilter::from_values(harnesses)),
         max_age: max_age_secs.map(std::time::Duration::from_secs),
         mux_state: (!mux_states.is_empty()).then(|| MuxStateFilter::from_values(mux_states)),
+        live_state: (!live_states.is_empty()).then(|| LiveStateFilter::from_values(live_states)),
         // Entries OR together, so both values admit every PR.
         pr_branch: match pr_branches.len() {
             1 => pr_branches.first().copied(),

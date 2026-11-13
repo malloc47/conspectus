@@ -10,12 +10,14 @@ use crate::tui::keymap::{SelectedDefault, selected_default_action};
 
 /// How long each part of the header holds on as the screen narrows, the
 /// highest longest; the session count has no rank and never gives way.
-/// Freshness and the load-bearing counts outlast the triage chip, which
+/// Freshness and the load-bearing counts outlast the count of agents
+/// waiting on the operator, which outlasts the triage chip, which
 /// outlasts the stopped count, and the opt-in harness chips go first,
 /// from the end (ADR 0078's order of what the header carries).
 mod header_rank {
-    pub(super) const FRESHNESS: u32 = 5;
-    pub(super) const MUX: u32 = 4;
+    pub(super) const FRESHNESS: u32 = 6;
+    pub(super) const MUX: u32 = 5;
+    pub(super) const WAITING: u32 = 4;
     pub(super) const AMBIGUITY: u32 = 3;
     pub(super) const STOPPED: u32 = 2;
     pub(super) const HARNESS_CHIPS: u32 = 1;
@@ -35,6 +37,7 @@ pub(super) fn draw_header(app: &App, buf: &mut Buffer, area: Rect) {
 /// ```text
 /// [updated Ns ago · ] N/M sessions · M mux[ · K stopped]
 ///   [  ·  <opt-in harness chips>]
+///   [  ·  ! N when agents anywhere wait > 0]
 ///   [  ·  ▲ N when ambiguous > 0]
 /// ```
 ///
@@ -69,6 +72,12 @@ pub(super) fn header_line(app: &App) -> PriorityLine {
     let counts = HeaderCounts::from_app(app);
     if app.config().show_harness_chips {
         push_harness_chips(&mut line, &counts, theme);
+    }
+    // The agents waiting on the operator anywhere, whatever the view
+    // lists: read with the rows' live values, so it changes with them.
+    let waiting = app.tree().waiting_anywhere;
+    if waiting > 0 {
+        push_waiting_chip(&mut line, waiting, theme);
     }
     if counts.mux_ambiguous > 0 {
         push_ambiguity_chip(&mut line, counts.mux_ambiguous, theme);
@@ -136,6 +145,18 @@ pub(super) fn push_harness_chips(line: &mut PriorityLine, counts: &HeaderCounts,
                 .gap(gap),
         );
     }
+}
+
+/// Add the count of agents waiting on the operator (`! N`), only called
+/// when N > 0, set apart from what precedes it: the chip a group header
+/// counts the agents beneath it with, so the two read alike.
+pub(super) fn push_waiting_chip(line: &mut PriorityLine, waiting: usize, theme: &Theme) {
+    use crate::tui::widgets::badge::waiting_count_chip;
+    line.push(
+        Segment::new(vec![waiting_count_chip(waiting, theme)])
+            .rank(header_rank::WAITING)
+            .gap(SECTION_SEPARATOR),
+    );
 }
 
 /// Add the ambiguity triage chip (`▲ N`), only called when N > 0, set
@@ -417,11 +438,13 @@ pub(super) fn sort_chip_label(sort: crate::tui::Sort) -> &'static str {
 }
 
 /// Render the active filter as a compact chip-strip:
-/// `harness:claude,codex · max-age:7d · mux:unmuxed`. Returns the
-/// empty string when no constraints are active so callers can
-/// short-circuit the separator. Per ADR 0031 the chip order is
-/// stable across runs (harness → max-age → mux-state → state → branch) so the
-/// operator builds muscle memory for where each predicate lives.
+/// `harness:claude,codex · max-age:7d · mux:unmuxed · agent:waiting`.
+/// Returns the empty string when no constraints are active so callers
+/// can short-circuit the separator. Per ADR 0031 the chip order is
+/// stable across runs (harness → max-age → mux-state → agent state → PR
+/// state → branch) so the operator builds muscle memory for where each
+/// predicate lives. The agents' live state reads `agent:` because the PR
+/// state's chip is `state:` (ADR 0215).
 pub(super) fn render_filter_chips(filter: &crate::filter::RowFilter) -> String {
     if !filter.has_narrowing_predicates() && filter.pr_branch.is_none() && filter.pr_state.is_none()
     {
@@ -448,6 +471,16 @@ pub(super) fn render_filter_chips(filter: &crate::filter::RowFilter) -> String {
             .collect();
         if !labels.is_empty() {
             chips.push(format!("mux:{}", truncate_chip_list(&labels, 3)));
+        }
+    }
+    if let Some(live_state) = &filter.live_state {
+        let labels: Vec<String> = live_state
+            .values()
+            .iter()
+            .map(|key| key.as_str().to_string())
+            .collect();
+        if !labels.is_empty() {
+            chips.push(format!("agent:{}", truncate_chip_list(&labels, 3)));
         }
     }
     if let Some(pr_state) = &filter.pr_state {
@@ -556,7 +589,7 @@ pub(crate) fn status_hints(app: &App) -> KeyHintBar {
         })
     };
     let program = |command: &Command| match command {
-        Command::Refresh | Command::Quit => Some(Annotation::new()),
+        Command::Refresh | Command::Quit | Command::NextWaiting => Some(Annotation::new()),
         // A hard refresh asks the forges again, which only the PRs view
         // shows.
         Command::HardRefresh => (app.active_view() == View::Prs).then(Annotation::new),

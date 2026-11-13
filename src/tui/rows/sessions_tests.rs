@@ -2936,3 +2936,198 @@ fn a_session_with_no_known_mux_has_no_name_to_fall_back_on() {
     assert_eq!(row.tree_label(), None);
     assert_eq!(row.gone_mux_name(), None);
 }
+
+/// `snapshot` with `key`'s codex session reporting `state`, found
+/// running so the state does not age.
+fn reporting(snapshot: &mut GraphSnapshot, key: &str, state: crate::model::live::LiveState) {
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, Liveness};
+    snapshot.node_live.insert(
+        NodeId::AgentSession(AgentSessionId::new("codex", "/state", key)),
+        LiveBinding::new(
+            LiveObservation::new(state, LiveSource::Hook, 1_000_000),
+            Liveness::Alive,
+        ),
+    );
+}
+
+/// A repo of four sessions, newest first: working, waiting and in a mux,
+/// with no live state, and waiting.
+fn waiting_world() -> GraphSnapshot {
+    use crate::model::live::LiveState;
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(repo("/home/op/src/proj"));
+    snapshot
+        .nodes
+        .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+    for (key, epoch) in [
+        ("working-new", 4_000),
+        ("waiting-muxed", 3_000),
+        ("silent", 2_000),
+        ("waiting-old", 1_000),
+    ] {
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            key,
+            Some("/home/op/src/proj"),
+            epoch,
+        ));
+    }
+    snapshot.nodes.push(mux_node("tmux", "editor"));
+    snapshot.candidate_links.push(linked_to_mux(
+        &NodeId::AgentSession(AgentSessionId::new("codex", "/state", "waiting-muxed")),
+        &NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        Provenance::Discovered,
+        "1",
+    ));
+    reporting(&mut snapshot, "working-new", LiveState::Working);
+    reporting(&mut snapshot, "waiting-muxed", LiveState::Waiting);
+    reporting(&mut snapshot, "waiting-old", LiveState::Waiting);
+    resolve_snapshot(snapshot)
+}
+
+/// The session keys `filter` lists in `grouping`, in order, with the
+/// states of the snapshot's live table read into it as a build does.
+fn listed_with(
+    snapshot: &GraphSnapshot,
+    grouping: SessionsGrouping,
+    filter: RowFilter,
+) -> Vec<String> {
+    let filter = RowFilter {
+        live: crate::filter::LiveStates::read(snapshot, snapshot.live_tables(), 2_000_000),
+        ..filter
+    };
+    build(SessionsBuildInputs {
+        snapshot,
+        grouping,
+        home: Some(home().as_path()),
+        now: Some(5_000),
+        cwd: None,
+        filter,
+    })
+    .rows
+    .iter()
+    .filter_map(|row| match &row.kind {
+        RowKind::AgentSession(session) => Some(session.session.session_key.clone()),
+        _ => None,
+    })
+    .collect()
+}
+
+#[test]
+fn float_waiting_lifts_the_waiting_sessions_of_a_group_above_the_rest() {
+    let snapshot = waiting_world();
+    for grouping in [SessionsGrouping::Graph, SessionsGrouping::None] {
+        assert_eq!(
+            listed_with(&snapshot, grouping, RowFilter::default()),
+            ["working-new", "waiting-muxed", "silent", "waiting-old"],
+            "{grouping:?}: off, newest first"
+        );
+        assert_eq!(
+            listed_with(
+                &snapshot,
+                grouping,
+                RowFilter {
+                    float_waiting_top: true,
+                    ..RowFilter::default()
+                }
+            ),
+            ["waiting-muxed", "waiting-old", "working-new", "silent"],
+            "{grouping:?}: the waiting ones first, each part newest first"
+        );
+    }
+}
+
+#[test]
+fn float_waiting_comes_before_the_muxed_float() {
+    let snapshot = waiting_world();
+    let muxed = RowFilter {
+        float_muxed_sessions_top: true,
+        ..RowFilter::default()
+    };
+    assert_eq!(
+        listed_with(&snapshot, SessionsGrouping::Graph, muxed.clone()),
+        ["waiting-muxed", "working-new", "silent", "waiting-old"]
+    );
+    let both = RowFilter {
+        float_waiting_top: true,
+        ..muxed
+    };
+    assert_eq!(
+        listed_with(&snapshot, SessionsGrouping::Graph, both),
+        ["waiting-muxed", "waiting-old", "working-new", "silent"],
+        "waiting first, the muxed float within each part"
+    );
+}
+
+#[test]
+fn without_live_states_the_float_moves_nothing_and_the_filter_reads_none() {
+    let snapshot = waiting_world();
+    let tree = |filter| {
+        build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::None,
+            home: Some(home().as_path()),
+            now: Some(5_000),
+            cwd: None,
+            filter,
+        })
+        .rows
+        .len()
+    };
+    // A builder given no states (no build read them) sees every session
+    // as having none: the float has nothing to lift, and the filter for
+    // `none` keeps them all.
+    assert_eq!(
+        tree(RowFilter {
+            float_waiting_top: true,
+            ..RowFilter::default()
+        }),
+        4
+    );
+    assert_eq!(
+        tree(RowFilter {
+            live_state: Some(crate::filter::LiveStateFilter::from_values([
+                crate::filter::LiveStateKey::None
+            ])),
+            ..RowFilter::default()
+        }),
+        4
+    );
+}
+
+#[test]
+fn the_live_state_filter_keeps_the_sessions_in_its_states() {
+    use crate::filter::{LiveStateFilter, LiveStateKey};
+    let snapshot = waiting_world();
+    let only = |keys: &[LiveStateKey]| RowFilter {
+        live_state: Some(LiveStateFilter::from_values(keys.iter().copied())),
+        ..RowFilter::default()
+    };
+    assert_eq!(
+        listed_with(
+            &snapshot,
+            SessionsGrouping::Graph,
+            only(&[LiveStateKey::Waiting])
+        ),
+        ["waiting-muxed", "waiting-old"]
+    );
+    assert_eq!(
+        listed_with(
+            &snapshot,
+            SessionsGrouping::None,
+            only(&[LiveStateKey::Working, LiveStateKey::None])
+        ),
+        ["working-new", "silent"],
+        "no live state reads none"
+    );
+    assert!(
+        listed_with(
+            &snapshot,
+            SessionsGrouping::Graph,
+            only(&[LiveStateKey::Error])
+        )
+        .is_empty(),
+        "a filter that keeps no session leaves no header either"
+    );
+}

@@ -8,6 +8,8 @@ fn app_over(view: View, snapshot: &GraphSnapshot) -> App {
     app.update(Msg::SwitchView(view));
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
         snapshot,
+        live: snapshot.live_tables(),
+        seen: crate::tui::rows::seen::SeenContext::nothing(),
         view,
         grouping: crate::tui::Grouping::default_for(view),
         filter: crate::filter::RowFilter::default(),

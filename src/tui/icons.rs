@@ -129,8 +129,38 @@ pub mod state {
     ];
 }
 
+/// Live-state marks: what an agent is doing now, in the one-cell column
+/// right after the age on session and mux rows. Every value has its own
+/// shape, so a mark reads without color, and the column is never blank:
+/// no evidence has a mark too. Two marks are the shared ones for the same
+/// idea: an error is the failure mark, and evidence too old to trust is
+/// the can't-tell mark. Pinned and History spell the first four as words
+/// instead.
+pub mod live {
+    use tuikit::glyphs::marks;
+
+    /// Blocked on the operator: a permission prompt, a question, a plan
+    /// to approve, or other input.
+    pub const WAITING: &str = "!";
+    /// A turn is running, the context is being compacted, or the agent
+    /// is starting.
+    pub const WORKING: &str = "»";
+    /// The turn is over and the agent takes a prompt.
+    pub const READY: &str = "›";
+    /// The turn ended on an error.
+    pub const ERROR: &str = marks::FAIL;
+    /// Evidence too old to trust, or a state its source could not tell.
+    pub const UNKNOWN: &str = super::state::UNKNOWN;
+    /// No evidence, or a session that has exited.
+    pub const NONE: &str = "·";
+
+    /// Every live-state mark, most urgent first.
+    pub const ALL: [&str; 6] = [WAITING, WORKING, READY, ERROR, UNKNOWN, NONE];
+}
+
 /// Every glyph the left panel can draw, once each: the kind glyphs, the
-/// state glyphs, and the framework marks it uses. The reference document
+/// state glyphs, the live-state marks, and the framework marks it uses.
+/// The reference document
 /// lists exactly these, and a test keeps the two in step. (The ellipsis
 /// and the rule cell are marks too, but the reference describes them in
 /// prose; they are not part of a row's vocabulary.)
@@ -145,6 +175,9 @@ pub fn all_glyphs() -> Vec<&'static str> {
         push(kind.default_glyph());
     }
     for glyph in state::ALL {
+        push(glyph);
+    }
+    for glyph in live::ALL {
         push(glyph);
     }
     for glyph in [

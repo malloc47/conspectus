@@ -16,6 +16,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
+use crate::model::live::{PaneTitle, TitleMark};
 use crate::model::{GraphNode, MuxProbe, MuxProbeStatus, MuxSessionId, MuxSessionNode};
 
 pub mod commands;
@@ -43,9 +44,19 @@ pub const KNOWN_MUX_BACKENDS: &[&str] = &[
 ];
 
 /// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
-/// session roots can safely contain spaces. `#{session_id}` comes last, so rows
-/// recorded before it was added still parse.
-pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}\t#{session_id}";
+/// session roots can safely contain spaces. Fields added later come last, so
+/// rows recorded before them still parse: `#{session_id}`, then the active
+/// pane's `#{pane_id}` and `#{pane_title}` (ADR 0217). The title is last of
+/// all, so a tab in it could not shift another field.
+pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}\t#{session_id}\t#{pane_id}\t#{pane_title}";
+
+/// [`TMUX_LIST_FORMAT`] without the pane title, for a probe that reads no
+/// titles (`CONSPECTUS_DISABLE_PANE_TITLES`).
+pub const TMUX_LIST_FORMAT_WITHOUT_TITLES: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}\t#{session_id}\t#{pane_id}";
+
+/// The fields of a [`TMUX_LIST_FORMAT`] row; the last, the title, is the
+/// rest of the line.
+const TMUX_LIST_FIELDS: usize = 14;
 
 /// Backend-neutral mux abstraction (ADR 0089).
 ///
@@ -226,7 +237,9 @@ pub trait MuxBackend: Send + Sync {
     /// Returning `None` means either the backend is unavailable in
     /// this environment or the caller isn't inside one of its
     /// sessions. The default returns `None`; SystemTmux overrides
-    /// with a `$TMUX` + `tmux display-message` probe. Zellij will
+    /// with a `$TMUX` + `tmux display-message` probe of the caller's
+    /// own pane (`TMUX_PANE`), so a caller with no terminal, such as
+    /// a detached hook, isn't told about another pane. Zellij will
     /// override when its equivalent probe is decided (defer to a
     /// follow-up story alongside a `$ZELLIJ` env-var contract).
     fn current_session_context(&self) -> Option<MuxSessionContext> {
@@ -965,18 +978,36 @@ impl MuxBackend for SystemTmux {
     }
 
     fn current_session_context(&self) -> Option<MuxSessionContext> {
-        // Probe `$TMUX` and `tmux display-message` for
-        // the caller's mux context. Migrated from
-        // `cli::tmux_context` so the tmux-specific env-var
-        // reading lives on the backend that owns it; the CLI
-        // hook writer iterates registered backends and asks each
-        // for its answer.
-        std::env::var_os("TMUX")?;
-        let socket_path = std::env::var("TMUX")
-            .ok()
+        // The tmux-specific environment is read on the backend that
+        // owns it; the hook writer and the TUI ask each backend for
+        // its answer.
+        self.session_context_of(
+            std::env::var_os("TMUX").as_deref(),
+            std::env::var("TMUX_PANE").ok(),
+        )
+    }
+}
+
+impl SystemTmux {
+    /// The mux context of a process whose environment holds `tmux`
+    /// (`$TMUX`) and `tmux_pane` (`TMUX_PANE`), from `tmux
+    /// display-message`. tmux is asked about that pane (`-t`): without
+    /// a target it answers for whichever pane it considers current,
+    /// which for a hook the harness runs with no terminal can be the
+    /// session's active pane rather than the hook's. A `TMUX_PANE` that
+    /// is not a pane id leaves the question untargeted.
+    fn session_context_of(
+        &self,
+        tmux: Option<&std::ffi::OsStr>,
+        tmux_pane: Option<String>,
+    ) -> Option<MuxSessionContext> {
+        let socket_path = tmux?
+            .to_str()
             .and_then(|value| value.split_once(',').map(|(socket, _)| socket.to_string()));
-        let session_name = display_message_value(&self.binary, "#{session_name}");
-        let pane_id = display_message_value(&self.binary, "#{pane_id}");
+        let target = tmux_pane.filter(|pane| is_pane_id(pane));
+        let session_name =
+            display_message_value(&self.binary, target.as_deref(), "#{session_name}");
+        let pane_id = display_message_value(&self.binary, target.as_deref(), "#{pane_id}");
         let ctx = MuxSessionContext {
             backend: TMUX_BACKEND,
             session_name,
@@ -990,9 +1021,27 @@ impl MuxBackend for SystemTmux {
     }
 }
 
-fn display_message_value(binary: &Path, format: &str) -> Option<String> {
+/// Whether `value` is a tmux pane id: `%` and its number.
+fn is_pane_id(value: &str) -> bool {
+    value
+        .strip_prefix('%')
+        .is_some_and(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// `display-message` printing `format` for pane `target`, or for the
+/// pane tmux considers current when there is none.
+fn display_message_args<'a>(target: Option<&'a str>, format: &'a str) -> Vec<&'a str> {
+    let mut args = vec!["display-message", "-p"];
+    if let Some(target) = target {
+        args.extend(["-t", target]);
+    }
+    args.push(format);
+    args
+}
+
+fn display_message_value(binary: &Path, target: Option<&str>, format: &str) -> Option<String> {
     let output = crate::exec::command(crate::exec::Program::Tmux, binary)
-        .args(["display-message", "-p", format])
+        .args(display_message_args(target, format))
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()
@@ -1614,6 +1663,12 @@ pub struct TmuxSessionRow {
     pub last_attached_epoch: Option<i64>,
     /// tmux's `#{session_id}` (`$3`).
     pub session_id: Option<String>,
+    /// The active pane's `#{pane_id}` (`%3`).
+    pub active_pane_id: Option<String>,
+    /// What the active pane's title says about its agent, when the pane
+    /// runs a harness that classifies its titles (ADR 0217). The title
+    /// itself is dropped as the row is parsed.
+    pub active_pane_title: Option<TitleMark>,
 }
 
 pub fn parse_list_sessions(stdout: &str) -> Vec<TmuxSessionRow> {
@@ -1624,7 +1679,7 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
     if line.trim().is_empty() {
         return None;
     }
-    let mut fields = line.split('\t');
+    let mut fields = line.splitn(TMUX_LIST_FIELDS, '\t');
     let name = fields.next()?.trim().to_string();
 
     if name.is_empty() {
@@ -1643,6 +1698,10 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
     let client_attached = interactive_client_attached(attached_count, attached_list.as_deref());
     let last_attached_epoch = optional_epoch(fields.next());
     let session_id = optional_string(fields.next());
+    let active_pane_id = optional_string(fields.next());
+    let active_pane_title = fields
+        .next()
+        .and_then(|title| title_mark(active_pane_command.as_deref(), title));
 
     Some(TmuxSessionRow {
         name,
@@ -1656,7 +1715,20 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
         client_attached,
         last_attached_epoch,
         session_id,
+        active_pane_id,
+        active_pane_title,
     })
+}
+
+/// The mark `title` carries for the harness `command` runs, by that
+/// harness's own reading of its titles; `None` when the pane runs no
+/// harness, or one whose titles are not read. The title goes no further
+/// than the adapter.
+fn title_mark(command: Option<&str>, title: &str) -> Option<TitleMark> {
+    use crate::discovery::harness::adapters_for_program;
+    adapters_for_program(command?)
+        .next()?
+        .pane_title_mark(title)
 }
 
 fn optional_string(value: Option<&str>) -> Option<String> {
@@ -1699,13 +1771,13 @@ fn looks_like_interactive_client(client_name: &str) -> bool {
 #[derive(Clone, Debug)]
 pub struct TmuxDiscovery<R: MuxBackend> {
     runner: R,
+    /// Whether the probe asks for the active panes' titles (ADR 0217).
+    read_titles: bool,
 }
 
 impl Default for TmuxDiscovery<SystemTmux> {
     fn default() -> Self {
-        Self {
-            runner: SystemTmux::new(),
-        }
+        Self::with_runner(SystemTmux::new())
     }
 }
 
@@ -1717,7 +1789,17 @@ impl TmuxDiscovery<SystemTmux> {
 
 impl<R: MuxBackend> TmuxDiscovery<R> {
     pub fn with_runner(runner: R) -> Self {
-        Self { runner }
+        Self {
+            runner,
+            read_titles: true,
+        }
+    }
+
+    /// A probe that leaves the panes' titles out of its listing, so it
+    /// records no title marks.
+    pub fn without_pane_titles(mut self) -> Self {
+        self.read_titles = false;
+        self
     }
 
     pub fn rows(&self) -> Result<TmuxDiscoveryRows> {
@@ -1726,14 +1808,27 @@ impl<R: MuxBackend> TmuxDiscovery<R> {
 
     /// The rows of server `socket_name`, or of the default server.
     pub fn rows_on(&self, socket_name: Option<&str>) -> Result<TmuxDiscoveryRows> {
-        let outcome = self
-            .runner
-            .list_sessions_on(socket_name, TMUX_LIST_FORMAT)?;
+        let format = if self.read_titles {
+            TMUX_LIST_FORMAT
+        } else {
+            TMUX_LIST_FORMAT_WITHOUT_TITLES
+        };
+        let outcome = self.runner.list_sessions_on(socket_name, format)?;
         Ok(match outcome {
-            TmuxOutcome::Sessions(stdout) => TmuxDiscoveryRows {
-                rows: parse_list_sessions(&stdout),
-                status: TmuxStatus::Available,
-            },
+            TmuxOutcome::Sessions(stdout) => {
+                let mut rows = parse_list_sessions(&stdout);
+                if !self.read_titles {
+                    // A backend that answers with a title anyway is not
+                    // read either.
+                    for row in &mut rows {
+                        row.active_pane_title = None;
+                    }
+                }
+                TmuxDiscoveryRows {
+                    rows,
+                    status: TmuxStatus::Available,
+                }
+            }
             TmuxOutcome::Unavailable(reason) => TmuxDiscoveryRows {
                 rows: Vec::new(),
                 status: TmuxStatus::Unavailable(reason),
@@ -1783,9 +1878,14 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
         let sockets = std::iter::once(None).chain(context.mux_sockets().map(Some));
         for socket in sockets {
             let outcome = self.rows_on(socket)?;
+            let observed_ms = crate::live_store::now_ms();
             for row in &outcome.rows {
                 nodes.push(GraphNode::MuxSession(node_for_row(row, socket)));
             }
+            let key = crate::model::probe_key(TMUX_BACKEND, socket);
+            let titles = context
+                .caches()
+                .carry_pane_titles(&key, titles_of(&outcome.rows, observed_ms));
             let status = match &outcome.status {
                 TmuxStatus::Available => MuxProbeStatus::Listed,
                 TmuxStatus::Unavailable(UnavailableReason::NoServer) => MuxProbeStatus::NoServer,
@@ -1797,11 +1897,10 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
                 },
             };
             mux_probes.insert(
-                crate::model::probe_key(TMUX_BACKEND, socket),
+                key,
                 MuxProbe {
-                    status,
-                    epoch,
-                    exited: Vec::new(),
+                    titles,
+                    ..MuxProbe::new(status, epoch)
                 },
             );
         }
@@ -1817,6 +1916,21 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
         context.caches().tmux.set((), fragment.clone());
         Ok(fragment)
     }
+}
+
+/// The title marks of `rows`, by session name, as one probe at
+/// `observed_ms` read them: each the first of its run until the caches
+/// carry it on.
+fn titles_of(rows: &[TmuxSessionRow], observed_ms: i64) -> BTreeMap<String, PaneTitle> {
+    rows.iter()
+        .filter_map(|row| {
+            let mark = row.active_pane_title?;
+            Some((
+                row.name.clone(),
+                PaneTitle::new(row.active_pane_id.clone(), mark, observed_ms),
+            ))
+        })
+        .collect()
 }
 
 /// The node for one listed session. A session on a named server gets
@@ -1850,3 +1964,7 @@ pub(crate) const TMUX_CACHE_TTL: Duration = Duration::from_secs(5);
 #[cfg(test)]
 #[path = "tmux_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "title_tests.rs"]
+mod title_tests;

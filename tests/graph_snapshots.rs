@@ -39,6 +39,11 @@ fn mux_candidates_json_snapshot() {
     assert_snapshot("mux_candidates", fixtures::mux_candidates_graph());
 }
 
+#[test]
+fn live_state_json_snapshot() {
+    assert_snapshot("live_state", fixtures::live_state_graph());
+}
+
 fn assert_snapshot(name: &str, snapshot: conspectus::model::GraphSnapshot) {
     let rendered = render_graph_json(&snapshot).expect("render graph fixture");
 

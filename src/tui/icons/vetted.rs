@@ -1,8 +1,9 @@
 //! Conspectus's glyphs, registered with the framework's vetted table.
 //!
 //! `tuikit::glyphs` vets the characters every control shares. The glyphs
-//! below are Conspectus's own: one per node kind, one per row state, and
-//! the few others its sources draw (the transcript viewer's result arrow,
+//! below are Conspectus's own: one per node kind, one per row state, the
+//! live-state marks the framework does not vet already, and the few
+//! others its sources draw (the transcript viewer's result arrow,
 //! the graph export's star). [`register_glyphs`] adds
 //! them with a note on how each was measured, so the source scan can check
 //! every character either crate draws against one table.
@@ -15,7 +16,7 @@
 
 use tuikit::glyphs::{RegisterError, VettedGlyphs};
 
-use super::{NodeKind, state};
+use super::{NodeKind, live, state};
 
 /// How a node kind's default glyph was vetted. `None` for a kind that
 /// draws a state glyph (a pin), which [`STATES`] registers.
@@ -83,6 +84,14 @@ const STATES: &[(&str, &str)] = &[
     ),
 ];
 
+/// The live-state marks the framework's table does not already hold:
+/// the rest are ASCII (`!`, `?`) or framework glyphs (the failure mark,
+/// `›`, `·`).
+const LIVE: &[(&str, &str)] = &[(
+    live::WORKING,
+    "Latin-1 Supplement; DejaVu Sans Mono, Liberation Mono, Andale Mono, and Courier New 1.00",
+)];
+
 /// Glyphs the sources draw that belong to no row vocabulary.
 const OTHERS: &[(&str, &str)] = &[
     (
@@ -109,6 +118,7 @@ pub fn register_glyphs(table: &mut VettedGlyphs) -> Result<(), RegisterError> {
         }
     }
     table.register_all(STATES)?;
+    table.register_all(LIVE)?;
     table.register_all(OTHERS)
 }
 

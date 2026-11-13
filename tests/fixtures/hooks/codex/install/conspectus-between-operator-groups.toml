@@ -1,0 +1,11 @@
+# Synthetic: a Conspectus group between two of the operator's.
+[[hooks.SessionStart]]
+matcher = "startup"
+hooks = [{ type = "command", command = "echo first" }]
+
+[[hooks.SessionStart]]
+hooks = [{ type = "command", command = "/usr/local/bin/conspectus hook write codex", timeout = 5 }]
+
+[[hooks.SessionStart]]
+matcher = "resume"
+hooks = [{ type = "command", command = "echo third" }]

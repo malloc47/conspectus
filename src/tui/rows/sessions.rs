@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use tuikit::age::Age;
 
-use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
+use crate::filter::{LiveStateKey, MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, NodeId,
     RelationKind, RepoId, WorkspaceId, WorktreeKind, WorktreeMeta, path_is_ancestor_of,
@@ -85,17 +85,18 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
                 let mux_state = MuxStateKey::from_candidate_count(
                     data.mux_candidates_for_session(session_id).len(),
                 );
-                if !session_matches_filter(session, mux_state, inputs.now, filter) {
+                if !session_matches_filter(session_id, session, mux_state, inputs.now, filter) {
                     return None;
                 }
                 Some(SessionEntry {
                     id: session_id.clone(),
                     node: session,
                     mux_state,
+                    live: filter.live.session(session_id),
                 })
             })
             .collect();
-        sessions.sort_by(|a, b| compare_sessions(a, b, filter.float_muxed_sessions_top));
+        sessions.sort_by(|a, b| compare_sessions(a, b, filter));
 
         let mut session_short_ids = ShortIds::from_sessions(sessions.iter());
         // SessionsGrouping::None never emits repo/worktree headers, so
@@ -110,7 +111,6 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
             home: inputs.home,
             now: inputs.now,
             grouping: inputs.grouping,
-            float_muxed_top: filter.float_muxed_sessions_top,
             nest_lineage,
             lineage_stack: HashSet::new(),
             session_bearing_worktrees: &session_bearing_worktrees,
@@ -137,13 +137,14 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         }
         let mux_state =
             MuxStateKey::from_candidate_count(data.mux_candidates_for_session(session_id).len());
-        if !session_matches_filter(session, mux_state, inputs.now, filter) {
+        if !session_matches_filter(session_id, session, mux_state, inputs.now, filter) {
             continue;
         }
         let entry = SessionEntry {
             id: session_id.clone(),
             node: session,
             mux_state,
+            live: filter.live.session(session_id),
         };
         match resolve_group_key(&entry, &data, inputs.grouping) {
             Some(key) => buckets.entry(key).or_default().push(entry),
@@ -205,7 +206,6 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         home: inputs.home,
         now: inputs.now,
         grouping: inputs.grouping,
-        float_muxed_top: filter.float_muxed_sessions_top,
         nest_lineage,
         lineage_stack: HashSet::new(),
         session_bearing_worktrees: &session_bearing_worktrees,
@@ -272,6 +272,7 @@ fn should_nest_lineage(grouping: SessionsGrouping) -> bool {
 }
 
 fn session_matches_filter(
+    id: &NodeId,
     session: &AgentSessionNode,
     mux_state: MuxStateKey,
     now: Option<i64>,
@@ -287,6 +288,7 @@ fn session_matches_filter(
         now_epoch: now,
         last_active_epoch: session.last_active_epoch,
         mux_state,
+        live_state: filter.live.session(id),
     };
     filter.matches_session(&match_inputs)
 }
@@ -310,7 +312,6 @@ struct EmitCtx<'a, 'snap> {
     home: Option<&'a Path>,
     now: Option<i64>,
     grouping: SessionsGrouping,
-    float_muxed_top: bool,
     nest_lineage: bool,
     lineage_stack: HashSet<NodeId>,
     /// Per-repo set of worktrees that contribute a (B)-class bucket
@@ -353,7 +354,7 @@ impl<'a> SessionsData<'a> {
             };
             let mux_state =
                 MuxStateKey::from_candidate_count(self.mux_candidates_for_session(parent).len());
-            if session_matches_filter(parent_node, mux_state, now, filter) {
+            if session_matches_filter(parent, parent_node, mux_state, now, filter) {
                 ids.insert(child.clone());
             }
         }
@@ -600,6 +601,9 @@ struct SessionEntry<'a> {
     /// is consistent across all call sites without re-walking the
     /// graph at compare time.
     mux_state: MuxStateKey,
+    /// The session's live state when the tree is built, which the
+    /// "float waiting sessions to top" toggle sorts by.
+    live: LiveStateKey,
 }
 
 fn resolve_group_key(
@@ -686,7 +690,7 @@ fn emit_checkout_bucket(
     mut sessions: Vec<SessionEntry<'_>>,
     previous: &mut PreviousHeader,
 ) {
-    sessions.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
+    sessions.sort_by(|a, b| compare_sessions(a, b, ctx.filter));
 
     if let Some(workspace_root) = key.workspace {
         if *previous != PreviousHeader::Workspace(workspace_root.clone()) {
@@ -837,7 +841,7 @@ fn worktree_group_marker(meta: &WorktreeMeta) -> Option<String> {
 }
 
 fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>) {
-    sessions.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
+    sessions.sort_by(|a, b| compare_sessions(a, b, ctx.filter));
     ctx.tree.rows.push(Row {
         id: RowId::Synthetic("ungrouped"),
         depth: 0,
@@ -907,7 +911,7 @@ fn emit_session_row(
         n => MuxIndicator::Ambiguous { candidate_count: n },
     };
     let mut lineage_children = visible_lineage_children(ctx, &entry.id);
-    lineage_children.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
+    lineage_children.sort_by(|a, b| compare_sessions(a, b, ctx.filter));
     let has_lineage_children = include_lineage_children && !lineage_children.is_empty();
     // ADR 0071: ambiguous mux candidates no longer expand a
     // per-session subtree; they surface as a section on the
@@ -942,6 +946,7 @@ fn emit_session_row(
             primary_node: entry.id.clone(),
             pin_id: ctx.data.pin_id_by_bound_session.get(&entry.id).cloned(),
             content_hit: None,
+            live: None,
         }),
     });
 
@@ -984,13 +989,14 @@ fn visible_lineage_children<'snap>(
             let mux_state = MuxStateKey::from_candidate_count(
                 ctx.data.mux_candidates_for_session(child_id).len(),
             );
-            if !session_matches_filter(child_node, mux_state, ctx.now, ctx.filter) {
+            if !session_matches_filter(child_id, child_node, mux_state, ctx.now, ctx.filter) {
                 return None;
             }
             Some(SessionEntry {
                 id: child_id.clone(),
                 node: child_node,
                 mux_state,
+                live: ctx.filter.live.session(child_id),
             })
         })
         .collect()
@@ -1023,24 +1029,29 @@ fn project_name_from_path(path: &str) -> Option<String> {
 
 /// Sessions sort by recency desc (None last),
 /// then alphabetical by harness then short id for a stable tie-breaker.
-/// When `float_muxed_top` is set, sessions with an attached mux
-/// candidate sort before sessions without one, with the existing
-/// within-group order preserved inside each of the two resulting
-/// halves.
+/// The filter's floats come first: with `float_waiting_top` set, the
+/// sessions waiting on the operator when the tree is built sort before
+/// the rest (ADR 0215); with `float_muxed_sessions_top` set, sessions
+/// with an attached mux candidate sort before sessions without one,
+/// within each of those parts. The existing order is preserved inside
+/// each part.
 fn compare_sessions(
     a: &SessionEntry<'_>,
     b: &SessionEntry<'_>,
-    float_muxed_top: bool,
+    filter: &RowFilter,
 ) -> std::cmp::Ordering {
-    if float_muxed_top {
-        let muxed_priority = |state: MuxStateKey| match state {
-            MuxStateKey::Attached | MuxStateKey::Ambiguous => 0,
-            MuxStateKey::Unmuxed => 1,
-        };
-        let ord = muxed_priority(a.mux_state).cmp(&muxed_priority(b.mux_state));
-        if ord != std::cmp::Ordering::Equal {
-            return ord;
-        }
+    let floats = |entry: &SessionEntry<'_>| {
+        let waiting = filter.float_waiting_top && entry.live == LiveStateKey::Waiting;
+        let muxed = filter.float_muxed_sessions_top
+            && matches!(
+                entry.mux_state,
+                MuxStateKey::Attached | MuxStateKey::Ambiguous
+            );
+        (!waiting, !muxed)
+    };
+    let ord = floats(a).cmp(&floats(b));
+    if ord != std::cmp::Ordering::Equal {
+        return ord;
     }
     b.node
         .last_active_epoch

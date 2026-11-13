@@ -3,7 +3,16 @@
 ## Status
 
 Accepted. Refined by ADR 0146: the spool is the durable hook record
-with or without a daemon, and a daemon ingest writes it too.
+with or without a daemon, and a daemon ingest writes it too. Amended:
+the SQLite store below was retired with the rest of SQLite (ADR 0082)
+for the latest-record spool, which keeps one record per pane, and no
+time limit applies to a record (ADR 0146's amendment). See the
+amendment at the end. Its carve-out for already-visible status
+surfaces is used once, by ADR 0217: the title a Codex pane sets, read
+for live state only. Its exception for a harness-documented,
+non-mutating control channel audited as safe is used once, by ADR 0218:
+`claude agents --json`, run as a control-plane adapter for live state
+only, never for attribution.
 
 ## Context
 
@@ -48,9 +57,11 @@ project trees:
 - otherwise `$HOME/.local/state/conspectus/hooks`
 
 The durable hook interface is `conspectus hook write`, not direct
-provider-specific file writes. The first implementation writes to a SQLite
-database named `hooks.sqlite3` in that state directory and keeps the older
-per-event JSON reader as a compatibility fallback. Because harness
+provider-specific file writes. The first implementation wrote to a SQLite
+database named `hooks.sqlite3` in that state directory and kept the older
+per-event JSON reader as a compatibility fallback. (Amended: the SQLite
+store is gone; records go to the spool `hooks-latest.json`, one per pane,
+and the per-event JSON reader remains.) Because harness
 configuration targets the subcommand rather than a storage file, Conspectus
 can later move hook observations to a daemon ingest path or another
 local-state backend without changing installed hooks.
@@ -69,8 +80,9 @@ Schema version 1 records contain:
 - `observed_epoch`
 - optional `harness_version`
 
-Read-only graph discovery may read this SQLite store plus legacy JSON records
-in the same directory and convert fresh records into `LinkedToMux` candidates
+Read-only graph discovery may read this store (now the spool) plus legacy JSON
+records in the same directory and convert fresh records into `LinkedToMux`
+candidates
 after ordinary harness and tmux discovery has produced nodes. Matching order
 is:
 
@@ -90,8 +102,10 @@ root; otherwise it uses a hook-sidecar fallback scope.
 Fresh explicit hook session evidence ranks above active-pane fd evidence,
 active-pane command/start-command evidence, file activity evidence, and
 cwd-only evidence. Stale records are ignored for active mux attribution. V1
-uses a 15-minute active-record TTL; future continuous mode may use event
-eviction instead.
+used a 15-minute active-record TTL. (Amended: no time limit applies. A
+record stays evidence until a fresher record for its pane supersedes it,
+and is ignored when its process is gone, its mux was created after it, or
+the mux's active pane runs another harness.)
 
 When a fresh hook record identifies session B for a mux that already has an
 `active_pane_command_session_match` candidate for session A, Conspectus marks
@@ -185,3 +199,29 @@ such channels must be implemented as explicit control-plane adapters.
 - Fresh hook observations may synthesize sparse session nodes when the harness
   has not yet persisted the transcript/state file that ordinary discovery
   would otherwise read.
+
+## Amendment: storage, panes, and freshness (2026-11-12)
+
+What this ADR says about storage and freshness no longer describes the
+code. The decision to attribute through `conspectus hook write` stands.
+
+- **Storage.** The SQLite store was retired with the rest of SQLite
+  (ADR 0082). Hook records go to the spool `hooks-latest.json` in the
+  same state directory, which every refresh replays and a daemon ingest
+  writes first (ADR 0146). The per-event JSON reader remains.
+- **One record per pane.** The spool keeps the latest record per pane,
+  so agents in split panes of one tmux session keep separate records,
+  and attribution keeps one Active hook link per pane, the freshest
+  (ADR 0146's amendment).
+- **No time limit.** The 15-minute TTL is gone. A record is ignored for
+  active attribution when its process is no longer running, when its mux
+  was created after it, or when the mux's active pane runs another
+  harness; otherwise it stays evidence until a fresher record for its
+  pane supersedes it.
+- **The hook's own pane.** `hook write` asks tmux about the pane named
+  by `TMUX_PANE` (`display-message -t`), so the record's tmux session and
+  pane are the hook's. Untargeted, tmux answers a caller with no
+  terminal, such as a hook a harness runs detached, with the session's
+  active pane (checked on tmux 3.6 and 3.7). A `TMUX_PANE` that is not a
+  pane id leaves the question untargeted; a pane tmux doesn't know gets
+  no answer rather than another pane's.

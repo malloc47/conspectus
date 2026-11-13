@@ -5,7 +5,9 @@
 Accepted. See ADR 0147 for content search, which reads transcripts on
 the same in-memory footing and honors `--no-live-preview`. Amended by ADR 0144: a `Pin` slot has no binding, so its
 preview is its target's preview (see that ADR); the Bound/Unbound row
-below is historical. Amends ADR 0107 (a Related row's evidence becomes a header
+below is historical. Amended by ADR 0213: a node's live-state fields
+preview by their types (`since` a timestamp, `state`, `source`, and
+`evidence` from a fixed set, `pane_agents` a list). Amends ADR 0107 (a Related row's evidence becomes a header
 above the neighbor's own preview). Supersedes the Preview rules in
 `docs/tui-sessions-mockup.md` and the recent-turns transcript plan
 (`CSP-207`–`CSP-210`, `CSP-213`–`CSP-215`), which predates the native
@@ -65,10 +67,10 @@ previews by the type of its value, so a new field inherits a preview:
 | Commit | `git show --stat` | `current_commit` |
 | Process ID | The process tree rooted there | `pid`, `parent_pid`, `root_pane_pid`, `active_pane_pid` |
 | Command line | The full command, one argument per line | `command`, `active_pane_command`, `active_pane_start_command`, `launch` |
-| Timestamp | Absolute time, local and UTC, with its age | `last_active`, `created`, `updated`, `observed` |
+| Timestamp | Absolute time, local and UTC, with its age | `last_active`, `created`, `updated`, `observed`, `since` |
 | Free text | The full value, untruncated | `title`, `alias`, `name`, `reason`, `last_message_preview` |
-| Value from a fixed set | What the value means, from a short glossary | `harness`, `backend`, `provider`, `status`, `state`, `draft`, `attached`, `scope`, `capabilities`, `source`, `depth` |
-| List | The full list | `remotes` |
+| Value from a fixed set | What the value means, from a short glossary | `harness`, `backend`, `provider`, `status`, `state`, `draft`, `attached`, `scope`, `capabilities`, `source`, `depth`, `evidence`, `agents` |
+| List | The full list | `remotes`, `pane_agents` |
 
 ### 3. Related rows show evidence, then the neighbor's preview
 

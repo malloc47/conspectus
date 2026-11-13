@@ -124,4 +124,8 @@ fn a_refused_gesture_never_reports_like_a_success() {
     app.update(Msg::Explorer(tuikit::explorer::ExplorerKey::Inspect));
     let status = app.status().expect("`o` with nothing to open says so");
     assert_eq!(status.severity, Severity::Warning, "{}", status.text);
+
+    app.update(Msg::NextWaiting);
+    let status = app.status().expect("`W` with nothing waiting says so");
+    assert_eq!(status.severity, Severity::Warning, "{}", status.text);
 }

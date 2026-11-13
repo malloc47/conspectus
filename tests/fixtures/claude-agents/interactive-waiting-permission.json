@@ -1,0 +1,12 @@
+[
+  {
+    "pid": 41234,
+    "sessionId": "8c1d2f0e-5b7a-4c39-9e21-3a6f0b9d4e17",
+    "name": "placeholder session name",
+    "cwd": "/home/user/projects/my-project",
+    "kind": "interactive",
+    "startedAt": 1794546000000,
+    "status": "waiting",
+    "waitingFor": "permission prompt"
+  }
+]

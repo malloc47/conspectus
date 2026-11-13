@@ -175,7 +175,7 @@ of five enumerated categories:
 - tmux session lifecycle actions (create, rename, attach, tear down) that you
   start yourself;
 - subprocesses that Conspectus launches itself;
-- the hook entry `conspectus hook init` adds to a harness's settings file
+- the hook entries `conspectus hook init` adds to a harness's settings file
   (for Pi, its one extension file), which `hook remove` takes out again.
 
 These prohibitions are absolute:
@@ -261,7 +261,7 @@ about what is linked to what. See the
 | Version control | git | Repos, checkouts, linked worktrees (including worktrees of bare repos), branches, remotes, and upstreams. |
 | Workspaces | Atelier, [agent-deck](https://github.com/asheshgoplani/agent-deck), and generic multi-repo roots | Workspace membership, plus fork provenance from Atelier. |
 | Forges | GitHub, via the `gh` CLI | Open pull requests and the last 30 days of PR history for every GitHub remote of every discovered repo, including a fork's upstream and remotes on GitHub Enterprise hosts `gh` is signed in to. A PR links to a local branch when its head is one of the repo's remotes. A GitLab adapter exists only as a stub. |
-| Harness hooks (optional) | Claude Code, Codex, and Pi (`conspectus hook init`), plus an [opencode plugin](plugins/opencode-hook/) | The harness's current session id, which sharpens tmux attribution. |
+| Harness hooks (optional) | Claude Code, Codex, and Pi (`conspectus hook init`), plus an [opencode plugin](plugins/opencode-hook/) | The harness's current session id, which sharpens tmux attribution, and what each agent is doing now: waiting on you, ready for a prompt, or working ([live agent state](docs/operations.md#live-agent-state)). |
 
 Discovery starts from the current directory (or the `--scan-root` paths you
 pass), plus each harness's home-level state directory. It then checks the
@@ -304,7 +304,7 @@ conspectus graph --format html > graph.html   # self-contained interactive explo
 Two optional extras:
 
 ```sh
-conspectus hook init claude-code   # let Claude Code report its session id
+conspectus hook init claude-code   # let Claude Code report its session and state
 conspectus serve                   # keep the graph warm in the background
 ```
 
@@ -671,6 +671,11 @@ the work moved from building to hardening.
   GitLab is a stub.
 - **Worktree mutation needs worktrunk.** Without `wt` on your `PATH`,
   worktree support is read-only.
+- **Live agent state is CLI and JSON only for now.** Once a harness's hooks
+  are installed, `conspectus table sessions --columns +live`, `node show`, and
+  `graph --format json` show it, but the TUI does not display it yet, and
+  the event mappings follow each harness's documentation until they are
+  checked against recorded sessions.
 - **The library API isn't stable yet.** `conspectus::api` exists
   ([library API](docs/library-api.md)), but no external consumer relies on
   it, so treat it as unstable.

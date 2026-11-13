@@ -264,6 +264,103 @@ fn merge_with_prior_lets_fresh_win_and_keeps_prior_only_nodes() {
 }
 
 #[test]
+fn merge_with_prior_keeps_the_fresh_live_table_and_drops_the_prior_one() {
+    // The prior's live observations are a cycle old and the live-state
+    // pass rebinds the table after the merge (ADR 0205), so none of
+    // them leaks into the merged snapshot, not even for a node that
+    // only the prior has; the fresh table passes through whole.
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+
+    let kept = AgentSessionId::new("codex", "/state", "kept");
+    let ended = AgentSessionId::new("codex", "/state", "ended");
+    let pane = MuxSessionId::new("tmux:pane");
+    let session_node = |id: &AgentSessionId| {
+        GraphNode::AgentSession(AgentSessionNode::new(id.clone(), "codex".to_string()))
+    };
+    let observed = |state| {
+        LiveBinding::new(
+            LiveObservation::new(state, LiveSource::Hook, 1_000),
+            Liveness::Alive,
+        )
+    };
+
+    let mut fresh = GraphSnapshot::empty();
+    fresh.nodes.push(session_node(&kept));
+    fresh.nodes.push(GraphNode::MuxSession(MuxSessionNode::new(
+        pane.clone(),
+        "tmux".to_string(),
+        "pane".to_string(),
+    )));
+    fresh.node_live.insert(
+        NodeId::AgentSession(kept.clone()),
+        observed(LiveState::Waiting),
+    );
+    fresh
+        .node_live
+        .insert(NodeId::MuxSession(pane), observed(LiveState::Starting));
+
+    let mut prior = GraphSnapshot::empty();
+    prior.nodes.push(session_node(&kept));
+    prior.nodes.push(session_node(&ended));
+    prior
+        .node_live
+        .insert(NodeId::AgentSession(kept), observed(LiveState::Working));
+    prior.node_live.insert(
+        NodeId::AgentSession(ended.clone()),
+        observed(LiveState::Working),
+    );
+
+    let expected = fresh.node_live.clone();
+    let merged = merge_with_prior(fresh, prior);
+
+    assert!(
+        merged
+            .nodes
+            .iter()
+            .any(|node| node.id() == NodeId::AgentSession(ended.clone())),
+        "the prior-only node survives as usual"
+    );
+    assert_eq!(merged.node_live, expected);
+
+    let only_prior = merge_with_prior(GraphSnapshot::empty(), {
+        let mut prior = GraphSnapshot::empty();
+        prior.nodes.push(session_node(&ended));
+        prior
+            .node_live
+            .insert(NodeId::AgentSession(ended), observed(LiveState::Ready));
+        prior
+    });
+    assert!(only_prior.node_live.is_empty());
+}
+
+#[test]
+fn a_fragment_made_from_a_snapshot_keeps_only_provider_output() {
+    // Providers emit fragments; the live table is bound after the merge,
+    // so the conversion leaves it behind with the other derived fields.
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+
+    let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "s1"));
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "s1"),
+            "codex".to_string(),
+        )));
+    snapshot.node_live.insert(
+        session,
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_000),
+            Liveness::Alive,
+        ),
+    );
+
+    let fragment = GraphFragment::from(snapshot.clone());
+    assert_eq!(fragment.nodes, snapshot.nodes);
+    assert!(fragment.into_snapshot().node_live.is_empty());
+}
+
+#[test]
 fn context_normalizes_and_deduplicates_scan_roots() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let root = temp.path();
@@ -907,6 +1004,53 @@ fn slice_fingerprint_ignores_agent_last_message_preview_and_title_churn() {
 }
 
 #[test]
+fn slice_fingerprint_ignores_live_state() {
+    // Live state changes every few seconds and says nothing about
+    // which processes a pane runs, so a change in `node_live` alone
+    // must never reopen the /proc walk (ADR 0205).
+    use crate::model::live::{
+        LiveBinding, LiveDetail, LiveObservation, LiveSource, LiveState, Liveness,
+    };
+
+    let quiet = snapshot_with_mux_session("s1", "s1", 1_000);
+    let agent_node = NodeId::AgentSession(AgentSessionId::new("codex", "global", "s1"));
+    let mux_node = NodeId::MuxSession(MuxSessionId::new("tmux:s1"));
+
+    let mut working = quiet.clone();
+    working.node_live.insert(
+        agent_node.clone(),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_000_000)
+                .with_detail(LiveDetail::Tool)
+                .with_pid(4242, Some(7)),
+            Liveness::Alive,
+        ),
+    );
+    let mut waiting = working.clone();
+    waiting.node_live.insert(
+        agent_node,
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 2_000_000)
+                .with_detail(LiveDetail::Permission)
+                .with_pid(4242, Some(7)),
+            Liveness::Dead,
+        ),
+    );
+    waiting.node_live.insert(
+        mux_node,
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Starting, LiveSource::Hook, 2_000_000),
+            Liveness::Unknown,
+        ),
+    );
+
+    let expected = mux_or_harness_slice_fingerprint(&quiet);
+    assert!(expected.is_some());
+    assert_eq!(mux_or_harness_slice_fingerprint(&working), expected);
+    assert_eq!(mux_or_harness_slice_fingerprint(&waiting), expected);
+}
+
+#[test]
 fn slice_fingerprint_differs_when_mux_active_pane_pid_changes() {
     // active_pane_pid *does* matter — a new pid means a fresh
     // process to attribute in the walk. Must not be zeroed by
@@ -1118,4 +1262,364 @@ fn cwd_git_probes_skip_the_cwd_of_a_gone_mux() {
         .insert(id, crate::model::NodePresence::Gone { last_seen: 1 });
     let gone = observed_cwd_git_fragment(&snapshot, &DiscoveryCaches::default());
     assert!(gone.nodes.is_empty(), "a ghost's cwd is not");
+}
+
+/// A codex session in a scratch harness root, a tmux mux `alpha` on the
+/// default server, and a scratch live-state store, for the tests of the
+/// `live_state` pass.
+struct LiveWorld {
+    temp: tempfile::TempDir,
+    caches: Arc<DiscoveryCaches>,
+}
+
+impl LiveWorld {
+    const SESSION: &str = "session-x";
+
+    fn new() -> Self {
+        use crate::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        std::fs::create_dir(temp.path().join("scan")).expect("scan dir");
+        HarnessFixture::at(temp.path().join("state"))
+            .write_codex_session(&CodexSessionRecord::new(Self::SESSION).with_cwd("/work/x"))
+            .expect("write codex session");
+        Self {
+            temp,
+            caches: Arc::default(),
+        }
+    }
+
+    fn live_root(&self) -> PathBuf {
+        self.temp.path().join("live")
+    }
+
+    /// Fold `kind` for `harness:session` into the store, as `hook write`
+    /// does, with `context`.
+    fn event(
+        &self,
+        harness: &str,
+        session: &str,
+        kind: crate::live_store::LiveEventKind,
+        context: crate::live_store::LiveContext,
+    ) {
+        let event =
+            crate::live_store::LiveEvent::new(harness, session, crate::live_store::now_ms(), kind)
+                .with_context(context);
+        crate::live_store::LiveStore::at(self.live_root())
+            .apply_event(&event)
+            .expect("write the store");
+    }
+
+    fn config(&self) -> LocalDiscoveryConfig {
+        self.config_listing("alpha\t/work/x\t1700000500\t1700000000\n")
+    }
+
+    /// The config with the tmux server listing `listing`.
+    fn config_listing(&self, listing: &str) -> LocalDiscoveryConfig {
+        use crate::discovery::harness::codex::HARNESS_KEY as CODEX_KEY;
+        use crate::discovery::harness::fixtures::HarnessFixture;
+        use crate::discovery::tmux::FakeTmux;
+
+        LocalDiscoveryConfig::empty()
+            .with_harness_state_root(
+                CODEX_KEY,
+                HarnessFixture::at(self.temp.path().join("state")).codex_state_root(),
+            )
+            .with_tmux_runner(FakeTmux::with_sessions(listing))
+            .with_live_state_root(self.live_root())
+            .with_caches(Arc::clone(&self.caches))
+    }
+
+    /// One discovery cycle on top of `prior`, as the daemon runs them.
+    fn discover(&self, prior: GraphSnapshot) -> GraphSnapshot {
+        discover_local_warm_with(
+            [self.temp.path().join("scan")],
+            self.config(),
+            prior,
+            &crate::config::ServerIntervals::default(),
+        )
+        .expect("discover")
+    }
+
+    fn fingerprint(&self) -> Option<u64> {
+        *self
+            .caches
+            .process_tree_fingerprint
+            .lock()
+            .expect("fingerprint lock")
+    }
+}
+
+/// The codex session's node id in `snapshot`.
+fn codex_session(snapshot: &GraphSnapshot) -> NodeId {
+    snapshot
+        .nodes
+        .iter()
+        .find_map(|node| match node {
+            GraphNode::AgentSession(session) if session.id.session_key == LiveWorld::SESSION => {
+                Some(node.id())
+            }
+            _ => None,
+        })
+        .expect("the codex session is discovered")
+}
+
+fn this_process() -> crate::live_store::LiveContext {
+    let pid = i64::from(std::process::id());
+    crate::live_store::LiveContext {
+        pid: Some(pid),
+        pid_start: crate::live_store::process_start_time(pid),
+        ..Default::default()
+    }
+}
+
+fn in_alpha(pane: &str) -> crate::live_store::LiveContext {
+    crate::live_store::LiveContext {
+        tmux: Some(crate::live_store::LiveTmux {
+            socket: Some("/tmp/tmux-1000/default".to_string()),
+            session: Some("alpha".to_string()),
+            pane: Some(pane.to_string()),
+        }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn discovery_binds_the_live_state_store_to_sessions_and_muxes() {
+    use crate::live_store::LiveEventKind;
+    use crate::model::live::{LiveState, Liveness};
+
+    let world = LiveWorld::new();
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnStarted,
+        this_process(),
+    );
+    world.event(
+        "pi",
+        "no-transcript-yet",
+        LiveEventKind::TurnStarted,
+        in_alpha("%2"),
+    );
+    world.event(
+        "codex",
+        "nowhere",
+        LiveEventKind::TurnStarted,
+        Default::default(),
+    );
+
+    let snapshot = world.discover(GraphSnapshot::empty());
+
+    let session = codex_session(&snapshot);
+    let table: Vec<(NodeId, LiveState, Liveness)> = snapshot
+        .node_live
+        .iter()
+        .map(|(id, binding)| (id.clone(), binding.observation.state, binding.liveness))
+        .collect();
+    assert_eq!(
+        table,
+        vec![(session, LiveState::Working, Liveness::Alive)],
+        "one binding per bound session entry"
+    );
+    let panes: Vec<(crate::model::LivePane, LiveState, Liveness)> = snapshot
+        .pane_live
+        .iter()
+        .map(|(pane, binding)| (pane.clone(), binding.observation.state, binding.liveness))
+        .collect();
+    assert_eq!(
+        panes,
+        vec![(
+            crate::model::LivePane::new(MuxSessionId::new("tmux:alpha"), Some("%2".into())),
+            LiveState::Working,
+            Liveness::Unknown
+        )],
+        "the agent with no session binds to its pane"
+    );
+    assert_eq!(
+        snapshot
+            .nodes
+            .iter()
+            .filter(|node| matches!(node, GraphNode::AgentSession(_)))
+            .count(),
+        1,
+        "an unbound entry creates no session"
+    );
+}
+
+#[test]
+fn every_cycle_rebinds_the_store_without_reopening_the_process_tree_walk() {
+    use crate::live_store::LiveEventKind;
+    use crate::model::live::LiveState;
+
+    let world = LiveWorld::new();
+    let state_of = |snapshot: &GraphSnapshot| {
+        snapshot
+            .node_live
+            .get(&codex_session(snapshot))
+            .map(|binding| binding.observation.state)
+    };
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnStarted,
+        Default::default(),
+    );
+    let first = world.discover(GraphSnapshot::empty());
+    assert_eq!(state_of(&first), Some(LiveState::Working));
+    let fingerprint = world.fingerprint();
+    assert!(fingerprint.is_some());
+
+    // The turn ends. A cold rebuild (a one-shot command, the daemonless
+    // TUI) binds the new state, and the mux and harness slice, which is
+    // all the process-tree gate looks at, is as it was.
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnEnded { interrupted: false },
+        Default::default(),
+    );
+    let second = world.discover(GraphSnapshot::empty());
+    assert_eq!(state_of(&second), Some(LiveState::Ready));
+    assert_eq!(
+        world.fingerprint(),
+        fingerprint,
+        "a state change alone must not reopen the process-tree walk"
+    );
+
+    // A cycle on top of the last snapshot, as the daemon runs them,
+    // takes the table from the store, not from the prior.
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnStarted,
+        Default::default(),
+    );
+    let third = world.discover(second);
+    assert_eq!(state_of(&third), Some(LiveState::Working));
+
+    // An emptied store empties the table on the next cycle, and the
+    // session stays.
+    std::fs::write(
+        world.live_root().join(crate::live_store::LIVE_STATE_FILE),
+        r#"{ "schema_version": 1, "rev": 9, "entries": {} }"#,
+    )
+    .expect("empty the store");
+    let fourth = world.discover(third);
+    assert!(fourth.node_live.is_empty(), "{:?}", fourth.node_live);
+    assert_eq!(state_of(&fourth), None);
+}
+
+#[test]
+fn discovery_without_a_live_state_root_binds_nothing() {
+    use crate::live_store::LiveEventKind;
+
+    let world = LiveWorld::new();
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::TurnStarted,
+        Default::default(),
+    );
+    let snapshot = discover_local_with(
+        [world.temp.path().join("scan")],
+        world.config().without_live_state(),
+    )
+    .expect("discover");
+    assert!(snapshot.node_live.is_empty());
+}
+
+/// A listing of tmux session `alpha` whose active pane `%0` runs Codex
+/// under the title `title`.
+fn codex_in_alpha(title: &str) -> String {
+    format!(
+        "alpha\t/work/x\t1700000500\t1700000000\tcodex\t42\t/work/x\tcodex\t0\t\t\t$1\t%0\t{title}\n"
+    )
+}
+
+#[test]
+fn discovery_shows_a_codex_pane_waiting_from_its_title_without_hooks() {
+    use crate::model::live::{LiveDetail, LiveSource, LiveState};
+
+    let world = LiveWorld::new();
+    let listing = codex_in_alpha("[ ! ] Action Required fix-auth | conspectus");
+    let snapshot = discover_local_with(
+        [world.temp.path().join("scan")],
+        world.config_listing(&listing),
+    )
+    .expect("discover");
+    let pane = crate::model::LivePane::new(
+        crate::model::MuxSessionId::new("tmux:alpha"),
+        Some("%0".to_string()),
+    );
+    let binding = snapshot
+        .pane_live
+        .get(&pane)
+        .expect("the pane's title binds");
+    assert_eq!(
+        (
+            binding.observation.state,
+            binding.observation.detail,
+            binding.observation.source
+        ),
+        (
+            LiveState::Waiting,
+            Some(LiveDetail::Input),
+            LiveSource::PaneTitle
+        )
+    );
+    assert!(snapshot.node_live.is_empty());
+
+    // Turned off, the probe reads no title and binds nothing.
+    let world = LiveWorld::new();
+    let snapshot = discover_local_with(
+        [world.temp.path().join("scan")],
+        world.config_listing(&listing).without_pane_titles(),
+    )
+    .expect("discover");
+    assert!(snapshot.pane_live.is_empty());
+    assert!(snapshot.mux_probes["tmux"].titles.is_empty());
+}
+
+#[test]
+fn two_probes_without_the_marker_clear_a_codex_wait_its_hooks_reported() {
+    use crate::live_store::{LiveEventKind, WaitKind};
+    use crate::model::live::{LiveSource, LiveState};
+
+    let world = LiveWorld::new();
+    let mut context = this_process();
+    context.tmux = in_alpha("%0").tmux;
+    world.event(
+        "codex",
+        LiveWorld::SESSION,
+        LiveEventKind::WaitStarted {
+            agent: None,
+            kind: WaitKind::Permission,
+        },
+        context,
+    );
+    let listing = codex_in_alpha("⠋ fix-auth | conspectus");
+    let cycle = || {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        world.caches.clear_mux();
+        discover_local_warm_with(
+            [world.temp.path().join("scan")],
+            world.config_listing(&listing),
+            GraphSnapshot::empty(),
+            &crate::config::ServerIntervals::default(),
+        )
+        .expect("discover")
+    };
+    let read = |snapshot: &GraphSnapshot| {
+        let binding = snapshot.node_live[&codex_session(snapshot)];
+        (binding.observation.state, binding.observation.source)
+    };
+
+    // The first probe after the wait could have beaten Codex's redraw.
+    let first = cycle();
+    assert_eq!(read(&first), (LiveState::Waiting, LiveSource::Hook));
+    // The second confirms it: the approval was answered.
+    let second = cycle();
+    assert_eq!(read(&second), (LiveState::Working, LiveSource::PaneTitle));
+    assert!(second.pane_live.is_empty(), "the agent counts once");
 }

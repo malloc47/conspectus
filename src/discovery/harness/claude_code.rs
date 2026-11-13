@@ -56,6 +56,7 @@ use serde_json::json;
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{FileStamp, StampedMap};
 use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
+use crate::live_store::{LiveContext, LiveEvent};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
@@ -169,7 +170,43 @@ impl HarnessAdapter for ClaudeCodeAdapter {
             std::ffi::OsString::from(session_id),
         ])
     }
+
+    /// Only `SessionStart` names the session a process runs, so only it
+    /// is recorded for attribution; every other event reaches only the
+    /// live-state store.
+    fn is_attribution_event(&self, payload: &serde_json::Value) -> bool {
+        live::is_attribution_event(payload)
+    }
+
+    /// Every event `hook init claude-code` installs; see
+    /// `claude_code_live.rs` for the mapping and its known gaps.
+    fn live_events_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        context: &LiveContext,
+        observed_ms: i64,
+    ) -> Vec<LiveEvent> {
+        live::live_events(payload, context, observed_ms)
+    }
+
+    fn reports_live_state(&self) -> bool {
+        true
+    }
+
+    /// `claude agents --json`, run to repair a working or waiting state
+    /// the hooks left stuck (ADR 0218); see `claude_code_agents.rs`.
+    fn live_poller(&self) -> Option<crate::discovery::live_poller::LivePoller> {
+        Some(agents::poller())
+    }
 }
+
+#[path = "claude_code_live.rs"]
+mod live;
+
+#[path = "claude_code_agents.rs"]
+pub mod agents;
+
+pub(crate) use live::{HOOK_SUBSCRIPTIONS, HookSubscription};
 
 fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFragment> {
     let projects = state_root.join("projects");

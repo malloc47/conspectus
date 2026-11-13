@@ -1,7 +1,10 @@
+use conspectus::model::live::{
+    LiveBinding, LiveDetail, LiveObservation, LiveSource, LiveState, Liveness,
+};
 use conspectus::model::{
     AgentSessionId, AgentSessionNode, BranchId, BranchNode, Confidence, ForgePrId, ForgePrNode,
     ForkId, ForkNode, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
-    MuxSessionId, MuxSessionNode, NodeId, Provenance, RelationKind, RepoId, RepoNode,
+    LivePane, MuxSessionId, MuxSessionNode, NodeId, Provenance, RelationKind, RepoId, RepoNode,
     SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
 };
 use conspectus::resolve;
@@ -187,6 +190,74 @@ pub fn mux_candidates_graph() -> GraphSnapshot {
         candidate_links: vec![cached_link, convention_link, strong_link],
         ..GraphSnapshot::empty()
     })
+}
+
+/// A mux hosting one session that waits on the operator, beside a
+/// pane-only entry on the mux (an agent no session matched yet) and a
+/// second session with no live state at all.
+pub fn live_state_graph() -> GraphSnapshot {
+    let main = mux_node("tmux:main", "main");
+    let session = |key: &str| {
+        GraphNode::AgentSession(AgentSessionNode {
+            id: agent_id(key),
+            harness_key: "codex".to_string(),
+            cwd: Some("/workspace".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind: None,
+        })
+    };
+    let link = |key: &str| {
+        let mut link = GraphLink::new(
+            format!("mux-{key}"),
+            NodeId::AgentSession(agent_id(key)),
+            LinkEndpoint::Node { id: main.id() },
+            RelationKind::LinkedToMux,
+            Provenance::StrongDiscovered,
+        );
+        link.source_metadata.adapter = "process".to_string();
+        link
+    };
+
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![session("session-a"), session("session-quiet"), main.clone()],
+        candidate_links: vec![link("session-a"), link("session-quiet")],
+        ..GraphSnapshot::empty()
+    };
+    snapshot.node_live.insert(
+        NodeId::AgentSession(agent_id("session-a")),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Waiting, LiveSource::Hook, 1_790_769_000_000)
+                .with_detail(LiveDetail::Permission)
+                .with_since_ms(1_790_768_940_000)
+                .with_subagents(1)
+                .with_pid(4242, Some(123_456)),
+            Liveness::Alive,
+        ),
+    );
+    // Two agents no session matched yet, each in a pane of `main`.
+    let main_id = MuxSessionId::new("tmux:main");
+    snapshot.pane_live.insert(
+        LivePane::new(main_id.clone(), Some("%2".to_string())),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Working, LiveSource::Hook, 1_790_769_500_000)
+                .with_detail(LiveDetail::Generating)
+                .with_heartbeat_s(30),
+            Liveness::Unknown,
+        ),
+    );
+    snapshot.pane_live.insert(
+        LivePane::new(main_id, Some("%3".to_string())),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Ready, LiveSource::Hook, 1_790_769_540_000)
+                .with_detail(LiveDetail::Finished)
+                .with_since_ms(1_790_769_520_000)
+                .with_pid(4343, Some(654_321)),
+            Liveness::Alive,
+        ),
+    );
+    resolved(snapshot)
 }
 
 pub fn fork_ancestry_graph() -> GraphSnapshot {

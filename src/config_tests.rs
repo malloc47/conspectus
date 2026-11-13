@@ -574,6 +574,44 @@ fn tui_views_filter_invalid_mux_state_emits_diagnostic() {
     );
 }
 
+#[test]
+fn tui_views_filter_state_entries_or_together_and_an_unknown_value_is_reported() {
+    use crate::filter::LiveStateKey;
+
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[[tui.views.mux.filters]]\n\
+             state = [\"Waiting\", \"seen\"]\n\
+             [[tui.views.mux.filters]]\n\
+             state = [\"error\"]\n",
+    );
+
+    let loader = ConfigLoader::new().with_home(temp.path());
+    let outcome = loader.load_from(&project);
+
+    assert_eq!(outcome.diagnostics.len(), 1, "{:?}", outcome.diagnostics);
+    let message = &outcome.diagnostics[0].message;
+    assert!(
+        message.contains("invalid `[tui.views.mux.filters].state` value `seen`"),
+        "{message}"
+    );
+    assert!(
+        message.contains("waiting, ready, working, error, unknown, none"),
+        "{message}"
+    );
+    let filter = &outcome.config.tui.views.mux.filter;
+    assert_eq!(
+        filter
+            .live_state
+            .as_ref()
+            .map(|wanted| wanted.values().to_vec()),
+        Some(vec![LiveStateKey::Waiting, LiveStateKey::Error])
+    );
+}
+
 fn prs_filter_from(config: &str) -> (RowFilter, Vec<String>) {
     let temp = TempDir::new().expect("temp dir");
     let project = temp.path().join("project");

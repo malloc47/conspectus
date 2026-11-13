@@ -1,0 +1,10 @@
+[
+  {
+    "id": "bg-placeholder-4",
+    "sessionId": "c3d5e7f9-0a2b-4c6d-8e0f-1a3b5c7d9e11",
+    "cwd": "/home/user/projects/my-project",
+    "kind": "background",
+    "startedAt": 1794540000000,
+    "state": "stopped"
+  }
+]

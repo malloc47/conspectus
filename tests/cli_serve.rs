@@ -129,6 +129,61 @@ fn serve_populates_graph_cache_within_first_tick() {
 }
 
 #[test]
+fn serve_rebuilds_cold_over_a_graph_bin_from_an_older_format() {
+    // ADR 0083: at startup the daemon ignores a `graph.bin` whose header
+    // carries an older format version, says so in one line, cold-builds,
+    // and overwrites the file in the current format on its first cycle.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let cache_path = data.path().join("conspectus").join("graph.bin");
+    std::fs::create_dir_all(cache_path.parent().expect("parent")).expect("create dir");
+    let old_version = conspectus::snapshot::FORMAT_VERSION - 1;
+    let mut bytes =
+        conspectus::snapshot::serialize_to_bytes(&conspectus::model::GraphSnapshot::empty())
+            .expect("serialize");
+    bytes[8..12].copy_from_slice(&old_version.to_le_bytes());
+    std::fs::write(&cache_path, &bytes).expect("write old graph.bin");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn conspectus serve");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut rewritten = false;
+    while Instant::now() < deadline {
+        if conspectus::snapshot::open_mmap(&cache_path).is_ok() {
+            rewritten = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    let output = child.wait_with_output().expect("collect serve output");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        rewritten,
+        "the daemon should replace the old graph.bin; stderr=\n{stderr}"
+    );
+    let skipped: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("warm-start skipped"))
+        .collect();
+    assert_eq!(skipped.len(), 1, "stderr=\n{stderr}");
+    assert!(
+        skipped[0].contains(&format!("format version {old_version} is incompatible")),
+        "stderr=\n{stderr}"
+    );
+}
+
+#[test]
 fn serve_socket_echoes_a_ping_request() {
     // ADR 0038 wire shape: 4-byte big-endian length prefix +
     // UTF-8 JSON. The v1 dispatch table only knows `ping` (the

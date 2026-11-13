@@ -91,6 +91,7 @@ tui`:
 - `--grouping VALUE` (valid values depend on `--view`)
 - `--harness HARNESS` (repeatable)
 - `--mux-state attached,ambiguous,unmuxed`
+- `--state waiting,ready,working,error,unknown,none`
 - `--max-age DURATION`
 - `--sort {hierarchy|recency}`
 - `--color {auto|always|never}`
@@ -308,6 +309,7 @@ Coverage at a glance:
 | Forks | 1 (atelier alpha) |
 | Forge PRs | 2 (open + draft) |
 | Resolved relationships | 37 across 11 distinct relation kinds incl. `parent_session` lineage |
+| Live state | 11 sessions (waiting × 4 in three groups since different times, the orphan in Ungrouped for two hours, the pinned one in `project` on its subagent's question for an hour, the codex fork under its parent in `repo-a` for half an hour, and another in `project` for a minute, so `W` has an order to walk; working with 3 subagents, quiet working, ready × 2, the agent-deck launcher's turn seen since its mux was attached after it ended and the codex parent's, in no mux, unseen; error, stale, exited) and 2 agents in panes of `project` no session matches, in the world's own `state/conspectus/live-state.json`; no process is recorded, so each holds for fifteen minutes from the anchor time and the scenario TUI shows them stale |
 
 ## Adding A Scenario
 

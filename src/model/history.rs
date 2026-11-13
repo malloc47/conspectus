@@ -723,6 +723,25 @@ pub struct MuxProbe {
     /// but resurrectable (zellij's `EXITED`). They are gone, not live.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exited: Vec<String>,
+    /// What the active pane title of each listed session said about its
+    /// agent, by session name, for the sessions whose pane runs a harness
+    /// that classifies its titles (ADR 0217). Only the mark is kept,
+    /// never the title.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub titles: BTreeMap<String, crate::model::live::PaneTitle>,
+}
+
+impl MuxProbe {
+    /// A probe with `status` that ran at `epoch`, listing no exited
+    /// session and no pane title.
+    pub fn new(status: MuxProbeStatus, epoch: i64) -> Self {
+        Self {
+            status,
+            epoch,
+            exited: Vec::new(),
+            titles: BTreeMap::new(),
+        }
+    }
 }
 
 /// Access to a record's envelope, whatever its kind.

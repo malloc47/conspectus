@@ -1,0 +1,11 @@
+[
+  {
+    "id": "bg-placeholder-2",
+    "sessionId": "6a0b3c9d-2e4f-4a71-b8c5-9d1e3f5a7b02",
+    "name": "placeholder background task",
+    "cwd": "/home/user/projects/my-project",
+    "kind": "background",
+    "startedAt": 1794540000000,
+    "state": "done"
+  }
+]

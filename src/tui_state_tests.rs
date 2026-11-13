@@ -162,6 +162,54 @@ fn full_state_round_trips_sort_filter_and_view_slots() {
 }
 
 #[test]
+fn each_view_keeps_its_own_agent_state_filter_and_waiting_float() {
+    use crate::filter::{LiveStateFilter, LiveStateKey};
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    let mut state = PersistedState {
+        last_view: Some(View::Sessions),
+        sort: None,
+        mux_recency: None,
+        preview_wrap: None,
+        session_preview: None,
+        view_states: BTreeMap::new(),
+    };
+    let slot = |filter| PersistedViewSlot {
+        filter,
+        grouping: None,
+        tree: PersistedTree::default(),
+    };
+    state.view_states.insert(
+        View::Sessions,
+        slot(RowFilter {
+            float_waiting_top: true,
+            ..RowFilter::default()
+        }),
+    );
+    state.view_states.insert(
+        View::Mux,
+        slot(RowFilter {
+            live_state: Some(LiveStateFilter::from_values([LiveStateKey::Waiting])),
+            ..RowFilter::default()
+        }),
+    );
+
+    write_tui_state(&cache, &state).expect("write");
+    let text = fs::read_to_string(cache.path().expect("path")).expect("read text");
+    assert!(text.contains("\"float_waiting_top\": true"), "{text}");
+    assert!(text.contains("\"live_state\""), "{text}");
+    let read = read_tui_state(&cache).expect("read");
+    let filter = |view| &read.view_states.get(&view).expect("slot").filter;
+    assert!(filter(View::Sessions).float_waiting_top);
+    assert_eq!(filter(View::Sessions).live_state, None);
+    assert!(!filter(View::Mux).float_waiting_top, "per view");
+    assert_eq!(
+        filter(View::Mux).live_state,
+        Some(LiveStateFilter::from_values([LiveStateKey::Waiting]))
+    );
+}
+
+#[test]
 fn mux_recency_basis_round_trips() {
     // The mux recency basis survives a write/read
     // cycle so the operator's choice persists across restarts.

@@ -153,6 +153,67 @@ pub fn glossary_entry(field: &str, value: &str) -> Option<String> {
         ("state", "open") => "Open for review.",
         ("state", "closed") => "Closed without merging.",
         ("state", "merged") => "Merged into its base branch.",
+        // What an agent is doing, and the detail beside it.
+        ("state", "waiting") => "The agent is blocked on you.",
+        ("state", "working") => "A turn is running.",
+        ("state", "ready") => "The turn is over, and the agent takes a prompt.",
+        ("state", "compacting") => "The harness is compacting the conversation's context.",
+        ("state", "error") => "The turn ended on an error. The agent takes a prompt again.",
+        ("state", "starting") => "The agent's process is up and has said nothing more.",
+        ("state", "exited") => "The session is over.",
+        ("state", "unknown") => "There is no usable evidence of what the agent is doing.",
+        ("state", "generating") => "The model is writing.",
+        ("state", "tool") => "A tool is running.",
+        ("state", "retrying") => "A request failed and is being retried.",
+        ("state", "rate_limited") => {
+            "The provider is limiting requests: a working agent waits out the limit to retry, and \
+             an error is a turn that ended on it."
+        }
+        ("state", "permission") => "It asks your permission to go on.",
+        ("state", "question") => "It asked you a question.",
+        ("state", "plan") => "It waits for you to approve a plan.",
+        ("state", "input") => {
+            "It waits for other input, such as a form a tool asks you to fill in."
+        }
+        ("state", "finished") => "The turn ended by itself.",
+        ("state", "interrupted") => "The turn was interrupted.",
+        ("state", "auth") => "A sign-in or credential problem ended the turn.",
+        ("state", "overloaded") => "The provider was overloaded.",
+        ("state", "failed") => "The turn failed.",
+        ("state", "ended") => "It quit, or its process moved on to a new session.",
+        ("state", "killed") => {
+            "Its process is gone without a word, or its pid now belongs to another process."
+        }
+        ("state", "stale") => {
+            "Its process can't be checked, and nothing has arrived from it for fifteen minutes."
+        }
+        ("state", "unseen") => {
+            "You haven't looked at this finished turn: no tmux client has attached to its mux \
+             since it ended, or, for a session with no mux, the cursor hasn't rested on its row \
+             in this TUI. Its mark is bold until you do."
+        }
+        ("state", "seen") => {
+            "You have looked at this finished turn: a tmux client attached to its mux since it \
+             ended, or, for a session with no mux, the cursor rested on its row in this TUI."
+        }
+        ("source", "hook") => "Reported by the harness's hooks or plugin.",
+        ("source", "pane_title") => {
+            "Read from the title the agent sets on its tmux pane, which says whether it waits on \
+             you or works, but not what it waits for."
+        }
+        ("source", "harness_poll") => {
+            "Read from the harness's own list of its sessions, which Conspectus asks for when \
+             the hooks have gone quiet on an agent that was working or waiting."
+        }
+        ("source", "unknown") => "Reported by a source this version of Conspectus doesn't know.",
+        ("evidence", "fresh") => {
+            "Recent enough to trust, or a state that doesn't age while the agent runs."
+        }
+        ("evidence", "quiet") => {
+            "Work with no news for longer than its source reports in: still under way as far as \
+             anyone knows, but not confirmed."
+        }
+        ("evidence", "stale") => "Too old to trust, so the agent's state reads unknown.",
         ("draft", "true") => "A draft: not yet ready for review.",
         ("draft", "false") => "Ready for review.",
         ("attached", "yes") => "A tmux client is attached right now.",
@@ -193,87 +254,5 @@ pub fn glossary_entry(field: &str, value: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn rows(value: &FieldValue, now: Option<i64>) -> Vec<String> {
-        value_lines(value, now, crate::tui::Theme::default().muted)
-            .expect("lines")
-            .iter()
-            .map(ToString::to_string)
-            .collect()
-    }
-
-    #[test]
-    fn command_lines_split_like_a_shell() {
-        assert_eq!(
-            split_command_line(r#"claude --resume abc -p 'two words' "a \"q\"" x\ y"#),
-            [
-                "claude",
-                "--resume",
-                "abc",
-                "-p",
-                "two words",
-                r#"a "q""#,
-                "x y"
-            ]
-        );
-        assert_eq!(
-            rows(
-                &FieldValue::Command(vec!["claude".into(), "--resume".into(), "abc".into()]),
-                None
-            ),
-            ["claude", "  --resume", "  abc"]
-        );
-    }
-
-    #[test]
-    fn a_timestamp_shows_utc_and_its_age() {
-        let lines = rows(&FieldValue::Timestamp(1_700_000_000), Some(1_700_003_600));
-        assert!(
-            lines.contains(&"UTC    2023-11-14 22:13:20".to_string()),
-            "{lines:?}"
-        );
-        assert_eq!(lines.last().map(String::as_str), Some("age    1h ago"));
-        #[cfg(unix)]
-        assert!(lines[0].starts_with("local  2023-11-1"), "{lines:?}");
-    }
-
-    #[test]
-    fn a_fixed_set_value_shows_its_entry_or_says_it_has_none() {
-        assert_eq!(
-            rows(
-                &FieldValue::Glossary {
-                    field: "backend",
-                    values: vec!["tmux".into()],
-                },
-                None
-            ),
-            ["tmux", "A tmux session on the default socket."]
-        );
-        assert_eq!(
-            rows(
-                &FieldValue::Glossary {
-                    field: "backend",
-                    values: vec!["screen".into()],
-                },
-                None
-            ),
-            ["screen", "no glossary entry for `screen`"]
-        );
-        assert_eq!(
-            glossary_entry("depth", "2").as_deref(),
-            Some("2 levels below the pane's root process.")
-        );
-    }
-
-    #[test]
-    fn text_and_lists_show_in_full() {
-        let long = "x".repeat(300);
-        assert_eq!(rows(&FieldValue::Text(long.clone()), None), [long]);
-        assert_eq!(
-            rows(&FieldValue::List(vec!["a".into(), "b".into()]), None),
-            ["a", "b"]
-        );
-    }
-}
+#[path = "value_tests.rs"]
+mod tests;

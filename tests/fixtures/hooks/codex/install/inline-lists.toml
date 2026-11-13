@@ -1,0 +1,11 @@
+# Synthetic: inline lists under [hooks], with the session start entry an
+# older `conspectus hook init codex` wrote after the operator's own.
+model = "gpt-5.4-mini"
+
+[hooks]
+SessionStart = [
+  { hooks = [
+      { type = "command", command = "echo existing", async = false },
+    ] },
+  { hooks = [{ type = "command", command = "/old/bin/conspectus hook write codex", async = false }] },
+]

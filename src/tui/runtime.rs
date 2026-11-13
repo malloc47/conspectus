@@ -46,6 +46,8 @@ mod content;
 mod executor;
 mod handoff;
 mod launch;
+#[cfg(test)]
+mod live_tests;
 mod mux_name;
 mod overlay_keys;
 mod term;
@@ -496,25 +498,12 @@ impl LoopMode for LiveMode {
             }
             match snapshot {
                 Ok(snapshot) => {
-                    // Build the tree against `App`'s current
-                    // projection state (ADR 0085 contract 4). If
-                    // the operator changed view / grouping /
-                    // filter after the worker was spawned, the
-                    // fresh snapshot lands in the projection the
-                    // operator is actually looking at instead of
-                    // the stale config snapshot the worker
-                    // captured.
-                    let tree = crate::tui::rows::build_tree_for_view(
-                        crate::tui::rows::TreeInputs::from_app(&snapshot, app),
-                    );
-                    let handle = SnapshotHandle::new(snapshot);
-                    let initial_selection_hint = launch_context_row_id(&tree);
-                    app.update(Msg::SetData {
-                        snapshot: handle,
-                        tree,
-                        loaded_at_epoch: crate::discovery::current_epoch(),
-                        initial_selection_hint,
-                    });
+                    // If the operator changed view / grouping / filter
+                    // after the worker was spawned, the fresh snapshot
+                    // lands in the projection the operator is actually
+                    // looking at instead of the stale config snapshot
+                    // the worker captured.
+                    install_snapshot(app, snapshot);
                     let cfg_clone = app.config().clone();
                     populate_provider_status(app, &cfg_clone);
                 }
@@ -530,6 +519,10 @@ impl LoopMode for LiveMode {
             }
         }
         let _ = config;
+        // Between snapshots, live state comes from its store: one stat a
+        // tick, a re-read and re-bind when the store was rewritten, and
+        // once a second a check of the bound agents' processes.
+        app.poll_live(Instant::now(), crate::tui::rows::tree_current_unix_ms());
         // Timer-driven auto-refresh. Only fires when no request
         // is in-flight and at least `refresh_interval` has
         // elapsed.
@@ -818,8 +811,10 @@ impl LoopMode for StaticMode {
     fn drain(&mut self, app: &mut App, _config: &RunConfig) -> Result<()> {
         // Scenario mode has no async event sources: no discovery
         // worker to poll and no refresh timer to arm. A requested
-        // content search runs to completion here.
+        // content search runs to completion here, and the cursor's rest
+        // can see a finished turn, as in the live loop.
         content::run_blocking(app, None);
+        app.note_cursor_rest(Instant::now());
         Ok(())
     }
 
@@ -1008,7 +1003,8 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
     config.forge_fetch = crate::discovery::forge::ForgeFetch::CachedOnly;
     // Snapshot mode goes through a different entry point, so the
     // file only ever moves under interactive runs.
-    let app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
+    let mut app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
+    app.set_live_overlay(crate::tui::live_overlay::LiveOverlay::from_env());
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
     let (preview_tx, preview_rx) = mpsc::channel();
     let (confirmed_tx, confirmed_rx) = mpsc::channel();
@@ -1022,7 +1018,13 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         confirmed_tx,
         confirmed_rx,
         probe: Arc::new(handoff::TmuxIncarnation::default()),
-        discover: Arc::new(nudged_discovery),
+        discover: {
+            // Built once, so each poll remembers its last run across
+            // refreshes; only this worker's discovery runs them, never
+            // the UI thread or the overlay (ADR 0218).
+            let pollers = crate::discovery::live_poller::from_env();
+            Arc::new(move |config: &mut RunConfig, nudge| nudged_discovery(config, nudge, &pollers))
+        },
         workers: WorkerLedger::default(),
         last_refresh: Instant::now(),
         refresh_interval,
@@ -1062,17 +1064,7 @@ pub(in crate::tui) fn set_static_data(
     config: &RunConfig,
     snapshot: &crate::model::GraphSnapshot,
 ) {
-    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
-        snapshot, app,
-    ));
-    let handle = SnapshotHandle::new(snapshot.clone());
-    let initial_selection_hint = launch_context_row_id(&tree);
-    app.update(Msg::SetData {
-        snapshot: handle,
-        tree,
-        loaded_at_epoch: crate::discovery::current_epoch(),
-        initial_selection_hint,
-    });
+    install_snapshot(app, snapshot.clone());
     populate_provider_status(app, config);
 }
 
@@ -1151,8 +1143,13 @@ struct Discovered {
 
 /// Rescan what `nudge` names, through the daemon when there is one, and
 /// load a snapshot. A failed nudge leaves `config` asking for a local
-/// rebuild, so a later probe by the same worker skips the daemon too.
-fn nudged_discovery(config: &mut RunConfig, nudge: DaemonNudge) -> Discovered {
+/// rebuild, so a later probe by the same worker skips the daemon too. A
+/// local rebuild may run `pollers` (ADR 0218).
+fn nudged_discovery(
+    config: &mut RunConfig,
+    nudge: DaemonNudge,
+    pollers: &[Arc<crate::discovery::live_poller::LivePoller>],
+) -> Discovered {
     prepare_rescan(config, nudge);
     let warning = nudge_daemon(nudge.classes()).err();
     if warning.is_some() {
@@ -1160,7 +1157,7 @@ fn nudged_discovery(config: &mut RunConfig, nudge: DaemonNudge) -> Discovered {
         // operator still sees current state.
         config.refresh = true;
     }
-    match discover_and_resolve_sourced(config) {
+    match discover_and_resolve_sourced(config, pollers) {
         Ok((snapshot, from_daemon)) => Discovered {
             snapshot: Ok(snapshot),
             from_daemon,
@@ -1404,12 +1401,16 @@ pub(super) fn refresh_after_launch_with_spinner(terminal: &mut DefaultTerminal, 
 /// benefits from the freshest data. `RunConfig::refresh` collapses
 /// the prior to empty for a forced cold scan.
 pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::GraphSnapshot> {
-    discover_and_resolve_sourced(config).map(|(snapshot, _)| snapshot)
+    discover_and_resolve_sourced(config, &[]).map(|(snapshot, _)| snapshot)
 }
 
 /// [`discover_and_resolve`], also reporting whether the snapshot came
-/// from a running daemon.
-fn discover_and_resolve_sourced(config: &RunConfig) -> Result<(crate::model::GraphSnapshot, bool)> {
+/// from a running daemon. A local rebuild may run `pollers`, which only
+/// the background refresh worker passes.
+fn discover_and_resolve_sourced(
+    config: &RunConfig,
+    pollers: &[Arc<crate::discovery::live_poller::LivePoller>],
+) -> Result<(crate::model::GraphSnapshot, bool)> {
     if !config.refresh
         && let Some(snapshot) = try_daemon_snapshot()
     {
@@ -1426,7 +1427,8 @@ fn discover_and_resolve_sourced(config: &RunConfig) -> Result<(crate::model::Gra
     let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
         .with_caches(std::sync::Arc::clone(&config.discovery_caches))
         .with_forge_fetch(config.forge_fetch)
-        .with_forge_concurrency(config.forge_concurrency);
+        .with_forge_concurrency(config.forge_concurrency)
+        .with_live_pollers(pollers);
     let fresh_since = crate::discovery::current_epoch();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
@@ -2142,27 +2144,31 @@ fn apply_discovery(
     discovered: Result<crate::model::GraphSnapshot>,
 ) {
     match discovered {
-        Ok(snapshot) => {
-            // Build against `App`'s projection state (ADR 0085
-            // contract 4). This is a synchronous refresh so no App
-            // mutations landed between resolve and build, but
-            // reading from App keeps the shape symmetric with the
-            // async worker path above.
-            let tree = crate::tui::rows::build_tree_for_view(
-                crate::tui::rows::TreeInputs::from_app(&snapshot, app),
-            );
-            let handle = SnapshotHandle::new(snapshot);
-            let initial_selection_hint = launch_context_row_id(&tree);
-            app.update(Msg::SetData {
-                snapshot: handle,
-                tree,
-                loaded_at_epoch: crate::discovery::current_epoch(),
-                initial_selection_hint,
-            });
-        }
+        Ok(snapshot) => install_snapshot(app, snapshot),
         Err(err) => report_refresh_failure(app, &err),
     }
     populate_provider_status(app, config);
+}
+
+/// Put `snapshot` on screen in place of the one the app holds: bind the
+/// live overlay to it, build the active view's tree against the app's
+/// projection state (ADR 0085 contract 4), and send [`Msg::SetData`].
+/// Every new snapshot (a discovery worker's or a daemon's, `r`, a
+/// fixture, snapshot mode) arrives this way, so the overlay is never
+/// keyed to the nodes of the snapshot it replaced.
+fn install_snapshot(app: &mut App, snapshot: crate::model::GraphSnapshot) {
+    app.rebind_live(&snapshot, Instant::now());
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+        &snapshot, app,
+    ));
+    let handle = SnapshotHandle::new(snapshot);
+    let initial_selection_hint = launch_context_row_id(&tree);
+    app.update(Msg::SetData {
+        snapshot: handle,
+        tree,
+        loaded_at_epoch: crate::discovery::current_epoch(),
+        initial_selection_hint,
+    });
 }
 
 /// Mark the snapshot stale and log why (ADR 0105). The previous good
@@ -2237,18 +2243,7 @@ pub(super) fn refresh_from_snapshot(
     config: &RunConfig,
     snapshot: crate::model::GraphSnapshot,
 ) {
-    let resolved = resolve_snapshot(snapshot);
-    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
-        &resolved, app,
-    ));
-    let handle = SnapshotHandle::new(resolved);
-    let initial_selection_hint = launch_context_row_id(&tree);
-    app.update(Msg::SetData {
-        snapshot: handle,
-        tree,
-        loaded_at_epoch: crate::discovery::current_epoch(),
-        initial_selection_hint,
-    });
+    install_snapshot(app, resolve_snapshot(snapshot));
     populate_provider_status(app, config);
 }
 

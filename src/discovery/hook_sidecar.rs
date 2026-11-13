@@ -4,7 +4,7 @@
 //! current harness session and terminal context. This post-merge pass maps
 //! those records onto already-discovered `AgentSession` and `MuxSession` nodes.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use crate::hook::{self, HookRecord, HookTmuxRecord};
@@ -25,6 +25,30 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, now_epoch:
     apply_hook_records(snapshot, records, now_epoch);
 }
 
+/// A pane hook records are deduplicated by: the mux they matched and the
+/// pane they name, if any.
+type PaneKey = (MuxSessionId, Option<String>);
+
+/// The Active hook link that speaks for a pane.
+struct PaneWinner {
+    link_id: String,
+    observed_epoch: i64,
+    /// Already in the graph before this pass, as when a daemon ingests
+    /// one record into its live graph. A fresher record takes the pane
+    /// from it; a record from this pass never yields to a later one.
+    in_graph: bool,
+}
+
+/// Turn hook records into session ↔ mux links, one Active link per pane:
+/// the freshest record wins and older ones for the same pane are
+/// Overridden.
+///
+/// A discovery cycle runs this on a graph with no hook links, the pass
+/// having been evicted first. A daemon's ingest runs it on its live
+/// graph, whose Active hook links compete too: an ingested record that
+/// wins its pane overrides the older link and drops its process
+/// observation, as the next cycle would, so an ingest never leaves two
+/// Active hook links for one pane.
 pub fn apply_hook_records(
     snapshot: &mut GraphSnapshot,
     mut records: Vec<HookRecord>,
@@ -33,7 +57,8 @@ pub fn apply_hook_records(
     // Freshest first so the dedupe map keeps the winner per pane.
     records.sort_by_key(|record| std::cmp::Reverse(record.observed_epoch));
 
-    let mut winners: HashMap<(MuxSessionId, Option<String>), String> = HashMap::new();
+    let mut winners = graph_pane_winners(snapshot);
+    let mut superseded = false;
     let node_count_before = snapshot.nodes.len();
     let link_count_before = snapshot.candidate_links.len();
 
@@ -89,17 +114,30 @@ pub fn apply_hook_records(
             };
         } else {
             match winners.get(&pane_key) {
-                None => {
-                    winners.insert(pane_key, link.id.clone());
-                    demote_weaker_mux_links(snapshot, &link);
-                }
-                Some(winner_id) => {
+                // The same observation the graph already links.
+                Some(winner) if winner.link_id == link.id => {}
+                Some(winner)
+                    if !(winner.in_graph && record.observed_epoch >= winner.observed_epoch) =>
+                {
                     link.state = LinkState::Overridden {
-                        by: winner_id.clone(),
-                        reason: Some(
-                            "superseded by fresher hook sidecar record for same pane".to_string(),
-                        ),
+                        by: winner.link_id.clone(),
+                        reason: Some(SAME_PANE_REASON.to_string()),
                     };
+                }
+                previous => {
+                    if let Some(previous) = previous {
+                        supersede_graph_link(snapshot, &previous.link_id, &link.id);
+                        superseded = true;
+                    }
+                    winners.insert(
+                        pane_key,
+                        PaneWinner {
+                            link_id: link.id.clone(),
+                            observed_epoch: record.observed_epoch,
+                            in_graph: false,
+                        },
+                    );
+                    demote_weaker_mux_links(snapshot, &link);
                 }
             }
         }
@@ -121,11 +159,139 @@ pub fn apply_hook_records(
     // Stamp any nodes/links the hook-sidecar pass added with the
     // `hook_sidecar` provider; first-write-wins so prior entries (the
     // harness adapters' sessions, tmux's mux nodes, etc.) survive.
-    if snapshot.nodes.len() != node_count_before
+    if superseded
+        || snapshot.nodes.len() != node_count_before
         || snapshot.candidate_links.len() != link_count_before
     {
         crate::discovery::stamp_snapshot_mutations(snapshot, ADAPTER_NAME, now_epoch);
     }
+}
+
+const SAME_PANE_REASON: &str = "superseded by fresher hook sidecar record for same pane";
+
+/// The graph's Active hook links, one per pane: the freshest. Any other
+/// Active hook link for the same pane, which only a graph published
+/// before the ingest rule could hold, is overridden by it.
+fn graph_pane_winners(snapshot: &mut GraphSnapshot) -> HashMap<PaneKey, PaneWinner> {
+    let mut active: Vec<(PaneKey, String, i64)> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.relation == RelationKind::LinkedToMux
+                && link.source_metadata.adapter == ADAPTER_NAME
+                && matches!(link.state, LinkState::Active)
+        })
+        .filter_map(|link| {
+            let NodeId::MuxSession(mux) = link.target_node_id()? else {
+                return None;
+            };
+            let fields = &link.source_metadata.fields;
+            let observed_epoch = fields
+                .get("observed_epoch")
+                .and_then(serde_json::Value::as_i64)?;
+            let pane = fields
+                .get("tmux")
+                .and_then(|tmux| tmux.get("pane_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            Some(((mux.clone(), pane), link.id.clone(), observed_epoch))
+        })
+        .collect();
+    active.sort_by_key(|(_, _, observed_epoch)| std::cmp::Reverse(*observed_epoch));
+
+    let mut winners: HashMap<PaneKey, PaneWinner> = HashMap::new();
+    for (pane_key, link_id, observed_epoch) in active {
+        match winners.get(&pane_key) {
+            Some(winner) => {
+                let winner_id = winner.link_id.clone();
+                supersede_graph_link(snapshot, &link_id, &winner_id);
+            }
+            None => {
+                winners.insert(
+                    pane_key,
+                    PaneWinner {
+                        link_id,
+                        observed_epoch,
+                        in_graph: true,
+                    },
+                );
+            }
+        }
+    }
+    winners
+}
+
+/// Override the graph's hook link `link_id` by `winner_id`, a fresher
+/// record's link for the same pane, and drop the process observation it
+/// brought, which a cycle emits only for a pane's winner.
+fn supersede_graph_link(snapshot: &mut GraphSnapshot, link_id: &str, winner_id: &str) {
+    let Some(link) = snapshot
+        .candidate_links
+        .iter_mut()
+        .find(|link| link.id == link_id)
+    else {
+        return;
+    };
+    link.state = LinkState::Overridden {
+        by: winner_id.to_string(),
+        reason: Some(SAME_PANE_REASON.to_string()),
+    };
+    let session = link.source.clone();
+    let (Some(mux), Some(observed_epoch)) = (
+        link.target_node_id().cloned(),
+        link.source_metadata
+            .fields
+            .get("observed_epoch")
+            .and_then(serde_json::Value::as_i64),
+    ) else {
+        return;
+    };
+    drop_process_observation(snapshot, &mux, &session, observed_epoch);
+}
+
+/// Remove the `RuntimeProcess` node a hook record observed in `mux` for
+/// `session` at `observed_epoch`, with its two links.
+fn drop_process_observation(
+    snapshot: &mut GraphSnapshot,
+    mux: &NodeId,
+    session: &NodeId,
+    observed_epoch: i64,
+) {
+    let key_prefix = format!("hook_sidecar:{mux}:pid:");
+    let processes: BTreeSet<NodeId> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.relation == RelationKind::ProcessIdentifiesSession
+                && link.source_metadata.adapter == ADAPTER_NAME
+                && link.target_node_id() == Some(session)
+        })
+        .map(|link| link.source.clone())
+        .filter(|process| {
+            matches!(
+                snapshot.find_node(process),
+                Some(GraphNode::RuntimeProcess(node))
+                    if node.observation_key.starts_with(&key_prefix)
+                        && node.observed_epoch == Some(observed_epoch)
+            )
+        })
+        .collect();
+    if processes.is_empty() {
+        return;
+    }
+    snapshot
+        .nodes
+        .retain(|node| !processes.contains(&node.id()));
+    snapshot
+        .node_provenance
+        .retain(|id, _| !processes.contains(id));
+    snapshot.candidate_links.retain(|link| {
+        link.source_metadata.adapter != ADAPTER_NAME
+            || !(processes.contains(&link.source)
+                || link
+                    .target_node_id()
+                    .is_some_and(|target| processes.contains(target)))
+    });
 }
 
 /// Maps the mux's active pane command back to the harness key when the

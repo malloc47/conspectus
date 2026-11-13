@@ -6,7 +6,7 @@
 use super::*;
 
 /// The words the mixed views (Pinned, History) use for status.
-const STATUS_WORDS: [&str; 10] = [
+const STATUS_WORDS: [&str; 14] = [
     "live",
     "stopped",
     "removed",
@@ -17,6 +17,10 @@ const STATUS_WORDS: [&str; 10] = [
     "merged",
     "closed",
     "draft",
+    "waiting",
+    "working",
+    "ready",
+    "error",
 ];
 
 /// Whitespace-separated words of a line.
@@ -86,6 +90,10 @@ fn mixed_views_use_only_the_shared_status_vocabulary() {
         "draft",
         "merged",
         "closed",
+        "waiting",
+        "working",
+        "ready",
+        "error",
     ];
     for view in [View::Pinned, View::History] {
         let lines = lines_of(view);

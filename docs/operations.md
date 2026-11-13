@@ -19,6 +19,7 @@ never sets or modifies them.
 | `CONSPECTUS_DISABLE_TMUX`      | When set (any value), the tmux provider is skipped entirely. No `MuxSession` nodes appear.      |
 | `CONSPECTUS_DISABLE_FORGE`     | When set (any value), the GitHub forge provider is skipped. No `ForgePr` nodes appear.         |
 | `CONSPECTUS_DISABLE_PROCTREE`  | When set (any value), active-pane process-tree linking is skipped. Other tmux evidence still runs. |
+| `CONSPECTUS_DISABLE_PANE_TITLES` | When set (any value), the tmux probe leaves the panes' titles out of its listing, so Codex's title shows no live state (see [Codex's pane title](#codexs-pane-title)). |
 
 Use these in CI, automated tests, or shells where running `tmux
 list-sessions`, walking `/proc`, or running `gh pr list` is unwanted,
@@ -67,47 +68,61 @@ Hook sidecar records are optional, local observations written by
 harness hooks through `conspectus hook write`. They refine
 session-to-mux attribution when a harness can report the current
 session id without terminal input. Each observation lands in a
-minimal latest-only spool at `hooks-latest.json`, which every refresh
-replays. With `conspectus serve` running, the hook writer sends the
+minimal latest-only spool at `hooks-latest.json`, one record per tmux
+pane (so agents in split panes of one session keep their own), which
+every refresh replays. With `conspectus serve` running, the hook writer sends the
 observation to the daemon, which writes it to the spool and updates the
 graph at once; with no daemon, the hook writer writes the spool itself.
+It waits at most 2 seconds for the daemon to answer, so a stuck daemon
+delays a session start by that much, and then writes the spool itself.
 The spool lives under:
 
 1. `$CONSPECTUS_HOOK_SIDECAR_STATE`, when set.
 2. `$XDG_STATE_HOME/conspectus/hooks`.
 3. `$HOME/.local/state/conspectus/hooks`.
 
-The records are not project intent and should not be committed. Stale
-records are ignored for active mux attribution. Older per-event JSON
-records in the same directory remain readable as a compatibility path.
+The records are not project intent and should not be committed. A
+record counts for its pane until a newer one from that pane replaces it,
+however old it is; it is ignored once its agent process has exited, when
+its tmux session was created after it, or when the session's active
+pane now runs a different harness. The spool keeps at most 256 records, dropping the
+oldest. Older per-event JSON records in the same directory remain
+readable as a compatibility path.
 
 Install a harness hook automatically:
 
 ```sh
-conspectus hook init claude-code   # a SessionStart entry in ~/.claude/settings.json
-conspectus hook init codex         # a hook entry in ~/.codex/config.toml
+conspectus hook init claude-code   # 14 hook entries in ~/.claude/settings.json
+conspectus hook init codex         # 11 hook entries in ~/.codex/config.toml
 conspectus hook init pi            # <agent-dir>/extensions/conspectus-hook.ts
 ```
 
 `--scope project` installs into the current project instead
 (`.claude/`, `.codex/`, `.pi/extensions/`). The commands are idempotent.
-`conspectus hook status <harness>` reports whether the hook is present,
-and `conspectus hook remove <harness>` removes only what Conspectus
+A settings file that is a symlink, as a dotfile manager leaves it, is
+written through to its target and keeps its mode; a read-only one is
+refused.
+`conspectus hook status <harness>` reports whether the hook is present
+and ends with a [live-state health line](#live-state-health), and
+`conspectus hook remove <harness>` removes only what Conspectus
 installed. The opencode hook is a plugin; see
 [`plugins/opencode-hook/README.md`](../plugins/opencode-hook/README.md).
 
-Manual Claude Code hook setup:
+Manual Claude Code hook setup puts the same handler under each event
+listed in [Claude Code live state](#claude-code-live-state), with the
+matcher `hook init` uses where it uses one; for session start:
 
 ```json
 {
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "resume|startup|clear|compact",
+        "matcher": "startup|resume|clear|compact|fork",
         "hooks": [
           {
             "type": "command",
-            "command": "conspectus hook write claude-code"
+            "command": "conspectus hook write claude-code",
+            "timeout": 5
           }
         ]
       }
@@ -118,19 +133,771 @@ Manual Claude Code hook setup:
 
 Place that in `~/.claude/settings.json` or a local Claude Code
 settings file. The subcommand reads Claude's hook JSON from stdin,
-records `session_id`, `transcript_path`, `cwd`, and tmux context when
-available, then exits without writing to the transcript.
+records `session_id`, `transcript_path`, `cwd`, and the tmux session
+and pane the hook runs in (`TMUX_PANE`'s) when available, then exits
+without writing to the transcript. Only a session
+start also writes the attribution record.
+
+`hook write` never disturbs the harness that runs it. It prints nothing
+on stdout or stderr and exits 0 even when the payload is empty or
+unreadable, the harness name is unknown, tmux is missing, or a store
+can't be written, so a broken hook shows up as missing attribution, not
+as an error in the harness. Only a malformed command line (no harness
+name, an unknown flag) prints a usage message and exits 2, which Claude
+Code treats as a block; `hook init` always installs a well-formed one.
+To check a hook by hand, pipe a payload in and look for the records:
+
+```sh
+echo '{"session_id":"test","cwd":"/tmp","hook_event_name":"SessionStart"}' |
+  conspectus hook write claude-code --state-root /tmp/hook-check
+ls /tmp/hook-check   # hooks-latest.json, live-state.json, and its lock
+```
+
+`--state-root PATH` writes both files under `PATH` and never asks the
+daemon.
 
 Pi has no hook settings, so its hook is a TypeScript extension that
 `hook init pi` writes as one file (ADR 0121). Restart Pi or run
 `/reload` to load it; Pi asks you to trust a project before it loads
 project extensions. The extension reports each interactive session
-start, including `/new`, `/resume`, `/fork`, and `/clone`, through
+start, including `/new`, `/resume`, `/fork`, and `/clone`, and what the
+session is doing (see [Pi live state](#pi-live-state)) through
 `conspectus hook write pi`, and skips `--no-session` runs and Pi's
 print, JSON, and RPC modes. Besides `installed` and `not-installed`,
 `hook status pi` reports `outdated` (an older copy) and `foreign` (a
 file at that path Conspectus didn't write, which `init` and `remove`
 leave alone). See [`plugins/pi-hook/README.md`](../plugins/pi-hook/README.md).
+
+## Live agent state
+
+Live state says what each running agent is doing now, in three buckets:
+
+- **Waiting on you**: a permission prompt, a question, a plan to approve,
+  or other input the agent asked for.
+- **Ready for a prompt**: the turn is over.
+- **Working**: the model is generating, a tool is running, a request is
+  being retried, or the context is being compacted.
+
+The same hooks and plugins that say which session runs in which pane
+([Hook sidecar state](#hook-sidecar-state)) report it, so it is opt-in: a
+harness reports nothing until you turn it on, and a session without live
+state is one Conspectus has no evidence about, not an idle one. One
+source needs no hook: the title Codex sets on its tmux pane, which shows
+when it waits on you and when it works
+([Codex's pane title](#codexs-pane-title)). Another repairs what Claude
+Code's hooks miss: when they go quiet on a session that works or waits,
+Conspectus asks Claude Code's own list of its sessions
+([Claude Code's agent list](#claude-codes-agent-list)).
+Conspectus only watches. It never answers a prompt or types into an
+agent's pane; to act on a waiting agent, attach to its mux as usual.
+
+Live state shows in the TUI (a mark after the age on session and mux
+rows, a count of waiting agents on group headers and in the header line,
+a word on pinned sessions, and fields in the detail pane; see
+[Live state in the TUI](#live-state-in-the-tui)), in `conspectus table`,
+`conspectus node show`, and the graph JSON.
+
+### Turning live state on
+
+| Harness | Turn it on | Then |
+| --- | --- | --- |
+| Claude Code | `conspectus hook init claude-code` | Restart agents that were already running. Hooks run in a folder only once you accept Claude Code's workspace trust dialog there. |
+| Codex | `conspectus hook init codex` | Open `/hooks` in Codex and trust the Conspectus entries, and again after any `hook init` that changed them. Restart agents that were already running. |
+| opencode | Build the plugin, version 0.3.0 or later, from the checkout your `conspectus` came from: `npm install && npm run build` in `plugins/opencode-hook` | Restart opencode. On 2.x, list `dist/v2` in `opencode.jsonc` and restart `opencode serve --service` too (see [OpenCode live state](#opencode-live-state)). |
+| Pi | `conspectus hook init pi` | Restart Pi or run `/reload`. Waiting needs Pi 0.84.4 or later; 1.1.0 or later is recommended. |
+
+`--scope project` installs for the current project only (`.claude/`,
+`.codex/`, `.pi/extensions/`), and `hook status` checks the scope you
+name. After upgrading Conspectus, run the same command again: `hook init`
+brings an older install up to date in place and otherwise changes
+nothing. For opencode, rebuild the plugin with every new `conspectus`,
+since an older binary treats each report as an attribution record, and
+an older plugin reports less. Nothing in this repository's CI builds the
+plugins, so check a build with `npm run typecheck` (after `npm install`)
+in `plugins/opencode-hook`. For Pi, `hook status pi` says `outdated` for
+an older extension; one older than version 2 reports which session a
+pane runs but no live state.
+
+Then run `conspectus hook status <harness>` and read its last line
+([Live-state health](#live-state-health)): `receiving` once an agent has
+done something.
+
+### What each state means
+
+| Bucket | State | Detail | Meaning |
+| --- | --- | --- | --- |
+| Waiting on you | `waiting` | `permission`, `question`, `plan`, `input` | Blocked on you: a permission prompt, a question, a plan to approve, or other input, such as a form a tool asks you to fill in. |
+| Ready for a prompt | `ready` | `finished`, `interrupted`, none | The turn ended, by itself or by an interrupt. No detail means a session with no turn yet, or one the harness called idle without saying how its turn ended. |
+| Working | `working` | `generating`, `tool`, `retrying`, `rate_limited` | A turn runs: the model generates, a tool runs, a request is retried, or a retry waits out a rate limit. |
+| Working | `compacting` | none | The harness is compacting the context. |
+| Other | `error` | `rate_limited`, `auth`, `overloaded`, `failed` | The turn ended on an error: a rate limit, a sign-in or credential problem, an overloaded provider, or anything else. The agent takes a prompt again. |
+| Other | `exited` | `ended`, `killed` | The session is over. `ended`: it quit, or its process moved to a new session (`/clear`, `/new`, a resume). `killed`: its process is gone without a word, or its pid now belongs to another process. |
+| Other | `unknown` | `stale`, none | No usable evidence. `stale`: the process can't be checked and nothing has arrived for fifteen minutes. No detail: the source knows the session but not its state. |
+| Other | `starting` | none | The process is up and has said nothing more. No current hook reports it. |
+
+Around the state:
+
+- **`+N`**: how many subagents run: Claude Code's and Codex's
+  subagents, opencode's child sessions, or Pi's subagent tool calls.
+- **Via a subagent** (`via_subagent` in JSON): the wait is a child
+  agent's, shown on its root session.
+- **Since**: when the state began. A wait shows when the wait began; when
+  it ends, the session shows its own state again with the start it had,
+  so a turn does not look new because a dialog came and went.
+- **Quiet**: see below.
+
+### How a state ages
+
+A recorded state is read against the clock and the agent's process each
+time you look:
+
+- **A gone process wins.** When the agent's process has exited, or its
+  pid now belongs to another process, the session reads `exited:killed`,
+  whatever it said last.
+- **Waiting, ready, and error do not age** while the process runs. A
+  prompt you leave for hours still reads `waiting`.
+- **Working never turns into ready; it turns quiet.** A working or
+  compacting session that has said nothing for a while is marked `quiet`:
+  as far as anyone knows it is still at work (a forty-minute build is real
+  work), but there is no news. The window is ten minutes for Claude Code
+  and Codex, whose hooks speak only when something happens, and three
+  missed reports (three minutes) for opencode and Pi, whose plugins repeat
+  theirs every minute while a session is busy.
+- **The 15-minute rule.** When the process can't be checked (no pid was
+  recorded, or the system has no `/proc`), every state but `exited` reads
+  `unknown:stale` once nothing has arrived for fifteen minutes.
+- **No entry is no evidence.** A session without live state shows `—`
+  in `conspectus table` and `·` in the TUI, never `ready`.
+
+Every window counts from the latest event, so a repeated report keeps a
+state fresh. A recorded `exited` stays as it is.
+
+### Live state in the TUI
+
+Every session row and mux row has one cell right after its age that says
+what the agent is doing, in every view that lists them (Sessions, the
+agents under a mux or a PR, and Search). It is always filled, and each
+state has its own shape, so it reads without color:
+
+| Mark | Means | Color |
+| --- | --- | --- |
+| `!` | Waiting on you: a permission prompt, a question, a plan, other input | yellow |
+| `»` | Working, compacting, or starting | green |
+| `›` | Ready for a prompt: the turn is over | green |
+| `×` | The turn ended on an error | red |
+| `?` | Can't tell: a process that can't be checked has said nothing for fifteen minutes | dim |
+| `·` | No live state: the harness's hooks are off, or the session has ended | dim |
+
+- **Quiet** work (no news past the quiet window) draws the same `»`
+  dimmed.
+- **Unseen** finished turns draw the same `›` bold, until you have looked
+  at them; then it is plain. For an agent in a mux, looking is attaching
+  a tmux client to that mux after the turn ended, through Conspectus or
+  not (the mark turns plain at the refresh that lists the attach). For a
+  session with no mux, it is resting the cursor on one of its rows, in
+  any view, for a second; scrolling past does not count. A turn you have
+  seen stays seen until the agent finishes another, but only in this
+  TUI: nothing is written, so after a restart the finished turns of
+  sessions with no mux read unseen again. A mux's `›` is bold while any
+  of its ready agents' turns is unseen, and the detail pane's `state`
+  says `unseen` or `seen`. On the cursor row, which is bold anyway, only
+  the detail pane tells them apart.
+- **A mux** shows the state of its agents that needs you first: waiting,
+  then error, then ready, then working, then the rest. Under a mux with
+  several agents, each agent's row shows its own mark.
+- **Group headers** count the agents beneath them that wait on you, as
+  `! 2` after the `(N)` session count, each agent once however many rows
+  list it. In the Mux view a header counts every agent of its muxes,
+  listed as a row or not, so it can show `! 1` with no `(N)`. Pinned and
+  History buckets show no counts.
+- **The header line** shows the same `! 2` when agents anywhere wait on
+  you: every session and every pane-only agent, whatever the view lists
+  or the filter hides, so one glance says whether anything needs you. It
+  sits before `▲ N`, and on a narrow screen it outlasts `▲ N` and the
+  stopped count.
+- **Subagents** show as a dim `+N` right after a session's label while
+  its agent runs any (`+9+` for ten or more), on every session row,
+  nested ones included, but not on mux rows. A session that has exited
+  or can't be told shows none, as in `conspectus table`. A wait raised by
+  a subagent reads `!` on its root session.
+- **Pinned** spells it as a word: a pinned session (or one listed under a
+  pinned mux) whose agent is waiting, working, ready, or failed reads
+  `waiting`, `working`, `ready`, or `error` instead of `in mux` or
+  `resumable`. Can't-tell, ended, and no-state sessions keep `in mux` or
+  `resumable`, and the detail pane still says which mux a session runs
+  in.
+- **The detail pane** spells it out. A session with live state lists,
+  after `status`: `state`, its row's mark and then the state and detail
+  in words (`! waiting · permission`, `› ready · finished · unseen`, `?
+  unknown · stale`); `since`, when that state began (`5m ago`); `source`, what
+  reported it (`hook`, or `pane_title` for [Codex's pane
+  title](#codexs-pane-title)); `evidence`, `fresh`, `quiet`, or `stale`, the
+  last two dimmed along with the state's words; and `subagents` (`2
+  active`) while the row shows `+N`. A mux lists `agents`, its mark and
+  its agents' counts, most urgent first (`! 1 waiting · 2 working`), and
+  `pane_agents`, the agents in its panes that no session matches yet
+  (`%3 working · generating`). Moving the cursor onto a field previews
+  what its words mean. A node without live state lists none of them.
+  The fields change with the row's mark.
+- **Nothing animates.** The spinner still means a refresh is pending, and
+  takes the link cell, not the live mark, which keeps its value until the
+  agent reports again.
+- **Waiting first.** Controls (`f`) has **Float waiting sessions to top**
+  in the Sessions view and **Float waiting muxes to top** in the Mux view,
+  both off by default. With it on, the sessions marked `!` sort above the
+  rest of their group (and of the flat list), and the running muxes marked
+  `!` above the other running muxes, each part keeping its order. It
+  comes before the view's other float when both are on.
+- **Only one state.** Controls' **agent state** row, after `mux state`,
+  steps `any`, `waiting`, `ready`, `working`, `error`: anything but `any`
+  lists only the sessions in that state, and the running muxes with an
+  agent in it (any agent the mux's mark counts, a pane's included), as
+  `agent:ready` in the status bar with `matching/total sessions` in the header. `F` or
+  **Clear all filters** turns it and the float off. Pinned and History
+  ignore it, as they do every filter. A ready turn is `ready` whether or
+  not you have seen it.
+- **Rows keep still between your actions.** The float and the filter read
+  each agent's state when the list is built: when you change a Controls
+  row, the view, its grouping, or the sort, press `r`, or a new snapshot
+  arrives. In between, a mark changes as soon as the agent reports, but
+  no row moves or leaves: a session whose wait you just answered stays
+  where the float put it, and stays listed under `agent:waiting`, until
+  the list is built again. The cursor stays on its row either way.
+- The colors are the theme's `warning`, `info`, `success`, and `error`
+  colors and its `muted` look, which
+  [`[tui.theme]`](#tuitheme--palette-overrides-adr-0032-adr-0153) sets.
+  `info` and `success` are both green by default; set `info` to tell
+  working from ready by color too (it also colors Info messages).
+- `?` in the TUI lists the marks under "Agent state".
+
+A `·` on every row means no harness reports live state yet: turn it on as
+in [Turning live state on](#turning-live-state-on). The TUI picks up a new
+state within about a second, with or without `conspectus serve`.
+
+### Finding what waits
+
+- **`! N` in the header** says how many agents wait on you anywhere; a
+  group header's `! N` says how many wait beneath it.
+- **`W` goes to the one that has waited longest**, from any view and
+  either pane, and each press goes on to the next, longest wait first,
+  back to the first after the last. It lands on the session's row in the
+  view you are in, opening the groups above it: a session row, a pin on
+  it, or, in the Mux view, its mux's row when the mux shows its only
+  agent inline. An agent in a pane no session matches yet is reached on
+  its mux's row. When your view does not list the session (Pinned without
+  a pin on it, History, a filter that hides it), `W` switches to Sessions
+  (to Mux for a pane's agent) and the status line says so; `Backspace`
+  goes back. The status line says which it reached (`2 of 4 waiting,
+  since 1h ago`); with nothing waiting, or every waiting session hidden
+  by the views' filters, it says so and the cursor stays. Then `Enter` or
+  `a` attaches as usual. The status bar shows `W next waiting` while
+  anything waits.
+- **Controls** floats the waiting sessions (or muxes) to the top of
+  their groups, or lists only one state: see the bullets above.
+- **From a shell,** `conspectus table sessions --state waiting --columns
+  +live` lists them with their wait (`waiting:permission 12m`).
+
+### Where live state shows
+
+An entry describes one session. It shows on the session Conspectus
+discovered for it or, when there is none yet (a new session with no
+transcript), on the tmux pane it runs in, counted on that pane's mux. An
+entry that matches neither shows nowhere, and live state never adds a
+session.
+
+- **`conspectus table sessions --columns +live`** and **`conspectus table
+  mux --columns +live`** add a `live` column: see
+  [Live state columns](#live-state-columns).
+- **`conspectus node show <id>`** prints a `live state` section for a
+  session: the state and detail, `via: a subagent` when a child agent
+  raised it, the recorded state when the rules above replaced it
+  (`recorded: working:tool` under `state: exited`), when it began
+  (`since`, UTC) and how long ago (`age`), the last event, the confidence
+  (`fresh`, `quiet`, or `stale`), running subagents, the source, and the
+  process with whether it ran when last checked. A mux gets its counts
+  per state and, for each of its panes whose agent no session matches
+  yet, that agent's fields. A node without live state has no section.
+- **`conspectus graph --format json`** lists the bound entries under
+  `node_live`, one per session, and `pane_live`, one per pane whose agent
+  no session matches yet (with the mux's `node_id` and a `pane` such as
+  `%2`). Each holds the state as recorded and `liveness` (`alive`,
+  `dead`, or `unknown`) from the process check made when it was bound, so
+  a script applies the rules above itself, as `table` and `node show` do:
+
+  ```json
+  "node_live": [
+    {
+      "node_id": { "type": "agent_session", "harness_key": "codex",
+                   "state_scope": "/home/me/.codex", "session_key": "session-a" },
+      "state": "waiting", "detail": "permission", "subagents": 1,
+      "since_ms": 1790768940000, "observed_ms": 1790769000000,
+      "source": "hook", "pid": 4242, "pid_start": 123456, "liveness": "alive"
+    }
+  ]
+  ```
+
+  A field at its default is left out: no `detail`, no `subagents`, no
+  `pid`, `via_subagent` false, `heartbeat_s` (seconds between a plugin's
+  repeated reports) 0. Each list is left out when it is empty. `source`
+  is `hook`, `pane_title` for a state read from
+  [Codex's pane title](#codexs-pane-title), or `harness_poll` for one
+  read from [Claude Code's agent list](#claude-codes-agent-list).
+- **`conspectus hook status <harness>`** ends with the
+  [health line](#live-state-health).
+- **`--state STATE`** on `conspectus table`, `conspectus tui`, and
+  `conspectus search` keeps only the sessions whose agent is in one of
+  the states, read when the command runs: `waiting`, `ready`, `working`
+  (compacting and starting too), `error`, `unknown` (evidence too old to
+  trust), or `none` (no live state, or ended). Comma-separated or
+  repeated: `conspectus table sessions --state waiting,error`. A mux
+  row of `table mux` stays when an agent it hosts matches, and lists only
+  those agents. `[tui.views.<name>.filters]` takes `state = ["waiting"]`
+  for the TUI.
+
+With `conspectus serve` running, these commands read its snapshot, which
+binds the store again every few seconds; `--refresh` binds the store as
+it is now.
+
+### Known gaps
+
+Hooks report what the harness tells them, and every harness leaves gaps:
+
+| Gap | Where | What you see | What repairs it |
+| --- | --- | --- | --- |
+| An Esc interrupt fires no stop event | Claude Code | `working`, then quiet after ten minutes | The next turn event: your next prompt, or Claude Code's idle notification; with `conspectus serve` or a TUI running, [Claude Code's agent list](#claude-codes-agent-list) within about a minute |
+| Approving a prompt fires nothing until the approved tool ends | Claude Code, Codex | `waiting` through the whole of a long approved tool | The next tool event, when that tool ends; for Claude Code, its agent list within about a minute; for Codex, its pane title within two probes |
+| A killed process says nothing | Every harness | The last state, until the next process check | The process check: `exited:killed` at the next discovery (every few seconds with `conspectus serve`) |
+| Hooks do nothing until trusted | Claude Code (the workspace trust dialog; also `disableAllHooks`, `--bare`, managed hooks only), Codex (`/hooks`) | No live state; `hook status` says `silent` while the agent runs (Codex still shows waiting and working from its pane title) | Trust the hooks (or turn them back on), then restart the agent |
+| Waiting covers only extension dialogs | Pi | Pi's own pickers, a provider login, and the project trust prompt never read `waiting` | Nothing: Pi tells extensions nothing about them |
+| Older harness versions | opencode 1.x, Pi before 0.84.4 | An interrupted opencode 1.x turn reads `ready:finished`; a Pi session never reads `waiting` | Upgrading the harness |
+
+Each harness's own gaps are in its section below.
+
+### Claude Code live state
+
+`hook init claude-code` installs one entry for each Claude Code hook
+event that says whether a session is working, waiting for you, or ready:
+`SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `PreToolUse`
+(only `AskUserQuestion` and `ExitPlanMode`), `PostToolUse`,
+`PostToolUseFailure`, `Notification` (only the dialog, idle, and
+usage-limit types), `SubagentStart`, `SubagentStop`, `Stop`,
+`StopFailure`, `PreCompact`, `PostCompact`, and `SessionEnd`, each with a
+5 s timeout. An older install that covered only session start is
+upgraded in place when you run `conspectus hook init claude-code` again;
+nothing changes until you do. `--command` sets the command every
+Conspectus entry runs.
+
+The install edits `settings.json` in place: it adds or changes only
+Conspectus's entries, in the file's own indentation and line ending, and
+leaves every other byte as you wrote it, your key order and your own
+hook groups included, so a dotfiles diff shows only the new entries.
+`hook remove claude-code` cuts out exactly what the install added and
+gives back the file you had. A file that isn't plain JSON (a comment, a
+trailing comma) is refused rather than rewritten, as is one that names
+the same key twice in an object the install has to change.
+
+`conspectus hook status claude-code` prints `installed`, `partial`, or
+`not-installed` for the file, then one line per event (`installed`,
+`outdated`, or `missing`, followed by the event name), and says on
+stderr how to complete a partial install. `hook remove claude-code`
+takes out every Conspectus entry and nothing else.
+
+Each event updates the session's entry in the
+[store](#the-live-state-store), and a subagent's events count on its
+parent's session. Beyond the [known gaps](#known-gaps):
+
+- Denying a permission prompt reads `waiting` until the next prompt.
+- A `Stop` that another hook blocks reads `ready` while the continuation
+  that hook forces runs.
+- An interrupted turn and an answered approval, which fire no hook, are
+  read from [Claude Code's agent list](#claude-codes-agent-list) once the
+  hooks have been quiet for ten seconds, while `conspectus serve` or a TUI
+  runs.
+
+### Claude Code's agent list
+
+Claude Code's hooks miss two moments: an Esc interrupt fires no event, so
+the turn reads `working` until your next prompt, and approving a
+permission prompt fires none until the approved tool ends, so the session
+reads `waiting` meanwhile. Claude Code also lists its own sessions with
+their status, `claude agents --json`, and Conspectus asks it, only to
+repair those two:
+
+- **When.** A Claude Code session's hooks last said `working` or
+  `waiting`, ten seconds have passed with no event, and no earlier call
+  has already answered it; at most one call every 30 s. Only
+  `conspectus serve` and a TUI with no daemon (at its refresh, in the
+  background) make the call. A one-shot command such as `conspectus
+  table` never does, but shows a running daemon's answer. Nothing runs
+  while every Claude Code session is ready or keeps reporting.
+- **What it reads.** Each session's status: busy reads `working`, waiting
+  reads `waiting` (detail `permission` for a permission prompt or a
+  sandbox request, `input` for anything else), idle reads `ready` with no
+  detail, since the list cannot say whether the turn finished or was
+  interrupted. A background session's state reads `working`, `waiting`,
+  `ready` (`finished`), `error`, or `exited`. Anything else says nothing.
+- **How it combines with the hooks.** A session reads what the list says,
+  with `source` `harness_poll`, when the list says something other than
+  the hooks did and the call came at least ten seconds after their last
+  event. The next hook event, such as your next prompt, takes over again
+  at once. A hook's `ready`, `error`, `compacting`, and `exited` never
+  change on the list's account, and a session with no hook entry gets
+  nothing from it: install the hooks for that.
+- **What it costs.** About half a second of one CPU per call. While an
+  agent works through a long tool or waits on you, that is one call every
+  30 s; an interrupted session left idle costs one call.
+- **What it keeps.** Each listed session's pid, session id, and status,
+  read in memory as the output arrives. Its name (which can be a title
+  made from your prompt), its directory, and every other field are
+  dropped there, and nothing it prints on stderr is read. Nothing is
+  written: the [store](#the-live-state-store) keeps what the hooks said.
+  Conspectus runs it with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
+  so the call reaches no network, and kills it after 3 s.
+- **Turning it off.** Set `CONSPECTUS_DISABLE_LIVE_POLL` where
+  `conspectus serve` or the TUI starts.
+
+What it cannot see:
+
+- **Anything without `claude`** on the `PATH` the daemon or the TUI
+  started with, or with `CLAUDE_CODE_DISABLE_AGENT_VIEW` set: the call
+  fails and nothing changes.
+- **A session whose hooks recorded another process** than the one Claude
+  Code lists (the pid each records), unless both name the same session
+  id.
+- **A session with no hooks**, as above.
+
+The fields come from Claude Code's documentation; a recording of a real
+session has not checked them yet.
+
+### Codex live state
+
+`hook init codex` installs one entry for each Codex hook event that says
+whether a session is working, waiting for you, or ready:
+`SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`,
+`Stop`, `Interrupt`, `SessionEnd`, `SubagentStart`, `SubagentStop`,
+`PreCompact`, and `PostCompact`, each its own group with no matcher and a
+5 s timeout:
+
+```toml
+[[hooks.Stop]]
+hooks = [{ type = "command", command = "conspectus hook write codex", timeout = 5 }]
+```
+
+Recent Codex versions skip a hook they don't manage until you trust it, so
+after `conspectus hook init codex`, open `/hooks` in Codex and review the
+Conspectus entries. Do it again after any `hook init` that changed them:
+the trust Codex records covers each entry's command, matcher, and timeout,
+and its place in the list. Conspectus never writes that trust itself, and never touches
+`hooks.state` (where Codex keeps it) or `notify`.
+
+The install edits `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`)
+in place: comments, layout, and your own hooks stay as they were, in
+whichever form you wrote them (`[[hooks.<Event>]]` tables, lists under
+`[hooks]` or in dotted keys, or an inline `hooks = { ... }`). Conspectus's
+groups go after yours, so an install never moves one of your entries. An
+older session-start-only install is upgraded in place when you run
+`conspectus hook init codex` again; nothing changes until you do. A
+`hooks` value or event list of the wrong type stops the install with an
+error instead of being replaced. If a `hooks.json` sits beside
+`config.toml`, Codex reads both; `hook init` says so, installs in
+`config.toml` anyway, and never edits `hooks.json`.
+
+`conspectus hook status codex` prints `installed`, `partial`, or
+`not-installed` for the file and one line per event, as for Claude Code.
+`hook remove codex` takes out every Conspectus entry and nothing else,
+wherever it sits; when that moves one of your entries up a place, it
+warns that Codex may ask you to review that entry again.
+
+Events update the session's entry as for Claude Code, and a subagent's
+events count on its parent's session. Beyond the
+[known gaps](#known-gaps):
+
+- Declining a prompt reads `waiting` until a later tool, the end of the
+  turn, or an interrupt.
+- MCP elicitations and sign-in prompts fire no hook, so a session waiting
+  on one reads `working` until it goes quiet after ten minutes; then its
+  [pane title](#codexs-pane-title) says `waiting`, if the pane is a
+  session's active pane.
+- A turn that ends in plan mode reads `ready`, whether or not it proposed
+  a plan you still have to accept.
+- With hooks turned off or managed hooks only, the hooks report nothing,
+  as before you trust them.
+- A wait the hooks reported clears within two of the mux probe's rounds
+  (about ten seconds with `conspectus serve`) of your answering it, from
+  the pane title, instead of when the approved tool ends.
+
+### Codex's pane title
+
+Codex writes its own state into its terminal's title, which tmux keeps as
+the pane's title: a spinner frame (`⠋`, `⠙`, …) while it works, and
+`[ ! ] Action Required` (blinking with `[ . ] Action Required`) while it
+needs you. The tmux probe Conspectus already runs asks for the title of
+each session's active pane in the same call, and for a pane whose program
+is `codex`, reads it as live state:
+
+| Title begins with | Live state |
+| --- | --- |
+| `[ ! ] Action Required` or `[ . ] Action Required` | `waiting`, detail `input`: the title cannot say whether it is a permission, a question, or other input |
+| a spinner frame | `working` |
+| anything else | nothing: an idle title is also what Codex shows while it starts, and while it works with its animations off |
+
+A `● ` before either (Codex's microphone) counts too. So a Codex whose
+hooks are untrusted, not installed, or turned off still shows `!` while it
+waits on you and `»` while it works, with `source` `pane_title` in the
+detail pane, `node show`, and the graph JSON. A pane's title state has no
+session: it shows on the mux's row and counts in the mux's, the group
+headers', and the header line's `! N`, and `W` reaches it on the mux row.
+It has no process to check either, so it reads `unknown` after fifteen
+minutes without a probe. `hook status codex` adds `1 agent shown from its
+pane title` to its last line while the saved graph shows one.
+
+With hooks reporting, the title only fills in:
+
+- **A fresh hook report wins.** A recent event, or a wait, a finished
+  turn, or an error the agent is still in, is what the session shows,
+  whatever the title says.
+- **The title replaces a stale or quiet one**: work with no event for ten
+  minutes, or a process that can't be checked and has been silent for
+  fifteen, reads what the title says when it says `waiting` or `working`.
+- **An answered approval clears.** Codex sends no event when you answer an
+  approval, so a hook's `waiting` would last until the approved tool ends.
+  Once the title has shown no `Action Required` on two probes in a row,
+  both after the wait began, the session reads `working` instead.
+- A hook's `ready`, `error`, `compacting`, and `exited` never change on
+  the title's account, and the title never names a session the hooks did
+  not.
+
+It updates as often as the mux probe runs: every few seconds with
+`conspectus serve`, at each refresh of a TUI without one, once per
+one-shot command. A one-shot command sees one probe, so it never clears a
+hook's wait from the title. The TUI does not ask tmux any more often
+than that.
+
+Only Codex's titles are read, and only the start of each: the rest of
+the title is the thread's name and the project's, which can hold words
+you typed, and Conspectus keeps none of it. It reads the title, keeps
+which of the three it was, and drops the text; the title appears in no
+file, output, log, or error. Set `CONSPECTUS_DISABLE_PANE_TITLES` to stop
+reading titles at all.
+
+What the title cannot see:
+
+- **Another pane.** Only a session's active pane is read; a Codex in
+  another pane of a split window, or in a window that is not current,
+  shows only what its hooks report.
+- **A Codex the pane does not report as `codex`**, such as one started
+  through `node` from an npm install.
+- **A title Codex does not write**: a `tui.terminal_title` without the
+  activity item or set to `null`, or tmux's `allow-set-title off`. With
+  Codex's animations off, a working Codex shows no spinner, so its title
+  says nothing until it waits.
+- **A thread named like the marker**: a thread whose name starts with
+  `[ ! ] Action Required` or a spinner frame reads that way while idle.
+- **Claude Code**, which writes a status glyph into its title too, but in
+  a vocabulary Conspectus has not recorded yet; its titles are not read.
+
+### OpenCode live state
+
+The opencode plugin (`plugins/opencode-hook`, 0.3.0 or later) reports
+what each session is doing: working (generating, retrying, rate
+limited), waiting for a permission, a question, or other input, ready,
+compacting, failed, and how many subagents it runs. It works on opencode
+1.x and 2.x. There is no `hook init opencode`: rebuild the plugin from
+the same checkout as your `conspectus` (`npm install && npm run build` in
+`plugins/opencode-hook`), since an older binary treats every report as an
+attribution record, then restart opencode.
+
+- **1.x**: the existing install (`opencode plugin <path>`) is enough;
+  the plugin runs in each TUI.
+- **2.x**: list `dist/v2` in `opencode.jsonc` as `{"package":
+  "<checkout>/plugins/opencode-hook/dist/v2"}` instead of in `cli.json`,
+  and restart the `opencode serve --service` process too. That loads the
+  plugin's server entrypoint in the shared service, which sees every
+  session, as well as its TUI entrypoint in each client. Listed only in
+  `cli.json`, the plugin still says which session each pane shows but
+  reports no live state.
+
+See [`plugins/opencode-hook/README.md`](../plugins/opencode-hook/README.md)
+for the details. The plugin sends a session's whole state whenever it
+changes and every minute while the session is not ready; each report
+replaces the session's entry in the store. A subagent's permission or
+question also shows on its root session, and only a root session's
+lifecycle events still go to attribution, so a pane no longer names a
+running subagent. Beyond the [known gaps](#known-gaps):
+
+- opencode 1.x publishes nothing for an Esc interrupt, so the turn reads
+  `ready` (finished), not interrupted; 2.x says which. Not every 1.x
+  failure publishes an error either, so a failed 1.x turn may read
+  `ready`.
+- On 2.x the process Conspectus checks is the shared service's, so
+  closing a client leaves its sessions as the service runs them.
+- When opencode reloads the plugin without restarting (1.x instance
+  disposal, a 2.x plugin unload), sessions still working or waiting read
+  `exited` until their next event.
+- `hook status` does not cover opencode yet; check with `conspectus table
+  sessions --columns +live`.
+
+### Pi live state
+
+The Pi extension (version 2, which `conspectus hook init pi` installs)
+reports what its session is doing: working (generating, running a tool,
+retrying, rate limited), waiting for you, ready (finished or
+interrupted), compacting, failed (rate limited, auth, overloaded, or
+otherwise), ended, and how many subagent tool calls run. An older copy
+reports only which session a pane runs; re-run `conspectus hook init pi`
+to upgrade it, then restart Pi or run `/reload`. `hook status pi` says
+when the installed copy is older, and that waiting needs Pi 0.84.4 or
+later (1.1.0 or later is recommended).
+
+The extension keeps the session's state inside Pi and sends all of it
+when what the session shows changes, and every minute while it is not
+ready; each report replaces the session's entry in the store. A change
+between working sub-states waits half a second, so a burst of tool calls
+costs one report. The report carries Pi's own pid, which Conspectus uses
+instead of looking for a process named `pi`, for live state and for pane
+attribution. The extension sorts an error into rate limited, auth,
+overloaded, or failed itself, and sends only the class. Beyond the
+[known gaps](#known-gaps):
+
+- Pi asks for nothing on its own: it has no approval prompt, so
+  `waiting` means a dialog an extension opened (a permission gate, a
+  question tool, plan mode's approval). A `confirm` reads as a permission
+  and a `select`, `input`, or `editor` as a question, so a gate that asks
+  with a select, like Pi's example, reads as a question. Custom dialogs
+  never read as waiting, since Pi reports loaders and widgets the same
+  way.
+- A provider login and Pi's own pickers (`/model`, `/resume`, settings)
+  are invisible to extensions, and the project trust prompt comes before
+  the session starts, so none of them reads as waiting.
+- Before Pi 0.84.4 the dialog events don't exist and a session never
+  reads as waiting; before 1.1.0 an interrupted run is told only by its
+  last message's stop reason.
+- Quitting, `/new`, `/resume`, and `/fork` end the session they leave at
+  once.
+- After `/reload` the extension reports the session afresh, so a
+  finished turn reads `ready` without its detail.
+
+### The live-state store
+
+Every report lands in one file,
+`$XDG_STATE_HOME/conspectus/live-state.json` (or
+`$HOME/.local/state/conspectus/live-state.json`), with `live-state.lock`
+beside it. `hook write --state-root PATH` writes under `PATH` instead
+(see [Hook sidecar state](#hook-sidecar-state)).
+
+It holds one entry per harness and session: the state and its detail,
+when the state began and when the latest event came, the running
+subagents and whether the state is a subagent's, the source, the agent's
+pid and that process's start time, how often a plugin repeats its report,
+the working directory and transcript path, the tmux socket, session, and
+pane, a plugin report's instance and sequence number, and, for hooks that
+report events, the ids of pending waits and running subagents and the
+state to return to after compaction.
+
+It never holds a prompt, a message, a tool's input, output, or name, a
+title, a question or a form's fields, a permission's patterns or
+resources, an error's text, or an agent's type. Each writer reads the harness's payload in
+memory against a fixed list of fields and drops the rest, and the tests
+plant a marker in every text field of every payload and check that none
+reaches the file.
+
+The file is a rebuildable observation, like the hook spool: local to the
+machine, never part of a project, and safe to delete (sessions read `—`
+until their next event). Entries that exited more than an hour ago, and
+entries whose process died and that have not changed for a day, are
+dropped, and the file keeps at most 512. A missing, unreadable, or
+newer-format file means no live state, never an error.
+
+Writing it never slows or stops the agent. `hook write` prints nothing,
+always exits 0, and waits at most 200 ms for the lock before it drops the
+event. It talks to a running daemon only for an attribution record, such
+as a session start's, and gives up on it after 2 s.
+
+### Live-state health
+
+The last line of `conspectus hook status <harness>` says whether the
+harness's hooks feed live state:
+`<health>\t<harness>\t<live-state file>\t<message>`. It goes by what
+Conspectus already has: the entries in `live-state.json`, whether the
+hooks are installed in the scope you asked about, and the harness's agent
+processes in the graph the last discovery saved (`graph.bin`, which a
+running `conspectus serve` rewrites every few seconds), each checked
+against the running processes. It starts no process and asks no daemon.
+
+| Health | Meaning |
+|---|---|
+| `receiving` | The file has entries for the harness: `live state: 2 sessions, newest event 12s ago`. |
+| `silent` | The hooks are installed and one of the harness's agents runs, but no event has arrived: the hooks may be untrusted, disabled, or the agent was started before they were installed. Restart the agent after `hook init`, and accept the workspace trust prompt (for Codex, trust the entries in `/hooks`). |
+| `no-events` | The hooks are installed, nothing has arrived, and no running agent of the harness is known. Start one, or run a command that discovers, such as `conspectus table sessions`, so the saved graph lists it. |
+| `off` | The hooks are not installed in this scope, or for Pi the installed extension is too old to report live state; the message names the `conspectus hook init` command that installs them. |
+| `unsupported` | The harness's hook reports sessions but no live state. Claude Code, Codex, and Pi all report it now; the line stays for harnesses added later. |
+
+For Codex, any of them may end with `; 1 agent shown from its pane title`
+(or `2 agents ... their pane titles`): agents the saved graph shows from
+[Codex's pane title](#codexs-pane-title), with or without hooks.
+
+### Troubleshooting live state
+
+Start from the health label:
+
+- **`off`**: run the `conspectus hook init` command the message names, with
+  the same `--scope` you checked; an install in one scope does not count
+  in the other. For Pi, `outdated` on the line above means an extension
+  too old to report live state: run `conspectus hook init pi` and restart
+  Pi or run `/reload`.
+- **`no-events`**: nothing has arrived and no agent of the harness is
+  known to run. Start one and give it a prompt. If one already runs, the
+  saved graph has not seen it: run `conspectus table sessions` (or keep
+  `conspectus serve` running) and check again, which turns the label
+  into `silent` or `receiving`.
+- **`silent`**: an agent runs but nothing arrives.
+  - It was started before the hooks were installed: restart it.
+  - Claude Code: accept the workspace trust dialog in that folder, and
+    check that `disableAllHooks`, `--bare`, or a managed-hooks-only policy
+    is not turning hooks off.
+  - Codex: trust the Conspectus entries in `/hooks`, again after any
+    `hook init` that changed them.
+  - Claude Code with `CLAUDE_CONFIG_DIR` set reads its settings from
+    that directory, but `hook init claude-code` writes
+    `~/.claude/settings.json`. Install with `--scope project` in each
+    project, or copy the Conspectus entries into that directory's
+    `settings.json`.
+  - The lines above the health line say `partial` or `outdated`: run
+    `conspectus hook init <harness>` again.
+  - Claude Code and Codex: the command the entries run no longer
+    exists, as when the install recorded a path a package upgrade
+    removed. Run `conspectus hook init <harness> --command "conspectus
+    hook write <harness>"` so they run `conspectus` from your `PATH`. The
+    opencode plugin and the Pi extension run `$CONSPECTUS_HOOK_BIN`, else
+    `conspectus` from the `PATH` the harness started with.
+  - To test the writer itself, pipe it a payload with `--state-root`, as
+    [Hook sidecar state](#hook-sidecar-state) shows.
+- **`receiving`, but a session shows `—`**: the file has entries, but
+  none is bound to that session. The entry may be on the session's tmux
+  mux instead, when Conspectus has no session for it yet (look at
+  `conspectus table mux --columns +live`), or Conspectus may not discover
+  the session at all, as for Codex sessions under a `CODEX_HOME` other
+  than `~/.codex` (see
+  [Harness state-root overrides](#harness-state-root-overrides)). An agent
+  outside tmux with no discovered session shows nowhere. `receiving` also
+  counts entries kept after their session ended; the newest event's age
+  says how recent the latest is.
+- **`receiving`, but the state looks wrong**: check the
+  [known gaps](#known-gaps) and the harness's own section first.
+  `exited:killed` for an agent that runs means its recorded process is
+  gone (a session resumed in a new process, say), and its next event
+  corrects it. `unknown:stale` means Conspectus
+  can't check the process and has heard nothing for fifteen minutes. An
+  answer a few seconds old comes from `conspectus serve`'s snapshot; pass
+  `--refresh` to read the store as it is now. A Claude Code turn still
+  `working` a minute after an interrupt means
+  [Claude Code's agent list](#claude-codes-agent-list) was not asked:
+  no daemon or TUI runs, `claude` is not on its `PATH`, or
+  `CONSPECTUS_DISABLE_LIVE_POLL` is set. A `--refresh` command reads the
+  hooks only.
+- **`unsupported`**: the harness's hook reports no live state. No harness
+  says this today. opencode has no health line yet; check it with
+  `conspectus table sessions --columns +live`.
 
 ## Configuration File
 
@@ -198,7 +965,9 @@ teardown_grace = "3s"
 - **Filters:** `filters` takes one inline table or an array of tables
   (`[[tui.views.<name>.filters]]`); entries OR together per dimension.
   `max_age` accepts `s`, `m`, `h`, and `d` suffixes; `mux_state` values are
-  `attached`, `ambiguous`, and `unmuxed`. For the PRs view, `pr_branch` takes
+  `attached`, `ambiguous`, and `unmuxed`; `state` values are the agents'
+  live states as `--state` takes them (`waiting`, `ready`, `working`,
+  `error`, `unknown`, `none`). For the PRs view, `pr_branch` takes
   `tracked` and/or `untracked` to keep only PRs with or without a local branch
   (both, or neither, keeps every PR), `pr_state` takes `open` (drafts
   included), `draft`, `merged`, and/or `closed` to keep only PRs in those
@@ -288,10 +1057,10 @@ muted              = "dim"             # hints, placeholders, notes, rules, foot
 inert              = "dark_gray"       # short ids, previews, gone or stopped rows (a color)
 selection_active   = "reversed,bold"   # the cursor row of the list that has focus: a pane, menu, form, or picker
 selection_inactive = "bold"            # the cursor row of a list without focus, such as the other pane
-success            = "green"           # confirmations: toasts, the status line, Messages
-warning            = "yellow"          # refusals and fallbacks, in the same three places
-error              = "red"             # failures, in the same three places
-info               = "green"           # hints and notes, in the same three places
+success            = "green"           # confirmations: toasts, the status line, Messages; the ready agent mark
+warning            = "yellow"          # refusals and fallbacks, in the same three places; the waiting agent mark
+error              = "red"             # failures, in the same three places; the failed agent mark
+info               = "green"           # hints and notes, in the same three places; the working agent mark
 link               = "blue"            # mux names and link rows
 match_highlight    = "yellow"          # text a search matched (bold, underlined)
 badge              = "reversed,bold"   # the chip look
@@ -428,7 +1197,7 @@ conspectus columns {sessions|mux|union|prs|forks}
                    [--pager | --no-pager]
                    [--color {auto|always|never}]
 conspectus tui [--view {sessions|mux|prs|pinned|history|search}] [--grouping VALUE] [--sort {hierarchy|recency}]
-               [--harness H]... [--max-age D] [--mux-state S]...
+               [--harness H]... [--max-age D] [--mux-state S]... [--state S]...
                [--scan-root PATH]... [--refresh-interval D] [--no-live-preview]
                [--contains TEXT]
 conspectus declared {list|create|remove|confirm|ignore|override} ...
@@ -439,7 +1208,7 @@ conspectus pin {add|edit|rename|retarget|refresh|move|rm|list|show|migrate} ...
 conspectus rebuild <REF> [--dry-run] [--no-attach] [--session ID]
 conspectus history {list|show|reap|forget} ...
 conspectus search <QUERY> [--source {sessions|panes|all}] [--group {session|message|flat}]
-                         [--tools] [--thinking] [--harness H]...
+                         [--tools] [--thinking] [--harness H]... [--state S]...
                          [--limit N] [--format {table|json}]
 conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach] [--pin [PIN] [--no-launch]]
 conspectus mux launch <HARNESS> --name <NAME> [--cwd PATH] [--argv ARG...]
@@ -527,6 +1296,40 @@ which keeps the cell scannable when several agents share a mux. On
 the `union` row-type the preview shows for agent rows only; mux
 rows render `—`.
 
+### Live state columns
+
+The `live` column (registered on `sessions` and `mux`, opt-in like
+`activity`) shows what each agent is doing now, from the live state its
+hooks report (see [Live agent state](#live-agent-state)).
+Opt in with `--columns +live` or `[table.<rows>].columns = [..., "live"]`.
+The state is read when the command runs, so a long silence and a gone
+process show as they would in the TUI.
+
+On `sessions` the cell is the state and its detail, `+N` for running
+subagents, `quiet` when a working agent has said nothing for longer than
+its quiet window (ten minutes for hooks), and how long ago the state
+began:
+
+```text
+AGENT                LIVE
+-------------------  ----------------------------
+claude-code:builder  working:generating quiet 12m
+claude-code:gone     exited:killed 4m
+claude-code:lost     unknown:stale 20m
+claude-code:unheard  —
+claude-code:waiter   waiting:permission +1 3m
+```
+
+`exited:killed` is a session whose process is gone, and `unknown:stale`
+one whose process can't be checked and that has been silent for more
+than fifteen minutes; for those two the age counts from the last event.
+`—` is a session with no live state, which is no evidence, not idle.
+
+On `mux` the cell counts the agents the mux hosts in each state, most
+urgent first (`1 waiting, 1 working, 1 unknown, 1 exited`), including
+each agent in its panes that no session matches yet; `—` when none has
+live state.
+
 ## Searching session contents
 
 `conspectus search <QUERY>` finds sessions by what was said in them. It
@@ -562,8 +1365,9 @@ Flags:
   session, or per matching message across all sessions, newest first,
   with no session grouping.
 - `--tools`, `--thinking`: also search tool calls and output, or thinking.
-- `--harness H` (repeatable), `--max-age DURATION`, `--mux-state STATE`:
-  narrow the sessions searched, with the same meaning as on `table`.
+- `--harness H` (repeatable), `--max-age DURATION`, `--mux-state STATE`,
+  `--state STATE`: narrow the sessions searched, with the same meaning as
+  on `table`.
 - `--limit N`: stop after N results (at least 1).
 - `--format table|json`; `--width N` and `--color auto|always|never`
   shape the table (the match is bold on a terminal).
@@ -895,7 +1699,9 @@ default flags), so paged output retains color.
 
 The command prints the node itself plus every candidate link (outgoing
 and incoming), resolved relationship, source metadata, and diagnostic
-that touches the resolved node. Resolved relationships include the
+that touches the resolved node, and a `live state` section for a session
+or mux with live state (see
+[Where live state shows](#where-live-state-shows)). Resolved relationships include the
 same resolver score breakdown exposed by `conspectus graph --explain`:
 the selected link's score axes, competing links' score axes, and the
 first axis that decided the winner when there is a competitor.
@@ -1893,10 +2699,10 @@ What the file holds:
   run (`--sort` overrides the sort).
 - `view_states` has an entry for each view the operator has used:
   `filter` and `grouping` as last set (a `--grouping`, `--harness`,
-  `--max-age`, `--mux-state`, or PR filter flag overrides them for the
-  starting view), `expanded` (the rows whose children were showing),
-  and `selected` (the row under the cursor and the rows above it, the
-  top-level one first). The Search view keeps neither `expanded` nor
+  `--max-age`, `--mux-state`, `--state`, or PR filter flag overrides them
+  for the starting view), `expanded` (the rows whose children were
+  showing), and `selected` (the row under the cursor and the rows above
+  it, the top-level one first). The Search view keeps neither `expanded` nor
   `selected`; nothing keeps the right pane's drill or the preview's
   scroll.
 - Rows are named by keys: the row's kind (`group`, `session`, `mux`,

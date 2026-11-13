@@ -7,7 +7,7 @@
 //! the class TTL) and which must be evicted and re-run.
 //!
 //! Mutator providers (`cross_link`, `codex_log`, `hook_sidecar`,
-//! `declared`) are always evicted — see ADR 0079's "Always-rerun
+//! `live_state`, `declared`) are always evicted — see ADR 0079's "Always-rerun
 //! providers" rule. They re-derive their outputs from whatever the
 //! heavy providers produced this invocation, so caching their
 //! prior output would let stale links survive upstream deletions.
@@ -152,6 +152,7 @@ pub const MUTATOR_PROVIDERS: &[&str] = &[
     providers::CROSS_LINK,
     providers::CODEX_LOG,
     providers::HOOK_SIDECAR,
+    providers::LIVE_STATE,
     providers::DECLARED,
 ];
 
@@ -161,8 +162,9 @@ pub const MUTATOR_PROVIDERS: &[&str] = &[
 /// and their prior contribution is preserved (not evicted) on
 /// git/forge-only cycles so agent↔pane links survive without a fresh
 /// `/proc` walk. `cross_link` produces the agent↔mux links;
-/// `codex_log` is the pid-fed aux attribution. `hook_sidecar` and
-/// `declared` stay always-rerun (cheap file reads, no `/proc`).
+/// `codex_log` is the pid-fed aux attribution. `hook_sidecar`,
+/// `live_state`, and `declared` stay always-rerun (cheap file reads;
+/// `live_state` checks one `/proc/<pid>` per store entry, never walks).
 pub const PROCESS_TREE_MUTATORS: &[&str] = &[providers::CROSS_LINK, providers::CODEX_LOG];
 
 /// Whether `provider` belongs to the mux or harness interval class —

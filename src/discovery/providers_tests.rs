@@ -21,6 +21,7 @@ fn canonical_strings_are_stable() {
     assert_eq!(CROSS_LINK, "cross_link");
     assert_eq!(CODEX_LOG, "codex_log");
     assert_eq!(HOOK_SIDECAR, "hook_sidecar");
+    assert_eq!(LIVE_STATE, "live_state");
     assert_eq!(DECLARED, "declared");
 }
 
@@ -48,6 +49,7 @@ fn descriptor_constants_agree() {
         CROSS_LINK,
         CODEX_LOG,
         HOOK_SIDECAR,
+        LIVE_STATE,
         DECLARED,
     ];
     assert_eq!(REGISTRY.len(), expected.len());
@@ -103,5 +105,8 @@ fn mutator_keys_derive_from_registry() {
     assert_eq!(derived, expected);
     // Pin the expected list so a change that flips a heavy
     // provider to a mutator (or vice versa) is caught here.
-    assert_eq!(derived, vec![CROSS_LINK, CODEX_LOG, HOOK_SIDECAR, DECLARED]);
+    assert_eq!(
+        derived,
+        vec![CROSS_LINK, CODEX_LOG, HOOK_SIDECAR, LIVE_STATE, DECLARED]
+    );
 }

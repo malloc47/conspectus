@@ -28,12 +28,15 @@ mod controls;
 mod explorer_nav;
 mod handoff;
 mod listing;
+mod live;
 mod msg;
 mod overlays;
 mod restore;
 mod search_open;
+mod seen;
 mod tree;
 mod viewport;
+mod waiting;
 
 #[cfg(test)]
 pub(crate) use content::MAX_DETAIL_SESSIONS;
@@ -309,6 +312,16 @@ pub struct App {
     /// The trees the state file saved, by view, each waiting for its
     /// view to list rows (see [`restore`]).
     saved_trees: BTreeMap<View, crate::tui_state::PersistedTree>,
+    /// The live table the rows read, bound from the store between
+    /// snapshots once the live runtime turns it on (see [`live`]).
+    live: crate::tui::live_overlay::LiveOverlay,
+    /// The finished turns this TUI found the operator has seen. Memory
+    /// only: it is never written, and starts empty with each TUI.
+    seen: crate::tui::rows::seen::SeenTurns,
+    /// The session whose row the cursor rests on and since when, which
+    /// counts as seeing its finished turn once it has rested long enough
+    /// and the session has no mux.
+    resting: Option<(NodeId, Instant)>,
 }
 
 /// Saved-per-view UI state. Each entry holds everything that needs
@@ -482,6 +495,9 @@ impl App {
             view_states: BTreeMap::new(),
             tui_state_cache: None,
             saved_trees: BTreeMap::new(),
+            live: crate::tui::live_overlay::LiveOverlay::off(),
+            seen: crate::tui::rows::seen::SeenTurns::default(),
+            resting: None,
         }
     }
 
@@ -832,8 +848,9 @@ impl App {
     }
 
     /// The app's data as the explorer reads it: the snapshot, the theme,
-    /// whether link rows show their edge meta, and the left pane's
-    /// selection. `None` before the first snapshot.
+    /// whether link rows show their edge meta, the left pane's
+    /// selection, and the live values its rows show. `None` before the
+    /// first snapshot.
     pub fn graph_source(&self) -> Option<GraphSource<'_>> {
         Some(GraphSource {
             snapshot: self.handle.as_ref()?.snapshot(),
@@ -841,6 +858,7 @@ impl App {
             theme: self.theme(),
             edge_meta: self.edge_meta_visible,
             left: self.tree_state.selected(),
+            live: &self.tree.live,
         })
     }
 
@@ -1666,6 +1684,7 @@ impl App {
                     }
                 }
             }
+            Msg::NextWaiting => effects.extend(self.jump_to_next_waiting()),
             Msg::RevealSelected => {
                 let subject = crate::tui::actions::action_subject(self);
                 let result = match (&subject.pin, &subject.node) {

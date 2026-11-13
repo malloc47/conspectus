@@ -12,6 +12,7 @@ use conspectus::discovery::tmux::FakeTmux;
 use conspectus::discovery::{LocalDiscoveryConfig, discover_local_with};
 use conspectus::filter::RowFilter;
 use conspectus::hook::{HookRecord, HookStore};
+use conspectus::live_store::{LiveEvent, LiveStore};
 use conspectus::model::GraphSnapshot;
 use conspectus::resolve::resolve_snapshot;
 use conspectus::tui::SessionsGrouping;
@@ -21,6 +22,7 @@ pub struct ReplayWorld {
     temp: tempfile::TempDir,
     harness: HarnessFixture,
     hook_root: PathBuf,
+    live_root: PathBuf,
     tmux_rows: Vec<TmuxReplayRow>,
     fd_paths_by_pid: BTreeMap<i64, Vec<String>>,
 }
@@ -30,10 +32,12 @@ impl ReplayWorld {
         let temp = tempfile::TempDir::new().expect("replay temp dir");
         let harness = HarnessFixture::at(temp.path().join("harness"));
         let hook_root = temp.path().join("hooks");
+        let live_root = temp.path().join("state/conspectus");
         Self {
             temp,
             harness,
             hook_root,
+            live_root,
             tmux_rows: Vec::new(),
             fd_paths_by_pid: BTreeMap::new(),
         }
@@ -45,6 +49,19 @@ impl ReplayWorld {
 
     pub fn hook_root(&self) -> &Path {
         &self.hook_root
+    }
+
+    /// The world's live-state store directory, which discovery binds.
+    pub fn live_root(&self) -> &Path {
+        &self.live_root
+    }
+
+    /// Fold `event` into the world's live-state store, as `hook write`
+    /// does.
+    pub fn write_live_event(&self, event: &LiveEvent) {
+        LiveStore::at(&self.live_root)
+            .apply_event(event)
+            .expect("write replay live state");
     }
 
     pub fn mkdir(&self, relative: impl AsRef<Path>) -> PathBuf {
@@ -107,7 +124,8 @@ impl ReplayWorld {
                 CLAUDE_CODE_HARNESS_KEY,
                 self.harness.claude_code_state_root(),
             )
-            .with_hook_sidecar_root(&self.hook_root);
+            .with_hook_sidecar_root(&self.hook_root)
+            .with_live_state_root(&self.live_root);
 
         if !self.tmux_rows.is_empty() {
             config = config.with_tmux_runner(FakeTmux::with_sessions(self.tmux_stdout()));

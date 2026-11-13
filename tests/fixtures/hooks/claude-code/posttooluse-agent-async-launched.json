@@ -1,0 +1,22 @@
+{
+  "session_id": "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f",
+  "transcript_path": "/home/user/.claude/projects/-home-user-projects-my-project/3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f.jsonl",
+  "cwd": "/home/user/projects/my-project",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "Survey the parser modules",
+    "prompt": "List every module under src/viewer/parser and what it parses",
+    "subagent_type": "Explore",
+    "run_in_background": true
+  },
+  "tool_response": {
+    "status": "async_launched",
+    "agentId": "c5d2a8f1e0b7c364",
+    "description": "Survey the parser modules",
+    "prompt": "List every module under src/viewer/parser and what it parses"
+  },
+  "tool_use_id": "toolu_01Agent0000000000000002",
+  "duration_ms": 8123
+}

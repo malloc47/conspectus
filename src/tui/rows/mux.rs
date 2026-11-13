@@ -20,9 +20,9 @@ use crate::model::{
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedRow, MixedTone, MuxSessionRow,
-    PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, harness_label, mux_process_harnesses,
-    mux_program, mux_program_harness, shorten_home,
+    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedLive, MixedRow, MixedTone,
+    MuxSessionRow, PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, harness_label,
+    mux_process_harnesses, mux_program, mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -130,7 +130,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             .cloned()
             .collect();
 
-        if !mux_matches_filter(&attached, &visible_attached, &inputs.filter) {
+        if !mux_matches_filter(&mux.id, &attached, &visible_attached, &inputs.filter) {
             continue;
         }
 
@@ -171,6 +171,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             pin_id: pin_by_mux.get(&node_id).map(|pin| pin.id.id.clone()),
             primary_node: node_id.clone(),
             content_hit: None,
+            live: Default::default(),
         };
 
         let children: Vec<AttachedAgent> = if attached_count > 1 {
@@ -520,20 +521,23 @@ fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputs<'_>) {
             (None, Some(_)) => return std::cmp::Ordering::Less,
             (None, None) => {}
         }
-        let left_float = usize::from(left.attached_count == 0);
-        let right_float = usize::from(right.attached_count == 0);
-        let float_order = if inputs.filter.float_attached_muxes_top {
-            left_float.cmp(&right_float)
-        } else {
-            std::cmp::Ordering::Equal
+        // Muxes an agent waiting on the operator counts toward come first
+        // when asked (ADR 0215), then muxes with an attached agent.
+        let filter = &inputs.filter;
+        let floats = |group: &MuxGroup| {
+            let waiting = filter.float_waiting_top && filter.live.mux_waits(&group.parent_row.mux);
+            let attached = filter.float_attached_muxes_top && group.attached_count > 0;
+            (!waiting, !attached)
         };
-        float_order.then_with(|| match inputs.sort {
-            Sort::Hierarchy => std::cmp::Ordering::Equal,
-            Sort::Recency => recency_key(&right.parent_row, inputs.mux_recency)
-                .cmp(&recency_key(&left.parent_row, inputs.mux_recency))
-                .then_with(|| left.parent_row.native_id.cmp(&right.parent_row.native_id))
-                .then_with(|| left.parent_node_id.cmp(&right.parent_node_id)),
-        })
+        floats(left)
+            .cmp(&floats(right))
+            .then_with(|| match inputs.sort {
+                Sort::Hierarchy => std::cmp::Ordering::Equal,
+                Sort::Recency => recency_key(&right.parent_row, inputs.mux_recency)
+                    .cmp(&recency_key(&left.parent_row, inputs.mux_recency))
+                    .then_with(|| left.parent_row.native_id.cmp(&right.parent_row.native_id))
+                    .then_with(|| left.parent_node_id.cmp(&right.parent_node_id)),
+            })
     });
 }
 
@@ -622,7 +626,14 @@ fn agent_labels(agents: &[AttachedAgent]) -> Vec<String> {
     labels
 }
 
+/// Whether a running mux is listed under `filter`: always without a
+/// narrowing predicate; when one of its attached agents passes; when the
+/// live state is the only predicate and an agent its mark counts passes
+/// it (ADR 0215), a session whose preferred mux it is or an agent in one
+/// of its panes; and, for a mux with no agent at all, under a lone
+/// `unmuxed` mux-state filter.
 fn mux_matches_filter(
+    mux: &MuxSessionId,
     all_attached: &[AttachedAgent],
     visible_attached: &[AttachedAgent],
     filter: &RowFilter,
@@ -633,12 +644,17 @@ fn mux_matches_filter(
     if !visible_attached.is_empty() {
         return true;
     }
+    if filter.admits_mux_agents(filter.live.mux_agents(mux)) {
+        return true;
+    }
     let RowFilter {
         harness,
         max_age,
         mux_state,
+        live_state,
         float_muxed_sessions_top: _,
         float_attached_muxes_top: _,
+        float_waiting_top: _,
         pr_branch: _,
         pr_state: _,
         float_tracked_prs_top: _,
@@ -646,10 +662,12 @@ fn mux_matches_filter(
         show_stopped_muxes: _,
         pinned_only: _,
         show_pinned_history: _,
+        live: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()
         && content.is_none()
+        && live_state.is_none()
         && mux_state
             .as_ref()
             .is_some_and(|mux_state| mux_state.values().contains(&MuxStateKey::Unmuxed))
@@ -666,6 +684,7 @@ fn agent_matches_filter(agent: &AttachedAgent, now: Option<i64>, filter: &RowFil
         now_epoch: now,
         last_active_epoch: agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(agent.candidate_count),
+        live_state: filter.live.session(&NodeId::AgentSession(agent.id.clone())),
     })
 }
 
@@ -736,6 +755,7 @@ fn collect_ghosts(
                 primary_node: id.clone(),
                 pr_status: None,
                 marker: PinMarker::None,
+                live: MixedLive::None,
             };
             Some(MuxGroup {
                 parent_row: MuxSessionRow {
@@ -756,6 +776,7 @@ fn collect_ghosts(
                     pin_id: None,
                     primary_node: id.clone(),
                     content_hit: None,
+                    live: Default::default(),
                 },
                 parent_node_id: id,
                 children: Vec::new(),
@@ -882,6 +903,7 @@ fn agent_row(
             mux_host: None,
             primary_node: node_id,
             content_hit: None,
+            live: None,
         }),
     }
 }

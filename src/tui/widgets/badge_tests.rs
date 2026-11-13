@@ -110,3 +110,19 @@ fn the_row_notes_recede() {
     assert_eq!(long.content, "was in a-very-long-mux-nam…");
     assert_eq!(long.style, note);
 }
+
+#[test]
+fn the_subagents_chip_counts_up_to_nine_then_caps() {
+    let theme = Theme::default();
+    let label = |running| subagents_chip(running, &theme).content.to_string();
+    assert_eq!(label(1), "+1");
+    assert_eq!(label(9), "+9");
+    assert_eq!(label(10), "+9+");
+    assert_eq!(label(u16::MAX), "+9+");
+    let chip = subagents_chip(3, &theme);
+    assert_eq!(
+        chip.style,
+        StatusChip::new("+3", Tone::Inert).look(&theme),
+        "it recedes like the other notes after a label"
+    );
+}

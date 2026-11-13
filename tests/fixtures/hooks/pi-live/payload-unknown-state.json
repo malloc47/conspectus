@@ -1,0 +1,23 @@
+{
+  "session_id": "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d",
+  "cwd": "/home/user/projects/my-project",
+  "transcript_path": "/home/user/.pi/agent/sessions/--home-user-projects-my-project--/2026-11-11T10-00-00-000Z_0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d.jsonl",
+  "hook_event_name": "live:a_future_event",
+  "extension_version": "9",
+  "pi_version": "2.0.0",
+  "live": {
+    "instance": "mhv8k2b2-4a6c8e0f2b4d6f15",
+    "seq": 3,
+    "observed_ms": 5000,
+    "heartbeat_s": 60,
+    "pid": 48213,
+    "pid_start": 771234567,
+    "state": "napping",
+    "detail": "dreaming",
+    "subagents": 0,
+    "since_ms": 4000,
+    "error_class": "context_overflow",
+    "tools_in_flight": 2,
+    "a_future_field": {"nested": [1, 2, 3]}
+  }
+}

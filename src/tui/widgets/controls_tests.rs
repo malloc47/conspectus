@@ -417,9 +417,9 @@ fn editor_prompt(editor: &Modal) -> tuikit::text_prompt::TextPrompt<Msg> {
 fn clear_all_with_empty_filter_is_silent_noop() {
     let fixture = Fixture::new(View::Sessions);
     let mut panel = at_filters();
-    // Step past the four predicate rows, the sessions-only float
-    // checkbox, and pinned only to land on FilterClear.
-    down(&mut panel, &fixture, 6);
+    // Step past the five predicate rows, the sessions-only float
+    // checkboxes, and pinned only to land on FilterClear.
+    down(&mut panel, &fixture, 8);
     assert_eq!(cursor(&panel), ControlsCursor::FilterClear);
     let outcome = key(&mut panel, &fixture, press(KeyCode::Enter));
     assert_eq!(outcome, Outcome::Consumed);
@@ -432,7 +432,7 @@ fn clear_all_with_active_filter_emits_empty_filter() {
         ..RowFilter::default()
     });
     let mut panel = at_filters();
-    down(&mut panel, &fixture, 6);
+    down(&mut panel, &fixture, 8);
     assert_eq!(cursor(&panel), ControlsCursor::FilterClear);
     let outcome = key(&mut panel, &fixture, press(KeyCode::Enter));
     assert_eq!(outcome, Outcome::Stay(Msg::ClearFilters));
@@ -458,7 +458,7 @@ fn float_muxed_checkbox_only_appears_on_sessions_view() {
 fn space_on_float_muxed_sessions_toggles_bool() {
     let fixture = Fixture::new(View::Sessions);
     let mut panel = at_filters();
-    down(&mut panel, &fixture, 4);
+    down(&mut panel, &fixture, 5);
     assert_eq!(cursor(&panel), ControlsCursor::FilterFloatMuxedSessions);
     let filter = applied_filter(key(&mut panel, &fixture, press(KeyCode::Char(' '))));
     assert!(filter.float_muxed_sessions_top);
@@ -472,7 +472,7 @@ fn space_on_float_attached_muxes_toggles_bool() {
         ..RowFilter::default()
     });
     let mut panel = at_filters();
-    down(&mut panel, &fixture, 4);
+    down(&mut panel, &fixture, 5);
     assert_eq!(cursor(&panel), ControlsCursor::FilterFloatAttachedMuxes);
     let filter = applied_filter(key(&mut panel, &fixture, press(KeyCode::Char(' '))));
     assert!(!filter.float_attached_muxes_top, "Space toggles bool off");
@@ -633,6 +633,7 @@ fn every_kind_of_row_reads_as_it_did() {
         "│  options      Enter opens  [ Edit ] ",
         "│Filters (PRs) ",
         &format!("│  harness      {}  [ Edit ] ", marks::NO_VALUE),
+        "│  agent state  any  [ Cycle ] ",
         &format!("│  PR state     {}  [ Edit ] ", marks::NO_VALUE),
         "│  local branch any  [ Cycle ] ",
         "│  [x] Float PRs with a local branch to top ",
@@ -693,7 +694,7 @@ fn space_on_local_branch_row_cycles_any_tracked_untracked() {
     for _ in 0..3 {
         let fixture = Fixture::new(View::Prs).filter(filter);
         let mut panel = at_filters();
-        down(&mut panel, &fixture, 5);
+        down(&mut panel, &fixture, 6);
         assert_eq!(cursor(&panel), ControlsCursor::FilterPrBranch);
         let next = applied_filter(key(&mut panel, &fixture, press(KeyCode::Char(' '))));
         seen.push(next.pr_branch);
@@ -713,7 +714,7 @@ fn space_on_local_branch_row_cycles_any_tracked_untracked() {
 fn space_on_float_tracked_prs_toggles_bool() {
     let fixture = Fixture::new(View::Prs);
     let mut panel = at_filters();
-    down(&mut panel, &fixture, 6);
+    down(&mut panel, &fixture, 7);
     assert_eq!(cursor(&panel), ControlsCursor::FilterFloatTrackedPrs);
     let next = applied_filter(key(&mut panel, &fixture, press(KeyCode::Char(' '))));
     assert!(next.float_tracked_prs_top);
@@ -728,7 +729,7 @@ fn clear_all_resets_the_pr_settings() {
         ..RowFilter::default()
     });
     let mut panel = at_filters();
-    down(&mut panel, &fixture, 8);
+    down(&mut panel, &fixture, 9);
     assert_eq!(cursor(&panel), ControlsCursor::FilterClear);
     assert_eq!(
         key(&mut panel, &fixture, press(KeyCode::Enter)),
@@ -759,7 +760,7 @@ fn pr_state_sub_editor_commits_the_chosen_states() {
 
     let fixture = Fixture::new(View::Prs);
     let mut panel = at_filters();
-    down(&mut panel, &fixture, 4);
+    down(&mut panel, &fixture, 5);
     assert_eq!(cursor(&panel), ControlsCursor::FilterPrState);
     let outcome = key(&mut panel, &fixture, press(KeyCode::Enter));
     assert_eq!(
@@ -801,7 +802,7 @@ fn pr_state_sub_editor_opens_with_the_current_states_selected_and_clears_when_em
 
 fn on_content_row(fixture: &Fixture) -> Panel {
     let mut panel = at_filters();
-    down(&mut panel, fixture, 3);
+    down(&mut panel, fixture, 4);
     assert_eq!(cursor(&panel), ControlsCursor::FilterContent);
     panel
 }
@@ -862,10 +863,150 @@ fn escape_in_the_content_editor_keeps_the_search_as_it_was() {
 fn clear_all_has_something_to_clear_when_only_a_search_is_active() {
     let fixture = Fixture::new(View::Sessions).searching("needle");
     let mut panel = at_filters();
-    down(&mut panel, &fixture, 6);
+    down(&mut panel, &fixture, 8);
     assert_eq!(cursor(&panel), ControlsCursor::FilterClear);
     assert_eq!(
         key(&mut panel, &fixture, press(KeyCode::Enter)),
         Outcome::Stay(Msg::ClearFilters)
     );
+}
+
+#[test]
+fn the_agent_state_row_follows_mux_state_in_every_view() {
+    for view in VIEW_OPTIONS {
+        let rows = flatten_rows(&Fixture::new(*view).context());
+        let at = |cursor| rows.iter().position(|row| *row == cursor);
+        let mux_state = at(ControlsCursor::FilterMuxState).expect("mux state");
+        assert_eq!(
+            at(ControlsCursor::FilterLiveState),
+            Some(mux_state + 1),
+            "{view:?}"
+        );
+    }
+}
+
+#[test]
+fn space_on_the_agent_state_row_steps_any_waiting_ready_working_error_any() {
+    use crate::filter::LiveStateKey;
+
+    let mut filter = RowFilter::default();
+    let mut seen = Vec::new();
+    for _ in 0..5 {
+        let fixture = Fixture::new(View::Sessions).filter(filter);
+        let mut panel = panel_at(ControlsCursor::FilterLiveState);
+        let next = applied_filter(key(&mut panel, &fixture, press(KeyCode::Char(' '))));
+        seen.push(
+            next.live_state
+                .as_ref()
+                .map(|wanted| wanted.values().to_vec()),
+        );
+        filter = next;
+    }
+    assert_eq!(
+        seen,
+        [
+            Some(vec![LiveStateKey::Waiting]),
+            Some(vec![LiveStateKey::Ready]),
+            Some(vec![LiveStateKey::Working]),
+            Some(vec![LiveStateKey::Error]),
+            None,
+        ]
+    );
+}
+
+#[test]
+fn the_agent_state_row_reads_a_set_it_cannot_step_to_and_steps_it_to_any() {
+    use crate::filter::{LiveStateFilter, LiveStateKey};
+
+    let fixture = Fixture::new(View::Mux).filter(RowFilter {
+        live_state: Some(LiveStateFilter::from_values([
+            LiveStateKey::Error,
+            LiveStateKey::Waiting,
+        ])),
+        ..RowFilter::default()
+    });
+    let mut panel = panel_at(ControlsCursor::FilterLiveState);
+    let buf = drawn(&mut panel, &fixture, (100, 60), true);
+    assert!(
+        rows(&buf)
+            .iter()
+            .any(|row| row.contains("agent state  waiting, error  [ Cycle ]")),
+        "{:?}",
+        rows(&buf)
+    );
+    let next = applied_filter(key(&mut panel, &fixture, press(KeyCode::Char(' '))));
+    assert_eq!(next.live_state, None, "a set steps to any");
+    for only in [LiveStateKey::Unknown, LiveStateKey::None] {
+        assert_eq!(
+            next_live_state(Some(&LiveStateFilter::from_values([only]))),
+            None,
+            "{only:?} is not a step"
+        );
+    }
+}
+
+#[test]
+fn the_float_waiting_checkbox_follows_the_views_other_float() {
+    for (view, other) in [
+        (View::Sessions, ControlsCursor::FilterFloatMuxedSessions),
+        (View::Mux, ControlsCursor::FilterFloatAttachedMuxes),
+    ] {
+        let fixture = Fixture::new(view);
+        let listed = flatten_rows(&fixture.context());
+        let at = |cursor| listed.iter().position(|row| *row == cursor);
+        assert_eq!(
+            at(ControlsCursor::FilterFloatWaiting),
+            at(other).map(|index| index + 1),
+            "{view:?}"
+        );
+        let mut panel = panel_at(ControlsCursor::FilterFloatWaiting);
+        let label = if view == View::Sessions {
+            "[ ] Float waiting sessions to top"
+        } else {
+            "[ ] Float waiting muxes to top"
+        };
+        let buf = drawn(&mut panel, &fixture, (100, 60), true);
+        assert!(
+            rows_contain(&buf, label),
+            "{view:?}: `{label}` in {:?}",
+            rows(&buf)
+        );
+        let next = applied_filter(key(&mut panel, &fixture, press(KeyCode::Char(' '))));
+        assert!(next.float_waiting_top, "{view:?}");
+        assert!(!next.has_narrowing_predicates(), "a float hides nothing");
+    }
+    for view in [View::Prs, View::Pinned, View::History, View::Search] {
+        assert!(
+            !flatten_rows(&Fixture::new(view).context())
+                .contains(&ControlsCursor::FilterFloatWaiting),
+            "{view:?}"
+        );
+    }
+}
+
+fn rows_contain(buf: &Buffer, text: &str) -> bool {
+    rows(buf).iter().any(|row| row.contains(text))
+}
+
+#[test]
+fn clear_all_has_something_to_clear_with_only_the_agent_state_or_its_float_set() {
+    use crate::filter::{LiveStateFilter, LiveStateKey};
+
+    for filter in [
+        RowFilter {
+            live_state: Some(LiveStateFilter::from_values([LiveStateKey::Waiting])),
+            ..RowFilter::default()
+        },
+        RowFilter {
+            float_waiting_top: true,
+            ..RowFilter::default()
+        },
+    ] {
+        let fixture = Fixture::new(View::Mux).filter(filter);
+        let mut panel = panel_at(ControlsCursor::FilterClear);
+        assert_eq!(
+            key(&mut panel, &fixture, press(KeyCode::Enter)),
+            Outcome::Stay(Msg::ClearFilters)
+        );
+    }
 }

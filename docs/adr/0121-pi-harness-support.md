@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended for live state by ADR 0206; see the amendment below.
 
 ## Context
 
@@ -220,6 +220,31 @@ no Conspectus-side knob, as in ADR 0049.
   matched in pane commands, `--no-session` runs are invisible, and
   relative, project-level, or per-run session directories need
   `CONSPECTUS_PI_STATE`.
+
+## Amendment: live state (ADR 0206)
+
+The extension now reports what the session is doing, not only which
+session a pane runs. Everything above stands except as follows.
+
+1. **Events and payload (decision 6).** The extension handles the
+   events of ADR 0206 decision 4, keeps the session's state itself, and
+   sends a `live` snapshot (ADR 0206 decisions 25 to 28). A
+   `session_start:<reason>` payload still names the session for
+   attribution and now carries the snapshot too; every other payload is
+   named `live:<event>` and reaches only the live-state store. A payload
+   without `live` means what it always meant, so a first-version copy
+   keeps working, and `EXTENSION_VERSION` is `"2"`, so `hook status pi`
+   reports such a copy `outdated`.
+2. **The pid (Consequences, hook pid resolution).** The extension passes
+   `process.pid` and its start time, and the Pi adapter uses that pid for
+   the attribution record as well as the snapshot, in place of the one
+   the parent walk finds. A record no longer depends on
+   `/proc/<pid>/comm` reading `pi`; a live check (backlog `CSP-630`)
+   still has to confirm it on a real Pi.
+3. **Writers.** Each writer is spawned detached, in its own process
+   group, so a quit's report still lands when Pi exits, and never keeps
+   Pi running. The gates are unchanged: nothing is written without a
+   session file or outside the interactive TUI.
 
 ## Alternatives Considered
 

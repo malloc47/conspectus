@@ -1,0 +1,8 @@
+---
+source: tests/live_state_output.rs
+expression: "table(&snapshot, Projection::Mux, &[\"mux\", \"agents\", \"live\"], now_ms)"
+---
+MUX          AGENTS                                                                                                                               LIVE
+-----------  -----------------------------------------------------------------------------------------------------------------------------------  ----
+tmux:editor  claude-code:builder [SD/H], claude-code:gone [SD/H], claude-code:lost [SD/H], claude-code:unheard [SD/H], claude-code:waiter [SD/H]  —
+tmux:spare   —                                                                                                                                    —

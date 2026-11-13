@@ -239,4 +239,8 @@ fn process_tree_mutators_are_a_subset_of_all_mutators() {
         !PROCESS_TREE_MUTATORS.contains(&providers::DECLARED),
         "declared reads config, not /proc — stays always-run",
     );
+    assert!(
+        !PROCESS_TREE_MUTATORS.contains(&providers::LIVE_STATE),
+        "live_state reads one file and checks one pid per entry — stays always-run",
+    );
 }

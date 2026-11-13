@@ -11,8 +11,11 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 pub const SCHEMA_VERSION: u16 = 1;
-pub const ACTIVE_TTL_SECONDS: i64 = 15 * 60;
 pub const LATEST_FILENAME: &str = "hooks-latest.json";
+/// The most records the spool keeps. A write past it drops the records
+/// observed longest ago. One record per pane has no natural bound, since
+/// every pane a hook ever ran in gets a slot.
+pub const MAX_SPOOL_RECORDS: usize = 256;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct HookRecord {
@@ -96,8 +99,15 @@ impl HookStore {
         set_user_only_dir(&self.root)?;
 
         let path = self.latest_path();
-        let mut store = LatestHookStore::read(&path);
-        let key = mux_record_key(record);
+        let mut store = match LatestHookStore::read(&path) {
+            SpoolRead::Records(store) => store,
+            SpoolRead::Newer(version) => bail!(
+                "{} has hook schema_version `{version}`, newer than this binary's \
+                 `{SCHEMA_VERSION}`; left untouched",
+                path.display()
+            ),
+        };
+        let key = spool_slot(record);
         let replaced_existing = store.records.contains_key(&key);
         let should_write = store
             .records
@@ -105,6 +115,7 @@ impl HookStore {
             .is_none_or(|existing| record.observed_epoch >= existing.observed_epoch);
         if should_write {
             store.records.insert(key, record.clone());
+            store.trim_to(MAX_SPOOL_RECORDS);
             store.write_atomic(&path)?;
             set_user_only_file(&path)?;
         }
@@ -115,8 +126,14 @@ impl HookStore {
         Ok(outcome)
     }
 
+    /// The spool's records, the newest per slot, then the legacy
+    /// per-event records beside it. A spool from a newer schema reads as
+    /// empty.
     pub fn read_records(&self) -> Vec<HookRecord> {
-        let mut records = LatestHookStore::read(&self.latest_path()).into_records();
+        let mut records = match LatestHookStore::read(&self.latest_path()) {
+            SpoolRead::Records(store) => store.into_records(),
+            SpoolRead::Newer(_) => Vec::new(),
+        };
         records.extend(read_json_records(&self.root));
         records
     }
@@ -197,28 +214,95 @@ pub fn optional_payload_string(payload: &serde_json::Value, key: &str) -> Option
         .map(ToString::to_string)
 }
 
+/// The spool file: `{schema_version, records: {slot -> record}}`.
+///
+/// The slot a record sits in is derived from the record itself
+/// ([`spool_slot`]), never trusted from the file, so a spool written
+/// under an older key scheme reads correctly: each record moves to its
+/// own slot, the newest one per slot wins, and the next accepted write
+/// stores them under the derived keys. The schema version stays 1, so a
+/// binary from before the pane slots reads the file too and adds its
+/// record under its own key without dropping any other.
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct LatestHookStore {
     schema_version: u16,
     records: BTreeMap<String, HookRecord>,
 }
 
+/// What a spool file holds, as this binary can use it.
+enum SpoolRead {
+    /// The records, each in its slot. A missing, unreadable, or corrupt
+    /// file reads as an empty store, which the next write replaces.
+    Records(LatestHookStore),
+    /// A spool a newer binary wrote with a higher schema version: its
+    /// records are not read, and it is never overwritten.
+    Newer(u16),
+}
+
+/// Just the version of a spool file, read before its records.
+#[derive(Deserialize)]
+struct SpoolHeader {
+    schema_version: u16,
+}
+
 impl LatestHookStore {
-    fn read(path: &Path) -> Self {
-        if !path.is_file() {
-            return Self::default_for_write();
+    fn read(path: &Path) -> SpoolRead {
+        let Ok(body) = fs::read_to_string(path) else {
+            return SpoolRead::Records(Self::default_for_write());
+        };
+        if let Ok(header) = serde_json::from_str::<SpoolHeader>(&body)
+            && header.schema_version > SCHEMA_VERSION
+        {
+            return SpoolRead::Newer(header.schema_version);
         }
-        fs::read_to_string(path)
+        let store = serde_json::from_str::<Self>(&body)
             .ok()
-            .and_then(|body| serde_json::from_str::<Self>(&body).ok())
             .filter(|store| store.schema_version == SCHEMA_VERSION)
-            .unwrap_or_else(Self::default_for_write)
+            .map_or_else(Self::default_for_write, Self::into_slots);
+        SpoolRead::Records(store)
     }
 
     fn default_for_write() -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             records: BTreeMap::new(),
+        }
+    }
+
+    /// Move every record to the slot it belongs in, keeping the newest
+    /// per slot; on a tie, the record already stored under its slot.
+    fn into_slots(self) -> Self {
+        let mut records: BTreeMap<String, HookRecord> = BTreeMap::new();
+        for (stored_key, record) in self.records {
+            let slot = spool_slot(&record);
+            let keep = records.get(&slot).is_none_or(|kept| {
+                record.observed_epoch > kept.observed_epoch
+                    || (record.observed_epoch == kept.observed_epoch && stored_key == slot)
+            });
+            if keep {
+                records.insert(slot, record);
+            }
+        }
+        Self {
+            schema_version: self.schema_version,
+            records,
+        }
+    }
+
+    /// Drop the records observed longest ago until at most `max` remain.
+    fn trim_to(&mut self, max: usize) {
+        let excess = self.records.len().saturating_sub(max);
+        if excess == 0 {
+            return;
+        }
+        let mut by_age: Vec<(i64, String)> = self
+            .records
+            .iter()
+            .map(|(slot, record)| (record.observed_epoch, slot.clone()))
+            .collect();
+        by_age.sort();
+        for (_, slot) in by_age.into_iter().take(excess) {
+            self.records.remove(&slot);
         }
     }
 
@@ -239,7 +323,16 @@ impl LatestHookStore {
     }
 }
 
-fn mux_record_key(record: &HookRecord) -> String {
+/// The spool slot `record` occupies; a newer record in the same slot
+/// replaces it.
+///
+/// - A pane of a mux session: `tmux:{socket}:{session}:pane:{pane}`, so
+///   agents in split panes of one session keep separate records.
+/// - A mux session with no pane: `tmux:{socket}:{session}`, one slot per
+///   session, as attribution treats such records.
+/// - Outside a mux: the harness process (`pid:{pid}`), else the
+///   directory (`cwd:{cwd}`), else the session itself.
+fn spool_slot(record: &HookRecord) -> String {
     if let Some(tmux) = &record.tmux {
         let mux = tmux
             .native_id
@@ -248,8 +341,14 @@ fn mux_record_key(record: &HookRecord) -> String {
             .filter(|value| !value.is_empty());
         if let Some(mux) = mux {
             let socket = tmux.socket_path.as_deref().unwrap_or("default");
-            return format!("tmux:{socket}:{mux}");
+            return match tmux.pane_id.as_deref().filter(|pane| !pane.is_empty()) {
+                Some(pane) => format!("tmux:{socket}:{mux}:pane:{pane}"),
+                None => format!("tmux:{socket}:{mux}"),
+            };
         }
+    }
+    if let Some(pid) = record.pid {
+        return format!("pid:{pid}");
     }
     if let Some(cwd) = record.cwd.as_deref() {
         return format!("cwd:{cwd}");

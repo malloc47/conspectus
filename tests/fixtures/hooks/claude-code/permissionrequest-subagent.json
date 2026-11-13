@@ -1,0 +1,28 @@
+{
+  "session_id": "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f",
+  "transcript_path": "/home/user/.claude/projects/-home-user-projects-my-project/3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f.jsonl",
+  "cwd": "/home/user/projects/my-project",
+  "permission_mode": "default",
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/home/user/projects/my-project/src/viewer/parser/mod.rs",
+    "old_string": "mod legacy;",
+    "new_string": ""
+  },
+  "permission_suggestions": [
+    {
+      "type": "addRules",
+      "rules": [
+        {
+          "toolName": "Edit",
+          "ruleContent": "cargo test:*"
+        }
+      ],
+      "behavior": "allow",
+      "destination": "localSettings"
+    }
+  ],
+  "agent_id": "a3f9c27e1b4d5068",
+  "agent_type": "Explore"
+}

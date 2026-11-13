@@ -578,3 +578,302 @@ fn codex_fd_beats_stale_argv_world() -> ReplayWorld {
 
     world
 }
+
+// ---- live state (the `live_state` discovery pass) ----
+
+const DEFAULT_TMUX_SOCKET: &str = "/tmp/tmux-1000/default";
+
+/// A live event for `session` with this process as its harness, seen in
+/// pane `pane` of tmux session `name` when one is given.
+fn live_event(
+    session: &str,
+    kind: conspectus::live_store::LiveEventKind,
+    pane: Option<(&str, &str)>,
+) -> conspectus::live_store::LiveEvent {
+    live_event_of(live_pid(), session, kind, pane)
+}
+
+/// The same, with the running process `pid` as the harness.
+fn live_event_of(
+    pid: i64,
+    session: &str,
+    kind: conspectus::live_store::LiveEventKind,
+    pane: Option<(&str, &str)>,
+) -> conspectus::live_store::LiveEvent {
+    conspectus::live_store::LiveEvent::new(
+        "claude-code",
+        session,
+        conspectus::live_store::now_ms(),
+        kind,
+    )
+    .with_context(conspectus::live_store::LiveContext {
+        pid: Some(pid),
+        pid_start: conspectus::live_store::process_start_time(pid),
+        tmux: pane.map(|(name, pane)| conspectus::live_store::LiveTmux {
+            socket: Some(DEFAULT_TMUX_SOCKET.to_string()),
+            session: Some(name.to_string()),
+            pane: Some(pane.to_string()),
+        }),
+        ..Default::default()
+    })
+}
+
+fn claude_session(snapshot: &GraphSnapshot, key: &str) -> conspectus::model::NodeId {
+    snapshot
+        .nodes
+        .iter()
+        .find_map(|node| match node {
+            conspectus::model::GraphNode::AgentSession(session)
+                if session.harness_key == "claude-code" && session.id.session_key == key =>
+            {
+                Some(node.id())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no claude-code session `{key}`"))
+}
+
+fn editor_mux() -> conspectus::model::MuxSessionId {
+    conspectus::model::MuxSessionId::new("tmux:editor")
+}
+
+#[test]
+fn replay_binds_live_state_to_the_session_the_hook_sidecar_synthesized() {
+    use conspectus::live_store::LiveEventKind;
+    use conspectus::model::live::{LiveState, Liveness};
+
+    // No transcript, only a hook record: the sidecar synthesizes the
+    // session, and the live-state pass, which runs after it, binds to it.
+    let mut world = ReplayWorld::new();
+    let work = world.mkdir("work");
+    world.add_tmux_row(TmuxReplayRow::new("editor").with_cwd(&work));
+    world.write_hook_record(HookRecord {
+        schema_version: SCHEMA_VERSION,
+        harness_key: "claude-code".to_string(),
+        session_key: "hooked".to_string(),
+        cwd: Some(work.to_string_lossy().to_string()),
+        pid: Some(live_pid()),
+        ppid: None,
+        tmux: Some(HookTmuxRecord {
+            session_name: Some("editor".to_string()),
+            native_id: None,
+            pane_id: Some("%1".to_string()),
+            socket_path: Some(DEFAULT_TMUX_SOCKET.to_string()),
+        }),
+        transcript_path: None,
+        hook_event_name: Some("SessionStart".to_string()),
+        observed_epoch: 1_700_000_550,
+        harness_version: None,
+        background_harness: false,
+    });
+    world.write_live_event(&live_event(
+        "hooked",
+        LiveEventKind::TurnStarted,
+        Some(("editor", "%1")),
+    ));
+    // An entry for a session discovery never saw, from another process.
+    world.write_live_event(&conspectus::live_store::LiveEvent::new(
+        "claude-code",
+        "unbound",
+        conspectus::live_store::now_ms(),
+        LiveEventKind::TurnStarted,
+    ));
+
+    let result = world.run();
+
+    let session = claude_session(&result.snapshot, "hooked");
+    let bindings: Vec<_> = result.snapshot.node_live.iter().collect();
+    assert_eq!(bindings.len(), 1, "{bindings:?}");
+    let (id, binding) = bindings[0];
+    assert_eq!(*id, session);
+    assert_eq!(binding.observation.state, LiveState::Working);
+    assert_eq!(binding.liveness, Liveness::Alive);
+    assert_eq!(
+        result.resolved.node_live, result.snapshot.node_live,
+        "resolving keeps the table"
+    );
+}
+
+#[test]
+fn replay_moves_a_pane_only_state_from_the_mux_to_its_session_when_it_appears() {
+    use conspectus::live_store::LiveEventKind;
+    use conspectus::model::live::{LiveCounts, LiveState};
+
+    let mut world = ReplayWorld::new();
+    let work = world.mkdir("work");
+    world.add_tmux_row(TmuxReplayRow::new("editor").with_cwd(&work));
+    world.write_live_event(&live_event(
+        "later",
+        LiveEventKind::TurnStarted,
+        Some(("editor", "%2")),
+    ));
+    let now_ms = conspectus::live_store::now_ms();
+    let working = LiveCounts {
+        working: 1,
+        ..LiveCounts::default()
+    };
+
+    let before = world.run().resolved;
+    assert!(before.node_live.is_empty());
+    assert_eq!(
+        before.pane_live.keys().cloned().collect::<Vec<_>>(),
+        vec![conspectus::model::LivePane::new(
+            editor_mux(),
+            Some("%2".to_string())
+        )],
+        "with no session yet, the agent shows on its pane of the mux"
+    );
+    assert_eq!(before.live_counts_of_mux(&editor_mux(), now_ms), working);
+
+    world.write_claude_code_session("later", &work);
+    let after = world.run().resolved;
+    let session = claude_session(&after, "later");
+    assert_eq!(
+        after.node_live.keys().collect::<Vec<_>>(),
+        vec![&session],
+        "the next discovery moves it to the session"
+    );
+    assert!(after.pane_live.is_empty());
+    assert_eq!(
+        after.live_state_of(&session, now_ms).map(|live| live.state),
+        Some(LiveState::Working)
+    );
+    assert_eq!(after.live_counts_of_mux(&editor_mux(), now_ms), working);
+}
+
+#[test]
+fn replay_two_agents_with_no_session_in_two_panes_both_count_on_the_mux() {
+    use conspectus::live_store::{LiveEventKind, WaitKind};
+    use conspectus::model::live::LiveCounts;
+
+    let mut world = ReplayWorld::new();
+    let work = world.mkdir("work");
+    world.add_tmux_row(TmuxReplayRow::new("editor").with_cwd(&work));
+    world.write_live_event(&live_event(
+        "fresh-left",
+        LiveEventKind::WaitStarted {
+            agent: None,
+            kind: WaitKind::Input,
+        },
+        Some(("editor", "%1")),
+    ));
+    // Another agent process: one process holds one live session.
+    world.write_live_event(&live_event_of(
+        i64::from(std::os::unix::process::parent_id()),
+        "fresh-right",
+        LiveEventKind::TurnStarted,
+        Some(("editor", "%2")),
+    ));
+    let now_ms = conspectus::live_store::now_ms();
+
+    let result = world.run();
+
+    assert_eq!(result.snapshot.pane_live.len(), 2, "one entry per pane");
+    assert_eq!(
+        result.resolved.pane_live, result.snapshot.pane_live,
+        "resolving keeps the table"
+    );
+    assert_eq!(
+        result.resolved.live_counts_of_mux(&editor_mux(), now_ms),
+        LiveCounts {
+            waiting: 1,
+            working: 1,
+            ..LiveCounts::default()
+        },
+        "each agent counts once"
+    );
+}
+
+#[test]
+fn replay_two_agents_in_one_tmux_session_each_keep_their_own_state() {
+    use conspectus::live_store::{LiveEventKind, WaitKind};
+    use conspectus::model::live::{LiveCounts, LiveDetail, LiveState};
+
+    let mut world = ReplayWorld::new();
+    let work = world.mkdir("work");
+    world.add_tmux_row(TmuxReplayRow::new("editor").with_cwd(&work));
+    world.write_claude_code_session("left", &work);
+    world.write_claude_code_session("right", &work);
+    world.write_live_event(&live_event(
+        "left",
+        LiveEventKind::TurnStarted,
+        Some(("editor", "%1")),
+    ));
+    world.write_live_event(&live_event(
+        "left",
+        LiveEventKind::WaitStarted {
+            agent: None,
+            kind: WaitKind::Permission,
+        },
+        Some(("editor", "%1")),
+    ));
+    // Another agent process: one process holds one live session, so the
+    // second agent runs as this test's parent, which outlives it.
+    world.write_live_event(&live_event_of(
+        i64::from(std::os::unix::process::parent_id()),
+        "right",
+        LiveEventKind::TurnStarted,
+        Some(("editor", "%2")),
+    ));
+    let now_ms = conspectus::live_store::now_ms();
+
+    let resolved = world.run().resolved;
+
+    let left = claude_session(&resolved, "left");
+    let right = claude_session(&resolved, "right");
+    assert_eq!(
+        resolved
+            .live_state_of(&left, now_ms)
+            .map(|live| (live.state, live.detail)),
+        Some((LiveState::Waiting, Some(LiveDetail::Permission)))
+    );
+    assert_eq!(
+        resolved
+            .live_state_of(&right, now_ms)
+            .map(|live| live.state),
+        Some(LiveState::Working)
+    );
+    // Both sessions sit in `editor` by their working directory.
+    assert_eq!(
+        resolved.live_counts_of_mux(&editor_mux(), now_ms),
+        LiveCounts {
+            waiting: 1,
+            working: 1,
+            ..LiveCounts::default()
+        }
+    );
+}
+
+#[test]
+fn replay_reads_a_vanished_process_as_killed() {
+    use conspectus::live_store::{LiveContext, LiveEvent, LiveEventKind};
+    use conspectus::model::live::{LiveDetail, LiveState, Liveness};
+
+    let world = ReplayWorld::new();
+    let work = world.mkdir("work");
+    world.write_claude_code_session("gone", &work);
+    // No process can have this pid: it is above every pid limit.
+    let event = LiveEvent::new(
+        "claude-code",
+        "gone",
+        conspectus::live_store::now_ms(),
+        LiveEventKind::TurnStarted,
+    )
+    .with_context(LiveContext {
+        pid: Some(i64::from(u32::MAX)),
+        pid_start: Some(1),
+        ..Default::default()
+    });
+    world.write_live_event(&event);
+
+    let resolved = world.run().resolved;
+
+    let session = claude_session(&resolved, "gone");
+    assert_eq!(resolved.node_live[&session].liveness, Liveness::Dead);
+    assert_eq!(
+        resolved
+            .live_state_of(&session, conspectus::live_store::now_ms())
+            .map(|live| (live.state, live.detail)),
+        Some((LiveState::Exited, Some(LiveDetail::Killed)))
+    );
+}

@@ -71,9 +71,15 @@ struct Exception {
     reason: &'static str,
 }
 
-/// None today: the table reader that recognized border characters in
-/// rendered cells moved to the framework's rich text.
-const EXCEPTIONS: &[Exception] = &[];
+/// The live-state ready mark is the breadcrumb separator's character:
+/// the operator chose its shape, a single angle beside working's double
+/// one. It is drawn only in the left pane's live cell, and the separator
+/// only between a breadcrumb's hops, so neither is read as the other.
+const EXCEPTIONS: &[Exception] = &[Exception {
+    path: "src/tui/icons.rs",
+    glyph: marks::CRUMB,
+    reason: "the live-state ready mark, a shape of its own beside working's",
+}];
 
 /// Every use of a guarded character in drawing code, and every string that
 /// is exactly a bare mark, as `path:line: ...` findings. A reviewed

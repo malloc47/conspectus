@@ -26,13 +26,18 @@ use crate::tui::View;
 
 pub(crate) mod content;
 pub mod history;
+pub(crate) mod live;
+mod live_mark;
 pub mod mux;
 pub mod pinned;
 mod pr_status;
 pub mod prs;
 pub mod search;
+pub(crate) mod seen;
 pub mod sessions;
 
+pub use live::{LiveCell, LiveValues, MixedLive, MuxLive};
+pub use live_mark::{LiveMark, LiveSign};
 pub use pr_status::PrStatus;
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
@@ -103,6 +108,15 @@ pub struct RowTree {
     /// Which view produced this tree, so renderers and tests can
     /// route accordingly without inspecting the rows themselves.
     pub view: ViewLabel,
+    /// How many agents anywhere in the graph wait on the operator, read
+    /// with the rows' live values (so it changes when they do): every
+    /// session and pane-only agent, listed by this view or not. The
+    /// header's waiting count.
+    pub waiting_anywhere: usize,
+    /// The live values the rows were filled with, for every entity of
+    /// the live tables, listed by this view or not: what the detail pane
+    /// says about a node's live state, so it agrees with the node's row.
+    pub live: LiveValues,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
@@ -277,11 +291,19 @@ pub mod words {
     pub const PR_DRAFT: &str = "draft";
     pub const PR_MERGED: &str = "merged";
     pub const PR_CLOSED: &str = "closed";
+    /// A session blocked on the operator.
+    pub const WAITING: &str = "waiting";
+    /// A session whose turn is running.
+    pub const WORKING: &str = "working";
+    /// A session whose turn is over, ready for a prompt.
+    pub const READY: &str = "ready";
+    /// A session whose turn ended on an error.
+    pub const ERROR: &str = "error";
 
     /// Every word, in the order the reference lists them.
-    pub const ALL: [&str; 12] = [
+    pub const ALL: [&str; 16] = [
         LIVE, IN_MUX, RESUMABLE, STOPPED, REMOVED, MISSING, PLANNED, UNKNOWN, PR_OPEN, PR_DRAFT,
-        PR_MERGED, PR_CLOSED,
+        PR_MERGED, PR_CLOSED, WAITING, WORKING, READY, ERROR,
     ];
 }
 
@@ -325,6 +347,10 @@ pub struct MixedRow {
     pub pr_status: Option<PrStatus>,
     /// The pin marker cell after the kind glyph.
     pub marker: PinMarker,
+    /// The live state of the session or mux the row stands for (a pin's
+    /// row: the entity it points at). A session's live word replaces its
+    /// link word; a stopped mux draws its agents' mark in the live cell.
+    pub live: MixedLive,
 }
 
 /// An agent or program name drawn as a chip.
@@ -548,6 +574,9 @@ pub struct AgentSessionRow {
     pub pin_id: Option<String>,
     /// What the active content search found in this session.
     pub content_hit: Option<ContentHitCell>,
+    /// The session's live state, `None` without evidence: the mark in
+    /// the cell after the age.
+    pub live: Option<LiveCell>,
 }
 
 /// A session's result in the active content search: how many turns
@@ -669,6 +698,11 @@ pub struct MuxSessionRow {
     /// What the active content search found in the mux's one attached
     /// session; unset for muxes with none or several.
     pub content_hit: Option<ContentHitCell>,
+    /// How many of the agents the mux hosts are in each live state, and
+    /// how many of its ready ones ended a turn the operator has not seen;
+    /// empty without evidence. The cell after the age shows the state
+    /// that ranks first.
+    pub live: MuxLive,
 }
 
 /// A PR row in the prs view.
@@ -1257,6 +1291,7 @@ pub(crate) fn agent_row(
             mux_host: None,
             primary_node: node_id,
             content_hit: None,
+            live: None,
         }),
     }
 }
@@ -1292,6 +1327,9 @@ pub(crate) fn session_matches_filter(
         now_epoch: now,
         last_active_epoch: agent.node.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
+        live_state: filter
+            .live
+            .session(&crate::model::NodeId::AgentSession(agent.id.clone())),
     })
 }
 
@@ -1302,6 +1340,13 @@ pub(crate) fn session_matches_filter(
 /// see the initial config values through the same read path.
 pub(crate) struct TreeInputs<'a> {
     pub snapshot: &'a crate::model::GraphSnapshot,
+    /// The live tables the rows read, bound to `snapshot`: its own
+    /// `node_live` and `pane_live`, or those the TUI bound from the store
+    /// since.
+    pub live: crate::model::LiveTables<'a>,
+    /// What says whether a ready turn was seen: the TUI's memory of the
+    /// turns it found seen, and when its snapshot loaded.
+    pub seen: seen::SeenContext<'a>,
     pub view: View,
     pub grouping: crate::tui::Grouping,
     pub filter: crate::filter::RowFilter,
@@ -1318,6 +1363,8 @@ impl<'a> TreeInputs<'a> {
     pub fn from_app(snapshot: &'a crate::model::GraphSnapshot, app: &'a crate::tui::App) -> Self {
         Self {
             snapshot,
+            live: app.live_table(snapshot),
+            seen: app.seen_context(),
             view: app.active_view(),
             grouping: app.grouping(),
             filter: {
@@ -1344,12 +1391,21 @@ impl<'a> TreeInputs<'a> {
 /// projection tuple; discovery-triggering paths pull it from
 /// [`crate::tui::RunConfig`] at startup, and post-first-load
 /// projection changes pull it from `App` state.
-pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
+///
+/// Every view's rows then take their entities' live state, read now
+/// ([`live::annotate`]). The builders filter and float by the same
+/// states, read at the same moment (ADR 0215): the order and the rows a
+/// tree is built with hold until it is built again, while the marks
+/// refill in place.
+pub(crate) fn build_tree_for_view(mut inputs: TreeInputs<'_>) -> RowTree {
     let pinned_only =
         inputs.filter.pinned_only && matches!(inputs.view, View::Sessions | View::Mux | View::Prs);
     let pinned = pinned_only.then(|| pinned_node_set(inputs.snapshot));
     let content = inputs.filter.content.clone();
     let snapshot = inputs.snapshot;
+    let now_ms = tree_current_unix_ms();
+    let live = live::LiveValues::at(snapshot, inputs.live, now_ms, inputs.seen);
+    inputs.filter.live = crate::filter::LiveStates::read(snapshot, inputs.live, now_ms);
     let mut tree = build_tree_for_view_unfiltered(inputs);
     if let Some(content) = &content {
         content::annotate(&mut tree, snapshot, content);
@@ -1357,6 +1413,7 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
     if let Some(pinned) = pinned {
         retain_pinned_rows(&mut tree, &pinned);
     }
+    live::annotate(&mut tree, snapshot, &live);
     tree
 }
 
@@ -1365,6 +1422,8 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
     let now = Some(tree_current_unix_epoch());
     let TreeInputs {
         snapshot,
+        live: _,
+        seen: _,
         view,
         grouping,
         filter,
@@ -1469,6 +1528,16 @@ pub(crate) fn tree_current_unix_epoch() -> i64 {
         .get()
         .copied()
         .unwrap_or_else(crate::discovery::current_epoch)
+}
+
+/// [`tree_current_unix_epoch`] in milliseconds, the unit live state is
+/// read in.
+pub(crate) fn tree_current_unix_ms() -> i64 {
+    FROZEN_NOW
+        .get()
+        .map_or_else(crate::live_store::now_ms, |epoch| {
+            epoch.saturating_mul(1000)
+        })
 }
 
 #[cfg(test)]

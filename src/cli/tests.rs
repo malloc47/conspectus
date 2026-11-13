@@ -1,7 +1,4 @@
-use super::hook::{
-    ensure_claude_hook, harness_binaries, has_claude_hook, remove_claude_hook,
-    resolve_harness_pid_with,
-};
+use super::hook_write::{harness_binaries, resolve_harness_pid_with};
 use super::tui::parse_tui_duration;
 use super::*;
 use std::time::Duration;
@@ -290,76 +287,6 @@ fn pager_candidates_empty_pager_env_falls_back_to_internal_defaults() {
     assert_eq!(args(&candidates[0]), vec!["-F", "-R", "-X"]);
 }
 
-#[test]
-fn ensure_claude_hook_preserves_existing_hooks() {
-    let mut document = serde_json::json!({
-        "theme": "dark",
-        "hooks": {
-            "SessionStart": [
-                {
-                    "matcher": "startup",
-                    "hooks": [
-                        { "type": "command", "command": "echo existing" }
-                    ]
-                }
-            ]
-        }
-    });
-
-    assert!(ensure_claude_hook(
-        &mut document,
-        "conspectus hook write claude-code"
-    ));
-    assert!(has_claude_hook(&document));
-
-    let entries = document["hooks"]["SessionStart"].as_array().expect("array");
-    assert_eq!(entries.len(), 2);
-    assert_eq!(document["theme"], "dark");
-}
-
-#[test]
-fn ensure_claude_hook_is_idempotent() {
-    let mut document = serde_json::json!({});
-
-    assert!(ensure_claude_hook(
-        &mut document,
-        "conspectus hook write claude-code"
-    ));
-    assert!(!ensure_claude_hook(
-        &mut document,
-        "conspectus hook write claude-code"
-    ));
-
-    let entries = document["hooks"]["SessionStart"].as_array().expect("array");
-    assert_eq!(entries.len(), 1);
-}
-
-#[test]
-fn remove_claude_hook_preserves_unrelated_hooks_in_same_entry() {
-    let mut document = serde_json::json!({
-        "hooks": {
-            "SessionStart": [
-                {
-                    "matcher": "startup",
-                    "hooks": [
-                        { "type": "command", "command": "conspectus hook write claude-code" },
-                        { "type": "command", "command": "echo existing" }
-                    ]
-                }
-            ]
-        }
-    });
-
-    assert!(remove_claude_hook(&mut document));
-    assert!(!has_claude_hook(&document));
-
-    let hooks = document["hooks"]["SessionStart"][0]["hooks"]
-        .as_array()
-        .expect("hooks");
-    assert_eq!(hooks.len(), 1);
-    assert_eq!(hooks[0]["command"], "echo existing");
-}
-
 // ---- ADR 0031: FilterArgs ----
 
 fn filter_args_with(
@@ -372,6 +299,7 @@ fn filter_args_with(
         harness: harness.into_iter().map(String::from).collect(),
         max_age: max_age.map(String::from),
         mux_state: mux_state.into_iter().map(String::from).collect(),
+        state: Vec::new(),
         pr_branch: None,
         pr_state: Vec::new(),
         contains: None,
@@ -457,6 +385,49 @@ fn filter_args_mux_state_invalid_value_errors_with_choices() {
     let err = args.to_row_filter().unwrap_err().to_string();
     assert!(err.contains("invalid --mux-state"));
     assert!(err.contains("attached, ambiguous, unmuxed"));
+}
+
+#[test]
+fn filter_args_state_takes_every_live_state_value_as_a_set() {
+    use crate::filter::LiveStateKey;
+
+    let mut args = filter_args_with(vec![], None, vec![], None);
+    assert_eq!(args.to_row_filter().expect("none").live_state, None);
+    args.state = vec![
+        "Waiting".to_string(),
+        "error".to_string(),
+        " none ".to_string(),
+        "waiting".to_string(),
+    ];
+    let filter = args.to_row_filter().expect("parse");
+    assert_eq!(
+        filter
+            .live_state
+            .as_ref()
+            .map(|wanted| wanted.values().to_vec()),
+        Some(vec![
+            LiveStateKey::Waiting,
+            LiveStateKey::Error,
+            LiveStateKey::None
+        ])
+    );
+    assert!(filter.has_narrowing_predicates(), "it narrows the rows");
+    for value in ["ready", "working", "unknown"] {
+        args.state = vec![value.to_string()];
+        assert!(args.to_row_filter().is_ok(), "{value}");
+    }
+}
+
+#[test]
+fn filter_args_state_invalid_value_errors_with_choices() {
+    let mut args = filter_args_with(vec![], None, vec![], None);
+    args.state = vec!["unseen".to_string()];
+    let err = args.to_row_filter().unwrap_err().to_string();
+    assert!(err.contains("invalid --state `unseen`"), "{err}");
+    assert!(
+        err.contains("waiting, ready, working, error, unknown, none"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -668,18 +639,18 @@ mod help_text {
 
 #[test]
 fn opencode_shared_service_is_a_background_hook_harness() {
-    assert!(super::hook::is_background_harness_command(
+    assert!(super::hook_write::is_background_harness_command(
         "opencode",
         "/home/user/.opencode/bin/opencode serve --service"
     ));
-    assert!(!super::hook::is_background_harness_command(
+    assert!(!super::hook_write::is_background_harness_command(
         "opencode",
         "opencode --session ses_16d204c1dffeIkBjxxbpD9uujI"
     ));
-    assert!(!super::hook::is_background_harness_command(
+    assert!(!super::hook_write::is_background_harness_command(
         "opencode", "opencode"
     ));
-    assert!(!super::hook::is_background_harness_command(
+    assert!(!super::hook_write::is_background_harness_command(
         "not-a-harness",
         "opencode serve"
     ));
