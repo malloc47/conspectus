@@ -43,8 +43,11 @@ const plugin: Plugin.Plugin = {
     void (async () => {
       try {
         // opencode checks the names at run time: one a version lacks is
-        // ignored, with a warning in the service log.
-        const events = ctx.event.subscribe({ types: [...V2_EVENTS] as never, signal: stop.signal });
+        // ignored, with a warning in the service log. The options are
+        // built apart so the pinned 2.0.32 types, which predate `types`,
+        // do not reject the property; later ones declare it.
+        const options = { types: [...V2_EVENTS] as never, signal: stop.signal };
+        const events = ctx.event.subscribe(options);
         for await (const event of events) {
           live.send((state, now) => state.v2(event, now));
         }
