@@ -200,6 +200,82 @@ fn contains_is_accepted_by_the_other_tables_and_leaves_them_alone() {
     }
 }
 
+/// A fake `tmux` in `<home>/fake-tmux/` that lists one live session,
+/// `name`, working in the transcripts' project, and prints nothing for
+/// every other call. Returns the `PATH` that puts it first.
+fn fake_tmux(home: &Path, name: &str) -> std::ffi::OsString {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = home.join("fake-tmux");
+    fs::create_dir_all(&dir).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let project = "/home/user/project";
+    let pid = std::process::id();
+    let rows = dir.join("sessions");
+    fs::write(
+        &rows,
+        format!(
+            "{name}\t{project}\t{now}\t{now}\tclaude\t{pid}\t{project}\tclaude\t0\t\t0\t$1\t%1\t\n"
+        ),
+    )
+    .unwrap();
+    let script = dir.join("tmux");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\nlist-sessions) cat '{rows}' ;;\nesac\n",
+            rows = rows.display(),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap()
+}
+
+/// The mux table matches each attached session's transcript by the
+/// session's own key, as the sessions table does.
+#[test]
+fn contains_keeps_a_mux_whose_session_s_transcript_mentions_the_text() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let claude = temp.path().join("claude");
+    fs::create_dir_all(&home).unwrap();
+    write_session(
+        &claude,
+        "aaaaaaaa-0000-0000-0000-000000000001",
+        "We chose the quokka design",
+    );
+    let path = fake_tmux(&home, "editor");
+    let mux_table = |extra: &[&str]| {
+        let mut cmd = conspectus(&home, &claude);
+        cmd.env_remove("CONSPECTUS_DISABLE_TMUX")
+            .env("PATH", &path)
+            .args(["table", "mux", "--wide", "--no-pager"])
+            .args(extra);
+        let output = cmd.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+
+    let all = mux_table(&[]);
+    assert!(all.contains("tmux:editor"), "{all}");
+    assert!(all.contains("00000001"), "the session is attached: {all}");
+
+    let matched = mux_table(&["--contains", "QUOKKA"]);
+    assert!(matched.contains("tmux:editor"), "{matched}");
+    let unmatched = mux_table(&["--contains", "zebra"]);
+    assert!(!unmatched.contains("tmux:editor"), "{unmatched}");
+}
+
 /// Scenario worlds have no transcripts, so the scenario viewer says so
 /// instead of quietly ignoring the flag.
 #[cfg(debug_assertions)]

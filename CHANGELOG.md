@@ -889,6 +889,11 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **`conspectus table mux --contains TEXT` lists the muxes whose
+  sessions mention the text.** It looked each attached session's
+  transcript up by the wrong key, so no session matched and the table
+  listed no mux at all. It now matches each session as `table sessions`
+  does.
 - **An agent on another tmux server no longer counts on a mux of the
   same name.** An agent with no session yet was counted on the tmux
   session it names on the server whose socket *name* matched, so a

@@ -119,7 +119,7 @@ fn agent_matches_filter(
     let candidate_count = ambiguity.get(&agent.session_key).copied().unwrap_or(0);
     filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.session_key.0,
-        session_key: &agent.session_key.1,
+        session_key: &agent.session_key.2,
         now_epoch: options.now_epoch,
         last_active_epoch: agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
