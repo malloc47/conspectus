@@ -307,6 +307,17 @@ fn names_server(socket: &str, probed: Option<&str>) -> bool {
     probed.is_none_or(|probed| probed == socket)
 }
 
+/// Whether `mux` is a session of the tmux server whose socket is at
+/// `socket`, a path as `$TMUX` gives it, by the rule rule 2 binds by:
+/// the server's name matches the path's last component, and the path is
+/// the one the mux's probe read, where it read one. The hook sidecar
+/// finds a record's mux by the same rule.
+pub(crate) fn on_server(snapshot: &GraphSnapshot, mux: &MuxSessionNode, socket: &str) -> bool {
+    mux.backend == crate::discovery::tmux::TMUX_BACKEND
+        && server_of(socket).is_some_and(|server| server == effective_socket(mux.socket.as_deref()))
+        && names_server(socket, probed_socket(snapshot, mux))
+}
+
 #[path = "live_title.rs"]
 mod title;
 

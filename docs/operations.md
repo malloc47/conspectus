@@ -87,6 +87,12 @@ however old it is; it is ignored once its agent process has exited, when
 its tmux session was created after it, or when its own pane now runs a
 different harness (the discovery probe lists every pane's program, so an
 agent in one split pane is not judged by what the pane beside it runs).
+A record ties its session to the tmux session it names on its own tmux
+server, the one whose socket path it recorded (compared with the path
+tmux reports for each server Conspectus lists), so a session of the
+same name on another server (a `-L` server, another `TMUX_TMPDIR`,
+another user's) is not its mux; when that session is not listed, a
+session of that server in the record's directory is.
 The spool keeps at most 256 records, dropping the
 oldest. Older per-event JSON records in the same directory remain
 readable as a compatibility path.

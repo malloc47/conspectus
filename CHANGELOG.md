@@ -892,6 +892,16 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A hook record is tied to a mux on its own tmux server.** A record
+  was matched to the tmux session of its name on whichever server
+  listed one, so an agent on a default server under another
+  `TMUX_TMPDIR` or user was tied to your session of the same name, and
+  an agent on a `-L` server never matched its own session by name and
+  fell back to any mux in its directory. A record that names its
+  server's socket now matches a session of that server only, by name and
+  then by directory, compared by socket path where tmux reports one, as
+  live state does; a record from a tmux that names no socket is matched
+  by name as before.
 - **A group header counts each session once.** In the PRs view, a
   checkout with two pull requests on one branch lists the branch's
   sessions under each, and its header's `(N)` counted them twice, so it

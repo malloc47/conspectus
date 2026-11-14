@@ -914,6 +914,168 @@ fn agents_of_two_harnesses_in_split_panes_of_one_session_are_both_attributed() {
     );
 }
 
+const DEFAULT_SOCKET: &str = "/tmp/tmux-1000/default";
+const WORK_SOCKET: &str = "/tmp/tmux-1000/work";
+
+/// Probes of the tmux servers `servers` names, by socket name (`None`
+/// is the default server), each with the socket path it read.
+fn server_probes(
+    servers: &[(Option<&str>, Option<&str>)],
+) -> BTreeMap<String, crate::model::MuxProbe> {
+    servers
+        .iter()
+        .map(|(socket, path)| {
+            let mut probe =
+                crate::model::MuxProbe::new(crate::model::MuxProbeStatus::Listed, 1_700_000_500);
+            probe.socket_path = path.map(str::to_string);
+            (crate::model::probe_key("tmux", *socket), probe)
+        })
+        .collect()
+}
+
+/// Session `editor` on the `-L work` server, in another directory and
+/// with another active pane process than [`mux`]'s.
+fn work_editor() -> GraphNode {
+    let GraphNode::MuxSession(mut mux) = mux("work:editor") else {
+        unreachable!()
+    };
+    mux.socket = Some("work".to_string());
+    mux.cwd = Some("/elsewhere".to_string());
+    mux.active_pane_current_path = Some("/elsewhere".to_string());
+    mux.active_pane_pid = Some(456);
+    GraphNode::MuxSession(mux)
+}
+
+/// [`pane_record`] from the server whose socket is at `socket`.
+fn record_on(session_key: &str, socket: &str) -> hook::HookRecord {
+    let mut record = pane_record(session_key, "%1", 1_700_000_000);
+    record.tmux.as_mut().expect("tmux").socket_path = Some(socket.to_string());
+    record
+}
+
+/// The mux each Active hook link ties `session` to.
+fn hook_mux_targets(snapshot: &GraphSnapshot, session: &NodeId) -> Vec<NodeId> {
+    hook_mux_links(snapshot)
+        .into_iter()
+        .filter(|link| &link.source == session && matches!(link.state, LinkState::Active))
+        .filter_map(|link| link.target_node_id().cloned())
+        .collect()
+}
+
+fn mux_node(native_id: &str) -> NodeId {
+    NodeId::MuxSession(MuxSessionId::new(format!("tmux:{native_id}")))
+}
+
+#[test]
+fn a_record_from_a_default_server_elsewhere_is_not_attributed_to_a_session_of_its_name() {
+    // The record's server is a default server under another
+    // `TMUX_TMPDIR`; its session shares the probed server's session's
+    // name, its directory, and nothing else.
+    let foreign = "/run/other/tmux-1000/default";
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![session("alpha"), mux("editor")],
+        mux_probes: server_probes(&[(None, Some(DEFAULT_SOCKET))]),
+        ..GraphSnapshot::empty()
+    };
+    apply_hook_records(
+        &mut snapshot,
+        vec![record_on("alpha", foreign)],
+        1_700_000_600,
+    );
+    assert!(hook_mux_links(&snapshot).is_empty());
+
+    // The probed server's own record still matches by session name.
+    apply_hook_records(
+        &mut snapshot,
+        vec![record_on("alpha", DEFAULT_SOCKET)],
+        1_700_000_600,
+    );
+    assert_eq!(
+        hook_mux_targets(&snapshot, &session_node("alpha")),
+        [mux_node("editor")]
+    );
+}
+
+#[test]
+fn a_probe_that_read_no_socket_path_leaves_the_name_to_decide() {
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![session("alpha"), mux("editor")],
+        mux_probes: server_probes(&[(None, None)]),
+        ..GraphSnapshot::empty()
+    };
+    apply_hook_records(
+        &mut snapshot,
+        vec![record_on("alpha", "/run/other/tmux-1000/default")],
+        1_700_000_600,
+    );
+    assert_eq!(
+        hook_mux_targets(&snapshot, &session_node("alpha")),
+        [mux_node("editor")]
+    );
+}
+
+#[test]
+fn a_record_from_a_named_server_matches_its_mux_by_session_name_on_that_server() {
+    // Session `editor` on the default server and on `-L work`; each
+    // record names its own server's socket.
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            session("alpha"),
+            session("beta"),
+            mux("editor"),
+            work_editor(),
+        ],
+        mux_probes: server_probes(&[
+            (None, Some(DEFAULT_SOCKET)),
+            (Some("work"), Some(WORK_SOCKET)),
+        ]),
+        ..GraphSnapshot::empty()
+    };
+    apply_hook_records(
+        &mut snapshot,
+        vec![
+            record_on("alpha", WORK_SOCKET),
+            record_on("beta", DEFAULT_SOCKET),
+        ],
+        1_700_000_600,
+    );
+    assert_eq!(
+        hook_mux_targets(&snapshot, &session_node("alpha")),
+        [mux_node("work:editor")]
+    );
+    assert_eq!(
+        hook_mux_targets(&snapshot, &session_node("beta")),
+        [mux_node("editor")]
+    );
+}
+
+#[test]
+fn a_record_from_a_named_server_falls_back_to_a_directory_on_that_server_only() {
+    // The record's session is not listed (renamed since, say); the cwd
+    // fallback finds the `-L work` mux in its directory, not the default
+    // server's mux in the same directory.
+    let mut record = record_on("alpha", WORK_SOCKET);
+    record.tmux.as_mut().expect("tmux").session_name = Some("renamed".to_string());
+    record.cwd = Some("/work".to_string());
+    let GraphNode::MuxSession(mut work) = work_editor() else {
+        unreachable!()
+    };
+    work.cwd = Some("/work".to_string());
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![session("alpha"), mux("editor"), GraphNode::MuxSession(work)],
+        mux_probes: server_probes(&[
+            (None, Some(DEFAULT_SOCKET)),
+            (Some("work"), Some(WORK_SOCKET)),
+        ]),
+        ..GraphSnapshot::empty()
+    };
+    apply_hook_records(&mut snapshot, vec![record], 1_700_000_600);
+    assert_eq!(
+        hook_mux_targets(&snapshot, &session_node("alpha")),
+        [mux_node("work:editor")]
+    );
+}
+
 /// A live Claude Code record from pane `pane` of tmux session `editor`:
 /// its pid is this test process, so the liveness gate passes.
 fn pane_record(session_key: &str, pane: &str, observed_epoch: i64) -> hook::HookRecord {

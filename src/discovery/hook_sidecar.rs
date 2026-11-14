@@ -434,6 +434,10 @@ fn inferred_state_scope(record: &HookRecord) -> String {
         .unwrap_or_else(|| "hook_sidecar".to_string())
 }
 
+/// The live mux a record reports from: the session its tmux names (on
+/// the server its socket path names, when it names one), else the mux
+/// whose active pane runs its process, else a mux in its directory (on
+/// its server, when it names one).
 fn find_mux(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<MuxSessionNode> {
     // A gone mux can't host what a hook just reported (ADR 0140).
     let muxes: Vec<_> = snapshot
@@ -444,12 +448,25 @@ fn find_mux(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<MuxSessionN
         })
         .collect();
 
-    let native_id = record
-        .tmux
-        .as_ref()
-        .and_then(|tmux| tmux.native_id.as_deref().or(tmux.session_name.as_deref()));
-    if let Some(native_id) = native_id
-        && let Some(mux) = muxes.iter().find(|mux| mux.native_id == native_id)
+    // A record that names its tmux server's socket is attributed only to
+    // a mux of that server: two servers can hold sessions of one name
+    // (the default server under another `TMUX_TMPDIR` or uid, or a `-L`
+    // server), and a strong hook link on the other's mux would be wrong.
+    // A tmux that reported no socket path leaves the name to decide.
+    let tmux = record.tmux.as_ref();
+    let socket = tmux
+        .and_then(|tmux| tmux.socket_path.as_deref())
+        .filter(|socket| !socket.is_empty());
+    let on_record_server = |mux: &MuxSessionNode| {
+        socket.is_none_or(|socket| super::live_state::on_server(snapshot, mux, socket))
+    };
+
+    let name = tmux.and_then(|tmux| tmux.native_id.as_deref().or(tmux.session_name.as_deref()));
+    if let Some(name) = name
+        && let Some(mux) = muxes.iter().find(|mux| match socket {
+            Some(_) => mux.session_name() == name && on_record_server(mux),
+            None => mux.native_id == name,
+        })
     {
         return Some((*mux).clone());
     }
@@ -465,7 +482,9 @@ fn find_mux(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<MuxSessionN
 
     if let Some(cwd) = record.cwd.as_deref()
         && let Some(mux) = muxes.iter().find(|mux| {
-            mux.cwd.as_deref() == Some(cwd) || mux.active_pane_current_path.as_deref() == Some(cwd)
+            on_record_server(mux)
+                && (mux.cwd.as_deref() == Some(cwd)
+                    || mux.active_pane_current_path.as_deref() == Some(cwd))
         })
     {
         return Some((*mux).clone());
