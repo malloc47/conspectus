@@ -50,7 +50,10 @@ Codex installer moved to per-event entries.
    harness's variable, then the home default. For Claude Code that covers
    the transcripts and the `sessions/<pid>.json` file the hook sidecar
    reads to tell a background process; for Codex, the rollouts, the state
-   database, and the log database.
+   database, and the log database. A session only a hook has reported
+   takes its state scope from its rollout's path by layout (the directory
+   above `sessions/`, else an enclosing `.codex`), so under a moved home
+   it gets the identity discovery gives it.
 
 3. **Hooks go to `dir`.** `hook init|status|remove --scope user` edit the
    settings file in the harness's directory: the harness's variable, then

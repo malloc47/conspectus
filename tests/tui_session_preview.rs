@@ -136,6 +136,7 @@ fn isolated_cmd(home: &Path) -> Command {
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
     cmd.env_remove("TMUX");
     cmd.env_remove("CLAUDE_CONFIG_DIR");
+    cmd.env_remove("CODEX_HOME");
     cmd
 }
 

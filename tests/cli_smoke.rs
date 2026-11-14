@@ -29,8 +29,9 @@ fn isolated_cmd(home: &Path) -> Command {
     cmd.env("XDG_CACHE_HOME", home.join(".cache"));
     cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
-    // `hook init codex` writes under `CODEX_HOME`; one inherited from the
-    // host would point it at the developer's real Codex config.
+    // `hook init codex` writes under `CODEX_HOME` and discovery reads
+    // there; one inherited from the host would point both at the
+    // developer's real Codex home.
     cmd.env("CODEX_HOME", home.join(".codex"));
     // Claude Code's settings and sessions follow `CLAUDE_CONFIG_DIR`; one
     // inherited from the host would point at the developer's own.
@@ -2487,6 +2488,100 @@ fn graph_json_emits_agent_sessions_from_env_state_root() {
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0]["harness_key"], "codex");
     assert_eq!(sessions[0]["cwd"], "/work/x");
+}
+
+/// One Codex rollout of session `key` in `/work/<key>` under the Codex
+/// home `codex_home`.
+fn write_codex_rollout(codex_home: &Path, key: &str) {
+    let dir = codex_home.join("sessions/2026/05/23");
+    fs::create_dir_all(&dir).expect("rollout dir");
+    fs::write(
+        dir.join(format!("rollout-2026-05-23T00-00-00-{key}.jsonl")),
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{key}\",\"cwd\":\"/work/{key}\"}}}}\n"
+        ),
+    )
+    .expect("rollout");
+}
+
+/// The Codex sessions `graph --format json` finds with `env`, as
+/// `(session key, state scope, title)`.
+fn codex_sessions_with(home: &Path, env: &[(&str, &Path)]) -> Vec<(String, String, String)> {
+    let mut cmd = isolated_cmd(home);
+    cmd.env_remove("CODEX_HOME").current_dir(home);
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let output = cmd
+        .args(["graph", "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).expect("graph json");
+    let mut sessions: Vec<_> = json["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .filter(|node| node["type"] == "agent_session" && node["harness_key"] == "codex")
+        .map(|node| {
+            let text = |value: &serde_json::Value| value.as_str().unwrap_or_default().to_string();
+            (
+                text(&node["id"]["session_key"]),
+                text(&node["id"]["state_scope"]),
+                text(&node["title"]),
+            )
+        })
+        .collect();
+    sessions.sort();
+    sessions
+}
+
+#[test]
+fn discovery_reads_codex_sessions_and_state_under_codex_home() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let moved = home.path().join("elsewhere/codex");
+    let fixture = home.path().join("fixture");
+    write_codex_rollout(&home.path().join(".codex"), "home-default");
+    write_codex_rollout(&moved, "moved-home");
+    write_codex_rollout(&fixture, "override");
+    // The state database under the moved home names a thread no rollout
+    // has, with a title.
+    let db = rusqlite::Connection::open(moved.join("state_5.sqlite")).expect("state db");
+    db.execute_batch(
+        "CREATE TABLE threads (id TEXT NOT NULL PRIMARY KEY, cwd TEXT, title TEXT, updated_at_ms INTEGER);
+         INSERT INTO threads VALUES ('state-only', '/work/state-only', 'Moved thread', 1700000000000);",
+    )
+    .expect("threads");
+    drop(db);
+    let scope = |dir: &Path| dir.to_string_lossy().into_owned();
+    let entry =
+        |key: &str, dir: &Path, title: &str| (key.to_string(), scope(dir), title.to_string());
+
+    assert_eq!(
+        codex_sessions_with(home.path(), &[]),
+        vec![entry("home-default", &home.path().join(".codex"), "")]
+    );
+    assert_eq!(
+        codex_sessions_with(home.path(), &[("CODEX_HOME", Path::new(""))]),
+        vec![entry("home-default", &home.path().join(".codex"), "")],
+        "an empty CODEX_HOME counts as unset"
+    );
+    assert_eq!(
+        codex_sessions_with(home.path(), &[("CODEX_HOME", &moved)]),
+        vec![
+            entry("moved-home", &moved, ""),
+            entry("state-only", &moved, "Moved thread"),
+        ]
+    );
+    assert_eq!(
+        codex_sessions_with(
+            home.path(),
+            &[("CODEX_HOME", &moved), ("CONSPECTUS_CODEX_STATE", &fixture)]
+        ),
+        vec![entry("override", &fixture, "")]
+    );
 }
 
 #[test]

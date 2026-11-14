@@ -968,3 +968,72 @@ fn state_db_missing_threads_table_degrades_to_rollout_only() {
     let rollout = session_by_id(&fragment, "rollout-id").expect("rollout-id");
     assert_eq!(rollout.cwd.as_deref(), Some("/r"));
 }
+
+#[test]
+fn codex_home_moves_discovery_and_the_hooks() {
+    use crate::discovery::harness::dirs::env_of;
+
+    let moved = env_of(&[("CODEX_HOME", "/srv/codex"), ("HOME", "/home/user")]);
+    assert_eq!(HARNESS_DIR.dir(&moved), Some(PathBuf::from("/srv/codex")));
+    assert_eq!(
+        HARNESS_DIR.state_root(&moved),
+        Some(PathBuf::from("/srv/codex"))
+    );
+
+    let default = env_of(&[("CODEX_HOME", ""), ("HOME", "/home/user")]);
+    assert_eq!(
+        HARNESS_DIR.dir(&default),
+        Some(PathBuf::from("/home/user/.codex"))
+    );
+    assert_eq!(
+        HARNESS_DIR.state_root(&default),
+        Some(PathBuf::from("/home/user/.codex"))
+    );
+
+    // The Conspectus override moves discovery; the hooks stay where
+    // Codex reads them.
+    let overridden = env_of(&[
+        ("CONSPECTUS_CODEX_STATE", "/fixture/codex"),
+        ("CODEX_HOME", "/srv/codex"),
+        ("HOME", "/home/user"),
+    ]);
+    assert_eq!(
+        HARNESS_DIR.state_root(&overridden),
+        Some(PathBuf::from("/fixture/codex"))
+    );
+    assert_eq!(
+        HARNESS_DIR.dir(&overridden),
+        Some(PathBuf::from("/srv/codex"))
+    );
+    assert_eq!(
+        HARNESS_DIR.missing_message(),
+        "HOME or CODEX_HOME is required for --scope user"
+    );
+}
+
+#[test]
+fn a_rollouts_state_scope_is_the_home_above_its_sessions_directory() {
+    let scope = |path: &str| CodexAdapter::new().state_scope_for_transcript(Path::new(path));
+    assert_eq!(
+        scope("/home/user/.codex/sessions/2026/05/23/rollout-2026-05-23T00-00-00-a.jsonl"),
+        Some("/home/user/.codex".to_string())
+    );
+    // A home `CODEX_HOME` moved is found by its layout, not its name.
+    assert_eq!(
+        scope("/srv/codex-home/sessions/2026/05/23/rollout-2026-05-23T00-00-00-a.jsonl"),
+        Some("/srv/codex-home".to_string())
+    );
+    assert_eq!(
+        scope("/srv/sessions/codex/sessions/2026/05/23/rollout-2026-05-23T00-00-00-a.jsonl"),
+        Some("/srv/sessions/codex".to_string())
+    );
+    assert_eq!(
+        scope("/home/user/.codex/archived_sessions/rollout-2026-05-23T00-00-00-a.jsonl"),
+        Some("/home/user/.codex".to_string())
+    );
+    assert_eq!(
+        scope("/sessions/user/.codex/archived_sessions/rollout-2026-05-23T00-00-00-a.jsonl"),
+        Some("/sessions/user/.codex".to_string())
+    );
+    assert_eq!(scope("/elsewhere/rollout-a.jsonl"), None);
+}

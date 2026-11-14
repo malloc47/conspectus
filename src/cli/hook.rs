@@ -38,7 +38,7 @@ use super::hook_health::print_health;
 use super::hook_opencode::{FileStatus, Loads, config_files, file_status, listing_note};
 use super::hook_write::HookWriteArgs;
 use super::json_splice::splice;
-use crate::discovery::harness::claude_code;
+use crate::discovery::harness::{claude_code, codex};
 
 #[derive(Debug, Args)]
 pub(super) struct HookArgs {
@@ -557,17 +557,15 @@ fn claude_settings_path(scope: HookScopeFlag) -> Result<PathBuf> {
     }
 }
 
+/// `config.toml` in Codex's home for `--scope user` (`CODEX_HOME`, else
+/// `~/.codex`, the rule discovery reads by), and `.codex/config.toml`
+/// under the current directory for `--scope project`.
 fn codex_config_path(scope: HookScopeFlag) -> Result<PathBuf> {
     match scope {
         HookScopeFlag::User => {
-            let home = if let Some(codex_home) = std::env::var_os("CODEX_HOME") {
-                PathBuf::from(codex_home)
-            } else {
-                std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .ok_or_else(|| anyhow!("HOME or CODEX_HOME is required for --scope user"))?
-                    .join(".codex")
-            };
+            let home = codex::HARNESS_DIR
+                .dir_from_env()
+                .ok_or_else(|| anyhow!(codex::HARNESS_DIR.missing_message()))?;
             Ok(home.join("config.toml"))
         }
         HookScopeFlag::Project => {

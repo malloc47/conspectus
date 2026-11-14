@@ -158,8 +158,9 @@ act = ["SIGTERM", "SIGKILL", "0"]
 # `$RUNTIME` are the home directory and the XDG base directories;
 # `$PROJECT` is any directory Conspectus treats as a project root;
 # `$SCRATCH` is the directory the dev scenario builder was given;
-# `$CLAUDE_CONFIG_DIR` is the directory that variable moves Claude
-# Code's `~/.claude` to, when it is set (ADR 0239).
+# `$CLAUDE_CONFIG_DIR` and `$CODEX_HOME` are the directories those
+# variables move Claude Code's `~/.claude` and Codex's `~/.codex` to,
+# when they are set (ADR 0239).
 # Creating the missing parents of an allowed path is allowed too.
 [writes]
 adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0143", "0121", "0146", "0204", "0239"]
@@ -203,6 +204,8 @@ hook = [
     "$CLAUDE_CONFIG_DIR/.settings.json.tmp-*",
     "$HOME/.codex/config.toml",
     "$HOME/.codex/.config.toml.tmp-*",
+    "$CODEX_HOME/config.toml",
+    "$CODEX_HOME/.config.toml.tmp-*",
     "$HOME/.pi/agent/extensions/conspectus-hook.ts",
     "$HOME/.pi/agent/extensions/conspectus-hook.ts.tmp",
     "$PROJECT/.claude/settings.json",

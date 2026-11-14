@@ -1415,11 +1415,16 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         project,
     );
 
-    // Hook installation where the harness's own variable moved its
+    // Hook installation where each harness's own variable moved its
     // directory: the settings follow it, and nothing lands under `$HOME`.
     let claude_config = world.root.join("claude-config");
     let claude_config_text = claude_config.to_string_lossy().into_owned();
-    let moved_env = [("CLAUDE_CONFIG_DIR", claude_config_text.as_str())];
+    let codex_home = world.root.join("codex-home");
+    let codex_home_text = codex_home.to_string_lossy().into_owned();
+    let moved_env = [
+        ("CLAUDE_CONFIG_DIR", claude_config_text.as_str()),
+        ("CODEX_HOME", codex_home_text.as_str()),
+    ];
     let moved = vec![
         world.run_with(
             &strace,
@@ -1430,8 +1435,22 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         ),
         world.run_with(
             &strace,
+            "hook-init-codex-moved",
+            &["hook", "init", "codex"],
+            project,
+            &moved_env,
+        ),
+        world.run_with(
+            &strace,
             "hook-remove-claude-moved",
             &["hook", "remove", "claude-code"],
+            project,
+            &moved_env,
+        ),
+        world.run_with(
+            &strace,
+            "hook-remove-codex-moved",
+            &["hook", "remove", "codex"],
             project,
             &moved_env,
         ),
@@ -1440,14 +1459,21 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         claude_config.join("settings.json").is_file(),
         "the install followed CLAUDE_CONFIG_DIR"
     );
+    assert!(
+        codex_home.join("config.toml").is_file(),
+        "the install followed CODEX_HOME"
+    );
     let mut moved_vars = world.vars(None);
     moved_vars
         .0
         .insert("CLAUDE_CONFIG_DIR", vec![claude_config_text.clone()]);
+    moved_vars
+        .0
+        .insert("CODEX_HOME", vec![codex_home_text.clone()]);
     moved_vars.0.remove("HOME");
     record(
         &Scenario {
-            name: "hook install under CLAUDE_CONFIG_DIR",
+            name: "hook install under CLAUDE_CONFIG_DIR and CODEX_HOME",
             contexts: &["read", "hook"],
             vars: &moved_vars,
             pager: None,

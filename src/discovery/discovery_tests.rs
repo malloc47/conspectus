@@ -1810,3 +1810,36 @@ fn agents_of_two_harnesses_in_split_panes_of_one_tmux_session_are_both_attribute
             .all(|link| matches!(link.state, LinkState::Active))
     );
 }
+
+#[test]
+fn harness_state_roots_follow_each_harnesss_own_directory_variable() {
+    use crate::discovery::harness::dirs::env_of;
+
+    let moved = harness_state_roots_in(&env_of(&[
+        ("HOME", "/home/user"),
+        ("CLAUDE_CONFIG_DIR", "/config/claude"),
+        ("CODEX_HOME", "/srv/codex"),
+    ]));
+    assert_eq!(moved["claude-code"], PathBuf::from("/config/claude"));
+    assert_eq!(moved["codex"], PathBuf::from("/srv/codex"));
+    assert_eq!(
+        moved["opencode"],
+        PathBuf::from("/home/user/.local/share/opencode")
+    );
+
+    let default = harness_state_roots_in(&env_of(&[("HOME", "/home/user")]));
+    assert_eq!(default["claude-code"], PathBuf::from("/home/user/.claude"));
+    assert_eq!(default["codex"], PathBuf::from("/home/user/.codex"));
+
+    let overridden = harness_state_roots_in(&env_of(&[
+        ("HOME", "/home/user"),
+        ("CLAUDE_CONFIG_DIR", "/config/claude"),
+        ("CODEX_HOME", "/srv/codex"),
+        ("CONSPECTUS_CLAUDE_CODE_STATE", "/fixture/claude"),
+        ("CONSPECTUS_CODEX_STATE", "/fixture/codex"),
+    ]));
+    assert_eq!(overridden["claude-code"], PathBuf::from("/fixture/claude"));
+    assert_eq!(overridden["codex"], PathBuf::from("/fixture/codex"));
+
+    assert!(harness_state_roots_in(&env_of(&[])).is_empty());
+}

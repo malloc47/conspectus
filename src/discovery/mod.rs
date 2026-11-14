@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::ffi::OsString;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1094,25 +1095,12 @@ pub struct LocalDiscoveryConfig {
 
 impl LocalDiscoveryConfig {
     /// Defaults derived from the process environment: harness state roots from
-    /// `CONSPECTUS_<HARNESS>_STATE`, falling back to where the harness itself
-    /// keeps them (Claude Code's `CLAUDE_CONFIG_DIR`, Pi's settings, then
-    /// standard `$HOME`-relative paths), and a real `SystemTmux` runner unless
+    /// `CONSPECTUS_<HARNESS>_STATE`, falling back to where each harness keeps
+    /// its sessions (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, Pi's settings, then
+    /// `$HOME`-relative defaults), and a real `SystemTmux` runner unless
     /// `CONSPECTUS_DISABLE_TMUX` is set.
     pub fn from_env() -> Self {
-        let mut harness_state_roots = BTreeMap::new();
-
-        if let Some(path) = env_state_root("CONSPECTUS_CODEX_STATE", ".codex") {
-            harness_state_roots.insert(harness::codex::HARNESS_KEY.to_string(), path);
-        }
-        if let Some(path) = harness::claude_code::HARNESS_DIR.state_root_from_env() {
-            harness_state_roots.insert(harness::claude_code::HARNESS_KEY.to_string(), path);
-        }
-        if let Some(path) = env_state_root("CONSPECTUS_OPENCODE_STATE", ".local/share/opencode") {
-            harness_state_roots.insert(harness::opencode::HARNESS_KEY.to_string(), path);
-        }
-        if let Some(path) = harness::pi::state_root_from_env() {
-            harness_state_roots.insert(harness::pi::HARNESS_KEY.to_string(), path);
-        }
+        let harness_state_roots = harness_state_roots_in(&|key| env::var_os(key));
 
         let mut mux_backends: Vec<Box<dyn tmux::MuxBackend>> = Vec::new();
         if env::var_os("CONSPECTUS_DISABLE_TMUX").is_none() {
@@ -1439,11 +1427,38 @@ impl LocalDiscoveryConfig {
     }
 }
 
-fn env_state_root(env_key: &str, home_relative: &str) -> Option<PathBuf> {
-    if let Some(value) = env::var_os(env_key) {
-        return Some(PathBuf::from(value));
-    }
-    env::var_os("HOME").map(|home| PathBuf::from(home).join(home_relative))
+/// Each harness's state root in `env`: `CONSPECTUS_<HARNESS>_STATE`, else
+/// where the harness itself keeps its sessions (Claude Code's
+/// `CLAUDE_CONFIG_DIR` and Codex's `CODEX_HOME`, ADR 0239; Pi's own
+/// settings, ADR 0121), else the `$HOME`-relative default. A harness with
+/// no root (no `HOME`) is left out.
+fn harness_state_roots_in(env: &impl Fn(&str) -> Option<OsString>) -> BTreeMap<String, PathBuf> {
+    let roots = [
+        (
+            harness::codex::HARNESS_KEY,
+            harness::codex::HARNESS_DIR.state_root(env),
+        ),
+        (
+            harness::claude_code::HARNESS_KEY,
+            harness::claude_code::HARNESS_DIR.state_root(env),
+        ),
+        (
+            harness::opencode::HARNESS_KEY,
+            env("CONSPECTUS_OPENCODE_STATE")
+                .map(PathBuf::from)
+                .or_else(|| {
+                    env("HOME").map(|home| PathBuf::from(home).join(".local/share/opencode"))
+                }),
+        ),
+        (
+            harness::pi::HARNESS_KEY,
+            harness::pi::resolve_state_root(env),
+        ),
+    ];
+    roots
+        .into_iter()
+        .filter_map(|(key, root)| Some((key.to_string(), root?)))
+        .collect()
 }
 
 pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> GraphSnapshot {

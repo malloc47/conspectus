@@ -52,6 +52,16 @@ const TAIL_SCAN_BYTES: u64 = 32 * 1024;
 
 pub const HARNESS_KEY: &str = crate::discovery::providers::CODEX;
 
+/// Codex's home (`config.toml`, `sessions/`, the state and log
+/// databases): `CODEX_HOME`, else `~/.codex`. Discovery reads
+/// `CONSPECTUS_CODEX_STATE` instead when it is set; the hooks always go
+/// where Codex reads them (ADR 0239).
+pub const HARNESS_DIR: super::dirs::HarnessDir = super::dirs::HarnessDir {
+    state_override: "CONSPECTUS_CODEX_STATE",
+    variable: "CODEX_HOME",
+    home_relative: ".codex",
+};
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CodexAdapter;
 
@@ -84,13 +94,19 @@ impl HarnessAdapter for CodexAdapter {
         HARNESS_KEY
     }
 
-    /// Rollouts nest under dated directories, so the root is the
-    /// enclosing `.codex` directory rather than a fixed depth.
+    /// Rollouts nest under dated directories of `<home>/sessions/`, so
+    /// the root is the nearer of the directory above a `sessions` (which
+    /// finds a home `CODEX_HOME` moved) and an enclosing `.codex` (which
+    /// finds an archived rollout).
     fn state_scope_for_transcript(&self, path: &std::path::Path) -> Option<String> {
-        path.ancestors().find_map(|ancestor| {
-            (ancestor.file_name().and_then(|name| name.to_str()) == Some(".codex"))
-                .then(|| ancestor.to_string_lossy().to_string())
-        })
+        path.ancestors()
+            .skip(1)
+            .find_map(|ancestor| match ancestor.file_name()?.to_str()? {
+                "sessions" => ancestor.parent(),
+                ".codex" => Some(ancestor),
+                _ => None,
+            })
+            .map(|root| root.to_string_lossy().to_string())
     }
 
     fn runtime_signature(&self) -> &'static super::RuntimeSignature {
