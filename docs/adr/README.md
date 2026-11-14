@@ -201,7 +201,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted (amended by 0160, 0161, 0191); framework-owned |
 | [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted (amended) |
 | [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted (amended by 0145, 0198) |
-| [0145](0145-state-glyphs-and-words-in-the-left-panel.md) | State Glyphs And Words In The Left Panel | Accepted (amended by 0209) |
+| [0145](0145-state-glyphs-and-words-in-the-left-panel.md) | State Glyphs And Words In The Left Panel | Accepted (amended by 0209, 0234) |
 | [0150](0150-tui-framework-workspace-crate.md) | The TUI Framework Is A Workspace Member Crate | Accepted (separation rehearsal carried out by 0199; runtime evaluation settled by 0200); framework-owned |
 | [0151](0151-tui-framework-control-set-and-house-rules.md) | The Framework Control Set And Its House Rules | Accepted; framework-owned |
 | [0152](0152-tui-framework-dependency-ownership.md) | Who Owns The Framework's Third-Party Crates | Accepted; framework-owned |
@@ -254,7 +254,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0199](0199-tui-framework-separation-is-rehearsed-in-ci.md) | The Framework's Separation Is Rehearsed In CI | Accepted; framework-owned in part |
 | [0200](0200-tui-the-application-runtime-stays-in-conspectus-until-a-second-program-needs-it.md) | The Application Runtime Stays In Conspectus Until A Second Program Needs It | Accepted; framework-owned in part |
 | [0202](0202-tui-each-view-reopens-with-the-rows-it-had-expanded-and-selected.md) | Each View Reopens With The Rows It Had Expanded And Selected | Accepted |
-| [0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md) | Session And Mux Rows Show Live State In A One-Cell Column After The Age | Accepted (amended by 0212, 0214, 0215, 0233) |
+| [0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md) | Session And Mux Rows Show Live State In A One-Cell Column After The Age | Accepted (amended by 0212, 0214, 0215, 0233, 0234) |
 | [0210](0210-tui-group-headers-count-the-agents-waiting-beneath-them.md) | Group Headers Count The Agents Waiting Beneath Them | Accepted (amended) |
 | [0211](0211-tui-the-header-counts-every-agent-waiting-on-you.md) | The Header Counts Every Agent Waiting On You | Accepted |
 | [0212](0212-tui-a-session-row-shows-its-running-subagents-after-its-label.md) | A Session Row Shows Its Running Subagents After Its Label | Accepted |
@@ -264,6 +264,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0216](0216-tui-one-key-jumps-to-the-agent-that-has-waited-longest.md) | One Key Jumps To The Agent That Has Waited Longest | Accepted |
 | [0231](0231-tui-a-turn-watched-in-an-attached-client-reads-seen-when-the-client-comes-back.md) | A Turn Watched In An Attached Client Reads Seen When The Client Comes Back | Accepted |
 | [0233](0233-tui-a-mux-mark-recedes-when-every-agent-in-its-state-is-quiet.md) | A Mux's Mark Recedes When Every Agent In Its State Is Quiet | Accepted |
+| [0234](0234-tui-a-pinned-mux-reads-the-word-of-its-agents-mark.md) | A Pinned Mux Reads The Word Of Its Agents' Mark | Accepted |
 
 ## Transcript viewer
 
