@@ -307,7 +307,7 @@ Follow-ups the stories filed (labels `live-state`, milestone m-26):
 | CSP-841 | Count every pane-only agent on its mux (`pane_live`) | Done |
 | CSP-842 | Name running agents without live state in `hook status` | To Do |
 | CSP-843 | Re-check bound agents' processes between snapshots in the TUI | Done |
-| CSP-844 | Honor `CODEX_HOME` for Codex discovery | To Do |
+| CSP-844 | Honor `CODEX_HOME` for Codex discovery | Done |
 | CSP-845 | Ask tmux about the hook's own pane in `hook write` | Done |
 | CSP-846 | OpenCode 2.x: live state from a TUI-only plugin install | To Do |
 | CSP-847 | OpenCode 2.x: re-read pending permission asks when the server plugin starts | To Do |
