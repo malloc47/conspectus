@@ -214,8 +214,10 @@ forms, lists, readers, and keys look and behave alike.
   with it drop their preview a few cells sooner.
 - **Finished turns you haven't seen are bold.** A `›` (and Pinned's
   `ready`) draws bold until you have looked at the finished turn:
-  attached a tmux client to its mux after it ended, or, for a session
-  with no mux, rested the cursor on its row for a second. A mux's `›` is
+  attached a tmux client to its mux after it ended, or, inside tmux,
+  watched it there and switched back to the TUI's session (the turn ended
+  before you left), or, for a session with no mux, rested the cursor on
+  its row for a second. A mux's `›` is
   bold while any of its ready agents' turns is unseen, and the detail
   pane's `state` ends with `unseen` or `seen`. A seen turn stays seen
   until the agent finishes another; nothing is written, so a restarted

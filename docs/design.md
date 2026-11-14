@@ -746,9 +746,10 @@ session's `state` (led by its row's mark), `since`, `source`,
 filled with, and none of them without evidence (ADR 0213). A ready turn
 the operator has not seen draws its `›` bold, the shape unchanged (ADR
 0214): seen once a tmux client attached to its mux after it ended, or,
-for a session with no mux, once the cursor rested on its row for a
-second, and kept seen in the TUI's memory until a later turn ends;
-nothing is persisted. Controls can float the rows marked `!` above the
+inside tmux, once the client that watched the mux switches back to the
+TUI's session (ADR 0231), or, for a session with no mux, once the
+cursor rested on its row for a second, and kept seen in the TUI's
+memory until a later turn ends; nothing is persisted. Controls can float the rows marked `!` above the
 rest of their group (Sessions) or above the other running muxes (Mux),
 and narrow the lists to one agent state (`agent state`, `--state` on
 `table`, `tui`, and `search`, `state` in the views' config filters); a

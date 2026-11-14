@@ -324,7 +324,14 @@ state has its own shape, so it reads without color:
 - **Unseen** finished turns draw the same `›` bold, until you have looked
   at them; then it is plain. For an agent in a mux, looking is attaching
   a tmux client to that mux after the turn ended, through Conspectus or
-  not (the mark turns plain at the refresh that lists the attach). For a
+  not (the mark turns plain at the refresh that lists the attach), or,
+  when the TUI runs inside tmux, watching the mux in a client that
+  stayed on it and switching back to the TUI's session: the mark turns
+  plain as you arrive, whether the turn ended before you attached or
+  while you watched, and a turn that ended after you left the mux stays
+  bold. With two tmux clients on the TUI's own session, tmux may report
+  the other client's last session, so the mark may stay bold until the
+  next attach. For a
   session with no mux, it is resting the cursor on one of its rows, in
   any view, for a second; scrolling past does not count. A turn you have
   seen stays seen until the agent finishes another, but only in this

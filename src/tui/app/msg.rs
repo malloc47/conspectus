@@ -148,6 +148,11 @@ pub enum Msg {
     /// in another session. Asks for the same background refresh as a
     /// returned attach, without marking any row as awaiting it.
     ViewRegained,
+    /// The operator's tmux client came back to the TUI's own session
+    /// from another one (ADR 0231): the turns that ended on that
+    /// session while the client was there read seen, with no new
+    /// refresh.
+    ClientReturned(crate::tui::rows::seen::ClientReturn),
     /// `mux`'s rows (and its linked sessions' rows) stop awaiting the
     /// hand-off: the existence check found it still running as the same
     /// incarnation, or the refresh started after its return landed

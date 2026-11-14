@@ -448,8 +448,15 @@ impl LoopMode for LiveMode {
         // they did in the other session is not on screen yet.
         if let Some(watcher) = &self.visibility {
             let mut returned = false;
-            while watcher.rx.try_recv().is_ok() {
-                returned = true;
+            while let Ok(signal) = watcher.rx.try_recv() {
+                match signal {
+                    visibility::Signal::Regained => returned = true,
+                    // Before the refresh the regain asks for, which
+                    // judges the turns again.
+                    visibility::Signal::Returned(back) => {
+                        app.update(Msg::ClientReturned(back));
+                    }
+                }
             }
             if returned {
                 app.update(Msg::ViewRegained);

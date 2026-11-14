@@ -200,7 +200,10 @@ or the mux of the pane an agent no session matches runs in), looking is
 a tmux client attaching to that mux after the turn ended: the mux's last
 attach time is at or after the turn's end, or a refresh that came after
 the turn ended lists a client attached. Attaching through Conspectus
-counts once the refresh that follows lists it. For a session with no
+counts once the refresh that follows lists it. Inside tmux, a client
+that stayed on the mux while the turn ended counts when it switches
+back to the TUI's session, at once, and only for turns that ended
+before it left. For a session with no
 mux, looking is resting the cursor on one of its rows, in any view, for
 a second; a cursor that only passes the row while you scroll does not
 count. A turn found seen stays seen until the agent finishes a later

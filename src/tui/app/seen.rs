@@ -3,7 +3,9 @@
 //! session with no mux.
 //!
 //! The rows judge each ready turn when their live values are filled
-//! (`rows::seen`); the App keeps every turn they find seen, so a later
+//! (`rows::seen`); the App keeps every turn they find seen, and every
+//! return of the operator's tmux client to the TUI's session (ADR 0231),
+//! so a later
 //! snapshot that no longer shows the evidence (a client attached to the
 //! mux) can't make it unseen again, and remembers a session with no mux
 //! once the cursor has rested on one of its rows for
@@ -11,7 +13,7 @@
 //! nothing is written and no effect is emitted.
 
 use super::*;
-use crate::tui::rows::seen::{self, Agent, SEEN_REST, SeenContext};
+use crate::tui::rows::seen::{self, Agent, ClientReturn, SEEN_REST, SeenContext};
 
 impl App {
     /// What judges whether a ready turn was seen: the memory, and when
@@ -30,6 +32,16 @@ impl App {
         let turns: Vec<(Agent, i64)> = self.tree.live.seen_turns().collect();
         for (agent, ended_ms) in turns {
             self.seen.see(agent, ended_ms);
+        }
+    }
+
+    /// The operator's client came back to the TUI's session from another
+    /// one: remember it, and judge the ready turns on screen again, which
+    /// takes the ones that ended on that session while the client was
+    /// there as seen, in place.
+    pub(super) fn see_return(&mut self, back: ClientReturn) {
+        if self.seen.note_return(back) {
+            self.settle_seen();
         }
     }
 

@@ -5,8 +5,10 @@
 //! in a mux (a session's preferred mux, or the mux of the pane an agent no
 //! session matches runs in), a tmux client attached to that mux after the
 //! turn ended: the mux's last attach time is at or after it, or a snapshot
-//! loaded after it shows a client attached. For a session with no mux, the
-//! cursor resting on one of its rows in this TUI for [`SEEN_REST`].
+//! loaded after it shows a client attached, or the operator's client came
+//! back to the TUI's tmux session from that mux after the turn ended
+//! ([`ClientReturn`]). For a session with no mux, the cursor resting on
+//! one of its rows in this TUI for [`SEEN_REST`].
 //!
 //! A turn found seen stays seen, in this TUI's memory ([`SeenTurns`]),
 //! until a later turn ends: a refresh that no longer shows the client
@@ -44,17 +46,39 @@ impl Agent {
     }
 }
 
+/// The operator's tmux client came back to the TUI's own session (the
+/// one the TUI runs in) from `session`, so it was on that session until
+/// `at_ms` (ADR 0231). tmux moves a session's last attach time when a
+/// client attaches or switches to it, not while one stays, so this is
+/// what says a turn that ended while the client watched the session was
+/// seen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientReturn {
+    /// The socket path of the tmux server both sessions live on, as
+    /// `$TMUX` names it.
+    pub socket: String,
+    /// The session the client came back from, by its tmux name.
+    pub session: String,
+    /// The last moment the client was known to be away from the TUI's
+    /// session, in Unix epoch milliseconds.
+    pub at_ms: i64,
+}
+
 /// The finished turns this TUI found seen: for each agent, when the
-/// latest of them ended. In memory only.
+/// latest of them ended; and the sessions its client came back from, for
+/// the turns it watched there. In memory only.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SeenTurns {
     turns: BTreeMap<Agent, i64>,
+    /// The latest return from each session, by server socket and name.
+    returns: BTreeMap<(String, String), i64>,
 }
 
 /// No turn seen, for readers with no memory of their own.
 #[cfg(test)]
 static NOTHING_SEEN: SeenTurns = SeenTurns {
     turns: BTreeMap::new(),
+    returns: BTreeMap::new(),
 };
 
 impl SeenTurns {
@@ -73,6 +97,31 @@ impl SeenTurns {
         }
         *seen = ended_ms;
         true
+    }
+
+    /// Remember that the client came back from a session. Says whether
+    /// that is news: an older return from the same session is not.
+    pub(crate) fn note_return(&mut self, back: ClientReturn) -> bool {
+        let at = self
+            .returns
+            .entry((back.socket, back.session))
+            .or_insert(i64::MIN);
+        if *at >= back.at_ms {
+            return false;
+        }
+        *at = back.at_ms;
+        true
+    }
+
+    /// Whether the client came back from `mux`'s session after the turn
+    /// that ended at `ended_ms`: the return is on `mux`'s server, by the
+    /// rule the live-state binding uses, and names its session.
+    fn returned_from(&self, snapshot: &GraphSnapshot, mux: &MuxSessionNode, ended_ms: i64) -> bool {
+        self.returns.iter().any(|((socket, session), at_ms)| {
+            ended_ms <= *at_ms
+                && session == mux.session_name()
+                && crate::discovery::live_state::on_server(snapshot, mux, socket)
+        })
     }
 }
 
@@ -112,7 +161,10 @@ pub(crate) fn unseen(
         return false;
     }
     match mux.and_then(|mux| mux_node(snapshot, mux)) {
-        Some(mux) => !attached_since(mux, ended_ms, context.loaded_ms),
+        Some(mux) => {
+            !attached_since(mux, ended_ms, context.loaded_ms)
+                && !context.memory.returned_from(snapshot, mux, ended_ms)
+        }
         None => true,
     }
 }

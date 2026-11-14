@@ -1305,6 +1305,7 @@ impl App {
                     .get_or_insert_with(PendingHandoff::new)
                     .regained();
             }
+            Msg::ClientReturned(back) => self.see_return(back),
             Msg::HandoffReleased(mux) => {
                 if let Some(handoff) = &mut self.handoff {
                     handoff.release(&mux);

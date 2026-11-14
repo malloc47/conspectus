@@ -366,7 +366,7 @@ mod live {
         mode: LiveMode,
         app: App,
         calls: mpsc::Receiver<mpsc::Sender<GraphSnapshot>>,
-        regained: mpsc::Sender<()>,
+        regained: mpsc::Sender<visibility::Signal>,
         probe: Arc<ScriptedProbe>,
     }
 
@@ -577,7 +577,7 @@ mod live {
         let mut rig = Rig::new(snapshot(vec![running("other", "$9")]), &[]);
         let a = rig.returned("a");
         let b = rig.returned("b");
-        rig.regained.send(()).unwrap();
+        rig.regained.send(visibility::Signal::Regained).unwrap();
         rig.drain();
         let regained = rig.next_discovery();
 

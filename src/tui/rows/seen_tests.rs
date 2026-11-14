@@ -183,3 +183,120 @@ fn an_agent_whose_mux_is_not_listed_has_none() {
         ENDED_MS + 1
     ));
 }
+
+const SOCKET: &str = "/tmp/tmux-1000/default";
+
+fn came_back(session: &str, at_ms: i64) -> ClientReturn {
+    ClientReturn {
+        socket: SOCKET.to_string(),
+        session: session.to_string(),
+        at_ms,
+    }
+}
+
+/// Memory holding one return of the client to the TUI's own session.
+fn returned(session: &str, at_ms: i64) -> SeenTurns {
+    let mut memory = SeenTurns::default();
+    memory.note_return(came_back(session, at_ms));
+    memory
+}
+
+#[test]
+fn a_turn_that_ended_before_the_client_left_its_mux_is_seen_on_the_return() {
+    let hosted = Agent::Session(session("hosted"));
+    let snapshot = world(false, Some(ENDED_S - 600));
+    let loaded = ENDED_MS + 60_000;
+    for (left_at, unseen) in [
+        // The client left the mux after the turn ended: it watched it.
+        (ENDED_MS + 5_000, false),
+        (ENDED_MS, false),
+        // The turn ended after the client was already gone.
+        (ENDED_MS - 1, true),
+    ] {
+        assert_eq!(
+            judged(&snapshot, &hosted, &returned("work", left_at), loaded),
+            unseen,
+            "client left at {left_at}"
+        );
+    }
+}
+
+#[test]
+fn a_return_from_another_session_sees_nothing_of_this_mux() {
+    let hosted = Agent::Session(session("hosted"));
+    let snapshot = world(false, Some(ENDED_S - 600));
+    assert!(
+        judged(
+            &snapshot,
+            &hosted,
+            &returned("elsewhere", ENDED_MS + 5_000),
+            ENDED_MS + 60_000
+        ),
+        "the client came back from `elsewhere`, not from the mux"
+    );
+}
+
+#[test]
+fn a_return_is_matched_by_server_as_well_as_by_name() {
+    let hosted = Agent::Session(session("hosted"));
+    // The mux lives on the `-L side` server, as a session named `work`.
+    let mut snapshot = world(false, Some(ENDED_S - 600));
+    for node in &mut snapshot.nodes {
+        if let GraphNode::MuxSession(mux) = node {
+            mux.socket = Some("side".to_string());
+            mux.native_id = "side:work".to_string();
+        }
+    }
+    let loaded = ENDED_MS + 60_000;
+    assert!(
+        judged(
+            &snapshot,
+            &hosted,
+            &returned("work", ENDED_MS + 5_000),
+            loaded
+        ),
+        "a `work` on the default server is not the mux on `side`"
+    );
+    let mut memory = SeenTurns::default();
+    memory.note_return(ClientReturn {
+        socket: "/tmp/tmux-1000/side".to_string(),
+        session: "work".to_string(),
+        at_ms: ENDED_MS + 5_000,
+    });
+    assert!(
+        !judged(&snapshot, &hosted, &memory, loaded),
+        "a return on the `side` server is"
+    );
+}
+
+#[test]
+fn a_return_sees_a_pane_agents_turn_and_never_one_with_no_mux() {
+    let pane = Agent::Pane(LivePane::new(work(), Some("%3".into())));
+    let loose = Agent::Session(session("loose"));
+    let snapshot = world(false, None);
+    let memory = returned("work", ENDED_MS + 5_000);
+    let loaded = ENDED_MS + 60_000;
+    assert!(!judged(&snapshot, &pane, &memory, loaded));
+    assert!(
+        judged(&snapshot, &loose, &memory, loaded),
+        "a session in no mux is seen by resting on it"
+    );
+}
+
+#[test]
+fn only_the_latest_return_from_a_session_is_kept() {
+    let mut memory = SeenTurns::default();
+    assert!(memory.note_return(came_back("work", 2_000)));
+    assert!(
+        !memory.note_return(came_back("work", 1_000)),
+        "an older one is no news"
+    );
+    assert!(
+        memory.note_return(came_back("work", 3_000)),
+        "a later one is"
+    );
+    assert!(
+        memory.note_return(came_back("other", 1_000)),
+        "another session has its own"
+    );
+}

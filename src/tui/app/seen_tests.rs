@@ -9,7 +9,7 @@ use crate::model::{
     AgentSessionId, AgentSessionNode, GraphLink, GraphNode, LinkEndpoint, LinkState,
     MuxSessionNode, Provenance, RelationKind,
 };
-use crate::tui::rows::seen::SEEN_REST;
+use crate::tui::rows::seen::{ClientReturn, SEEN_REST};
 use crate::tui::rows::{LiveSign, MuxLive, RowKind};
 
 /// When the first snapshot loads, Unix seconds.
@@ -245,4 +245,74 @@ fn seeing_a_turn_persists_nothing_and_changes_no_other_value() {
     // A new TUI remembers nothing.
     let fresh = app_over(&world(false, None, ENDED_MS, ENDED_MS));
     assert!(unseen(&fresh, "loose"));
+}
+
+fn client_came_back(session: &str, at_ms: i64) -> Msg {
+    Msg::ClientReturned(ClientReturn {
+        socket: "/tmp/tmux-1000/default".to_string(),
+        session: session.to_string(),
+        at_ms,
+    })
+}
+
+#[test]
+fn a_turn_watched_in_an_attached_client_reads_seen_when_the_client_comes_back() {
+    // The mux was last attached before the turn ended and no refresh
+    // listed a client on it: only the return can say it was watched.
+    let mut app = app_over(&world(false, Some(LOADED - 600), ENDED_MS, ENDED_MS));
+    assert!(unseen(&app, "hosted"));
+    assert_eq!(mux_live(&app).unseen, 1);
+
+    app.update(client_came_back("work", ENDED_MS + 20_000));
+    assert!(
+        !unseen(&app, "hosted"),
+        "the client left the mux after the turn ended"
+    );
+    assert_eq!(mux_live(&app).unseen, 0, "its mux's mark follows");
+    assert!(
+        unseen(&app, "loose"),
+        "a session in no mux is seen by resting on it"
+    );
+
+    // A refresh that lists nothing of the sort keeps it seen.
+    load(
+        &mut app,
+        &world(false, Some(LOADED - 600), ENDED_MS, ENDED_MS),
+        LOADED + 30,
+    );
+    assert!(!unseen(&app, "hosted"), "no flicker back");
+}
+
+#[test]
+fn a_return_from_another_session_or_before_the_turn_leaves_it_unseen() {
+    let mut app = app_over(&world(false, Some(LOADED - 600), ENDED_MS, ENDED_MS));
+    app.update(client_came_back("elsewhere", ENDED_MS + 20_000));
+    assert!(unseen(&app, "hosted"), "the client was last on `elsewhere`");
+    app.update(client_came_back("work", ENDED_MS - 1));
+    assert!(
+        unseen(&app, "hosted"),
+        "the client had left the mux before the turn ended"
+    );
+    assert_eq!(mux_live(&app).unseen, 1);
+}
+
+#[test]
+fn a_return_noted_before_the_next_snapshot_still_sees_the_turn_in_it() {
+    let mut app = app_over(&world(false, Some(LOADED - 600), ENDED_MS, ENDED_MS));
+    app.update(client_came_back("work", ENDED_MS + 20_000));
+    // The refresh the regain asks for lands with a newer snapshot of the
+    // same turn.
+    load(
+        &mut app,
+        &world(false, Some(LOADED - 600), ENDED_MS, ENDED_MS),
+        LOADED + 5,
+    );
+    assert!(!unseen(&app, "hosted"));
+    // A turn that ends later is unseen until it is looked at.
+    load(
+        &mut app,
+        &world(false, Some(LOADED - 600), ENDED_MS + 120_000, ENDED_MS),
+        LOADED + 150,
+    );
+    assert!(unseen(&app, "hosted"), "the client has not been back since");
 }
