@@ -15,7 +15,8 @@ stand unchanged. Uses the read rule of
 as it is and adds a step to the binding of
 [ADR 0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md).
 Adds no program, subcommand, socket, signal, or write path (ADR 0117,
-ADR 0143), and no snapshot field.
+ADR 0143), and no snapshot field. Amended 2026-11-13 (see the end): an
+entry that names the tmux pane the agent was found in reports it.
 
 ## Context
 
@@ -144,3 +145,36 @@ status` already counts the running agents no store entry describes
   node discovery already made.
 - *Does it widen what Conspectus reads?* No: the same call, parser, and
   whitelist as ADR 0218, more often while an unreported agent runs.
+
+## Amendment: an entry that names the agent's pane reports it (2026-11-13)
+
+Decision 1 took an agent as reported only by an entry that recorded its
+pid or named a session the graph ties its process to. An agent the
+process tree found behind a wrapper (the entry records the harness
+process beneath it) in a new session (no transcript, so the graph ties
+the process to no session) was unreported, though its entry names the
+tmux server, session, and pane it runs in: `hook status` counted it as
+having no live state, and the poll could bind it a second time beside
+the entry's pane binding. Everything above stands except as follows.
+
+1. **Who, by pane.** An entry also reports an agent when it names a pane
+   the graph saw the agent's process in: its server (matched as the
+   binding matches an entry's server, ADR 0205's amendment), its session,
+   and its pane id. The graph sees a process in a pane when a mux found
+   it under its active pane (the pane's process tree, open files, or
+   command line); that pane is the one the mux's probe lists as its
+   session's active pane (ADR 0220). A hook's own observation of a
+   process keeps no pane, and needs none: that hook's entry records the
+   pid.
+2. **Only a live entry.** An entry that has exited, or whose recorded
+   process is found dead, reports no agent by pane: the pane may run
+   another agent now. An entry from another pane of the same session is
+   another agent's.
+3. **Shared, as before.** `hook status` and the poll's unreported agents
+   use the one rule. It reads the saved graph, the store, and `/proc`,
+   and starts no process.
+
+Alternatives considered: matching by the mux alone, which would let one
+agent's entry report every agent in the session's panes; and recording
+each process's pane on its node, a snapshot field for what the probe's
+pane listing already says.

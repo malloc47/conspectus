@@ -71,7 +71,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0218](0218-claude-codes-agent-list-repairs-a-live-state-its-hooks-left-stuck.md) | Claude Code's Agent List Repairs A Live State Its Hooks Left Stuck | Accepted (amended by 0222) |
 | [0220](0220-a-hook-record-is-judged-by-the-harness-its-own-pane-runs.md) | A Hook Record Is Judged By The Harness Its Own Pane Runs | Accepted |
 | [0221](0221-every-panes-title-is-read-from-the-pane-listing.md) | Every Pane's Title Is Read From The Pane Listing | Accepted |
-| [0222](0222-claude-codes-agent-list-shows-a-known-agent-its-hooks-do-not-report.md) | Claude Code's Agent List Shows A Known Agent Its Hooks Do Not Report | Accepted, awaiting the operator's approval |
+| [0222](0222-claude-codes-agent-list-shows-a-known-agent-its-hooks-do-not-report.md) | Claude Code's Agent List Shows A Known Agent Its Hooks Do Not Report | Accepted, awaiting the operator's approval (amended) |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |
