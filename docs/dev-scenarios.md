@@ -166,8 +166,13 @@ conspectus tui --snapshot --snapshot-pane left --snapshot-width 160 --snapshot-h
 conspectus tui --snapshot --snapshot-keys '2'           # switch to mux view
 conspectus tui --snapshot --snapshot-keys 'jjj<Enter>'  # navigate, expand
 # Keys follow pane focus as in the live TUI: after `<Tab>`, `j`/`k`,
-# `<Enter>`, and `<Backspace>` drive the right-pane explorer.
-conspectus tui --snapshot --snapshot-pane right --snapshot-keys 'j<Tab>jjjjj<Enter>'
+# `<Enter>`, and `<Backspace>` drive the right-pane explorer. On the
+# showcase, nine `j`s walk past the first session's nine Node fields (four
+# of them its live state) onto its first Related row, and `<Enter>` drills
+# into it. A node of another kind, or a session with more or less live
+# state to report, lists a different number of fields, and the explorer has
+# no key that skips them.
+conspectus tui --snapshot --snapshot-fixture tests/fixtures/showcase.json --snapshot-pane right --snapshot-keys 'j<Tab>jjjjjjjjj<Enter>'
 
 # Draw the Messages log with entries in it (repeat for more; the last is
 # the newest). A leading `info:`, `warning:`, or `error:` sets an entry's

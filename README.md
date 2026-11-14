@@ -721,10 +721,16 @@ enable through `--all-features`:
 
 ```sh
 cargo run --features snapshot -- tui --snapshot --snapshot-pane left --snapshot-keys 'jj<Enter>'
-cargo run --features snapshot -- tui --snapshot --snapshot-pane right --snapshot-keys 'j<Tab>jjjjj'
+cargo run --features snapshot -- tui --snapshot --snapshot-fixture tests/fixtures/showcase.json --snapshot-pane right --snapshot-keys 'j<Tab>jjjjjjjjj'
 cargo run --features snapshot -- tui --snapshot --snapshot-fixture tests/fixtures/showcase.json
 cargo run --features snapshot -- tui --fixture tests/fixtures/showcase.json   # interactive; `r` reloads
 ```
+
+After `<Tab>`, `j` moves the right pane's cursor, one field or row at a time.
+The second command walks past the nine Node fields of the showcase's first
+session, four of them its live state, onto its first Related row; a node of
+another kind, or a session with more or less live state to report, lists a
+different number of fields.
 
 `just demo` runs that last command, which is the easiest way to show the TUI
 without exposing your own sessions. `just screenshots` re-renders the images in
