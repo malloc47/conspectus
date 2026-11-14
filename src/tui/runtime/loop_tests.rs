@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use ratatui::crossterm::event::{Event, KeyCode};
 
+use super::blocked_tmux::{BlockedTmux, Gate};
 use super::console::scripted::{Scripted, key};
 use super::*;
 use crate::model::{AgentSessionId, AgentSessionNode, GraphNode, GraphSnapshot, NodeId};
@@ -81,6 +82,9 @@ struct Probe {
     clock: Rc<Cell<Duration>>,
     /// Every load the loop started, and when.
     loads: Vec<(Duration, PreviewSource)>,
+    /// Real workers for the loads, over a backend whose captures block,
+    /// instead of answering each load at once.
+    workers: Option<(PreviewLoads, Arc<Gate>)>,
 }
 
 impl LoopMode for Probe {
@@ -93,6 +97,9 @@ impl LoopMode for Probe {
 
     fn drain(&mut self, app: &mut App, _config: &RunConfig) -> Result<()> {
         content::run_blocking(app, None);
+        if let Some((loads, _)) = &mut self.workers {
+            loads.drain(app);
+        }
         Ok(())
     }
 
@@ -115,6 +122,14 @@ impl LoopMode for Probe {
 
     fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
         self.loads.push((self.clock.get(), source.clone()));
+        if let Some((loads, gate)) = &mut self.workers {
+            // Hold the loop until the capture is under way, so what the
+            // test sees next is the loop with a capture in flight.
+            let begun = gate.started();
+            loads.start(app, source);
+            gate.wait_started(begun + 1);
+            return;
+        }
         if let PreviewSource::Transcript(session) = &source {
             let content = PreviewContent::Unavailable(format!("cached {}", session.session_key));
             app.update(Msg::SetPreview { source, content });
@@ -129,6 +144,16 @@ fn run(snapshot: GraphSnapshot, console: Scripted, key_cost: Duration) -> Run {
     app.update(Msg::SetGrouping(crate::tui::Grouping::Sessions(
         crate::tui::SessionsGrouping::None,
     )));
+    run_in(app, snapshot, console, key_cost, None)
+}
+
+fn run_in(
+    mut app: App,
+    snapshot: GraphSnapshot,
+    mut console: Scripted,
+    key_cost: Duration,
+    workers: Option<(PreviewLoads, Arc<Gate>)>,
+) -> Run {
     let mut mode = Probe {
         inner: StaticMode {
             tmux: Box::new(crate::discovery::tmux::FakeTmux::with_sessions("")),
@@ -140,8 +165,8 @@ fn run(snapshot: GraphSnapshot, console: Scripted, key_cost: Duration) -> Run {
         last_key: Duration::ZERO,
         clock: console.clock_handle(),
         loads: Vec::new(),
+        workers,
     };
-    let mut console = console;
     let config = app.config().clone();
     match drive_loop(&mut console, &mut app, &config, &mut mode) {
         Ok(()) => {}
@@ -471,4 +496,89 @@ fn a_refresh_loads_the_selection_without_waiting_for_the_rest() {
         loads(&run),
         [(ms(0), "000".to_string()), (ms(300), "002".to_string())]
     );
+}
+
+/// Muxes `tmux:<name>` for each of `names`.
+fn muxes(names: &[&str]) -> GraphSnapshot {
+    let mut snapshot = GraphSnapshot::empty();
+    for name in names {
+        snapshot
+            .nodes
+            .push(GraphNode::MuxSession(crate::model::MuxSessionNode::new(
+                crate::model::MuxSessionId::new(format!("tmux:{name}")),
+                "tmux".to_string(),
+                (*name).to_string(),
+            )));
+    }
+    crate::resolve::resolve_snapshot(snapshot)
+}
+
+#[test]
+fn keys_are_handled_and_frames_drawn_while_a_pane_capture_is_in_flight() {
+    // Every capture waits at a gate the test holds closed, as a tmux
+    // server that has stopped answering would hold it.
+    let (tmux, gate) = BlockedTmux::closed();
+    let mut config = RunConfig::defaults();
+    config.default_view = crate::tui::View::Mux;
+    let console = Scripted::new(100, 30)
+        .key_at(ms(300), KeyCode::Down)
+        .key_at(ms(320), KeyCode::Down)
+        .key_at(ms(340), KeyCode::Up)
+        .ends_at(ms(1000));
+    let mut run = run_in(
+        App::new(config),
+        muxes(&["alpha", "beta", "gamma"]),
+        console,
+        Duration::ZERO,
+        Some((PreviewLoads::new(tmux), Arc::clone(&gate))),
+    );
+
+    // The first pane's capture began when the data landed and the cursor
+    // rests on beta at the end, so a second began there; neither has
+    // finished, and the loop drew and took keys all the while.
+    assert_eq!(gate.started(), 2);
+    assert_eq!(gate.finished(), 0);
+    assert!(
+        run.console
+            .frames()
+            .iter()
+            .filter(|f| f.at >= ms(300))
+            .count()
+            >= 8,
+        "frames kept coming while a capture was in flight"
+    );
+    let selected = run.app.selection().cloned();
+    assert!(
+        matches!(&selected, Some(RowId::MuxSession(NodeId::MuxSession(id))) if id.native_id == "tmux:beta"),
+        "the keys moved the cursor: {selected:?}"
+    );
+    assert!(
+        run.last_screen().contains("loading mux preview"),
+        "a pane never captured shows the placeholder:\n{}",
+        run.last_screen()
+    );
+
+    // The captures finish after the cursor has left the first pane's row:
+    // each is stored, and the screen shows the pane the cursor is on.
+    gate.open();
+    let (loads, _) = run.mode.workers.as_mut().expect("workers");
+    let begun = Instant::now();
+    while gate.finished() < 2
+        || run
+            .app
+            .mux_preview(&crate::model::MuxSessionId::new("tmux:alpha"))
+            .is_none()
+    {
+        assert!(
+            begun.elapsed() < Duration::from_secs(5),
+            "the captures never landed"
+        );
+        loads.drain(&mut run.app);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    loads.drain(&mut run.app);
+    run.console.draw(&mut run.app).expect("draw");
+    let screen = run.last_screen();
+    assert!(screen.contains("beta capture"), "{screen}");
+    assert!(!screen.contains("alpha capture"), "{screen}");
 }

@@ -379,11 +379,13 @@ mod live {
             let (regained, regained_rx) = mpsc::channel();
             let (discover, calls) = gated_discovery();
             let probe = Arc::new(ScriptedProbe::new(answers));
+            let tmux: Arc<dyn crate::discovery::tmux::MuxBackend> =
+                Arc::new(crate::discovery::tmux::FakeTmux::with_sessions(""));
             let mode = LiveMode {
-                tmux: Box::new(crate::discovery::tmux::FakeTmux::with_sessions("")),
+                tmux: Arc::clone(&tmux),
                 result_tx,
                 result_rx,
-                loads: crate::tui::runtime::previews::PreviewLoads::new(),
+                loads: crate::tui::runtime::previews::PreviewLoads::new(tmux),
                 confirmed_tx,
                 confirmed_rx,
                 probe: Arc::clone(&probe) as Arc<dyn IncarnationProbe>,

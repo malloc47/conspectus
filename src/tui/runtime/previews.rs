@@ -4,8 +4,11 @@
 //! load starts once the cursor has rested on its row for [`REST`]
 //! ([`PreviewRest`], ADR 0237). A load that is still running when the
 //! cursor leaves its row stops starting subprocesses ([`PreviewLoads`]).
+//! Every load, a mux pane's capture included, runs on a worker thread and
+//! reaches the reducer through [`PreviewLoads::drain`], so nothing the
+//! Preview reads can hold up a key or a frame (ADR 0024).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -13,10 +16,13 @@ use std::time::{Duration, Instant};
 use ratatui::style::Modifier;
 
 use crate::content_search::CancelToken;
+use crate::discovery::tmux::MuxBackend;
+use crate::model::MuxSessionId;
 use crate::tui::RunConfig;
 use crate::tui::app::{App, Msg};
 use crate::tui::preview::{
-    PreviewContent, PreviewSource, Stop, Stopped, load_offline_preview_unless, preview_source,
+    PreviewContent, PreviewSource, Stop, Stopped, capture_via, load_offline_preview_unless,
+    pane_native_id, preview_source,
 };
 
 /// How long the cursor stays on a row before its preview loads. Short
@@ -84,6 +90,9 @@ impl PreviewRest {
     }
 }
 
+/// What a preview says when its loader crashed.
+const CRASHED: &str = "the preview reader crashed";
+
 /// A finished load, on its way from a worker to the reducer.
 enum Landed {
     Loaded {
@@ -107,31 +116,74 @@ pub(super) type Loader = Arc<
 pub(super) struct PreviewLoads {
     tx: mpsc::Sender<Landed>,
     rx: mpsc::Receiver<Landed>,
+    /// Captures the panes of muxes, through the same backend as every
+    /// other mux call.
+    tmux: Arc<dyn MuxBackend>,
     loader: Loader,
     /// Each running load's flag, which stops it starting subprocesses.
     running: BTreeMap<PreviewSource, CancelToken>,
+    /// The panes with a capture in flight. A capture is one `tmux` call,
+    /// so it is never stopped, and a pane has at most one at a time.
+    capturing: BTreeSet<MuxSessionId>,
 }
 
 impl PreviewLoads {
-    pub(super) fn new() -> Self {
-        Self::with_loader(Arc::new(load_offline_preview_unless))
+    pub(super) fn new(tmux: Arc<dyn MuxBackend>) -> Self {
+        Self::with_loader(tmux, Arc::new(load_offline_preview_unless))
     }
 
     /// Loads that run through `loader`, which tests hold still.
-    pub(super) fn with_loader(loader: Loader) -> Self {
+    pub(super) fn with_loader(tmux: Arc<dyn MuxBackend>, loader: Loader) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
             tx,
             rx,
+            tmux,
             loader,
             running: BTreeMap::new(),
+            capturing: BTreeSet::new(),
         }
     }
 
     /// Start loading `source` on a worker thread. A loader panic still
     /// ends the load, or the preview would wait on it forever and `r`
     /// couldn't retry.
-    pub(super) fn start(&mut self, app: &App, source: PreviewSource) {
+    pub(super) fn start(&mut self, app: &mut App, source: PreviewSource) {
+        match source {
+            PreviewSource::Pane(mux) => self.capture(app, mux),
+            source => self.read(app, source),
+        }
+    }
+
+    /// Capture the pane of `mux` on a worker thread. A mux with no pane
+    /// to capture answers so at once, with no `tmux` call; a pane already
+    /// being captured is left to that capture.
+    fn capture(&mut self, app: &mut App, mux: MuxSessionId) {
+        let Some(native_id) = pane_native_id(app, &mux) else {
+            app.update(Msg::SetPreview {
+                source: PreviewSource::Pane(mux),
+                content: PreviewContent::NoTarget,
+            });
+            return;
+        };
+        if !self.capturing.insert(mux.clone()) {
+            return;
+        }
+        let (tx, tmux) = (self.tx.clone(), Arc::clone(&self.tmux));
+        std::thread::spawn(move || {
+            let content = catch_unwind(AssertUnwindSafe(|| capture_via(tmux.as_ref(), &native_id)))
+                .unwrap_or_else(|_| PreviewContent::Failed(CRASHED.to_string()));
+            // The receiver is gone only when the TUI is exiting.
+            let _ = tx.send(Landed::Loaded {
+                source: PreviewSource::Pane(mux),
+                content,
+            });
+        });
+    }
+
+    /// Read `source`, a transcript, listing, file, git query, process
+    /// tree, or pull request, on a worker thread.
+    fn read(&mut self, app: &App, source: PreviewSource) {
         let cancel = CancelToken::new();
         self.running.insert(source.clone(), cancel.clone());
         let (tx, loader, muted) = (self.tx.clone(), Arc::clone(&self.loader), app.theme().muted);
@@ -141,7 +193,7 @@ impl PreviewLoads {
                 Ok(Ok(Some(content))) => Landed::Loaded { source, content },
                 Ok(Ok(None)) | Err(_) => Landed::Loaded {
                     source,
-                    content: PreviewContent::Failed("the preview reader crashed".to_string()),
+                    content: PreviewContent::Failed(CRASHED.to_string()),
                 },
                 Ok(Err(Stopped)) => Landed::Abandoned(source),
             };
@@ -166,6 +218,9 @@ impl PreviewLoads {
             match landed {
                 Landed::Loaded { source, content } => {
                     self.running.remove(&source);
+                    if let PreviewSource::Pane(mux) = &source {
+                        self.capturing.remove(mux);
+                    }
                     app.update(Msg::SetPreview { source, content });
                 }
                 Landed::Abandoned(source) => {

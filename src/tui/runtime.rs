@@ -42,6 +42,8 @@ use crate::tui::{RunConfig, ui};
 /// Result of a completed background discovery run. The worker returns
 /// only the resolved snapshot; the main thread builds the row tree from
 /// the app's current view config.
+#[cfg(test)]
+mod blocked_tmux;
 mod console;
 mod content;
 mod executor;
@@ -121,8 +123,8 @@ trait LoopMode {
     fn tmux(&self) -> &dyn MuxBackend;
 
     /// Load a preview the selection needs (ADR 0112 §5). The default
-    /// loads on the calling thread; live mode moves transcript reads
-    /// to a worker.
+    /// loads on the calling thread; live mode loads every source,
+    /// a pane capture included, on a worker (ADR 0238).
     fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
         load_preview_now(app, self.tmux(), source);
     }
@@ -251,7 +253,7 @@ fn handle_event<M: LoopMode>(
 /// routes every action to the real handler (exec, tmux ops,
 /// store writes).
 struct LiveMode {
-    tmux: Box<dyn MuxBackend>,
+    tmux: Arc<dyn MuxBackend>,
     result_tx: mpsc::Sender<DiscoveryResult>,
     result_rx: mpsc::Receiver<DiscoveryResult>,
     /// The preview loads running on worker threads.
@@ -715,14 +717,11 @@ impl LoopMode for LiveMode {
         self.tmux.as_ref()
     }
 
-    /// Transcripts, listings, and files read from disk, which can be
-    /// slow, so they load on a worker thread and land through
-    /// [`LoopMode::drain`]. Pane captures stay synchronous.
+    /// Pane captures, transcripts, listings, and files read from disk or
+    /// asked of `tmux` can be slow, and `tmux` can stop answering, so
+    /// every load runs on a worker thread and lands through
+    /// [`LoopMode::drain`].
     fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
-        if matches!(source, PreviewSource::Pane(_)) {
-            load_preview_now(app, self.tmux(), source);
-            return;
-        }
         self.loads.start(app, source);
     }
 
@@ -1081,11 +1080,12 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
     let (confirmed_tx, confirmed_rx) = mpsc::channel();
     let refresh_interval = config.refresh_interval;
+    let tmux: Arc<dyn MuxBackend> = Arc::new(SystemTmux::new());
     let mode = LiveMode {
-        tmux: Box::new(SystemTmux::new()),
+        tmux: Arc::clone(&tmux),
         result_tx,
         result_rx,
-        loads: PreviewLoads::new(),
+        loads: PreviewLoads::new(tmux),
         confirmed_tx,
         confirmed_rx,
         probe: Arc::new(handoff::TmuxIncarnation::default()),

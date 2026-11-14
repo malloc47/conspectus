@@ -59,11 +59,13 @@ impl Rig {
                 warning: None,
             }
         };
+        let tmux: Arc<dyn MuxBackend> =
+            Arc::new(crate::discovery::tmux::FakeTmux::with_sessions(""));
         let mode = LiveMode {
-            tmux: Box::new(crate::discovery::tmux::FakeTmux::with_sessions("")),
+            tmux: Arc::clone(&tmux),
             result_tx,
             result_rx,
-            loads: PreviewLoads::new(),
+            loads: PreviewLoads::new(tmux),
             confirmed_tx,
             confirmed_rx,
             probe: Arc::new(NeverAsked),
