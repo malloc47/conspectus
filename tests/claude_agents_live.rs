@@ -326,6 +326,26 @@ fn the_switch_keeps_claude_from_being_run() {
 }
 
 #[test]
+fn the_switch_wins_over_the_setting_that_polls_for_agents_without_hooks() {
+    let mut world = World::new();
+    let config = world.home.join(".config/conspectus");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.toml"),
+        "[server]\nlive_poll_without_hooks = true\n",
+    )
+    .unwrap();
+    world.fake_claude(&listing("idle"));
+    world.hook_events(2, vec![LiveEventKind::TurnStarted]);
+    world.serve(&[("CONSPECTUS_DISABLE_LIVE_POLL", "1")]);
+    let entry = world.entry_when(|entry| entry["state"] == "working");
+    assert_eq!(entry["source"], "hook");
+    assert!(world.calls().is_empty(), "claude ran: {:?}", world.calls());
+    let stderr = world.stop();
+    assert!(!stderr.contains("live_poll_without_hooks"), "{stderr}");
+}
+
+#[test]
 fn a_one_shot_command_never_runs_claude() {
     let world = World::new();
     world.fake_claude(&listing("idle"));

@@ -274,7 +274,8 @@ impl HookStatusArgs {
                 self.scope_flag()
             ),
         };
-        print_health(harness, installed, &off_hint);
+        let poll_scope = crate::config::load_from_cwd().config.server.live_poll;
+        print_health(harness, installed, &off_hint, poll_scope);
         Ok(())
     }
 

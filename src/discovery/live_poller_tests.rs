@@ -505,7 +505,8 @@ fn a_running_agent_with_no_hook_entry_keeps_the_poll_running_every_interval() {
         .listing(listing("idle"))
         .listing(listing("idle"));
     let clock = Clock::at(NOW_MS);
-    let poller = poller(&script, &clock);
+    let poller = poller(&script, &clock).with_scope(PollScope::WithoutHooks);
+    assert_eq!(poller.scope(), PollScope::WithoutHooks);
     // No candidate and no unreported agent: nothing runs.
     assert_eq!(poller.poll(&[], 0, &EveryPid), None);
     assert_eq!(script.runs(), 0);
@@ -522,4 +523,34 @@ fn a_running_agent_with_no_hook_entry_keeps_the_poll_running_every_interval() {
     clock.set(NOW_MS + 3 * POLL_INTERVAL_MS);
     poller.poll(&[], 0, &EveryPid);
     assert_eq!(script.runs(), 2);
+}
+
+#[test]
+fn by_default_a_running_agent_with_no_hook_entry_runs_no_poll() {
+    let script = Script::default()
+        .listing(listing("idle"))
+        .listing(listing("idle"));
+    let clock = Clock::at(NOW_MS);
+    let poller = poller(&script, &clock);
+    assert_eq!(poller.scope(), PollScope::Repair);
+    // Agents with no hook entry call for nothing, however long they run.
+    for step in 0..4 {
+        clock.set(NOW_MS + step * POLL_INTERVAL_MS);
+        assert_eq!(poller.poll(&[], 3, &EveryPid), None);
+    }
+    assert_eq!(script.runs(), 0);
+    // A stuck hook entry is still repaired as before.
+    let stuck = [candidate(LiveState::Working, NOW_MS - 60 * SECOND)];
+    assert!(poller.poll(&stuck, 3, &EveryPid).is_some());
+    assert_eq!(script.runs(), 1);
+}
+
+#[test]
+fn the_switch_builds_no_poller_whatever_the_scope() {
+    for scope in [PollScope::Repair, PollScope::WithoutHooks] {
+        assert!(pollers(true, scope).is_empty(), "{scope:?}");
+        let built = pollers(false, scope);
+        assert!(!built.is_empty(), "{scope:?}");
+        assert!(built.iter().all(|poller| poller.scope() == scope));
+    }
 }

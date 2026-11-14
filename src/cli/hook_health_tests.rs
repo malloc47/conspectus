@@ -334,14 +334,38 @@ fn poll_agents_counts_the_harnesss_bindings_read_from_its_agent_list() {
 
 #[test]
 fn the_line_says_how_many_agents_their_agent_list_shows() {
-    assert_eq!(poll_note(0), None);
+    let shown = PollScope::WithoutHooks;
+    // Agents without hooks call for no hint: the setting is on.
+    assert_eq!(poll_note(shown, 0, 3), None);
     assert_eq!(
-        poll_note(1).as_deref(),
+        poll_note(shown, 1, 0).as_deref(),
         Some("1 agent shown from its agent list")
     );
     assert_eq!(
-        poll_note(2).as_deref(),
+        poll_note(shown, 2, 1).as_deref(),
         Some("2 agents shown from their agent list")
+    );
+}
+
+#[test]
+fn by_default_the_line_counts_nothing_from_the_agent_list_and_names_the_setting() {
+    let repair = PollScope::Repair;
+    // The repair's bindings are not counted, and with every agent
+    // reporting there is nothing to say.
+    assert_eq!(poll_note(repair, 2, 0), None);
+    assert_eq!(
+        poll_note(repair, 2, 1).as_deref(),
+        Some(
+            "1 agent could be shown from its agent list: set \
+             `live_poll_without_hooks = true` under `[server]` in the config file"
+        )
+    );
+    assert_eq!(
+        poll_note(repair, 0, 2).as_deref(),
+        Some(
+            "2 agents could be shown from their agent list: set \
+             `live_poll_without_hooks = true` under `[server]` in the config file"
+        )
     );
 }
 

@@ -1842,3 +1842,66 @@ fn search_group_accepts_flat_and_names_it_in_the_diagnostic() {
     let message = format!("{:?}", outcome.diagnostics);
     assert!(message.contains("session, message, or flat"), "{message}");
 }
+
+fn server_config_from(user: Option<&str>, project: Option<&str>) -> (ServerConfig, Vec<String>) {
+    let temp = TempDir::new().expect("temp dir");
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).expect("create project dir");
+    if let Some(text) = user {
+        write_file(&temp.path().join("xdg").join(USER_CONFIG_RELATIVE), text);
+    }
+    if let Some(text) = project {
+        write_file(&project_dir.join(PROJECT_CONFIG_FILENAME), text);
+    }
+    let outcome = ConfigLoader::new()
+        .with_home(temp.path())
+        .with_xdg_config_home(temp.path().join("xdg"))
+        .load_from(&project_dir);
+    let messages = outcome
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect();
+    (outcome.config.server, messages)
+}
+
+#[test]
+fn the_poll_for_agents_without_hooks_is_off_unless_the_config_turns_it_on() {
+    let (server, diagnostics) = server_config_from(None, None);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(server.live_poll, PollScope::Repair);
+
+    let on = "[server]\nlive_poll_without_hooks = true\n";
+    let off = "[server]\nlive_poll_without_hooks = false\n";
+    let (server, diagnostics) = server_config_from(Some(on), None);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(server.live_poll, PollScope::WithoutHooks);
+    // Beside the intervals, which keep their own values.
+    let (server, _) = server_config_from(
+        None,
+        Some("[server]\nlive_poll_without_hooks = true\n[server.intervals]\nmux = \"7s\"\n"),
+    );
+    assert_eq!(server.live_poll, PollScope::WithoutHooks);
+    assert_eq!(server.intervals.mux, Duration::from_secs(7));
+    // A project's value wins over the user's, either way.
+    let (server, _) = server_config_from(Some(on), Some(off));
+    assert_eq!(server.live_poll, PollScope::Repair);
+    let (server, _) = server_config_from(Some(off), Some(on));
+    assert_eq!(server.live_poll, PollScope::WithoutHooks);
+}
+
+#[test]
+fn an_invalid_live_poll_without_hooks_is_a_diagnostic_and_keeps_it_off() {
+    for raw in ["\"yes\"", "1", "[true]"] {
+        let (server, diagnostics) = server_config_from(
+            None,
+            Some(&format!("[server]\nlive_poll_without_hooks = {raw}\n")),
+        );
+        assert_eq!(server.live_poll, PollScope::Repair, "{raw}");
+        assert_eq!(diagnostics.len(), 1, "{raw}: {diagnostics:?}");
+        assert!(
+            diagnostics[0].contains("invalid `[server]` `live_poll_without_hooks`"),
+            "{raw}: {diagnostics:?}"
+        );
+    }
+}

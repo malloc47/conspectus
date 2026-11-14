@@ -12,8 +12,10 @@
 //! 1. [`POLL_INTERVAL_MS`] have passed since its last attempt, whatever
 //!    that attempt came to;
 //! 2. a candidate is *due*: it has had no event for [`SETTLE_MS`], and no
-//!    poll since has answered it ([`answered`]); or some running agent
-//!    has no hook entry, which only a poll can show (ADR 0222).
+//!    poll since has answered it ([`answered`]); or, for a poller the
+//!    operator let show agents without hooks ([`PollScope::WithoutHooks`],
+//!    off by default), some running agent has no hook entry, which only a
+//!    poll can show (ADR 0222).
 //!
 //! Either way it returns the last poll that succeeded, which the pass
 //! puts on the snapshot for the binding to fold in. A poll that fails (no
@@ -39,6 +41,26 @@ pub const SETTLE_MS: i64 = 10_000;
 
 /// How often a running poll checks whether its program has exited.
 const WAIT_STEP: Duration = Duration::from_millis(10);
+
+/// The environment variable that turns every poll off, whatever the
+/// configuration says.
+const DISABLE_ENV: &str = "CONSPECTUS_DISABLE_LIVE_POLL";
+
+/// Which agents a harness's poll speaks for (ADR 0222): the hook entries
+/// it repairs, and, only when the operator turned it on (`[server]
+/// live_poll_without_hooks`), the running agents no hook entry reports.
+/// One process builds every poller, and binds, with one scope.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PollScope {
+    /// Only to repair a hook entry that may be stuck (ADR 0218): no poll
+    /// runs because an agent has no hook entry, and a poll shows no agent
+    /// on its own.
+    #[default]
+    Repair,
+    /// Also while a running agent that discovery knows has no hook entry,
+    /// which the binding then shows from the poll alone.
+    WithoutHooks,
+}
 
 /// What running a poll's program came to.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -172,6 +194,7 @@ pub struct LivePoller {
     runner: Box<dyn PollRunner>,
     parse: PollParser,
     clock: Box<dyn Fn() -> i64 + Send + Sync>,
+    scope: PollScope,
     memory: Mutex<Memory>,
 }
 
@@ -185,21 +208,34 @@ impl fmt::Debug for LivePoller {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LivePoller")
             .field("harness", &self.harness)
+            .field("scope", &self.scope)
             .finish_non_exhaustive()
     }
 }
 
 impl LivePoller {
     /// A poller for `harness` that runs `runner` and reads its output
-    /// with `parse`, on the system clock.
+    /// with `parse`, on the system clock, for repairs only.
     pub fn new(harness: &'static str, runner: Box<dyn PollRunner>, parse: PollParser) -> Self {
         Self {
             harness,
             runner,
             parse,
             clock: Box::new(crate::live_store::now_ms),
+            scope: PollScope::default(),
             memory: Mutex::new(Memory::default()),
         }
+    }
+
+    /// The same poller speaking for the agents of `scope`.
+    pub fn with_scope(mut self, scope: PollScope) -> Self {
+        self.scope = scope;
+        self
+    }
+
+    /// Which agents this poller speaks for.
+    pub fn scope(&self) -> PollScope {
+        self.scope
     }
 
     /// The same poller on `clock`, Unix epoch milliseconds.
@@ -216,7 +252,8 @@ impl LivePoller {
     /// The poll the binding should fold in now: a new one when the
     /// limits of the module documentation let it run and it succeeds,
     /// else the last that succeeded. `unreported` counts the running
-    /// agents of the harness that no hook entry reports. Each listed
+    /// agents of the harness that no hook entry reports, which call for a
+    /// poll only in [`PollScope::WithoutHooks`]. Each listed
     /// pid's start time is read through `probe`, and each agent's run is
     /// carried on from the last poll.
     pub fn poll(
@@ -231,7 +268,7 @@ impl LivePoller {
             let rested = memory.last_attempt_ms.is_none_or(|last| {
                 now_ms < last || now_ms.saturating_sub(last) >= POLL_INTERVAL_MS
             });
-            let wanted = unreported > 0
+            let wanted = (self.scope == PollScope::WithoutHooks && unreported > 0)
                 || candidates
                     .iter()
                     .any(|candidate| due(candidate, memory.last.as_ref(), now_ms));
@@ -265,17 +302,23 @@ impl LivePoller {
     }
 }
 
-/// The repair polls of every registered harness that offers one, unless
-/// `CONSPECTUS_DISABLE_LIVE_POLL` is set. A process that discovers in the
-/// background builds these once and passes them to every discovery
+/// The polls of every registered harness that offers one, each speaking
+/// for `scope`, unless `CONSPECTUS_DISABLE_LIVE_POLL` is set, which wins
+/// over any scope. A process that discovers in the background builds
+/// these once and passes them to every discovery
 /// (`LocalDiscoveryConfig::with_live_pollers`).
-pub fn from_env() -> Vec<Arc<LivePoller>> {
-    if std::env::var_os("CONSPECTUS_DISABLE_LIVE_POLL").is_some() {
+pub fn from_env(scope: PollScope) -> Vec<Arc<LivePoller>> {
+    pollers(std::env::var_os(DISABLE_ENV).is_some(), scope)
+}
+
+/// The pollers [`from_env`] builds: none when `disabled`.
+fn pollers(disabled: bool, scope: PollScope) -> Vec<Arc<LivePoller>> {
+    if disabled {
         return Vec::new();
     }
     crate::discovery::harness::registered_adapters()
         .filter_map(crate::discovery::harness::HarnessAdapter::live_poller)
-        .map(Arc::new)
+        .map(|poller| Arc::new(poller.with_scope(scope)))
         .collect()
 }
 

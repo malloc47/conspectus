@@ -1004,7 +1004,9 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
     // Snapshot mode goes through a different entry point, so the
     // file only ever moves under interactive runs.
     let mut app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
-    app.set_live_overlay(crate::tui::live_overlay::LiveOverlay::from_env());
+    app.set_live_overlay(
+        crate::tui::live_overlay::LiveOverlay::from_env().with_poll_scope(config.live_poll),
+    );
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
     let (preview_tx, preview_rx) = mpsc::channel();
     let (confirmed_tx, confirmed_rx) = mpsc::channel();
@@ -1022,7 +1024,7 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
             // Built once, so each poll remembers its last run across
             // refreshes; only this worker's discovery runs them, never
             // the UI thread or the overlay (ADR 0218).
-            let pollers = crate::discovery::live_poller::from_env();
+            let pollers = crate::discovery::live_poller::from_env(config.live_poll);
             Arc::new(move |config: &mut RunConfig, nudge| nudged_discovery(config, nudge, &pollers))
         },
         workers: WorkerLedger::default(),

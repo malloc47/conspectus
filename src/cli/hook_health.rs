@@ -17,10 +17,14 @@
 //! many of its agents that graph shows from their titles, and for one
 //! whose own list of its sessions a poll reads (ADRs 0218, 0222), how
 //! many it shows from that list: either is how a harness whose hooks are
-//! silent can still show state.
+//! silent can still show state. That list shows an agent whose hooks
+//! report nothing only when the configuration turns it on (`[server]
+//! live_poll_without_hooks`); while it is off, the line says nothing of
+//! what the list shows, and when such agents run, names the setting.
 
 use std::path::PathBuf;
 
+use crate::discovery::live_poller::PollScope;
 use crate::live_store::{LiveFile, LiveStore, PidProbe, ProcProbe};
 use crate::model::live::LiveSource;
 use crate::model::{GraphNode, GraphSnapshot, NodeId};
@@ -150,7 +154,7 @@ impl Health {
     }
 }
 
-pub(super) use crate::discovery::live_state::{RunningAgent, running_agents};
+pub(super) use crate::discovery::live_state::{RunningAgent, running_agents, unreported};
 
 /// How many of `harness`'s agents the graph `snapshot` shows from their
 /// pane titles: its live bindings whose source is the pane title, on a
@@ -227,13 +231,28 @@ pub(super) fn poll_agents(snapshot: &GraphSnapshot, harness: &str) -> usize {
     sessions + panes
 }
 
-/// What the health line adds when the graph shows `count` agents from
-/// the harness's own list of its sessions; nothing for none.
-pub(super) fn poll_note(count: usize) -> Option<String> {
-    match count {
-        0 => None,
-        1 => Some("1 agent shown from its agent list".to_string()),
-        count => Some(format!("{count} agents shown from their agent list")),
+/// What the health line adds of the harness's own list of its sessions,
+/// read in `scope`. With agents without hooks shown from the list, how
+/// many agents the graph shows from it (`polled`); nothing for none.
+/// Without, nothing of what it shows, and when `hookless` running agents
+/// have no entry, the setting that would show them from the list.
+pub(super) fn poll_note(scope: PollScope, polled: usize, hookless: usize) -> Option<String> {
+    match (scope, polled, hookless) {
+        (PollScope::WithoutHooks, 0, _) | (PollScope::Repair, _, 0) => None,
+        (PollScope::WithoutHooks, 1, _) => Some("1 agent shown from its agent list".to_string()),
+        (PollScope::WithoutHooks, count, _) => {
+            Some(format!("{count} agents shown from their agent list"))
+        }
+        (PollScope::Repair, _, count) => {
+            let shown = if count == 1 {
+                "1 agent could be shown from its agent list".to_string()
+            } else {
+                format!("{count} agents could be shown from their agent list")
+            };
+            Some(format!(
+                "{shown}: set `live_poll_without_hooks = true` under `[server]` in the config file"
+            ))
+        }
     }
 }
 
@@ -251,7 +270,8 @@ pub(super) fn title_note(count: usize) -> Option<String> {
 /// `<label>\t<harness>\t<store file>\t<message>`. `installed` says
 /// whether the hooks are installed in the scope `hook status` looked at,
 /// and `off_hint` how to install them there, for the `off` message.
-pub(super) fn print_health(harness: &str, installed: bool, off_hint: &str) {
+/// `poll_scope` is the configured scope of the harness's poll.
+pub(super) fn print_health(harness: &str, installed: bool, off_hint: &str, poll_scope: PollScope) {
     let adapter = crate::discovery::harness::registered_adapters()
         .find(|adapter| adapter.harness_key() == harness);
     let reports_live_state =
@@ -284,13 +304,21 @@ pub(super) fn print_health(harness: &str, installed: bool, off_hint: &str) {
         .map_or_else(|| PathBuf::from("-"), LiveStore::path);
     // Building a poller runs nothing; it only says the harness has one.
     let polls = adapter.is_some_and(|adapter| adapter.live_poller().is_some());
-    let polled = if polls {
-        saved().map_or(0, |snapshot| poll_agents(snapshot, harness))
-    } else {
-        0
+    let (polled, hookless) = match (polls, poll_scope) {
+        (false, _) => (0, 0),
+        (true, PollScope::WithoutHooks) => (
+            saved().map_or(0, |snapshot| poll_agents(snapshot, harness)),
+            0,
+        ),
+        (true, PollScope::Repair) => (
+            0,
+            saved().map_or(0, |snapshot| {
+                unreported(snapshot, &file, &probe, harness).len()
+            }),
+        ),
     };
     let mut message = health.message(crate::live_store::now_ms(), off_hint);
-    for note in [title_note(titles), poll_note(polled)]
+    for note in [title_note(titles), poll_note(poll_scope, polled, hookless)]
         .into_iter()
         .flatten()
     {

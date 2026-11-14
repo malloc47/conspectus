@@ -22,10 +22,13 @@
 //! again. A hook entry's `ready`, `error`, `compacting`, `starting`,
 //! `unknown`, and `exited` never change.
 //!
-//! An agent the store has no entry for binds from the poll alone (ADR
-//! 0222) only when discovery knows its process: a running main agent of
-//! the harness that no entry reports ([`unreported`]), which is also what
-//! makes the poller run every thirty seconds. It binds to the session the
+//! When the operator turned it on (`[server] live_poll_without_hooks`,
+//! [`crate::discovery::live_poller::PollScope::WithoutHooks`]; off by
+//! default), an agent the store has no entry for binds from the poll
+//! alone (ADR 0222) only when discovery knows its process: a running main
+//! agent of the harness that no entry reports ([`unreported`]), which is
+//! then also what makes the poller run every thirty seconds. Off, such
+//! an agent neither binds nor makes a poll run. It binds to the session the
 //! graph says that process runs, else to the session the poll names, and
 //! only where no other binding sits ([`fold_poll_only`]). It records no
 //! pid, so the read rule ages it as it ages any state whose process
@@ -330,7 +333,7 @@ fn sessions_of(snapshot: &GraphSnapshot, process: &NodeId) -> BTreeSet<String> {
 
 /// The running main agents of `harness` that no entry of the store
 /// `file` reports: the agents a poll may show on its own, and whose being
-/// known keeps the poller running.
+/// known keeps the poller running, when the operator turned that on.
 pub fn unreported(
     snapshot: &GraphSnapshot,
     file: &LiveFile,

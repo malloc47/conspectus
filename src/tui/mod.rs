@@ -148,6 +148,10 @@ pub struct RunConfig {
     /// skips re-running providers whose class TTL has not expired.
     /// Defaults to the ADR 0038 starting values.
     pub intervals: crate::config::ServerIntervals,
+    /// `[server] live_poll_without_hooks` (ADR 0222): which agents the
+    /// live-state polls of this TUI's refresh worker speak for, and so
+    /// which polls the live overlay binds an agent from on their own.
+    pub live_poll: crate::discovery::live_poller::PollScope,
     /// Suppress the writer for this TUI invocation.
     /// The discovery loop still reads from the cache; only the
     /// post-refresh write is skipped.
@@ -207,6 +211,7 @@ impl RunConfig {
             default_session_preview: SessionPreview::default(),
             narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
+            live_poll: crate::discovery::live_poller::PollScope::default(),
             no_cache: false,
             refresh: false,
             discovery_caches: std::sync::Arc::default(),

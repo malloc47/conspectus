@@ -756,3 +756,70 @@ fn a_poll_the_snapshot_carries_repairs_the_overlays_table_until_a_newer_event() 
     assert!(overlay.poll(start + 2 * REREAD_INTERVAL, Some(&snapshot)));
     assert_eq!(read(&overlay), (LiveState::Working, LiveSource::Hook));
 }
+
+/// Session `s2`, run by the agent process [`PID`] that no entry reports,
+/// on a snapshot carrying a Claude Code poll that lists it waiting.
+fn polled_without_hooks() -> GraphSnapshot {
+    use crate::model::live::{LivePoll, PolledAgent};
+    use crate::model::{
+        GraphLink, LinkEndpoint, Provenance, RelationKind, RuntimeProcessId, RuntimeProcessNode,
+        RuntimeProcessRole,
+    };
+    let mut snapshot = graph(&["s2"]);
+    let process = RuntimeProcessId::new("proc:4242");
+    snapshot
+        .nodes
+        .push(GraphNode::RuntimeProcess(RuntimeProcessNode {
+            id: process.clone(),
+            observation_key: "proc:4242".to_string(),
+            pid: Some(PID),
+            parent_pid: None,
+            root_pane_pid: None,
+            command: None,
+            cwd: None,
+            harness_key: Some("claude-code".to_string()),
+            role: Some(RuntimeProcessRole::HumanAgent),
+            depth: None,
+            observed_epoch: None,
+        }));
+    snapshot.candidate_links.push(GraphLink::new(
+        "test:proc:4242:s2",
+        NodeId::RuntimeProcess(process),
+        LinkEndpoint::Node { id: session("s2") },
+        RelationKind::ProcessIdentifiesSession,
+        Provenance::Discovered,
+    ));
+    snapshot.live_polls.insert(
+        "claude-code".to_string(),
+        LivePoll {
+            observed_ms: NOW_MS,
+            agents: vec![PolledAgent {
+                pid: Some(PID),
+                pid_start: Some(PID_START),
+                session_id: Some("s2".to_string()),
+                ..PolledAgent::new(LiveState::Waiting, Some(LiveDetail::Input), NOW_MS)
+            }],
+        },
+    );
+    snapshot
+}
+
+#[test]
+fn the_overlay_shows_an_agent_without_hooks_from_a_poll_only_when_configured_to() {
+    let snapshot = polled_without_hooks();
+    let files = Files::holding(&store([]));
+    let pids = Pids::default();
+
+    // By default the poll repairs hook entries and shows no agent alone.
+    let mut by_default = overlay(&files, &pids);
+    by_default.rebind(&snapshot, Instant::now());
+    assert!(by_default.table(&snapshot).nodes.is_empty());
+
+    let mut shown = overlay(&files, &pids).with_poll_scope(PollScope::WithoutHooks);
+    shown.rebind(&snapshot, Instant::now());
+    let binding = shown.table(&snapshot).nodes[&session("s2")];
+    assert_eq!(
+        (binding.observation.state, binding.observation.source),
+        (LiveState::Waiting, LiveSource::HarnessPoll)
+    );
+}

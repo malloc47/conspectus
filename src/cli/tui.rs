@@ -465,6 +465,7 @@ impl TuiArgs {
             default_session_preview: outcome.config.tui.session_preview,
             narrow_layout_threshold: outcome.config.tui.narrow_layout_threshold,
             intervals: outcome.config.server.intervals,
+            live_poll: outcome.config.server.live_poll,
             no_cache: self.no_cache,
             refresh: self.refresh,
             discovery_caches: std::sync::Arc::default(),

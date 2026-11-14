@@ -277,6 +277,7 @@ impl ScenarioWorld {
             default_session_preview: crate::tui::SessionPreview::default(),
             narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
+            live_poll: crate::discovery::live_poller::PollScope::default(),
             no_cache: true,
             refresh: true,
             discovery_caches: std::sync::Arc::default(),

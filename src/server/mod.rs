@@ -153,6 +153,9 @@ pub struct ServeConfig {
     pub forge: crate::config::ForgeConfig,
     /// `[history]` settings (ADR 0140).
     pub history: crate::config::HistoryConfig,
+    /// `[server] live_poll_without_hooks`: which agents the live-state
+    /// polls speak for (ADR 0222).
+    pub live_poll: crate::discovery::live_poller::PollScope,
 }
 
 /// Resolve the canonical Unix-domain socket path per ADR 0038.
@@ -342,14 +345,16 @@ struct DispatchCtx {
 type DiscoveryFactory = Arc<dyn Fn(ForgeFetch) -> LocalDiscoveryConfig + Send + Sync>;
 
 /// The production [`DiscoveryFactory`]: the environment's providers,
-/// `caches`, `forge`'s concurrency, and the live-state repair polls
-/// (ADR 0218), built once so each remembers its last run across cycles.
+/// `caches`, `forge`'s concurrency, and the live-state polls (ADRs 0218,
+/// 0222) speaking for `live_poll`, built once so each remembers its last
+/// run across cycles.
 fn env_discovery(
     caches: Arc<DiscoveryCaches>,
     forge: crate::config::ForgeConfig,
+    live_poll: crate::discovery::live_poller::PollScope,
     shutdown: Arc<AtomicBool>,
 ) -> DiscoveryFactory {
-    let pollers = crate::discovery::live_poller::from_env();
+    let pollers = crate::discovery::live_poller::from_env(live_poll);
     Arc::new(move |fetch| {
         LocalDiscoveryConfig::from_env()
             .with_caches(Arc::clone(&caches))
@@ -1320,6 +1325,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
         discovery: env_discovery(
             Arc::clone(&discovery_caches),
             config.forge,
+            config.live_poll,
             Arc::clone(&shutdown),
         ),
         discovery_caches,

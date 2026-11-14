@@ -18,6 +18,7 @@ use serde::Deserialize;
 
 use std::collections::BTreeMap;
 
+use crate::discovery::live_poller::PollScope;
 use crate::filter::{
     HarnessFilter, LiveStateFilter, LiveStateKey, MuxStateFilter, MuxStateKey, PrBranchFilter,
     PrStateFilter, PrStateKey, RowFilter,
@@ -248,6 +249,14 @@ impl TeardownConfirm {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ServerConfig {
     pub intervals: ServerIntervals,
+    /// `[server] live_poll_without_hooks` (ADR 0222): whether a harness's
+    /// own list of its sessions is also asked, every 30 s, while one of
+    /// its agents runs with no hook reporting for it, and shows that
+    /// agent's state. Off by default ([`PollScope::Repair`]): the list is
+    /// then asked only to repair a hook's stuck state (ADR 0218). Read by
+    /// `conspectus serve`, a TUI with no daemon, and `hook status`;
+    /// `CONSPECTUS_DISABLE_LIVE_POLL` turns every poll off whatever it says.
+    pub live_poll: PollScope,
 }
 
 /// Per-provider-class refresh / TTL durations.
@@ -538,6 +547,10 @@ struct ForgeFile {
 struct ServerFile {
     #[serde(default)]
     intervals: Option<ServerIntervalsFile>,
+    /// Read as a raw value so a wrong type is a diagnostic, not a
+    /// failure of the whole file.
+    #[serde(default)]
+    live_poll_without_hooks: Option<toml::Value>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1093,6 +1106,19 @@ fn merge_server(
     path: &Path,
     diagnostics: &mut Vec<ConfigDiagnostic>,
 ) {
+    if let Some(raw) = file.live_poll_without_hooks {
+        match raw.as_bool() {
+            Some(true) => config.live_poll = PollScope::WithoutHooks,
+            Some(false) => config.live_poll = PollScope::Repair,
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[server]` `live_poll_without_hooks` value `{raw}`: \
+                     expected true or false"
+                ),
+            }),
+        }
+    }
     let Some(intervals) = file.intervals else {
         return;
     };

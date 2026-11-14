@@ -1071,13 +1071,37 @@ fn hook_init_claude_code_refuses_a_file_it_cannot_edit_exactly() {
 
 /// The last line `hook status <harness>` prints: the live-state health.
 fn health_line(home: &Path, harness: &str) -> String {
+    // Run from the temp home, so the config is the temp home's alone.
     let assert = isolated_cmd(home)
         .env("CODEX_HOME", home.join(".codex"))
+        .current_dir(home)
         .args(["hook", "status", harness])
         .assert()
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
     stdout.lines().last().expect("a health line").to_string()
+}
+
+/// What `hook status` adds by default when `count` running agents have
+/// no live state.
+fn agent_list_hint(count: usize) -> String {
+    let shown = if count == 1 {
+        "1 agent could be shown from its agent list".to_string()
+    } else {
+        format!("{count} agents could be shown from their agent list")
+    };
+    format!("; {shown}: set `live_poll_without_hooks = true` under `[server]` in the config file")
+}
+
+/// Write the user config with `[server] live_poll_without_hooks = on`.
+fn set_live_poll_without_hooks(home: &Path, on: bool) {
+    let dir = home.join(".config/conspectus");
+    std::fs::create_dir_all(&dir).expect("config dir");
+    std::fs::write(
+        dir.join("config.toml"),
+        format!("[server]\nlive_poll_without_hooks = {on}\n"),
+    )
+    .expect("write config");
 }
 
 fn install_claude_hooks(home: &Path) {
@@ -1172,25 +1196,34 @@ fn hook_status_calls_an_installed_hook_silent_when_its_agent_runs_without_events
     )
     .expect("write graph.bin");
 
+    let silent = "\tlive state: active but no events: hooks may be untrusted, disabled, or the \
+                  agent was started before they were installed";
     let line = health_line(home.path(), "claude-code");
     assert!(
         line.starts_with("silent\tclaude-code\t"),
         "an installed hook with a running agent and no events: {line}"
     );
+    // By default it also names the setting that shows the agent from its
+    // agent list.
     assert!(
-        line.ends_with(
-            "\tlive state: active but no events: hooks may be untrusted, disabled, or the \
-             agent was started before they were installed"
-        ),
+        line.ends_with(&format!("{silent}{}", agent_list_hint(1))),
         "{line}"
     );
+    // With that setting on, there is nothing to name.
+    set_live_poll_without_hooks(home.path(), true);
+    let line = health_line(home.path(), "claude-code");
+    assert!(line.ends_with(silent), "{line}");
+    set_live_poll_without_hooks(home.path(), false);
 
-    // Not installed, the same agent is told how to install the hooks.
+    // Not installed, the same agent is told how to install the hooks, and
+    // of the setting.
     isolated_cmd(home.path())
         .args(["hook", "remove", "claude-code"])
         .assert()
         .success();
-    assert!(health_line(home.path(), "claude-code").starts_with("off\tclaude-code\t"));
+    let line = health_line(home.path(), "claude-code");
+    assert!(line.starts_with("off\tclaude-code\t"), "{line}");
+    assert!(line.ends_with(&agent_list_hint(1)), "{line}");
 }
 
 #[test]
@@ -1254,7 +1287,10 @@ fn hook_status_counts_a_running_agent_without_live_state_beside_one_that_reports
     let _ = silent.wait();
     assert!(line.starts_with("receiving\tclaude-code\t"), "{line}");
     assert!(
-        line.ends_with("; 1 running agent has no live state"),
+        line.ends_with(&format!(
+            "; 1 running agent has no live state{}",
+            agent_list_hint(1)
+        )),
         "{line}"
     );
 }
@@ -1354,11 +1390,58 @@ fn hook_status_counts_an_agent_whose_entry_names_its_tmux_pane_as_reporting() {
     let _ = wrapper.kill();
     let _ = wrapper.wait();
     assert!(
-        beside.ends_with("; 1 running agent has no live state"),
+        beside.ends_with(&format!(
+            "; 1 running agent has no live state{}",
+            agent_list_hint(1)
+        )),
         "{beside}"
     );
     assert!(in_pane.starts_with("receiving\tclaude-code\t"), "{in_pane}");
     assert!(!in_pane.contains("no live state"), "{in_pane}");
+    assert!(!in_pane.contains("agent list"), "{in_pane}");
+}
+
+#[test]
+fn hook_status_counts_agents_shown_from_the_agent_list_only_with_the_setting_on() {
+    use conspectus::live_store::{LiveEvent, LiveEventKind, LiveStore, now_ms};
+    use conspectus::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    use conspectus::model::{AgentSessionId, GraphSnapshot, NodeId};
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    install_claude_hooks(home.path());
+    // The saved graph shows one Claude Code session from its agent list.
+    let mut graph = GraphSnapshot::empty();
+    graph.node_live.insert(
+        NodeId::AgentSession(AgentSessionId::new("claude-code", "/scope", "listed")),
+        LiveBinding::new(
+            LiveObservation::new(LiveState::Waiting, LiveSource::HarnessPoll, now_ms()),
+            Liveness::Unknown,
+        ),
+    );
+    conspectus::snapshot::write_atomic(
+        &home.path().join(".local/share/conspectus/graph.bin"),
+        &graph,
+    )
+    .expect("write graph.bin");
+    LiveStore::at(home.path().join(".local/state/conspectus"))
+        .apply_event(&LiveEvent::new(
+            "claude-code",
+            "alpha",
+            now_ms(),
+            LiveEventKind::TurnStarted,
+        ))
+        .expect("write live state");
+
+    let by_default = health_line(home.path(), "claude-code");
+    assert!(
+        by_default.starts_with("receiving\tclaude-code\t"),
+        "{by_default}"
+    );
+    assert!(!by_default.contains("agent list"), "{by_default}");
+
+    set_live_poll_without_hooks(home.path(), true);
+    let on = health_line(home.path(), "claude-code");
+    assert!(on.ends_with("; 1 agent shown from its agent list"), "{on}");
 }
 
 #[test]

@@ -43,6 +43,7 @@ impl ServeArgs {
             scan_roots,
             intervals: outcome.config.server.intervals,
             forge: outcome.config.forge,
+            live_poll: outcome.config.server.live_poll,
         })
     }
 }

@@ -5,8 +5,9 @@
 //!
 //! A snapshot carries the `node_live` table its discovery bound, which is
 //! as old as the snapshot. The overlay keeps a table of its own, bound
-//! with the same [`bind_live`], and the rows read it in place of the
-//! snapshot's ([`LiveOverlay::table`]). It is cheap when nothing
+//! with the same [`bind_live_scoped`] in the poll scope this TUI was
+//! configured with, and the rows read it in place of the snapshot's
+//! ([`LiveOverlay::table`]). It is cheap when nothing
 //! happens: each tick costs one stat of the store file, and the file is
 //! read and bound (one pid check per bound entry) only when the stat
 //! shows a rewrite and at least [`REREAD_INTERVAL`] has passed since the
@@ -37,7 +38,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::discovery::live_state::{BoundLive, bind_live};
+use crate::discovery::live_poller::PollScope;
+use crate::discovery::live_state::{BoundLive, bind_live_scoped};
 use crate::live_store::{LiveFile, LiveStore, PidProbe, ProcProbe};
 use crate::model::live::{LiveState, Liveness};
 use crate::model::{GraphSnapshot, LivePane, LiveTables, NodeId};
@@ -117,6 +119,9 @@ pub(crate) struct LiveOverlay {
     /// When the bound entries' processes were last checked, by a bind or
     /// a [`LiveOverlay::recheck`].
     probed_at: Option<Instant>,
+    /// Whether a snapshot's poll may show an agent no entry reports
+    /// (ADR 0222), as this TUI's configuration says.
+    poll_scope: PollScope,
 }
 
 /// The store file and what was last read from it.
@@ -155,6 +160,7 @@ impl LiveOverlay {
             checked: Default::default(),
             checked_at: None,
             probed_at: None,
+            poll_scope: PollScope::default(),
         }
     }
 
@@ -189,6 +195,14 @@ impl LiveOverlay {
             }),
             ..Self::off()
         }
+    }
+
+    /// The same overlay binding a snapshot's polls in `scope`: in
+    /// [`PollScope::WithoutHooks`] a poll also shows an agent that no
+    /// entry reports.
+    pub(crate) fn with_poll_scope(mut self, scope: PollScope) -> Self {
+        self.poll_scope = scope;
+        self
     }
 
     /// Whether the overlay is on.
@@ -303,7 +317,12 @@ impl LiveOverlay {
         let Some(source) = &self.source else {
             return false;
         };
-        let table = bind_live(snapshot, &source.file, source.probe.as_ref());
+        let table = bind_live_scoped(
+            snapshot,
+            &source.file,
+            source.probe.as_ref(),
+            self.poll_scope,
+        );
         self.probed_at = Some(now);
         let changed = table != self.table;
         self.table = table;

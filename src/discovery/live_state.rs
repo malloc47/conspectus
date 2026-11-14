@@ -2,10 +2,12 @@
 //! (ADR 0204) put on the graph nodes they describe, as a snapshot's
 //! `node_live` and `pane_live` tables.
 //!
-//! [`bind_live`] is pure and has two callers: the `live_state` pass
-//! ([`apply_live_state`]), which every discovery runs after the harness
-//! providers and the hook sidecar, and the TUI, which binds the store
-//! again against the snapshot it holds whenever the store changes.
+//! [`bind_live_scoped`] is pure and has two callers: the `live_state`
+//! pass ([`apply_live_state`]), which every discovery runs after the
+//! harness providers and the hook sidecar, and the TUI, which binds the
+//! store again against the snapshot it holds whenever the store changes.
+//! Each passes the [`PollScope`] its process was configured with;
+//! [`bind_live`] binds with the default.
 //!
 //! An entry binds by the first of these rules that fits:
 //!
@@ -40,10 +42,11 @@
 //! report the end of (the `title` module). Last, the snapshot's latest
 //! poll of a harness's own list of its sessions (ADR 0218) repairs a
 //! `working` or `waiting` entry of that harness whose hooks have been
-//! silent since before the poll, and shows a running agent of that
-//! harness that no entry reports on its session (ADR 0222; the `poll`
-//! module); the pass runs the polls it is given before it binds
-//! ([`apply_live_state`]).
+//! silent since before the poll, and, only in
+//! [`PollScope::WithoutHooks`], which the operator turns on, shows a
+//! running agent of that harness that no entry reports on its session
+//! (ADR 0222; the `poll` module); the pass runs the polls it is given
+//! before it binds ([`apply_live_state`]).
 //!
 //! Each binding records whether the entry's process ran when it was
 //! bound, from the recorded pid and start time checked through a
@@ -57,7 +60,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::discovery::live_poller::LivePoller;
+use crate::discovery::live_poller::{LivePoller, PollScope};
 use crate::live_store::{LiveEntry, LiveFile, LiveStore, PidProbe};
 use crate::model::live::{LiveBinding, LiveState};
 use crate::model::{
@@ -71,10 +74,12 @@ use crate::model::{
 /// discovery carries on.
 ///
 /// Each of `pollers` is first handed its harness's bound hook entries
-/// that a poll might repair and how many of its running agents no entry
-/// reports, runs its poll when they call for one (ADRs 0218, 0222), and
-/// puts its latest poll in `live_polls` for the binding to fold in. With
-/// no pollers, as in a one-shot command, `live_polls` ends empty.
+/// that a poll might repair and, in [`PollScope::WithoutHooks`], how many
+/// of its running agents no entry reports, runs its poll when they call
+/// for one (ADRs 0218, 0222), and puts its latest poll in `live_polls`
+/// for the binding to fold in. The binding shows an agent from a poll
+/// alone only when a poller's scope lets it. With no pollers, as in a
+/// one-shot command, `live_polls` ends empty.
 pub fn apply_live_state(
     snapshot: &mut GraphSnapshot,
     root: &Path,
@@ -83,16 +88,30 @@ pub fn apply_live_state(
 ) {
     let file = LiveStore::at(root).read();
     snapshot.live_polls = BTreeMap::new();
+    // A process builds all its pollers in one scope, its configuration's.
+    let scope = if pollers
+        .iter()
+        .any(|poller| poller.scope() == PollScope::WithoutHooks)
+    {
+        PollScope::WithoutHooks
+    } else {
+        PollScope::Repair
+    };
     for poller in pollers {
         let candidates = poll::candidates(snapshot, &file, probe, poller.harness());
-        let unreported = poll::unreported(snapshot, &file, probe, poller.harness());
-        if let Some(read) = poller.poll(&candidates, unreported.len(), probe) {
+        let unreported = match poller.scope() {
+            PollScope::WithoutHooks => {
+                poll::unreported(snapshot, &file, probe, poller.harness()).len()
+            }
+            PollScope::Repair => 0,
+        };
+        if let Some(read) = poller.poll(&candidates, unreported, probe) {
             snapshot
                 .live_polls
                 .insert(poller.harness().to_string(), read);
         }
     }
-    let bound = bind_live(snapshot, &file, probe);
+    let bound = bind_live_scoped(snapshot, &file, probe, scope);
     snapshot.node_live = bound.nodes;
     snapshot.pane_live = bound.panes;
 }
@@ -129,8 +148,20 @@ impl BoundLive {
 
 /// The live tables for `snapshot` from the store's entries, by the rules
 /// in the module documentation, with each entry's process checked
-/// through `probe`.
+/// through `probe`, in the default [`PollScope`]: a poll repairs hook
+/// entries and shows no agent on its own.
 pub fn bind_live(snapshot: &GraphSnapshot, file: &LiveFile, probe: &dyn PidProbe) -> BoundLive {
+    bind_live_scoped(snapshot, file, probe, PollScope::default())
+}
+
+/// [`bind_live`] in `scope`: in [`PollScope::WithoutHooks`] a poll also
+/// shows, on its session, a running agent that no entry reports.
+pub fn bind_live_scoped(
+    snapshot: &GraphSnapshot,
+    file: &LiveFile,
+    probe: &dyn PidProbe,
+    scope: PollScope,
+) -> BoundLive {
     let Winners { sessions, panes } = Winners::of(snapshot, file);
     let bind =
         |entry: &LiveEntry| LiveBinding::new(entry.observation, probe.liveness(&entry.observation));
@@ -146,7 +177,9 @@ pub fn bind_live(snapshot: &GraphSnapshot, file: &LiveFile, probe: &dyn PidProbe
     };
     title::fold_titles(snapshot, &sessions, &panes, &mut bound);
     poll::fold_polls(snapshot, &sessions, &panes, &mut bound);
-    poll::fold_poll_only(snapshot, file, probe, &mut bound);
+    if scope == PollScope::WithoutHooks {
+        poll::fold_poll_only(snapshot, file, probe, &mut bound);
+    }
     bound
 }
 
@@ -324,7 +357,7 @@ mod title;
 #[path = "live_poll.rs"]
 mod poll;
 
-pub use poll::{AgentPane, RunningAgent, running_agents};
+pub use poll::{AgentPane, RunningAgent, running_agents, unreported};
 
 #[cfg(test)]
 #[path = "live_state_tests.rs"]

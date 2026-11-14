@@ -1,6 +1,7 @@
 //! A poll's word on an agent with no hook entry (ADR 0222): who gets it,
-//! where it binds, and how it ages once polls stop. Every listing here is
-//! synthetic.
+//! where it binds, and how it ages once polls stop, with the operator's
+//! setting on; and that with it off (the default) no such agent binds or
+//! makes a poll run. Every listing here is synthetic.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
@@ -8,8 +9,8 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::discovery::harness::claude_code::agents;
-use crate::discovery::live_poller::{LivePoller, PollRunner, RunOutcome};
-use crate::discovery::live_state::{apply_live_state, bind_live};
+use crate::discovery::live_poller::{LivePoller, PollRunner, PollScope, RunOutcome};
+use crate::discovery::live_state::{BoundLive, apply_live_state, bind_live, bind_live_scoped};
 use crate::model::live::{LiveConfidence, LiveDetail, PolledAgent};
 use crate::model::{
     AgentSessionId, AgentSessionNode, GraphLink, LinkEndpoint, Provenance, RuntimeProcessId,
@@ -140,6 +141,11 @@ fn known(agents: Vec<PolledAgent>) -> GraphSnapshot {
     )
 }
 
+/// The binding with the setting that shows agents without hooks on.
+fn bind_shown(snapshot: &GraphSnapshot, file: &LiveFile, probe: &dyn PidProbe) -> BoundLive {
+    bind_live_scoped(snapshot, file, probe, PollScope::WithoutHooks)
+}
+
 fn waiting() -> PolledAgent {
     listed(LiveState::Waiting, Some(LiveDetail::Permission), SESSION)
 }
@@ -156,7 +162,7 @@ fn read(binding: Option<&LiveBinding>) -> Option<(LiveState, Option<LiveDetail>,
 
 #[test]
 fn a_known_agent_with_no_hook_entry_shows_the_polls_state_on_its_session() {
-    let bound = bind_live(&known(vec![waiting()]), &LiveFile::default(), &Alive);
+    let bound = bind_shown(&known(vec![waiting()]), &LiveFile::default(), &Alive);
     let binding = bound.nodes.get(&session(SESSION)).expect("bound");
     assert_eq!(
         read(Some(binding)),
@@ -177,6 +183,28 @@ fn a_known_agent_with_no_hook_entry_shows_the_polls_state_on_its_session() {
 }
 
 #[test]
+fn by_default_a_known_agent_with_no_hook_entry_gets_nothing_from_a_poll() {
+    // The same worlds that bind with the setting on bind nothing with it
+    // off, as when a repair poll of another agent happened to list it.
+    let by_process = known(vec![waiting()]);
+    let by_session = graph(
+        vec![
+            session_node(SESSION),
+            agent_process(RuntimeProcessRole::HumanAgent),
+        ],
+        Vec::new(),
+        vec![waiting()],
+    );
+    for snapshot in [&by_process, &by_session] {
+        assert!(!bind_shown(snapshot, &LiveFile::default(), &Alive).is_empty());
+        assert!(bind_live(snapshot, &LiveFile::default(), &Alive).is_empty());
+        assert!(
+            bind_live_scoped(snapshot, &LiveFile::default(), &Alive, PollScope::Repair).is_empty()
+        );
+    }
+}
+
+#[test]
 fn the_session_comes_from_the_poll_when_the_graph_names_none() {
     let snapshot = graph(
         vec![
@@ -186,7 +214,7 @@ fn the_session_comes_from_the_poll_when_the_graph_names_none() {
         Vec::new(),
         vec![waiting()],
     );
-    let bound = bind_live(&snapshot, &LiveFile::default(), &Alive);
+    let bound = bind_shown(&snapshot, &LiveFile::default(), &Alive);
     assert_eq!(
         read(bound.nodes.get(&session(SESSION))).map(|read| read.2),
         Some(LiveSource::HarnessPoll)
@@ -199,7 +227,7 @@ fn the_session_comes_from_the_poll_when_the_graph_names_none() {
         Vec::new(),
         vec![waiting()],
     );
-    assert!(bind_live(&snapshot, &LiveFile::default(), &Alive).is_empty());
+    assert!(bind_shown(&snapshot, &LiveFile::default(), &Alive).is_empty());
 }
 
 #[test]
@@ -207,7 +235,7 @@ fn an_agent_discovery_does_not_know_as_a_running_main_agent_gets_nothing() {
     // No process: the agent would show only because another one made the
     // poller run.
     let snapshot = graph(vec![session_node(SESSION)], Vec::new(), vec![waiting()]);
-    assert!(bind_live(&snapshot, &LiveFile::default(), &Alive).is_empty());
+    assert!(bind_shown(&snapshot, &LiveFile::default(), &Alive).is_empty());
 
     // A background helper or a subagent is no main agent.
     for role in [RuntimeProcessRole::Background, RuntimeProcessRole::Subagent] {
@@ -216,13 +244,13 @@ fn an_agent_discovery_does_not_know_as_a_running_main_agent_gets_nothing() {
             vec![runs_session(SESSION)],
             vec![waiting()],
         );
-        assert!(bind_live(&snapshot, &LiveFile::default(), &Alive).is_empty());
+        assert!(bind_shown(&snapshot, &LiveFile::default(), &Alive).is_empty());
     }
 
     // A listed session with no pid cannot be tied to the process.
     let mut no_pid = waiting();
     no_pid.pid = None;
-    assert!(bind_live(&known(vec![no_pid]), &LiveFile::default(), &Alive).is_empty());
+    assert!(bind_shown(&known(vec![no_pid]), &LiveFile::default(), &Alive).is_empty());
 }
 
 #[test]
@@ -233,7 +261,7 @@ fn an_agent_whose_hooks_report_keeps_the_hook_rules() {
     ready.rev = 1;
     let mut file = LiveFile::default();
     file.entries.insert(ready.key(), ready);
-    let bound = bind_live(&known(vec![waiting()]), &file, &Alive);
+    let bound = bind_shown(&known(vec![waiting()]), &file, &Alive);
     assert_eq!(
         read(bound.nodes.get(&session(SESSION))),
         Some((LiveState::Ready, None, LiveSource::Hook))
@@ -247,7 +275,7 @@ fn an_agent_whose_hooks_report_keeps_the_hook_rules() {
     let mut file = LiveFile::default();
     file.entries.insert(other.key(), other);
     assert!(
-        bind_live(&known(vec![waiting()]), &file, &Alive)
+        bind_shown(&known(vec![waiting()]), &file, &Alive)
             .nodes
             .is_empty()
     );
@@ -256,17 +284,17 @@ fn an_agent_whose_hooks_report_keeps_the_hook_rules() {
 #[test]
 fn it_is_gone_when_its_process_ends_or_the_poll_no_longer_lists_it() {
     // The process ended.
-    assert!(bind_live(&known(vec![waiting()]), &LiveFile::default(), &Gone).is_empty());
+    assert!(bind_shown(&known(vec![waiting()]), &LiveFile::default(), &Gone).is_empty());
 
     // Its pid now belongs to another process than the one the poll saw.
     let mut seen = waiting();
     seen.pid_start = Some(99);
-    assert!(bind_live(&known(vec![seen]), &LiveFile::default(), &Alive).is_empty());
+    assert!(bind_shown(&known(vec![seen]), &LiveFile::default(), &Alive).is_empty());
 
     // A newer poll that lists only another process.
     let mut someone_else = waiting();
     someone_else.pid = Some(5151);
-    assert!(bind_live(&known(vec![someone_else]), &LiveFile::default(), &Alive).is_empty());
+    assert!(bind_shown(&known(vec![someone_else]), &LiveFile::default(), &Alive).is_empty());
 }
 
 #[test]
@@ -396,12 +424,18 @@ struct PassWorld {
 }
 
 impl PassWorld {
+    /// With the setting that shows agents without hooks on.
     fn new(script: &Script) -> Self {
+        Self::in_scope(script, PollScope::WithoutHooks)
+    }
+
+    fn in_scope(script: &Script, scope: PollScope) -> Self {
         let clock = Arc::new(AtomicI64::new(NOW_MS));
         let read = Arc::clone(&clock);
         let poller = Arc::new(
             LivePoller::new(CLAUDE, Box::new(script.clone()), agents::parse)
-                .with_clock(move || read.load(Ordering::SeqCst)),
+                .with_clock(move || read.load(Ordering::SeqCst))
+                .with_scope(scope),
         );
         let mut snapshot = known(Vec::new());
         snapshot.live_polls.clear();
@@ -455,6 +489,23 @@ fn a_known_agent_with_no_hook_entry_is_polled_every_interval() {
         .retain(|node| !matches!(node, GraphNode::RuntimeProcess(_)));
     assert_eq!(world.pass(70 * SECOND), None);
     assert_eq!(script.runs(), 2);
+}
+
+#[test]
+fn by_default_a_known_agent_with_no_hook_entry_starts_no_poll_and_shows_nothing() {
+    let script = Script::default()
+        .listing(agent_list("waiting"))
+        .listing(agent_list("busy"));
+    let mut world = PassWorld::in_scope(&script, PollScope::Repair);
+    for after_ms in [0, 30 * SECOND, 5 * MINUTE] {
+        assert_eq!(world.pass(after_ms), None);
+        assert!(world.snapshot.live_polls.is_empty());
+    }
+    assert_eq!(
+        script.runs(),
+        0,
+        "no poll ran for an agent with no hook entry"
+    );
 }
 
 #[test]
