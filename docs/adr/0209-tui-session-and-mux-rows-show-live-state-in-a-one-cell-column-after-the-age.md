@@ -15,6 +15,9 @@ age that never gives way. Reads the data of
 and [ADR 0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md)
 as the row models already carry it; adds no theme role (ADR 0153) and one
 vetted glyph (ADR 0154). Amended by
+[ADR 0233](0233-tui-a-mux-mark-recedes-when-every-agent-in-its-state-is-quiet.md):
+a mux's mark is dimmed when every agent in its dominant state is quiet
+(decision 3). Amended by
 [ADR 0214](0214-tui-a-finished-turn-reads-unseen-until-you-look-at-it.md):
 a ready mark is bold while its finished turn is unseen. Amended by
 [ADR 0215](0215-tui-rows-float-and-filter-by-live-state-only-when-the-tree-is-built.md):

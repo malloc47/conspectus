@@ -70,7 +70,7 @@ names are kept (ADR 0086), so there is nothing to list one by one.
 
 7. **A mux shows its agents.** `agents`: its counts in the rollup's
    order, most urgent first (`2 waiting · 1 error · 1 starting`), led by
-   the mux row's mark (never dimmed, as on the row), previewing the
+   the mux row's mark (dimmed as on the row, ADR 0233), previewing the
    glossary entries of the states it counts. `pane_agents`: the agents
    in its panes that no session matches yet, each as its pane and state,
    read as a list field reads: the first and how many more (`%4 waiting ·
