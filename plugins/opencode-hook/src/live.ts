@@ -33,6 +33,7 @@
 // |                                           | any other `form.created`                    | pending input |
 // | `session.deleted`                         | `session.deleted`, `session.archived`       | a last snapshot, exited (ended) |
 // | `dispose`                                 | the plugin unloading                        | every session still working or waiting exits (ended) |
+// |                                           | asks listed when the server plugin starts   | the pending permissions it never saw (see {@link LiveReducer.seed}) |
 //
 // What a session shows, first match wins (research note 03, section 7.2,
 // in the vocabulary of ADR 0203): exited when it ended; waiting on its
@@ -52,7 +53,10 @@
 // type, status, and retry delay, and reads the words only to classify
 // them. It never reads a title, a message, a permission's patterns,
 // resources, or metadata, a question, a form's fields, or an error's
-// text, and an id that does not look like one is refused.
+// text, and an id that does not look like one is refused. What opencode
+// lists of a session ({@link LiveReducer.seed}, {@link readPending}) is
+// read the same way: a session's and an ask's id and session, a form's
+// kind, and a turn's status word.
 
 /** Seconds between heartbeats of a session that is not ready. */
 export const HEARTBEAT_S = 60;
@@ -99,6 +103,17 @@ export const V2_EVENTS = [
   "form.replied",
   "form.cancelled",
 ] as const;
+
+/** The most sessions {@link readPending} asks about when the server
+ * plugin starts: the location's most recent ones. */
+export const MAX_LISTED_SESSIONS = 100;
+
+/** Sessions {@link readPending} asks for at a time. */
+const LIST_PAGE = 50;
+
+/** How many ended asks an instance remembers, so a list read before an
+ * answer cannot bring the ask back. */
+const MAX_ANSWERED = 512;
 
 /** The 1.x events that also name the session a pane shows, so a root
  * session's are recorded for attribution as they were before live
@@ -179,6 +194,18 @@ export type LiveOptions = {
   heartbeatS?: number;
 };
 
+/** What opencode lists of one session, as {@link LiveReducer.seed} reads
+ * it. Every field is optional and anything it does not recognize is
+ * skipped. */
+export type Listed = {
+  /** The session's turn: `running` or `idle`. */
+  status?: unknown;
+  /** Its pending permission requests, each `{id, sessionID}`. */
+  permissions?: unknown;
+  /** Its pending forms, each `{id, sessionID, metadata: {kind}}`. */
+  forms?: unknown;
+};
+
 export type LiveReducer = {
   /** An opencode 1.x `event` hook event. */
   v1(event: unknown, now: number): HookPayload[];
@@ -190,6 +217,11 @@ export type LiveReducer = {
   heartbeat(now: number): HookPayload[];
   /** The instance is going away: what is still working or waiting ends. */
   dispose(now: number): HookPayload[];
+  /** What opencode lists of a session the events may not have told:
+   * pending asks the instance never saw are added, and the turn's status
+   * fills in a session it has no evidence for. Nothing is removed, and an
+   * ask the instance saw end is not brought back. */
+  seed(sessionID: unknown, listed: Listed, now: number): HookPayload[];
   /** Whether any session is due heartbeats. */
   needsHeartbeat(): boolean;
 };
@@ -347,7 +379,24 @@ export function createLiveState(options: LiveOptions): LiveReducer {
   const sessions = new Map<string, Session>();
   const heartbeatS = options.heartbeatS ?? HEARTBEAT_S;
   const directory = path(options.directory);
+  /** Asks seen to end, by `<kind>:<id>`, oldest first. */
+  const answered = new Set<string>();
   let seq = 0;
+
+  function ended(key: string): void {
+    answered.delete(key);
+    answered.add(key);
+    if (answered.size > MAX_ANSWERED) {
+      const oldest = answered.values().next();
+      if (!oldest.done) answered.delete(oldest.value);
+    }
+  }
+
+  /** Drop the session's pending asks, remembering that they ended. */
+  function clearWaits(s: Session): void {
+    for (const key of s.waits.keys()) ended(key);
+    s.waits.clear();
+  }
 
   function session(sessionID: string, now: number): Session {
     let found = sessions.get(sessionID);
@@ -408,7 +457,7 @@ export function createLiveState(options: LiveOptions): LiveReducer {
   function idle(s: Session, now: number): void {
     const state = s.base?.state;
     if (state !== undefined && state !== "working" && state !== "compacting") return;
-    s.waits.clear();
+    clearWaits(s);
     const ending = s.ending;
     s.ending = undefined;
     if (ending === "interrupted") setBase(s, "ready", "interrupted", now);
@@ -417,13 +466,13 @@ export function createLiveState(options: LiveOptions): LiveReducer {
   }
 
   function finish(s: Session, state: "ready" | "error", detail: LiveDetail, now: number): void {
-    s.waits.clear();
+    clearWaits(s);
     s.ending = undefined;
     setBase(s, state, detail, now);
   }
 
   function end(s: Session, now: number): void {
-    s.waits.clear();
+    clearWaits(s);
     s.ending = undefined;
     setBase(s, "exited", "ended", now);
   }
@@ -452,6 +501,7 @@ export function createLiveState(options: LiveOptions): LiveReducer {
   /** Remove the asks `keys` name from the session, or from whichever
    * session holds them when it does not. */
   function endWaits(sessionID: string | undefined, keys: string[], now: number): Session[] {
+    for (const key of keys) ended(key);
     const holds = (s: Session) => keys.some((key) => s.waits.has(key));
     const own = existing(sessionID, now);
     const holders = own && holds(own) ? [own] : [...sessions.values()].filter(holds);
@@ -463,13 +513,18 @@ export function createLiveState(options: LiveOptions): LiveReducer {
   }
 
   function reply(sessionID: string | undefined, requestID: unknown, answer: unknown, now: number): Session[] {
+    const request = id(requestID);
     if (word(answer) === "reject") {
+      if (request) ended(`permission:${request}`);
       const s = existing(sessionID, now);
       if (!s) return [];
-      for (const [key, wait] of s.waits) if (wait.kind === "permission") s.waits.delete(key);
+      for (const [key, wait] of s.waits) {
+        if (wait.kind !== "permission") continue;
+        ended(key);
+        s.waits.delete(key);
+      }
       return [s];
     }
-    const request = id(requestID);
     return request ? endWaits(sessionID, [`permission:${request}`], now) : [];
   }
 
@@ -810,6 +865,37 @@ export function createLiveState(options: LiveOptions): LiveReducer {
     return publish([s], "experimental.session.compacting", now);
   }
 
+  function seed(sessionID: unknown, listed: Listed, now: number): HookPayload[] {
+    const checked = id(sessionID);
+    if (!checked) return [];
+    const asks: Array<{ kind: WaitKind; id: string }> = [];
+    const collect = (items: unknown, kindOf: (item: Record<string, unknown>) => WaitKind) => {
+      if (!Array.isArray(items)) return;
+      for (const raw of items) {
+        const item = record(raw);
+        const request = id(item?.id);
+        // An ask of another session (or of none, a global form) is not
+        // this session's wait.
+        if (!item || !request || (item.sessionID !== undefined && id(item.sessionID) !== checked)) continue;
+        const kind = kindOf(item);
+        if (!answered.has(`${kind}:${request}`)) asks.push({ kind, id: request });
+      }
+    };
+    collect(listed.permissions, () => "permission");
+    collect(listed.forms, (item) => (word(record(item.metadata)?.kind) === "question" ? "question" : "input"));
+    const status = word(listed.status);
+    const known = sessions.get(checked);
+    const fills = known?.base === undefined && (status === "running" || status === "idle");
+    if ((asks.length === 0 && !fills) || known?.base?.state === "exited") return [];
+    const s = session(checked, now);
+    if (s.base === undefined) {
+      if (status === "running") work(s, "generating", now);
+      else if (status === "idle") setBase(s, "ready", undefined, now);
+    }
+    for (const ask of asks) startWait(s, ask.kind, ask.id, now);
+    return publish([s], "seed", now);
+  }
+
   function heartbeat(now: number): HookPayload[] {
     const out: HookPayload[] = [];
     for (const s of sessions.values()) {
@@ -832,5 +918,69 @@ export function createLiveState(options: LiveOptions): LiveReducer {
     return false;
   }
 
-  return { v1, v2, compacting, heartbeat, dispose, needsHeartbeat };
+  return { v1, v2, compacting, heartbeat, dispose, needsHeartbeat, seed };
+}
+
+/** Call `owner[name](input)`, keeping `owner` as `this`; reject when it
+ * is not a method. */
+async function call(owner: Record<string, unknown> | undefined, name: string, input: unknown): Promise<unknown> {
+  const method = owner?.[name];
+  if (typeof method !== "function") throw new TypeError(`no ${name}`);
+  return await (method as (this: unknown, input: unknown) => unknown).call(owner, input);
+}
+
+/** Ask opencode, through `api` (a 2.x server plugin's context), for the
+ * pending permission requests of the most recent sessions of
+ * `directory`, and hand each session that has one to `each`, as
+ * {@link LiveReducer.seed} reads it. Permission asks are events opencode
+ * does not repeat, so one pending when the plugin starts is seen only
+ * this way.
+ *
+ * It lists at most `limit` sessions (`api.session.list`, page by page
+ * through its cursor), then asks each (`api.permission.list`). A context
+ * without either call, a call that fails, and an answer it does not
+ * recognize are skipped: this only fills in what the events could not
+ * say. It reads a session's id and the cursor, and passes the asks on
+ * unread. `active` is asked before every call, so a plugin that unloads
+ * stops asking. */
+export async function readPending(
+  api: unknown,
+  directory: string | undefined,
+  each: (sessionID: string, listed: Listed) => void,
+  active: () => boolean = () => true,
+  limit: number = MAX_LISTED_SESSIONS,
+): Promise<void> {
+  const sessionApi = record(record(api)?.session);
+  const permissionApi = record(record(api)?.permission);
+  const dir = path(directory);
+  if (!dir || typeof sessionApi?.list !== "function" || typeof permissionApi?.list !== "function") return;
+  const ids: string[] = [];
+  let input: Record<string, unknown> = { directory: dir, limit: Math.min(LIST_PAGE, limit) };
+  while (ids.length < limit && active()) {
+    let page: unknown;
+    try {
+      page = await call(sessionApi, "list", input);
+    } catch {
+      return;
+    }
+    const items = Array.isArray(page) ? page : record(page)?.data;
+    if (!Array.isArray(items) || items.length === 0) break;
+    for (const item of items) {
+      const sessionID = id(record(item)?.id);
+      if (sessionID && ids.length < limit && !ids.includes(sessionID)) ids.push(sessionID);
+    }
+    const next = record(record(page)?.cursor)?.next;
+    if (typeof next !== "string" || next.length === 0) break;
+    input = { cursor: next };
+  }
+  for (const sessionID of ids) {
+    if (!active()) return;
+    let asks: unknown;
+    try {
+      asks = await call(permissionApi, "list", { sessionID });
+    } catch {
+      continue;
+    }
+    if (Array.isArray(asks) && asks.length > 0) each(sessionID, { permissions: asks });
+  }
 }

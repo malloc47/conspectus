@@ -18,8 +18,9 @@ use crate::discovery::harness::{HarnessAdapter, OpenCodeAdapter};
 use crate::live_store::{Applied, LiveStore};
 use crate::model::live::{LiveDetail, LiveState};
 
-/// The scenarios the research's fixture plan and the story list.
-const SCRIPTS: [&str; 19] = [
+/// The scenarios the research's fixture plan and the story list, and the
+/// asks the server plugin reads when it starts (`v2-seed-pending`).
+const SCRIPTS: [&str; 20] = [
     "v1-busy-idle",
     "v1-compaction",
     "v1-delete",
@@ -37,6 +38,7 @@ const SCRIPTS: [&str; 19] = [
     "v2-location",
     "v2-permission-form",
     "v2-retry",
+    "v2-seed-pending",
     "v2-shutdown-dispose",
     "v2-subagent-background",
 ];
@@ -271,6 +273,11 @@ fn v2_permissions_and_forms() {
 #[test]
 fn v2_retries_and_rate_limits() {
     replay("v2-retry");
+}
+
+#[test]
+fn v2_asks_pending_when_the_server_plugin_starts() {
+    replay("v2-seed-pending");
 }
 
 #[test]

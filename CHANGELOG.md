@@ -14,6 +14,14 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **opencode 2.x reports a permission ask that was pending when its
+  plugin started.** opencode never repeats an ask, so a server
+  entrypoint that started or reloaded while a session waited on you
+  showed it working, or nothing, until you answered. The plugin (0.4.0)
+  now asks opencode for the pending permissions of its location's 100
+  most recent sessions when it starts and reports those sessions
+  waiting. It needs an opencode whose server plugins can list sessions;
+  pending forms cannot be listed there.
 - **Pi counts the subagent tools you name.** List the tools of a
   third-party subagent package, separated by commas, in
   `CONSPECTUS_PI_SUBAGENT_TOOLS` where Pi starts, and the Pi extension

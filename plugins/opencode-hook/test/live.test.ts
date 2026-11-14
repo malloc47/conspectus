@@ -1,8 +1,9 @@
 // The live-state reducer (`src/live.ts`) against the shared event
 // scripts in `tests/fixtures/hooks/opencode-live/`. Each script is an
 // opencode major, a header with the plugin instance's options, and steps:
-// an input (an `event`, the 1.x `compacting` hook, a `heartbeat`, or
-// `dispose`), the payloads the reducer must `emit` after it, in order,
+// an input (an `event`, the 1.x `compacting` hook, a `heartbeat`,
+// `dispose`, or what opencode lists of sessions to `seed`), the payloads
+// the reducer must `emit` after it, in order,
 // and what each session it names is `shown` as. The Rust tests feed the
 // same payloads through `conspectus hook write opencode`'s parser and
 // the live-state store, and check `shown` there too.
@@ -17,13 +18,16 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  MAX_LISTED_SESSIONS,
   MAX_SESSIONS,
   V1_EVENTS,
   V2_EVENTS,
   createLiveState,
   newInstanceId,
   parseProcStartTime,
+  readPending,
   type HookPayload,
+  type Listed,
   type LiveReducer,
   type LiveSnapshot,
 } from "../src/live.ts";
@@ -58,6 +62,7 @@ type Step = {
   compacting?: string;
   heartbeat?: boolean;
   dispose?: boolean;
+  seed?: Record<string, Listed>;
   emit?: HookPayload[];
   shown?: Record<string, Shown>;
 };
@@ -95,6 +100,9 @@ function run(live: LiveReducer, major: 1 | 2, step: Step): HookPayload[] | undef
   if (step.compacting !== undefined) return live.compacting(step.compacting, step.at_ms);
   if (step.heartbeat) return live.heartbeat(step.at_ms);
   if (step.dispose) return live.dispose(step.at_ms);
+  if (step.seed !== undefined) {
+    return Object.entries(step.seed).flatMap(([session, listed]) => live.seed(session, listed, step.at_ms));
+  }
   return undefined;
 }
 
@@ -122,7 +130,7 @@ function checkShown(latest: Map<string, LiveSnapshot>, step: Step, place: string
 /** The script with each step's keys in reading order: when, why, the
  * input, what it emits, what that shows. */
 function rewrite(script: Script): void {
-  const order = ["at_ms", "note", "event", "compacting", "heartbeat", "dispose", "emit", "shown"];
+  const order = ["at_ms", "note", "event", "compacting", "heartbeat", "dispose", "seed", "emit", "shown"];
   const ordered = script.steps.map((step) => {
     const entries = Object.entries(step);
     const rank = (key: string) => (order.includes(key) ? order.indexOf(key) : order.length);
@@ -184,7 +192,7 @@ test("the scripts plant a sentinel in every payload-bearing field", () => {
       for (const [key, item] of Object.entries(value)) walk(item, [...keys, key]);
     }
   };
-  for (const script of scripts()) for (const step of script.steps) walk(step.event, []);
+  for (const script of scripts()) for (const step of script.steps) walk([step.event, step.seed], []);
   for (const field of [
     "title",
     "message",
@@ -294,4 +302,186 @@ test("instance ids look like ids and differ", () => {
   assert.equal(ids.size, 100);
   for (const value of ids) assert.match(value, /^[0-9a-z]+-[0-9a-f]{16}$/);
   assert.equal(newInstanceId(0, () => 0), "0-0000000000000000");
+});
+
+/** `value` behind a proxy that records every key read from it, and from
+ * the objects it holds, as `path.key`. */
+function watched<T>(value: T, reads: Set<string>, at = ""): T {
+  if (typeof value !== "object" || value === null) return value;
+  return new Proxy(value as object, {
+    get(target, key, receiver) {
+      const item = Reflect.get(target, key, receiver);
+      if (typeof key !== "string" || (Array.isArray(target) && (key === "length" || /^\d+$/.test(key)))) {
+        return Array.isArray(target) ? watched(item, reads, at) : item;
+      }
+      if (Array.isArray(target)) return item;
+      const where = at ? `${at}.${key}` : key;
+      reads.add(where);
+      return watched(item, reads, where);
+    },
+  }) as T;
+}
+
+const ask = (id: string, sessionID: string) => ({
+  id,
+  sessionID,
+  action: "SENTINEL action",
+  resources: ["SENTINEL resource"],
+  save: ["SENTINEL save"],
+  metadata: { command: "SENTINEL metadata" },
+  source: { type: "tool", messageID: "msg_1", id: "call_1" },
+  message: "SENTINEL message",
+});
+
+const form = (id: string, sessionID: string, kind?: string) => ({
+  id,
+  sessionID,
+  title: "SENTINEL title",
+  fields: [{ name: "SENTINEL field" }],
+  metadata: kind === undefined ? undefined : { kind, tool: { callID: "call_2" }, note: "SENTINEL note" },
+});
+
+test("a seed reads only an ask's id and session, a form's kind, and the status word", () => {
+  const live = createLiveState({ instance: "test-instance", directory: "/work" });
+  const reads = new Set<string>();
+  const out = live.seed(
+    "ses_8charsok",
+    watched(
+      {
+        status: "running",
+        permissions: [ask("per_1", "ses_8charsok"), ask("per_2", "ses_another1"), ask("per with space", "ses_8charsok")],
+        forms: [form("frm_1", "ses_8charsok", "question"), form("frm_2", "global"), form("frm_3", "ses_8charsok")],
+      },
+      reads,
+    ),
+    10,
+  );
+  assert.deepEqual([...reads].sort(), [
+    "forms",
+    "forms.id",
+    "forms.metadata",
+    "forms.metadata.kind",
+    "forms.sessionID",
+    "permissions",
+    "permissions.id",
+    "permissions.sessionID",
+    "status",
+  ]);
+  assert.equal(out.length, 1);
+  assert.ok(!JSON.stringify(out).includes("SENTINEL"));
+  assert.deepEqual([out[0].live?.state, out[0].live?.detail, out[0].live?.since_ms], ["waiting", "permission", 10]);
+  // The question form waits behind the permission, then the input form.
+  const replied = live.v2({ type: "permission.replied", data: { sessionID: "ses_8charsok", requestID: "per_1", reply: "once" } }, 20);
+  assert.deepEqual([replied[0].live?.state, replied[0].live?.detail], ["waiting", "question"]);
+  const answered = live.v2({ type: "form.replied", data: { id: "frm_1", sessionID: "ses_8charsok" } }, 30);
+  assert.deepEqual([answered[0].live?.state, answered[0].live?.detail], ["waiting", "input"]);
+  const cancelled = live.v2({ type: "form.cancelled", data: { id: "frm_3", sessionID: "ses_8charsok" } }, 40);
+  assert.deepEqual([cancelled[0].live?.state, cancelled[0].live?.detail, cancelled[0].live?.since_ms], ["working", "generating", 10]);
+  // None of the ended asks comes back from a later list.
+  assert.deepEqual(
+    live.seed("ses_8charsok", { permissions: [ask("per_1", "ses_8charsok")], forms: [form("frm_1", "ses_8charsok", "question"), form("frm_3", "ses_8charsok")] }, 50),
+    [],
+  );
+});
+
+test("a seed's status fills in only a session with no evidence, and never removes a wait", () => {
+  const live = createLiveState({ instance: "test-instance", directory: "/work" });
+  const fresh = live.seed("ses_idle0001", { status: "idle" }, 1);
+  assert.deepEqual([fresh[0].live?.state, fresh[0].live?.detail], ["ready", undefined]);
+  assert.deepEqual(live.seed("ses_idle0001", { status: "running" }, 2), [], "the session has evidence now");
+  const running = live.seed("ses_busy0001", { status: "running" }, 3);
+  assert.deepEqual([running[0].live?.state, running[0].live?.detail, running[0].live?.since_ms], ["working", "generating", 3]);
+  assert.deepEqual(live.seed("ses_none0001", { status: "SENTINEL" }, 4), [], "a word it does not know");
+  assert.deepEqual(live.seed("ses_none0001", { permissions: "not a list", forms: {} }, 4), []);
+  assert.deepEqual(live.seed("not an id", { status: "running" }, 4), []);
+  live.v2({ type: "permission.asked", data: { id: "per_1", sessionID: "ses_busy0001" } }, 5);
+  assert.deepEqual(live.seed("ses_busy0001", { permissions: [] }, 6), [], "an empty list removes nothing");
+  // A rejection ends every pending permission of the session, even one
+  // the list names and the instance never saw.
+  live.v2({ type: "permission.replied", data: { sessionID: "ses_busy0001", requestID: "per_2", reply: "reject" } }, 7);
+  assert.deepEqual(live.seed("ses_busy0001", { permissions: [ask("per_2", "ses_busy0001")] }, 8), []);
+  const ended = live.v2({ type: "session.execution.interrupted", data: { sessionID: "ses_busy0001", reason: "shutdown" } }, 9);
+  assert.equal(ended[0].live?.state, "exited");
+  assert.deepEqual(live.seed("ses_busy0001", { permissions: [ask("per_3", "ses_busy0001")] }, 10), [], "an ended session waits on nothing");
+});
+
+/** A stand-in for the server plugin context's two lists, which checks
+ * that each is called as a method and records what it was asked. */
+function standInLists(sessions: string[], asks: Record<string, unknown[]>, options: { failFor?: string; pageSize?: number } = {}) {
+  const calls: string[] = [];
+  const pageSize = options.pageSize ?? 2;
+  const session = {
+    async list(this: unknown, input: { directory?: string; limit?: number; cursor?: string }) {
+      assert.equal(this, session, "session.list is called as a method");
+      calls.push(`session.list ${JSON.stringify(input)}`);
+      const start = input.cursor === undefined ? 0 : Number(input.cursor);
+      const data = sessions.slice(start, start + Math.min(pageSize, input.limit ?? pageSize)).map((id) => ({ id, title: "SENTINEL title", directory: "/work" }));
+      const next = start + data.length < sessions.length ? String(start + data.length) : undefined;
+      return { data, cursor: next === undefined ? {} : { next } };
+    },
+  };
+  const permission = {
+    async list(this: unknown, input: { sessionID: string }) {
+      assert.equal(this, permission, "permission.list is called as a method");
+      calls.push(`permission.list ${input.sessionID}`);
+      if (input.sessionID === options.failFor) throw new Error("SENTINEL failure");
+      return asks[input.sessionID] ?? [];
+    },
+  };
+  return { api: { session, permission, location: { directory: "/work" } }, calls };
+}
+
+test("pending asks are read from the location's recent sessions through a stand-in context", async () => {
+  const reads = new Set<string>();
+  const pending = watched([ask("per_1", "ses_00000002")], reads);
+  const { api, calls } = standInLists(["ses_00000001", "ses_00000002", "ses_00000003", "ses_00000004", "ses_00000005"], { ses_00000002: pending }, { failFor: "ses_00000003" });
+  const seen: Array<[string, Listed]> = [];
+  await readPending(api, "/work", (sessionID, listed) => seen.push([sessionID, listed]));
+  assert.deepEqual(calls, [
+    'session.list {"directory":"/work","limit":50}',
+    'session.list {"cursor":"2"}',
+    'session.list {"cursor":"4"}',
+    "permission.list ses_00000001",
+    "permission.list ses_00000002",
+    "permission.list ses_00000003",
+    "permission.list ses_00000004",
+    "permission.list ses_00000005",
+  ]);
+  assert.deepEqual(seen.map(([sessionID]) => sessionID), ["ses_00000002"], "a failed call is skipped; an empty list says nothing");
+  assert.deepEqual([...reads], [], "the asks are passed on unread");
+
+  // Fed to the reducer, the session reads waiting.
+  const live = createLiveState({ instance: "test-instance", directory: "/work" });
+  const out = seen.flatMap(([sessionID, listed]) => live.seed(sessionID, listed, 100));
+  assert.deepEqual(out.map((payload) => [payload.session_id, payload.live?.state, payload.live?.detail]), [["ses_00000002", "waiting", "permission"]]);
+  assert.ok(!JSON.stringify(out).includes("SENTINEL"));
+});
+
+test("reading pending asks stops at its limit, when the plugin unloads, and without the calls", async () => {
+  const many = Array.from({ length: MAX_LISTED_SESSIONS + 20 }, (_, n) => `ses_${String(n).padStart(8, "0")}`);
+  const limited = standInLists(many, {}, { pageSize: 50 });
+  await readPending(limited.api, "/work", () => {});
+  assert.equal(limited.calls.filter((call) => call.startsWith("permission.list")).length, MAX_LISTED_SESSIONS);
+
+  const unloading = standInLists(["ses_00000001", "ses_00000002"], { ses_00000001: [ask("per_1", "ses_00000001")] });
+  let active = true;
+  const seen: string[] = [];
+  await readPending(unloading.api, "/work", (sessionID) => seen.push(sessionID), () => {
+    const now = active;
+    active = false;
+    return now;
+  });
+  assert.deepEqual(unloading.calls, ['session.list {"directory":"/work","limit":50}']);
+  assert.deepEqual(seen, []);
+
+  for (const api of [undefined, {}, { session: {} }, { session: { list: async () => [] } }, { permission: { list: async () => [] } }]) {
+    await readPending(api, "/work", () => assert.fail("nothing to read"));
+  }
+  const noDirectory = standInLists(["ses_00000001"], { ses_00000001: [ask("per_1", "ses_00000001")] });
+  await readPending(noDirectory.api, undefined, () => assert.fail("no location"));
+  assert.deepEqual(noDirectory.calls, []);
+  const failing = { session: { list: async () => { throw new Error("SENTINEL"); } }, permission: { list: async () => [] } };
+  await readPending(failing, "/work", () => assert.fail("the list failed"));
+  const odd = { session: { list: async () => ({ data: [{ id: "has space" }, { id: 7 }, {}] }) }, permission: { list: async () => assert.fail("no session to ask") } };
+  await readPending(odd, "/work", () => assert.fail("no session"));
 });

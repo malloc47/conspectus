@@ -755,7 +755,12 @@ running subagent. Beyond the [known gaps](#known-gaps):
   closing a client leaves its sessions as the service runs them.
 - When opencode reloads the plugin without restarting (1.x instance
   disposal, a 2.x plugin unload), sessions still working or waiting read
-  `exited` until their next event.
+  `exited` until their next event. opencode never repeats a permission
+  ask, so the 2.x server entrypoint (plugin 0.4.0 or later) asks opencode
+  for the pending permissions of its location's 100 most recent sessions
+  when it starts, and reports those sessions waiting at once. It needs an
+  opencode whose server plugins can list sessions; a pending form, which
+  a server plugin cannot list, shows from its session's next event.
 - `hook status` does not cover opencode yet; check with `conspectus table
   sessions --columns +live`.
 

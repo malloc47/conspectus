@@ -44,7 +44,12 @@ On **opencode 2.x** sessions run in one shared background service.
   `session.compaction.*`, `session.created`, `session.deleted`,
   `session.archived`, `session.status`, `permission.*`, and `form.*`
   events of its own location and sends live state only. Its writes come
-  from the service, so they never say anything about panes.
+  from the service, so they never say anything about panes. opencode
+  never repeats a permission ask, so when it starts (or reloads) it also
+  asks opencode for the pending permissions of its location's 100 most
+  recent sessions and reports those sessions waiting; this needs an
+  opencode whose server plugins can list sessions (`ctx.session.list`),
+  and forms cannot be listed there.
 - The **TUI entrypoint** (`dist/v2/tui.js`) runs inside each client and
   records which session that client shows: whenever the client's route
   moves to a session (including in-app switches, as `tui.route`), and on
@@ -170,7 +175,10 @@ npm test            # Node 22.6 or later; no install needed
 `npm test` (or `just opencode-plugin-test` from the repository root)
 replays the event scripts in
 [`tests/fixtures/hooks/opencode-live/`](../../tests/fixtures/hooks/opencode-live/)
-through `src/live.ts` and compares every payload it emits. The Rust tests
+through `src/live.ts` and compares every payload it emits.
+`test/entrypoints.test.ts` loads the 2.x entrypoints themselves against
+stand-ins for opencode's plugin context and for `conspectus`; it needs
+Node 22.15 or later and is skipped on an older one. The Rust tests
 feed the same payloads through `conspectus hook write opencode`'s parser
 and the live-state store. CI runs neither the build nor these tests, so
 run both after a change here.

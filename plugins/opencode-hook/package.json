@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@conspectus/opencode-hook",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "OpenCode plugin (1.x root entrypoint, 2.x server and TUI entrypoints in dist/v2) that reports each session's live state and the session a pane shows to `conspectus hook write opencode`.",
   "license": "MIT",
   "type": "module",

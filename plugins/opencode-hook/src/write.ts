@@ -14,7 +14,7 @@ import { HEARTBEAT_S, parseProcStartTime, type HookPayload, type LiveReducer } f
 
 export type { HookPayload } from "./live.js";
 
-export const PLUGIN_VERSION = "0.3.0";
+export const PLUGIN_VERSION = "0.4.0";
 const CONSPECTUS_BIN = process.env.CONSPECTUS_HOOK_BIN ?? "conspectus";
 
 let spawnWarningShown = false;

@@ -8,7 +8,9 @@ installation remains operator-initiated, ADR 0143 category 5. Refines
 ADR 0086 for hook payloads. Amended by ADR 0208: the Claude Code install
 edits `settings.json` in place. Extended by ADR 0227: the Pi extension
 also counts the tools named in `CONSPECTUS_PI_SUBAGENT_TOOLS` as
-subagents (decision 25).
+subagents (decision 25). Extended by ADR 0228: the opencode 2.x server
+entrypoint reads the permission asks pending when it starts (decisions
+20 and 23).
 
 ## Context
 
