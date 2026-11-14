@@ -21,7 +21,11 @@
 //! 4. a fresh hook-derived `waiting` turns `working` once the title has
 //!    read the same other mark on two consecutive probes, both after the
 //!    hook entry's latest evidence: Codex fires no hook when the operator
-//!    answers an approval.
+//!    answers an approval;
+//! 5. a fresh hook-derived `working` turns `waiting` (detail `input`)
+//!    once the title has read `waiting` on two consecutive probes, both
+//!    after the hook entry's latest evidence: Codex fires no hook for a
+//!    question, an elicitation, or a sign-in prompt.
 //!
 //! `neither` asserts nothing. A title never changes a hook entry's
 //! `ready`, `error`, `compacting`, `starting`, or `exited`, and it never
@@ -83,22 +87,46 @@ pub(crate) fn combine(hook: Option<&LiveBinding>, title: &PaneTitle) -> Option<L
         return from_title(title, Some(hook));
     }
     let recorded = &hook.observation;
-    if recorded.state == LiveState::Waiting
-        && title.mark != TitleMark::Waiting
-        && title.held_twice_after(recorded.observed_ms)
-    {
-        let since_ms = if title.since_ms > recorded.observed_ms {
-            title.since_ms
-        } else {
-            title.previous_ms.unwrap_or(title.observed_ms)
-        };
+    if !title.held_twice_after(recorded.observed_ms) {
+        return None;
+    }
+    let since_ms = run_since_after(title, recorded.observed_ms);
+    // The answered approval (rule 4): the marker is gone.
+    if recorded.state == LiveState::Waiting && title.mark != TitleMark::Waiting {
         return Some(replacing(
             hook,
             LiveObservation::new(LiveState::Working, LiveSource::PaneTitle, title.observed_ms)
                 .with_since_ms(since_ms),
         ));
     }
+    // A wait no hook reports (rule 5): the marker is up while the hook
+    // entry still says the agent works. Only a state read as `working` now
+    // counts, so an entry whose process was found gone stays exited.
+    if recorded.state == LiveState::Working
+        && read.state == LiveState::Working
+        && title.mark == TitleMark::Waiting
+    {
+        let (state, detail) = title.mark.asserts()?;
+        let mut observation = LiveObservation::new(state, LiveSource::PaneTitle, title.observed_ms)
+            .with_since_ms(since_ms);
+        if let Some(detail) = detail {
+            observation = observation.with_detail(detail);
+        }
+        return Some(replacing(hook, observation));
+    }
     None
+}
+
+/// When the run of `title`'s mark began, as far as the probes after
+/// `after_ms` show: the run's own start when it began after, else the
+/// earlier of the last two probes (which both ran after), since a run
+/// that began before says nothing of the probes it spans.
+fn run_since_after(title: &PaneTitle, after_ms: i64) -> i64 {
+    if title.since_ms > after_ms {
+        title.since_ms
+    } else {
+        title.previous_ms.unwrap_or(title.observed_ms)
+    }
 }
 
 /// The binding `title`'s mark asserts, in place of `hook` when there is

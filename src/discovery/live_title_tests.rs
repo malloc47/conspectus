@@ -111,6 +111,11 @@ fn a_fresh_hook_entry_wins_over_the_title() {
         LiveState::Starting,
     ] {
         for mark in [TitleMark::Waiting, TitleMark::Working, TitleMark::Neither] {
+            // A fresh working agent is raised by a held marker, in the
+            // test below.
+            if (state, mark) == (LiveState::Working, TitleMark::Waiting) {
+                continue;
+            }
             assert_eq!(
                 combine(Some(&hook(state, MINUTE)), &twice(mark)),
                 None,
@@ -178,6 +183,96 @@ fn an_approval_answered_before_any_probe_saw_the_marker_still_clears() {
     let demoted = combine(Some(&wait), &run).expect("demoted");
     assert_eq!(demoted.observation.state, LiveState::Working);
     assert_eq!(demoted.observation.since_ms, NOW_MS - 5 * SECOND);
+}
+
+#[test]
+fn a_fresh_hook_working_turns_waiting_once_two_probes_after_it_read_the_marker() {
+    let working = hook(LiveState::Working, MINUTE);
+    let raised = combine(Some(&working), &twice(TitleMark::Waiting)).expect("raised");
+    let observation = raised.observation;
+    assert_eq!(observation.state, LiveState::Waiting);
+    assert_eq!(
+        observation.detail,
+        Some(LiveDetail::Input),
+        "the title cannot say more"
+    );
+    assert_eq!(observation.source, LiveSource::PaneTitle);
+    assert_eq!(observation.since_ms, NOW_MS - 5 * SECOND);
+    assert_eq!(observation.observed_ms, NOW_MS);
+    // Still the same agent: its process, the check of it, and its
+    // subagents carry over.
+    assert_eq!(
+        (observation.pid, observation.pid_start),
+        (Some(4242), Some(77))
+    );
+    assert_eq!(observation.subagents, 2);
+    assert_eq!(raised.liveness, Liveness::Alive);
+    assert_eq!(
+        raised.effective(NOW_MS).confidence,
+        LiveConfidence::Fresh,
+        "a wait does not age while the process lives"
+    );
+}
+
+#[test]
+fn a_wait_begun_before_the_probes_started_counting_dates_from_the_earlier_probe() {
+    // The marker was up before the hook's last event and no probe caught
+    // the change: the run began earlier, but its last two probes came
+    // after the hook entry.
+    let working = hook(LiveState::Working, 7 * SECOND);
+    let run = title(
+        TitleMark::Waiting,
+        NOW_MS - 2 * MINUTE,
+        Some(NOW_MS - 5 * SECOND),
+    );
+    let raised = combine(Some(&working), &run).expect("raised");
+    assert_eq!(raised.observation.state, LiveState::Waiting);
+    assert_eq!(raised.observation.since_ms, NOW_MS - 5 * SECOND);
+}
+
+#[test]
+fn one_probe_or_a_probe_before_the_hook_event_leaves_a_working_agent_working() {
+    // The first probe to read the marker, which may be a stray frame.
+    let working = hook(LiveState::Working, 7 * SECOND);
+    assert_eq!(combine(Some(&working), &first(TitleMark::Waiting)), None);
+    // Two probes, but the earlier ran before the hook's last event: the
+    // agent went on after the marker was last up.
+    let straddling = title(
+        TitleMark::Waiting,
+        NOW_MS - MINUTE,
+        Some(NOW_MS - 8 * SECOND),
+    );
+    assert_eq!(combine(Some(&working), &straddling), None);
+    // Or at the very moment of it.
+    let level = title(
+        TitleMark::Waiting,
+        NOW_MS - MINUTE,
+        Some(NOW_MS - 7 * SECOND),
+    );
+    assert_eq!(combine(Some(&working), &level), None);
+}
+
+#[test]
+fn a_held_marker_changes_no_other_hook_state() {
+    for state in [
+        LiveState::Ready,
+        LiveState::Error,
+        LiveState::Compacting,
+        LiveState::Starting,
+        LiveState::Exited,
+        LiveState::Waiting,
+    ] {
+        assert_eq!(
+            combine(Some(&hook(state, MINUTE)), &twice(TitleMark::Waiting)),
+            None,
+            "{state:?}"
+        );
+    }
+    // A working agent whose process was found gone reads exited, and a
+    // title does not bring it back.
+    let mut dead = hook(LiveState::Working, MINUTE);
+    dead.liveness = Liveness::Dead;
+    assert_eq!(combine(Some(&dead), &twice(TitleMark::Waiting)), None);
 }
 
 #[test]
@@ -420,6 +515,62 @@ fn a_hook_wait_of_the_same_pane_is_cleared_in_its_own_slot() {
         Some((LiveState::Waiting, LiveSource::Hook))
     );
     assert!(bound.panes.is_empty());
+}
+
+#[test]
+fn a_hook_working_in_a_pane_that_asks_for_input_reads_waiting_in_its_own_slot() {
+    let nodes = || {
+        vec![
+            mux_node("cx", "codex"),
+            GraphNode::AgentSession(AgentSessionNode::new(session_id("s-1"), "codex")),
+        ]
+    };
+    let store = file([entry("s-1", LiveState::Working, MINUTE, "cx", "%0")]);
+
+    let snapshot = graph(nodes(), &[("cx", twice(TitleMark::Waiting))]);
+    let bound = bind_live(&snapshot, &store, &alive());
+    assert_eq!(
+        state_and_source(bound.nodes.get(&session("s-1"))),
+        Some((LiveState::Waiting, LiveSource::PaneTitle))
+    );
+    assert!(bound.panes.is_empty(), "one agent, counted once");
+
+    // One probe, and the agent keeps what its hooks said.
+    let snapshot = graph(nodes(), &[("cx", first(TitleMark::Waiting))]);
+    let bound = bind_live(&snapshot, &store, &alive());
+    assert_eq!(
+        state_and_source(bound.nodes.get(&session("s-1"))),
+        Some((LiveState::Working, LiveSource::Hook))
+    );
+
+    // A hook event after the probes: the agent went on.
+    let later = file([entry("s-1", LiveState::Working, 2 * SECOND, "cx", "%0")]);
+    let snapshot = graph(nodes(), &[("cx", twice(TitleMark::Waiting))]);
+    let bound = bind_live(&snapshot, &later, &alive());
+    assert_eq!(
+        state_and_source(bound.nodes.get(&session("s-1"))),
+        Some((LiveState::Working, LiveSource::Hook))
+    );
+}
+
+#[test]
+fn a_hook_ready_or_error_holds_against_a_held_marker_in_the_tables() {
+    for state in [LiveState::Ready, LiveState::Error, LiveState::Compacting] {
+        let snapshot = graph(
+            vec![
+                mux_node("cx", "codex"),
+                GraphNode::AgentSession(AgentSessionNode::new(session_id("s-1"), "codex")),
+            ],
+            &[("cx", twice(TitleMark::Waiting))],
+        );
+        let store = file([entry("s-1", state, MINUTE, "cx", "%0")]);
+        let bound = bind_live(&snapshot, &store, &alive());
+        assert_eq!(
+            state_and_source(bound.nodes.get(&session("s-1"))),
+            Some((state, LiveSource::Hook)),
+            "{state:?}"
+        );
+    }
 }
 
 #[test]

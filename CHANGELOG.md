@@ -266,7 +266,10 @@ forms, lists, readers, and keys look and behave alike.
   and for `W`, with `source: pane_title`. With hooks, a fresh report
   wins and the title replaces a quiet or stale one, and a hook's wait
   turns `working` once two probes after it show no marker, since Codex
-  sends no event when an approval is answered. Only the mark is kept,
+  sends no event when an approval is answered. A hook's `working` turns
+  `waiting` once two probes after it show the marker, since Codex sends
+  no event for a question, an MCP elicitation, or a sign-in prompt, so
+  those no longer read `working` for ten minutes. Only the mark is kept,
   never the title's text. `hook status codex` says how many agents pane
   titles show, and `CONSPECTUS_DISABLE_PANE_TITLES` turns the reading
   off. `graph.bin` moves to format version 13 and is rebuilt once after

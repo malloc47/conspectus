@@ -692,8 +692,9 @@ events count on its parent's session. Beyond the
 - Declining a prompt reads `waiting` until a later tool, the end of the
   turn, or an interrupt.
 - MCP elicitations and sign-in prompts fire no hook, so a session waiting
-  on one reads `working` until it goes quiet after ten minutes; then its
-  [pane title](#codexs-pane-title) says `waiting`.
+  on one reads `working` until its [pane title](#codexs-pane-title) has
+  said `waiting` on two probes in a row (about ten seconds with `conspectus
+  serve`), when it reads `waiting` too.
 - A turn that ends in plan mode reads `ready`, whether or not it proposed
   a plan you still have to accept.
 - With hooks turned off or managed hooks only, the hooks report nothing,
@@ -731,7 +732,13 @@ With hooks reporting, the title only fills in:
 
 - **A fresh hook report wins.** A recent event, or a wait, a finished
   turn, or an error the agent is still in, is what the session shows,
-  whatever the title says.
+  whatever the title says, apart from the two cases below.
+- **A held marker raises `working`.** MCP elicitations, sign-in prompts,
+  and questions fire no hook, so the hooks still say `working` while Codex
+  waits on you. Once the title has shown `Action Required` on two probes in
+  a row, both after the hook's latest event, the session reads `waiting`
+  (detail `input`) instead; the next hook event takes over again, and the
+  title never raises a hook's `ready`, `error`, `compacting`, or `exited`.
 - **The title replaces a stale or quiet one**: work with no event for ten
   minutes, or a process that can't be checked and has been silent for
   fifteen, reads what the title says when it says `waiting` or `working`.
@@ -745,8 +752,8 @@ With hooks reporting, the title only fills in:
 
 It updates as often as the mux probe runs: every few seconds with
 `conspectus serve`, at each refresh of a TUI without one, once per
-one-shot command. A one-shot command sees one probe, so it never clears a
-hook's wait from the title. The TUI does not ask tmux any more often
+one-shot command. A one-shot command sees one probe, so it never clears or raises
+a hook's state from the title. The TUI does not ask tmux any more often
 than that.
 
 Only Codex's titles are read, and only the start of each: the rest of

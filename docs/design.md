@@ -701,8 +701,10 @@ A pane that reports a launcher Codex runs under (`node`) is read as
 Codex's only where a Codex hook entry names the pane. With no hook entry
 for the pane a mark binds pane-only
 as `waiting/input` or `working` with source `pane_title` and no pid; a
-fresh hook entry wins, a quiet or stale one gives way, and a hook's wait
-turns `working` after two probes past it without the marker. The second is
+fresh hook entry wins, a quiet or stale one gives way, a hook's wait
+turns `working` after two probes past it without the marker, and a hook's
+fresh `working` turns `waiting` after two probes past it with the marker
+(ADR 0232). The second is
 `claude agents --json` (ADR 0218), run by the processes that discover in
 the background (the daemon, a daemonless TUI's refresh worker), at most
 every 30 s, while a Claude Code hook entry recorded `working` or `waiting`
