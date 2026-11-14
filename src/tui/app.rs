@@ -301,14 +301,14 @@ pub struct App {
     /// active fields. Sort stays global, so it lives on `App`
     /// rather than per-view.
     view_states: BTreeMap<View, ViewStateSlot>,
-    /// Optional persistence sink for the TUI state file.
-    /// When `Some`, every view switch and settings change, and the
-    /// end of the run, best-effort write the state to
+    /// How this run uses the TUI state file. When it is written, every
+    /// view switch and settings change, and the end of the run,
+    /// best-effort write the state to
     /// `$XDG_STATE_HOME/conspectus/tui-state.json`. The live and
-    /// fixture runtimes set this at startup; `--snapshot` leaves it
-    /// `None` so the file stays untouched. Test apps likewise
-    /// default to `None`.
-    tui_state_cache: Option<crate::tui_state::TuiStateCache>,
+    /// fixture runtimes set this at startup (read-only under
+    /// `--no-resume-view`); `--snapshot` leaves it off so the file
+    /// stays untouched. Test apps likewise default to off.
+    state_file: StateFile,
     /// The trees the state file saved, by view, each waiting for its
     /// view to list rows (see [`restore`]).
     saved_trees: BTreeMap<View, crate::tui_state::PersistedTree>,
@@ -322,6 +322,37 @@ pub struct App {
     /// counts as seeing its finished turn once it has rested long enough
     /// and the session has no mux.
     resting: Option<(NodeId, Instant)>,
+}
+
+/// How a run uses the TUI state file: not at all, to restore from
+/// only, or to restore from and write to.
+#[derive(Debug, Clone)]
+enum StateFile {
+    /// Neither read nor written: snapshot mode and test apps.
+    Off,
+    /// Read at startup and never written, so the run leaves the file as
+    /// it found it (`--no-resume-view`).
+    ReadOnly(crate::tui_state::TuiStateCache),
+    /// Read at startup and written as the run goes.
+    ReadWrite(crate::tui_state::TuiStateCache),
+}
+
+impl StateFile {
+    /// The file to restore from, when the run reads one.
+    fn to_read(&self) -> Option<&crate::tui_state::TuiStateCache> {
+        match self {
+            Self::Off => None,
+            Self::ReadOnly(cache) | Self::ReadWrite(cache) => Some(cache),
+        }
+    }
+
+    /// The file to write, when the run writes one.
+    fn to_write(&self) -> Option<&crate::tui_state::TuiStateCache> {
+        match self {
+            Self::ReadWrite(cache) => Some(cache),
+            Self::Off | Self::ReadOnly(_) => None,
+        }
+    }
 }
 
 /// Saved-per-view UI state. Each entry holds everything that needs
@@ -493,7 +524,7 @@ impl App {
             filter,
             grouping,
             view_states: BTreeMap::new(),
-            tui_state_cache: None,
+            state_file: StateFile::Off,
             saved_trees: BTreeMap::new(),
             live: crate::tui::live_overlay::LiveOverlay::off(),
             seen: crate::tui::rows::seen::SeenTurns::default(),
@@ -673,10 +704,18 @@ impl App {
     /// this at startup with a `TuiStateCache` resolver pointed at
     /// `$XDG_STATE_HOME/conspectus/tui-state.json`. Snapshot mode
     /// leaves the cache unset so nothing touches the on-disk file;
-    /// `--no-resume-view` keeps it, and only skips what it would
-    /// reopen ([`RunConfig::resume_view`]).
+    /// `--no-resume-view` uses [`Self::enable_read_only_view_persistence`]
+    /// instead.
     pub fn enable_view_persistence(&mut self, cache: crate::tui_state::TuiStateCache) {
-        self.tui_state_cache = Some(cache);
+        self.state_file = StateFile::ReadWrite(cache);
+    }
+
+    /// Restore from the state file without ever writing it: the saved
+    /// sort, filters, and groupings still apply, and the run leaves
+    /// the file as it found it, absent included
+    /// ([`RunConfig::resume_view`] off).
+    pub fn enable_read_only_view_persistence(&mut self, cache: crate::tui_state::TuiStateCache) {
+        self.state_file = StateFile::ReadOnly(cache);
     }
 
     /// Restore persisted sort, filter, and grouping from the state
@@ -687,7 +726,7 @@ impl App {
     /// Fields explicitly set via CLI flags (`--sort`, `--grouping`,
     /// `--harness`, `--max-age`, `--mux-state`) are not overridden.
     pub fn restore_persisted_state(&mut self) {
-        let Some(cache) = &self.tui_state_cache else {
+        let Some(cache) = self.state_file.to_read() else {
             return;
         };
         let Some(persisted) = crate::tui_state::read_tui_state(cache) else {
@@ -798,9 +837,10 @@ impl App {
     }
 
     /// Write the current TUI state to disk. Best-effort; failures are
-    /// silently swallowed.
+    /// silently swallowed. A run that only reads the state file writes
+    /// nothing.
     pub(crate) fn persist_state(&self) {
-        if let Some(cache) = &self.tui_state_cache {
+        if let Some(cache) = self.state_file.to_write() {
             let state = self.build_persisted_state();
             let _ = crate::tui_state::write_tui_state(cache, &state);
         }

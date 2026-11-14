@@ -27,9 +27,11 @@ pub(super) struct TuiArgs {
     #[arg(long, value_enum)]
     view: Option<ViewFlag>,
     /// Don't reopen the last-used view, or the rows each view last had
-    /// expanded and selected, for this run. The starting view follows
-    /// `--view`, then the config default, then `sessions`, and each
-    /// view opens on its default folds. `--snapshot` implies this
+    /// expanded and selected, for this run, and don't write the saved
+    /// state back: the run leaves it as it found it. The starting view
+    /// follows `--view`, then the config default, then `sessions`, and
+    /// each view opens on its default folds; the saved sort, filters,
+    /// and groupings still apply. `--snapshot` implies this
     /// automatically.
     #[arg(long = "no-resume-view")]
     no_resume_view: bool,
@@ -344,7 +346,9 @@ impl TuiArgs {
         // `--no-resume-view` and `--snapshot` both skip step 2, and the
         // TUI then reopens no view's expanded and selected rows either,
         // so the start stays deterministic for scripts and the
-        // snapshot fixture path.
+        // snapshot fixture path. A `--no-resume-view` run also never
+        // writes the state file (`resumed_app` reads it only), though
+        // it still applies the saved sort, filters, and groupings.
         #[cfg(feature = "snapshot")]
         let suppress_resume = self.no_resume_view || self.snapshot;
         #[cfg(not(feature = "snapshot"))]

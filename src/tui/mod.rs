@@ -87,10 +87,12 @@ pub struct RunConfig {
     /// state may override.
     pub explicit_grouping: bool,
     /// Whether each view reopens with the rows the last run left
-    /// expanded and selected, from persisted state. Off under
-    /// `--no-resume-view` and `--snapshot`, so the start is the same
-    /// every time; the view to start in is decided before the TUI
-    /// starts.
+    /// expanded and selected, from persisted state, and the run writes
+    /// that state back. Off under `--no-resume-view` and `--snapshot`,
+    /// so the start is the same every time and the run leaves the file
+    /// alone (a `--no-resume-view` run still applies the saved sort,
+    /// filters, and groupings); the view to start in is decided before
+    /// the TUI starts.
     pub resume_view: bool,
     /// Background graph refresh cadence.
     pub refresh_interval: Duration,

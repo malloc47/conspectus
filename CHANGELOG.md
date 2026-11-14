@@ -296,6 +296,13 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Changed
 
+- **`conspectus tui --no-resume-view` writes nothing.** It used to skip
+  reopening the last view and each view's rows but still wrote
+  `tui-state.json` as it ran and when it ended, so a scripted run's last
+  view and rows became the next interactive run's. It now only reads the
+  file: it makes no write and creates no file, and leaves the file
+  byte-identical. The saved sort, filters, and groupings still apply to
+  the run, and what the run changes of them is gone when it ends.
 - **Every pane's Codex title is read, not only the active pane's.** The
   pane listing the tmux probe runs each cycle now carries each pane's
   title, so a Codex in another pane of a split window, or in a window

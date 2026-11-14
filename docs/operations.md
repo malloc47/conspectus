@@ -1194,8 +1194,8 @@ teardown_grace = "3s"
   and the row you had selected, scrolled into view with the groups above
   it open. A row that is gone gives way to the nearest group above it
   that is still listed, then the first row. The Search view starts
-  fresh; `--no-resume-view` opens every view on its default folds. See
-  [TUI state](#tui-state).
+  fresh; `--no-resume-view` opens every view on its default folds and
+  writes nothing. See [TUI state](#tui-state).
 - **Preview wrap (ADR 0106):** `smart` wraps content but truncates
   rules, box borders, and padding that would spill onto extra rows;
   `plain` wraps every line; `none` keeps tmux's layout at the pane's
@@ -2935,7 +2935,8 @@ writes keeps it. Each view's `expanded` keeps only the rows the view
 lists at the time, so the groups that went away leave the file and it
 does not grow. A view the run never showed is written back as it was.
 Writes are atomic (tempfile + rename) and skip-on-unchanged, so quiet
-TUI sessions produce no mtime churn.
+TUI sessions produce no mtime churn. A `--no-resume-view` run makes none
+of these writes (see Opt-outs).
 
 **Startup precedence:** explicit `--view <name>` flag wins →
 persisted `last_view` wins → config `[tui].default_view` →
@@ -2943,16 +2944,22 @@ built-in `View::Sessions`.
 
 **Opt-outs:** pass `--no-resume-view` to ignore the persisted view for a
 single run and open every view on its default folds and first row
-(useful for scripts and tests that need a deterministic start); the
-run's own changes are still written when it ends, and the views it never
-showed keep what they had. The `--snapshot` dev path implies
-`--no-resume-view` and never writes the file, so snapshot regeneration
-never depends on what the operator last touched outside the fixture.
+(useful for scripts and tests that need a deterministic start). The run
+only reads the file: it never writes it, on a view switch, a settings
+change, before a hand-off, or when it ends, and it creates none when
+there is none, so the file is byte-identical afterwards and the next
+interactive run resumes from where the last one that wrote it left off.
+The saved sort, filters, groupings, and preview settings still apply to
+it (a command-line flag still wins), and what the run changes of them
+is gone when it ends. The `--snapshot` dev path implies
+`--no-resume-view`, so snapshot regeneration never depends on what the
+operator last touched outside the fixture.
 
 **Read-only invariant:** only `conspectus tui` reads or writes
-the file. The `graph`, `table`, `node show`, and `pin *`
-surfaces, and `tui --snapshot`, all leave it byte-identical, enforced
-by `tests/cli_tui_state_invariants.rs`.
+the file, and a `tui --no-resume-view` run only reads it. The `graph`,
+`table`, `node show`, and `pin *` surfaces, `tui --snapshot`, and
+`tui --no-resume-view` all leave it byte-identical, enforced by
+`tests/cli_tui_state_invariants.rs` and `tests/tui_tmux_e2e.rs`.
 
 ## What changed in the TUI
 

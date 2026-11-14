@@ -1453,3 +1453,61 @@ fn a_tui_content_search_writes_no_transcript_text_to_disk() {
         }
     }
 }
+
+// ---- --no-resume-view: a run that reads the state file and never writes it
+
+impl World {
+    /// The TUI's state file.
+    fn state_file(&self) -> PathBuf {
+        self.root.join("xdg/s/conspectus/tui-state.json")
+    }
+
+    /// Start the TUI with `extra` flags, switch to the Sessions view, and
+    /// quit, so the run has a view switch and an end to write at.
+    fn run_tui_once(&self, extra: &str) {
+        self.start_tui_outside_with(extra);
+        self.keys(&["1", "q"]);
+        wait_until("the TUI to exit", CONVERGE, || {
+            !self.screen().contains("sessions · mux")
+        });
+    }
+}
+
+/// A state file an earlier run left: it last showed the PRs view.
+const SAVED_STATE: &str = r#"{"schema_version":1,"last_view":"prs","sort":"recency"}"#;
+
+#[test]
+fn no_resume_view_leaves_the_saved_state_file_as_it_was() {
+    needs_tmux!();
+    let world = World::new();
+    world.new_mux("anchor", false);
+    fs::create_dir_all(world.state_file().parent().unwrap()).unwrap();
+    fs::write(world.state_file(), SAVED_STATE).unwrap();
+
+    world.run_tui_once("--no-resume-view");
+    assert_eq!(
+        fs::read_to_string(world.state_file()).unwrap(),
+        SAVED_STATE,
+        "a switch to the Sessions view and a quit rewrite nothing"
+    );
+}
+
+#[test]
+fn no_resume_view_creates_no_state_file_but_a_run_without_it_does() {
+    needs_tmux!();
+    let world = World::new();
+    world.new_mux("anchor", false);
+
+    world.run_tui_once("--no-resume-view");
+    assert!(
+        !world.state_file().exists(),
+        "a --no-resume-view run creates no state file"
+    );
+
+    // Without the flag, the same run writes it, so the check above
+    // would notice a write.
+    assert!(world.outer(&["kill-server"]).status.success());
+    world.run_tui_once("--no-live-preview");
+    let written = fs::read_to_string(world.state_file()).expect("a state file");
+    assert!(written.contains(r#""last_view": "sessions""#), "{written}");
+}

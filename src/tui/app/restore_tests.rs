@@ -1,9 +1,11 @@
 use std::collections::BTreeSet;
 
 use super::*;
+use crate::filter::{HarnessFilter, RowFilter};
 use crate::model::{AgentSessionId, RepoId, WorkspaceId};
 use crate::tui::rows::GroupRow;
 use crate::tui::runtime::{resumed_app, set_static_data};
+use crate::tui::{Grouping, SessionsGrouping};
 use crate::tui_state::{PersistedState, PersistedViewSlot, TuiStateCache};
 
 fn cache_in(dir: &tempfile::TempDir) -> TuiStateCache {
@@ -338,10 +340,17 @@ fn a_malformed_or_unknown_row_key_is_skipped_and_the_rest_apply() {
     );
 }
 
-#[test]
-fn no_resume_view_opens_on_the_defaults_and_keeps_other_views_saved_rows() {
-    let dir = tempfile::tempdir().unwrap();
-    let cache = cache_in(&dir);
+/// A run's config under `--no-resume-view`.
+fn no_resume_config() -> RunConfig {
+    let mut config = RunConfig::defaults();
+    config.resume_view = false;
+    config
+}
+
+/// The state file an earlier run left: sorted by recency with the
+/// preview wrap off, the Sessions view filtered to codex and grouped by
+/// repo, and rows saved for the Sessions and Mux views.
+fn seed_an_earlier_run(cache: &TuiStateCache) -> RowFilter {
     let saved = PersistedTree {
         expanded: Some(BTreeSet::from([key(&ws("/b"))])),
         selected: Some(PersistedSelection {
@@ -349,39 +358,137 @@ fn no_resume_view_opens_on_the_defaults_and_keeps_other_views_saved_rows() {
             path: vec![key(&ws("/b"))],
         }),
     };
-    let mut state = PersistedState::default();
-    for view in [View::Sessions, View::Mux] {
-        state.view_states.insert(
-            view,
-            PersistedViewSlot {
-                tree: saved.clone(),
-                ..PersistedViewSlot::default()
-            },
-        );
-    }
-    crate::tui_state::write_tui_state(&cache, &state).unwrap();
+    let filter = RowFilter {
+        harness: Some(HarnessFilter::from_values(["codex"])),
+        ..RowFilter::default()
+    };
+    let mut state = PersistedState {
+        last_view: Some(View::Mux),
+        sort: Some(crate::tui::Sort::Recency),
+        preview_wrap: Some(crate::tui::WrapMode::Plain),
+        ..PersistedState::default()
+    };
+    state.view_states.insert(
+        View::Sessions,
+        PersistedViewSlot {
+            filter: filter.clone(),
+            grouping: Some(Grouping::Sessions(SessionsGrouping::Repo)),
+            tree: saved.clone(),
+        },
+    );
+    state.view_states.insert(
+        View::Mux,
+        PersistedViewSlot {
+            tree: saved,
+            ..PersistedViewSlot::default()
+        },
+    );
+    crate::tui_state::write_tui_state(cache, &state).unwrap();
+    filter
+}
 
-    let mut config = RunConfig::defaults();
-    config.resume_view = false;
-    let mut app = resumed_app(&config, cache.clone());
+/// A run's writes, driven as the live loop drives them: each settings
+/// change and view switch asks to persist and the effect executor does,
+/// then the run writes once more as it ends. Each message that would
+/// write is checked to ask for it, so a run that stays quiet is the gate
+/// holding, not the reducer no longer asking.
+fn run_that_changes_things(app: &mut App) {
+    for msg in [
+        Msg::SetSort(crate::tui::Sort::Hierarchy),
+        Msg::SetGrouping(Grouping::Sessions(SessionsGrouping::Workspace)),
+        Msg::SetPreviewWrap(crate::tui::WrapMode::Smart),
+        Msg::SwitchView(View::Mux),
+        Msg::SwitchView(View::Prs),
+    ] {
+        let effects = app.update(msg);
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect, crate::tui::Effect::Persist)),
+            "{effects:?}"
+        );
+        crate::tui::runtime::execute_effects(app, effects);
+    }
+    app.persist_state();
+}
+
+#[test]
+fn no_resume_view_opens_on_the_default_folds_and_first_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = cache_in(&dir);
+    seed_an_earlier_run(&cache);
+
+    let mut app = resumed_app(&no_resume_config(), cache);
     load(&mut app, rows());
     let mut fresh = App::new(RunConfig::defaults());
     load(&mut fresh, rows());
     assert_eq!(expanded(&app), expanded(&fresh));
     assert_eq!(app.selection(), fresh.selection());
+}
 
-    app.persist_state();
-    let read = crate::tui_state::read_tui_state(&cache).unwrap();
+#[test]
+fn no_resume_view_run_still_applies_the_saved_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = cache_in(&dir);
+    let filter = seed_an_earlier_run(&cache);
+
+    let app = resumed_app(&no_resume_config(), cache);
+    assert_eq!(app.sort(), crate::tui::Sort::Recency);
+    assert_eq!(app.filter(), &filter);
+    assert_eq!(app.grouping(), Grouping::Sessions(SessionsGrouping::Repo));
+    assert_eq!(app.preview_wrap(), crate::tui::WrapMode::Plain);
+}
+
+#[test]
+fn no_resume_view_run_leaves_the_state_file_byte_identical() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = cache_in(&dir);
+    seed_an_earlier_run(&cache);
+    let path = cache.path().unwrap();
+    let before = std::fs::read(&path).unwrap();
+
+    let mut app = resumed_app(&no_resume_config(), cache);
+    load(&mut app, rows());
+    run_that_changes_things(&mut app);
+
     assert_eq!(
-        read.view_states[&View::Mux].tree,
-        saved,
-        "a view the run never showed keeps what it had"
+        std::fs::read(&path).unwrap(),
+        before,
+        "neither a view switch, a settings change, nor the end of the run writes"
     );
-    assert_eq!(
-        read.view_states[&View::Sessions].tree,
-        app.remembered_tree(),
-        "the view it showed is written as this run left it"
+}
+
+#[test]
+fn no_resume_view_run_creates_no_state_file_when_none_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = cache_in(&dir);
+
+    let mut app = resumed_app(&no_resume_config(), cache.clone());
+    load(&mut app, rows());
+    run_that_changes_things(&mut app);
+
+    assert!(
+        !cache.directory().unwrap().exists(),
+        "not even the state directory is made"
     );
+}
+
+#[test]
+fn a_run_that_resumes_writes_what_a_no_resume_run_does_not() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = cache_in(&dir);
+    seed_an_earlier_run(&cache);
+    let path = cache.path().unwrap();
+    let before = std::fs::read(&path).unwrap();
+
+    let mut app = resumed_app(&RunConfig::defaults(), cache.clone());
+    load(&mut app, rows());
+    run_that_changes_things(&mut app);
+
+    let after = crate::tui_state::read_tui_state(&cache).unwrap();
+    assert_ne!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(after.last_view, Some(View::Prs));
+    assert_eq!(after.sort, Some(crate::tui::Sort::Hierarchy));
 }
 
 #[test]

@@ -13,6 +13,9 @@
 //! `tui --snapshot`) must leave the file byte-identical: no creation
 //! when absent, no content or mtime drift when present. A snapshot
 //! also reopens nothing the file remembers, so it stays deterministic.
+//! A `tui --no-resume-view` run reads the file and never writes it; it
+//! needs a terminal, so `tests/tui_tmux_e2e.rs` and the unit tests of
+//! `resumed_app` pin that.
 //!
 //! Mirrors the read-only invariant pattern in
 //! `cli_pin_invariants.rs` and

@@ -2627,7 +2627,7 @@ fn restore_persisted_state_preserves_explicit_cli_overrides() {
 #[test]
 fn switch_view_msg_without_persistence_does_not_write() {
     // Negative pin: when persistence is disabled (the default,
-    // matching snapshot mode and `--no-resume-view`), the on-disk
+    // matching snapshot mode), the on-disk
     // file must not appear even after the effect executor runs.
     // Guards against accidental unconditional writes leaking into
     // snapshot tests. Phase E routes the persist through the

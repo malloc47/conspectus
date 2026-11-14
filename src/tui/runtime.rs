@@ -987,16 +987,20 @@ pub(in crate::tui) fn read_fixture(path: &std::path::Path) -> Result<crate::mode
     Ok(resolve_snapshot(snapshot))
 }
 
-/// The app an interactive run starts with: persistence on at `cache`,
-/// and the state file read back, sort, filters, groupings, and each
-/// view's expanded and selected rows (applied once the view lists rows,
-/// unless `--no-resume-view`).
+/// The app an interactive run starts with: the state file at `cache`
+/// read back, sort, filters, groupings, and each view's expanded and
+/// selected rows, and written as the run goes. Under `--no-resume-view`
+/// the rows are not reopened and the file is only read, never written.
 pub(in crate::tui) fn resumed_app(
     config: &RunConfig,
     cache: crate::tui_state::TuiStateCache,
 ) -> App {
     let mut app = App::new(config.clone());
-    app.enable_view_persistence(cache);
+    if config.resume_view {
+        app.enable_view_persistence(cache);
+    } else {
+        app.enable_read_only_view_persistence(cache);
+    }
     app.restore_persisted_state();
     app
 }
@@ -1009,7 +1013,8 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
     // Ctrl-R fetches in its refresh (ADR 0136).
     config.forge_fetch = crate::discovery::forge::ForgeFetch::CachedOnly;
     // Snapshot mode goes through a different entry point, so the
-    // file only ever moves under interactive runs.
+    // file only ever moves under interactive runs, and not under those
+    // started with `--no-resume-view`.
     let mut app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
     app.set_live_overlay(
         crate::tui::live_overlay::LiveOverlay::from_env().with_poll_scope(config.live_poll),
@@ -1053,10 +1058,11 @@ fn static_event_loop(
     tmux: Box<dyn MuxBackend>,
     recordings: Option<std::path::PathBuf>,
 ) -> Result<()> {
-    // The static fixture-replay TUI mode persists too. Snapshot mode
-    // (ADR 0067) uses a distinct entry point in `src/tui/snapshot.rs`
-    // that deliberately skips this so the on-disk file stays
-    // unconditionally unmoved when the snapshot tooling runs.
+    // The static fixture-replay TUI mode persists too, unless it is
+    // started with `--no-resume-view`. Snapshot mode (ADR 0067) uses a
+    // distinct entry point in `src/tui/snapshot.rs` that deliberately
+    // skips this so the on-disk file stays unconditionally unmoved when
+    // the snapshot tooling runs.
     let app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
     let mode = StaticMode {
         tmux,
