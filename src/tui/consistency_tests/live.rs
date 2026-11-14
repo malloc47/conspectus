@@ -430,6 +430,17 @@ fn expected(snapshot: &GraphSnapshot, node: &NodeId, mixed: Option<&str>) -> Sho
             };
             Shown::Word(word.to_string())
         }
+        (NodeId::MuxSession(id), Some("live")) => {
+            // A mux pin reads the word of the mark its mux row draws.
+            let word = match snapshot.live_counts_of_mux(id, now_ms).dominant() {
+                Some(LiveState::Waiting) => "waiting",
+                Some(LiveState::Error) => "error",
+                Some(LiveState::Ready) => "ready",
+                Some(LiveState::Working | LiveState::Compacting | LiveState::Starting) => "working",
+                None | Some(LiveState::Unknown | LiveState::Exited) => "live",
+            };
+            Shown::Word(word.to_string())
+        }
         (_, Some(status)) => Shown::Word(status.to_string()),
     }
 }
@@ -859,4 +870,109 @@ fn a_mux_mark_recedes_in_place_once_every_agent_in_its_state_is_quiet() {
         !modifier.contains(theme.muted),
         "one fresh agent in the state keeps it bright"
     );
+}
+
+/// What `snapshot` makes the mux `conspectus-main` read as in the Mux
+/// view (its mark) and in Pinned (the word of its pin's row).
+fn mux_mark_and_pinned_word(snapshot: &GraphSnapshot) -> (String, String) {
+    let id = NodeId::MuxSession(mux("conspectus-main"));
+    let drawn = |view: View| -> Vec<Shown> {
+        let mut app = listing_with(view, snapshot, LiveOverlay::off());
+        shown(&mut app, snapshot)
+            .into_iter()
+            .filter(|(node, _, _)| *node == id)
+            .map(|(_, drawn, _)| drawn)
+            .collect()
+    };
+    let marks: Vec<String> = drawn(View::Mux)
+        .into_iter()
+        .filter_map(|shown| match shown {
+            Shown::Mark(mark) => Some(mark),
+            Shown::Word(_) => None,
+        })
+        .collect();
+    let words: Vec<String> = drawn(View::Pinned)
+        .into_iter()
+        .filter_map(|shown| match shown {
+            Shown::Word(word) => Some(word),
+            Shown::Mark(_) => None,
+        })
+        .collect();
+    assert_eq!((marks.len(), words.len()), (1, 1), "{marks:?} {words:?}");
+    (marks[0].clone(), words[0].clone())
+}
+
+#[test]
+fn a_pinned_mux_reads_the_word_of_the_mark_its_mux_row_draws() {
+    use LiveState::{Compacting, Error, Exited, Ready, Starting, Unknown, Waiting, Working};
+    // The two agents of the mux, and the mark and word they give it: the
+    // state that ranks first decides both, so the mux reads one state in
+    // the Mux view and in Pinned.
+    let cases = [
+        ([Waiting, Working], ("!", "waiting")),
+        ([Error, Ready], ("×", "error")),
+        ([Ready, Working], ("›", "ready")),
+        ([Working, Working], ("»", "working")),
+        ([Compacting, Starting], ("»", "working")),
+        ([Starting, Exited], ("»", "working")),
+        // Nothing live to say: the pin keeps its word.
+        ([Unknown, Exited], ("?", "live")),
+        ([Exited, Exited], ("·", "live")),
+    ];
+    for (states, (mark, word)) in cases {
+        let mut snapshot = live_world();
+        // Just heard from, so work reads fresh whenever the rows are read.
+        let binding = |state| {
+            LiveBinding::new(
+                LiveObservation::new(state, LiveSource::Hook, now_ms()),
+                Liveness::Alive,
+            )
+        };
+        snapshot.node_live = BTreeMap::from([
+            (session(HOSTED), binding(states[0])),
+            (session(BESIDE), binding(states[1])),
+        ]);
+        assert_eq!(
+            mux_mark_and_pinned_word(&snapshot),
+            (mark.to_string(), word.to_string()),
+            "{states:?}"
+        );
+    }
+
+    // No agent has live state: the mux row's `·`, and the pin's `live`.
+    let mut snapshot = live_world();
+    snapshot.node_live.clear();
+    assert_eq!(
+        mux_mark_and_pinned_word(&snapshot),
+        ("·".to_string(), "live".to_string())
+    );
+}
+
+#[test]
+fn a_pinned_mux_draws_its_word_in_its_marks_style() {
+    let theme = crate::tui::Theme::default();
+    let now_ms = now_ms();
+    // Work with no news for eleven minutes: quiet, so the mux's mark and
+    // its pin's word are both dimmed. Fresh work draws both bright.
+    for (hosted, beside, dimmed) in [(11, 11, true), (11, 1, false)] {
+        let snapshot = working_since(now_ms, hosted, beside);
+        let mut app = listing_with(View::Pinned, &snapshot, LiveOverlay::off());
+        let buffer = buffer_of(&mut app, 220, 40);
+        let lines = tuikit::testkit::buffer::rows(&buffer);
+        let y = lines
+            .iter()
+            .position(|line| line.contains("conspectus-main"))
+            .expect("the mux pin's row");
+        let byte = lines[y]
+            .find("working")
+            .unwrap_or_else(|| panic!("no word `working` on the pin's row: {}", lines[y]));
+        let x = lines[y][..byte].chars().count();
+        let cell = &buffer[(u16::try_from(x).unwrap(), u16::try_from(y).unwrap())];
+        assert_eq!(cell.fg, theme.info, "the mark's color");
+        assert_eq!(
+            cell.modifier.contains(theme.muted),
+            dimmed,
+            "the word is drawn as the mark is ({hosted} and {beside} minutes)"
+        );
+    }
 }

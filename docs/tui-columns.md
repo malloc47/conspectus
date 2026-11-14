@@ -231,7 +231,7 @@ instead: in the state cell, or for live state in the live cell.
 
 | Word | Meaning | Glyph in a single-kind view | Where it appears |
 |---|---|---|---|
-| `live` | the pinned entity is running or present (worktrees, repos, branches, workspaces, forks, and live muxes) | pin marker `◉` | Pinned |
+| `live` | the pinned entity is running or present (worktrees, repos, branches, workspaces, forks, and muxes none of whose agents has a state to show) | pin marker `◉` | Pinned |
 | `in mux` | a pinned session that is running inside a mux | `⊸` | Pinned, and sessions nested under a mux pin |
 | `resumable` | a pinned session with no mux | `∘` | Pinned |
 | `stopped` | a mux that isn't running | `⊘` | Pinned, History |
@@ -243,15 +243,18 @@ instead: in the state cell, or for live state in the live cell.
 | `draft` | an open pull request marked draft | `◐` | Pinned, History |
 | `merged` | a merged pull request | `⊕` | Pinned, History |
 | `closed` | a closed, unmerged pull request | `⊗` | Pinned, History |
-| `waiting` | a running session whose agent is waiting on you; in place of `in mux` or `resumable` | `!` | Pinned, and sessions nested under a pin |
-| `working` | a running session whose agent is working, compacting, or starting; in place of `in mux` or `resumable` | `»` | Pinned, and sessions nested under a pin |
-| `ready` | a running session whose agent is ready for a prompt; in place of `in mux` or `resumable`; bold while the finished turn is unseen | `›` | Pinned, and sessions nested under a pin |
-| `error` | a running session whose agent's turn ended on an error; in place of `in mux` or `resumable` | `×` | Pinned, and sessions nested under a pin |
+| `waiting` | a running session whose agent is waiting on you, or a running mux whose mark is `!`; in place of `in mux`, `resumable`, or `live` | `!` | Pinned, and sessions nested under a pin |
+| `working` | a running session whose agent is working, compacting, or starting, or a running mux whose mark is `»`; in place of `in mux`, `resumable`, or `live` | `»` | Pinned, and sessions nested under a pin |
+| `ready` | a running session whose agent is ready for a prompt, or a running mux whose mark is `›`; in place of `in mux`, `resumable`, or `live`; bold while the finished turn is unseen | `›` | Pinned, and sessions nested under a pin |
+| `error` | a running session whose agent's turn ended on an error, or a running mux whose mark is `×`; in place of `in mux`, `resumable`, or `live` | `×` | Pinned, and sessions nested under a pin |
 
 In Pinned, the word of a live pull request takes the style of its state
 glyph (green, yellow, magenta, red, or dim for `unknown`), and a live
-session's `waiting`, `working`, `ready`, or `error` the style of its live
-mark (dimmed when quiet, bold when unseen); other live words are green. A session whose
+session's or a mux's `waiting`, `working`, `ready`, or `error` the style of its live
+mark (dimmed when quiet, bold when unseen); other live words are green. A mux reads
+the word of the mark its row draws in the Mux view, by the same precedence
+(waiting, then error, then ready, then working); one that has no agent with a state
+to show keeps `live`. A session whose
 live state can't be told, has exited, or is unknown keeps `in mux` or
 `resumable`; whether it runs in a mux stays in the detail pane either way.
 History lists no sessions, so it shows no live word. Words of rows that
@@ -419,7 +422,7 @@ A Pinned row in a narrow pane keeps its name and its state word:
 ```text
 ┌ ► sessions · mux · prs · pinned … ───┐
 │  ▼ project  ~/repos/project          │
-│►   ▼ ▣ ◉ project-main   live       5m│
+│►   ▼ ▣ ◉ project-main   working    5m│
 │        ●   ambiguous …  waiting    1m│
 │        ●   ambiguous …  working    1m│
 │        ●   hook-super…  working    1m│
@@ -838,7 +841,7 @@ in bold and its path dim; for kind grouping, `Muxes`, `Sessions`,
 |---|---|---|---|---|
 | 1 | Prefix | cursor gutter, indent, disclosure (only with rows beneath), the pin's kind glyph, pin marker | always | the glyph keeps its color even on a ghost row |
 | 2 | Label | the pin's name | always | bold, cut at 28, padded so it ends in one column at every depth |
-| 3 | Status | a word from [State words](#state-words); a running session's live word in place of `in mux` or `resumable` | always | cut at 9, padded; a spinner while a refresh is pending |
+| 3 | Status | a word from [State words](#state-words); a running session's or mux's live word in place of `in mux`, `resumable`, or `live` | always | cut at 9, padded; a spinner while a refresh is pending |
 | 4 | Age | see [Age](#age) | always | 4 cells |
 | 5 | Chip | the harness or program | mux and session pins | one width across the tree, so content lines up; the first cell to leave a narrow row |
 | 6 | Content | by kind (below) | when it gets at least 7 cells, or its whole text | gray |
@@ -860,7 +863,7 @@ or the first 8 characters of its key, its status is `in mux` or
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▼ project  ~/repos/project                                                       │
-│    ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/proje…│
+│    ▶ ▣ ◉ project-main                    working    5m   claude     ~/repos/proje…│
 │      ▣ ◎ nightly                         stopped    2d   claude     ~/repos/proje…│
 │      ● ◉ parser-session                  waiting    1h   claude     claude-code i…│
 │      ◇ ◎ ledger-worktree                 removed    3d              project · fea…│
@@ -873,7 +876,7 @@ or the first 8 characters of its key, its status is `in mux` or
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │► ▼ Muxes                                                                          │
-│    ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/proje…│
+│    ▶ ▣ ◉ project-main                    working    5m   claude     ~/repos/proje…│
 │      ▣ ◎ nightly                         stopped    2d   claude     ~/repos/proje…│
 │      ▣ ◎ weekly-review                   planned     —   codex      ~/repos/proje…│
 │  ▼ Sessions                                                                       │
@@ -887,7 +890,7 @@ or the first 8 characters of its key, its status is `in mux` or
 <!-- frame: keys="4<C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
-│► ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
+│► ▶ ▣ ◉ project-main                    working    5m   claude     ~/repos/project │
 │    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
 │    ● ◉ parser-session                  waiting    1h   claude     claude-code in …│
 │    ◇ ◎ ledger-worktree                 removed    3d              project · featu…│

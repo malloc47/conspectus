@@ -732,17 +732,18 @@ impl LeftColumns<'_> {
     }
 
     /// A Pinned or History row's cells after its prefix: the bold label,
-    /// the state word (a session's live word in place of its link word,
-    /// and a spinner while the row awaits the hand-off, as wide as the
-    /// word, so its column holds still), the age, the chip, and the
-    /// content. A row for something stopped, removed, missing, planned, or
+    /// the state word (a session's or a mux's live word in place of its
+    /// link word or `live`, and a spinner while the row awaits the
+    /// hand-off, as wide as the word, so its column holds still), the age,
+    /// the chip, and the content. A row for something stopped, removed, missing, planned, or
     /// unknown is dimmed from its label on when it is drawn.
     fn mixed_cells(&self, mixed: &MixedRow, pending: bool) -> Cells<Col> {
         let theme = self.theme;
         let live = live_word_sign(mixed);
-        // A live session's word and a pull request's word take the style
-        // of their glyphs, so the word reads as the glyph does in the
-        // views of one kind; other live words share the attached color.
+        // A live session's or mux's word and a pull request's word take
+        // the style of their glyphs, so the word reads as the glyph does
+        // in the views of one kind; other live words share the attached
+        // color.
         let status_style = match (mixed.tone, live, mixed.pr_status) {
             (MixedTone::Dim, _, _) => Style::default(),
             (MixedTone::Normal, Some(sign), _) => sign.style(theme),
@@ -826,15 +827,21 @@ impl LeftColumns<'_> {
 /// The live sign whose word a Pinned or History row prints in place of
 /// its status: the row stands for a running session (its word says
 /// whether it runs in a mux) whose agent is waiting, working, ready, or in
-/// error. A session with no evidence, or whose evidence can't be trusted,
-/// keeps its word, and the detail pane still says whether it is in a mux.
+/// error, or for a running mux (its word says `live`) whose agents' mark,
+/// by the precedence of its row in the Mux view, is one of those. A
+/// session with no evidence, or whose evidence can't be trusted, keeps its
+/// word, and the detail pane still says whether it is in a mux; so does a
+/// mux no agent of which has a state to show.
 fn live_word_sign(mixed: &MixedRow) -> Option<LiveSign> {
-    let MixedLive::Session(cell) = mixed.live else {
+    if mixed.tone != MixedTone::Normal {
         return None;
+    }
+    let sign = match (mixed.node_kind, mixed.live) {
+        (NodeKind::AgentSession, MixedLive::Session(cell)) => LiveSign::of_session(Some(cell)),
+        (NodeKind::MuxSession, MixedLive::Mux(live)) => LiveSign::of_mux(live),
+        _ => return None,
     };
-    let running_session =
-        mixed.node_kind == NodeKind::AgentSession && mixed.tone == MixedTone::Normal;
-    Some(LiveSign::of_session(Some(cell))).filter(|sign| running_session && sign.word().is_some())
+    sign.word().is_some().then_some(sign)
 }
 
 /// Whether a mixed-kind row is a stopped mux in the Mux view: a row that

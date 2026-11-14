@@ -363,9 +363,12 @@ state has its own shape, so it reads without color:
 - **Pinned** spells it as a word: a pinned session (or one listed under a
   pinned mux) whose agent is waiting, working, ready, or failed reads
   `waiting`, `working`, `ready`, or `error` instead of `in mux` or
-  `resumable`. Can't-tell, ended, and no-state sessions keep `in mux` or
-  `resumable`, and the detail pane still says which mux a session runs
-  in.
+  `resumable`. A pinned mux reads the word of the mark its row draws in the
+  Mux view (`waiting`, `error`, `ready`, or `working`, in that order of
+  precedence) instead of `live`, dimmed or bold as the mark is. Can't-tell,
+  ended, and no-state sessions keep `in mux` or `resumable`, a mux none of
+  whose agents has a state to show keeps `live`, and the detail pane still
+  says which mux a session runs in.
 - **The detail pane** spells it out. A session with live state lists,
   after `status`: `state`, its row's mark and then the state and detail
   in words (`! waiting · permission`, `› ready · finished · unseen`, `?
@@ -2157,7 +2160,8 @@ pin targets.
 Key `4` (or `--view pinned`) lists every pin, whatever its kind, in one set
 of columns: `<kind glyph> <pin> <status> <age> <content>`. The pin name is
 cut at 28 cells, the status is one word (`live`, `stopped`, `removed`,
-`unknown`, `planned`, `missing`, `in mux`, `resumable`, or a PR's state), the age is the
+`unknown`, `planned`, `missing`, `in mux`, `resumable`, an agent's state
+(`waiting`, `working`, `ready`, `error`), or a PR's state), the age is the
 last activity of a live entity or the time a gone one was last seen, and the
 content is the harness and place, the title, or the remote. Gone, missing,
 planned, and unknown rows wear the ghost style (the theme's `inert` color, in italics). The agent or program that runs is a
