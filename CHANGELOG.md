@@ -913,6 +913,18 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **Scrolling fast no longer leaves the screen catching up.** A
+  terminal turns each mouse-wheel notch into several cursor keys (three
+  per tick in Ghostty, more as a spin speeds up), and the TUI drew a full
+  frame for each, so a fast scroll queued a backlog that took seconds to
+  draw after you stopped, longest over a slow link and on a large screen.
+  The TUI now handles every key that is already waiting before it draws,
+  so a backlog costs one frame: on a 184 by 85 screen a 900-key scroll
+  settles within about 15 ms of the last key instead of 1 to 2.6 s. Each
+  key still does what it does alone (a key that opens a menu is followed
+  by keys the menu takes, and a paste types into its field), a key that
+  arrives alone draws at once, and a stream that never pauses still
+  redraws at least every 100 ms.
 - **`hook status` counts an agent whose entry names its tmux pane as
   reporting.** An agent counted as having no live state unless an entry
   recorded its process or named a session the saved graph tied that

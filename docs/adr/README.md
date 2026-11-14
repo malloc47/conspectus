@@ -265,6 +265,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0231](0231-tui-a-turn-watched-in-an-attached-client-reads-seen-when-the-client-comes-back.md) | A Turn Watched In An Attached Client Reads Seen When The Client Comes Back | Accepted |
 | [0233](0233-tui-a-mux-mark-recedes-when-every-agent-in-its-state-is-quiet.md) | A Mux's Mark Recedes When Every Agent In Its State Is Quiet | Accepted |
 | [0234](0234-tui-a-pinned-mux-reads-the-word-of-its-agents-mark.md) | A Pinned Mux Reads The Word Of Its Agents' Mark | Accepted |
+| [0236](0236-tui-the-event-loop-takes-the-input-that-is-waiting-before-it-draws.md) | The Event Loop Takes The Input That Is Waiting Before It Draws | Accepted |
 
 ## Transcript viewer
 

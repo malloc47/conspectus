@@ -2506,6 +2506,19 @@ Future caches (PR fetches, transcript indices, etc.) land
 under the same `$XDG_*_HOME/conspectus/` roots rather than
 inside `.conspectus.toml` or the project config directory.
 
+## Scrolling quickly
+
+A terminal that has no mouse mode turned on turns each notch of a mouse
+wheel, or each row's height of a trackpad swipe, into cursor keys, several
+per notch, and a held key repeats. The TUI handles every key that is
+already waiting before it draws the next frame, in order, so a scroll that
+queues a hundred keys costs one frame and the screen stops moving when
+your hand does, over a slow link and on a large screen too. Each key
+still does what it does alone: a key that opens a menu is followed by
+keys the menu takes, and a paste types into the focused field. A stream
+of keys that never pauses still redraws at least every 100 ms, so a long
+scroll shows its progress. A key that arrives alone draws at once.
+
 ## Keys on the right pane
 
 With the right pane focused (and no dialog open), these keys drive the
