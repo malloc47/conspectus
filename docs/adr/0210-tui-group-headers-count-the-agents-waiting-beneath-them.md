@@ -120,3 +120,8 @@ is. Everything above stands except as follows.
    beneath it reads as before, so the showcase's frames are unchanged.
    In the Mux view `(N)` still counts the agents nested under its muxes,
    so a header can still wait without a `(N)` (decision 2).
+3. **The header line agrees.** Under a filter, the header line's
+   `N/M sessions` in the PRs view (and the Sessions view) counts the
+   sessions its rows stand for, each once, by the same rule, so it no
+   longer reads `8/11` over the four sessions a checkout's two pull
+   requests both list. (Added 2026-11-13.)
