@@ -5,7 +5,9 @@
 Accepted. Amended for opencode 2.x by ADR 0126 and for live state by
 ADR 0206; see the amendments below. ADR 0229 amends the live-state
 amendment's item 2: listed only in `cli.json`, the TUI entrypoint
-reports the live state of the sessions its client shows.
+reports the live state of the sessions its client shows. ADR 0235
+amends decision 2 and the live-state amendment's item 4: CI tests and
+type-checks the plugin.
 
 ## Context
 
@@ -44,7 +46,8 @@ authoritative artifact. Boundaries:
    tsconfig.json, src/index.ts, README.md}` are committed. The package
    name is `@conspectus/opencode-hook`. Build output (`dist/`,
    `node_modules/`) is gitignored.
-2. **No CI build initially.** The Rust test suite continues to be the
+2. **No CI build initially** (amended by ADR 0235: CI now runs the
+   plugin tests and a type check). The Rust test suite continues to be the
    only mandatory CI surface. The plugin is small enough that
    compilation correctness is checked by reading the source and by users
    who install it; if/when the plugin grows or breakage becomes a
@@ -225,3 +228,23 @@ session a pane shows. Everything above stands except as follows.
 4. **Tests.** The reducer is a pure module tested with `node --test` on
    a machine with Node, by hand (ADR 0206). Decision 2 stands: CI builds
    and runs nothing of the plugin.
+
+## Amendment: CI builds and tests the plugin (ADR 0235)
+
+Decision 2 no longer stands, and item 4 of the live-state amendment
+loses its last sentence. The operator decided on 2026-11-13, for the
+reasons in ADR 0235, that:
+
+1. **The dev shell has Node.** `flake.nix` adds Node 24, so the plugin's
+   `node --test` suites and `npm` run wherever the shell does.
+2. **CI tests and type-checks the plugin.** A `plugins` job runs
+   `just plugins`: the opencode and Pi test suites and `tsc --noEmit` of
+   the opencode plugin after `npm ci` against its lock file. This is the
+   "separate CI step" decision 2 anticipated, though it runs through
+   `just` and `actions/setup-node`, not `nix develop -c`.
+3. **`just check` is unchanged.** It needs neither Node nor the network;
+   the plugin checks are `just plugins`.
+4. **Unchanged:** the Rust test suite stays the only check that gates the
+   Conspectus binary, `dist/` is still generated and gitignored, and the
+   plugin is still not published to npm.
+

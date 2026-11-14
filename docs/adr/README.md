@@ -56,7 +56,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0028](0028-hook-sidecar-mux-attribution.md) | Hook Sidecar Mux Attribution | Accepted (amended twice, and by 0220; refined by 0146; live state added by 0204, 0206; status surface used by 0217; control channel used by 0218) |
 | [0046](0046-process-tree-pane-linker.md) | Process-Tree Pane Linker | Accepted |
 | [0048](0048-codex-state-and-log-readers.md) | Codex State and Log Readers for Mux Attribution | Accepted (amended) |
-| [0049](0049-opencode-hook-plugin-distribution.md) | OpenCode Hook Plugin Distribution | Accepted (amended by 0126, 0206) |
+| [0049](0049-opencode-hook-plugin-distribution.md) | OpenCode Hook Plugin Distribution | Accepted (amended by 0126, 0206, 0235) |
 | [0121](0121-pi-harness-support.md) | Pi Harness Support | Accepted (amended by 0206) |
 | [0060](0060-agent-deck-multi-repo-workspace-adapter.md) | Agent-Deck Multi-Repo Workspace Adapter | Accepted |
 | [0066](0066-agent-deck-instance-titles-as-workspace-names.md) | Agent-Deck Instance Titles As Workspace Display Names | Accepted |
@@ -65,7 +65,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0111](0111-launch-directory-is-optional.md) | The Launch Directory Is An Optional Input | Accepted |
 | [0138](0138-provider-workspaces-from-observed-cwds.md) | Provider Workspaces From Observed Cwds | Accepted |
 | [0204](0204-the-live-state-store-folds-agent-events-per-session.md) | The Live-State Store Folds Agent Events Per Session | Accepted |
-| [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208, 0227, 0228, 0229) |
+| [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208, 0227, 0228, 0229, 0235) |
 | [0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted (applied by 0217, 0218, 0222; excepted by 0217, 0232) |
 | [0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md) | A Codex Pane's Title Fills In Its Live State Where Hooks Cannot | Accepted (amended by 0221, 0232) |
 | [0218](0218-claude-codes-agent-list-repairs-a-live-state-its-hooks-left-stuck.md) | Claude Code's Agent List Repairs A Live State Its Hooks Left Stuck | Accepted (amended by 0222) |
@@ -298,6 +298,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0224](0224-local-checks-run-the-workspace-tests-once-through-nextest.md) | Local Checks Run The Workspace Tests Once, Through Nextest | Accepted |
 | [0225](0225-local-checks-skip-the-framework-matrix-when-nothing-it-builds-from-changed.md) | Local Checks Skip The Framework Matrix When Nothing It Builds From Changed | Accepted |
 | [0226](0226-commands-load-the-dev-shells-environment-from-a-cache.md) | Commands Load The Dev Shell's Environment From A Cache | Accepted |
+| [0235](0235-node-joins-the-dev-shell-and-a-ci-job-tests-and-type-checks-the-harness-plugins.md) | Node Joins The Dev Shell, And A CI Job Tests And Type-Checks The Harness Plugins | Accepted |
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
 | [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164); framework-owned in part |
 | [0068](0068-snapshot-fixture-mode.md) | Fixture Mode For The Snapshot Tool | Accepted |

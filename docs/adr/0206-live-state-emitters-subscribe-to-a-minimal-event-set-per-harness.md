@@ -12,7 +12,9 @@ subagents (decision 25). Extended by ADR 0228: the opencode 2.x server
 entrypoint reads the permission asks pending when it starts (decisions
 20 and 23). Amended by ADR 0229: with no server entrypoint active, the
 TUI entrypoint reports the sessions its client shows (decision 23's
-last sentence).
+last sentence). Amended by ADR 0235: the dev shell has Node and CI runs
+the plugin tests and a type check (see the consequence about the
+plugin reducers).
 
 ## Context
 
@@ -415,7 +417,9 @@ are in the research notes and become tests.
   it emits, and the Rust tests feed the same expected snapshots through
   the payload parser and the store. Neither CI nor the dev shell gains
   Node here; that, and a CI run of the plugin tests, is a separate
-  decision (a plugin test runner in its own ADR).
+  decision (a plugin test runner in its own ADR). ADR 0235 made it: the
+  dev shell has Node 24, and CI runs `just plugins` (both test suites
+  and a type check of the opencode plugin).
 - Gaps remain by nature: an Esc interrupt in Claude fires no `Stop`; an
   approval granted fires no event until the tool ends (so `waiting` can
   linger through a long approved tool); a killed process says nothing.
