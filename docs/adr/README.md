@@ -142,7 +142,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0148](0148-opt-in-transcript-search-index.md) | Opt-In Transcript Search Index | Accepted (decided, not built) |
 | [0149](0149-two-level-search-current-and-wider-context.md) | Two-Level Search: Current Context And Wider Context | Accepted (amended by 0157, 0158, 0198) |
 | [0201](0201-tui-a-hand-off-freeze-ends-per-mux-and-at-once-when-the-mux-is-still-there.md) | A Hand-Off Freeze Ends Per Mux, And At Once When The Mux Is Still There | Accepted |
-| [0219](0219-socket-clients-bound-each-request-by-what-it-can-take.md) | Socket Clients Bound Each Request By What It Can Take | Accepted |
+| [0219](0219-socket-clients-bound-each-request-by-what-it-can-take.md) | Socket Clients Bound Each Request By What It Can Take | Accepted (amended) |
 
 ## CLI output and exports
 
