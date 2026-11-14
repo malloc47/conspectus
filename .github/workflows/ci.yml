@@ -116,3 +116,32 @@ jobs:
 
       - name: Export the framework and check it alone
         run: scripts/export-tuikit.sh --self-test "$RUNNER_TEMP/separation-rehearsal"
+
+  # The harness plugins (ADR 0235): the opencode plugin's and the Pi
+  # extension's `node --test` suites, and a type check of each against its
+  # locked dependencies. Same as `just plugins`. Not path-filtered: the
+  # suites replay event scripts under `tests/fixtures/hooks/` that the Rust
+  # tests share. CI does not use Nix, so Node's major version is set here
+  # and in `flake.nix` (`nodejs_24`); change both together.
+  plugins:
+    name: Plugin checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            plugins/opencode-hook/package-lock.json
+            plugins/pi-hook/package-lock.json
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      - name: Test and type-check the plugins
+        run: just plugins

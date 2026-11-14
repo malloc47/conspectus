@@ -49,6 +49,11 @@
           termshot
           tmux
           which
+          # Runs the harness plugins' tests and, through npm, their type
+          # check (ADR 0235, `just plugins`). CI installs Node with
+          # actions/setup-node, since it does not use this flake: keep the
+          # major version in .github/workflows/ci.yml in step with this one.
+          nodejs_24
         ];
 
         darwinInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
@@ -83,6 +88,9 @@
             if command -v backlog >/dev/null 2>&1; then
               printf "  backlog: %s\n" "$(backlog --version 2>/dev/null)"
             fi
+            if command -v node >/dev/null 2>&1; then
+              printf "  node:   %s\n" "$(node --version 2>/dev/null)"
+            fi
             echo
             echo "Common checks:"
             echo "  cargo fmt --all -- --check"
@@ -92,6 +100,7 @@
             echo "  RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps"
             echo "  just tuikit-features  (tuikit alone: clippy and tests with its features off, then with richtext; just check runs it when tuikit or a root build file changed)"
             echo "  just separation-rehearsal --self-test  (tuikit exported with its history and checked with no host file; slow, CI runs it)"
+            echo "  just plugins  (the harness plugins' tests and the opencode plugin's type check; needs the npm registry, so just check leaves it out, CI runs it)"
             echo "  git diff --check"
           '';
         };

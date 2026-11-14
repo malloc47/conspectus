@@ -159,11 +159,33 @@ scratch *args='shell':
 tui-columns:
     UPDATE_TUI_COLUMNS=1 cargo nextest run --all-features --test tui_columns_doc
 
+# Run it after a change under plugins/ or to the event scripts in
+# tests/fixtures/hooks/. `check` leaves it out, since the type check needs
+# the npm registry; CI's `plugins` job runs it (ADR 0235).
+# Both plugins' tests, then both plugins' type checks
+plugins: opencode-plugin-test pi-plugin-test plugins-typecheck
+
+# Each plugin's dependencies come from its own lock file and are installed
+# without running their scripts; the Pi extension's are only its types.
+# `npm ci` then `tsc --noEmit` in each plugin; needs the npm registry
+plugins-typecheck:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "plugins-typecheck: npm not found on PATH; the type check needs Node and npm (the dev shell provides them)" >&2
+        exit 1
+    fi
+    for plugin in plugins/opencode-hook plugins/pi-hook; do
+        echo "plugins-typecheck: $plugin"
+        (cd "$plugin" && npm ci --ignore-scripts --no-audit --no-fund && npm run typecheck)
+    done
+
 # The opencode plugin's live-state tests (ADR 0206): its reducer replays
 # the event scripts in tests/fixtures/hooks/opencode-live/. They need
-# Node 22.6 or later, which the dev shell does not provide. Without it the
+# Node 22.6 or later, which the dev shell provides (ADR 0235). Without it the
 # recipe says so and fails, since a test run that could not run is no
-# pass; `check` does not run it.
+# pass; `check` does not run it, `plugins` does.
+# The opencode plugin's `node --test` suite
 opencode-plugin-test:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -181,9 +203,10 @@ opencode-plugin-test:
 # The Pi extension's live-state tests (ADR 0206): its state machine
 # replays the event scripts in tests/fixtures/hooks/pi-live/, and its
 # handlers run against a stand-in Pi and a stand-in writer. Like the
-# opencode tests they need Node 22.6 or later, which the dev shell does not
-# provide; without it the recipe says so and fails, and `check` does not
-# run it.
+# opencode tests they need Node 22.6 or later, which the dev shell provides
+# (ADR 0235); without it the recipe says so and fails, and `check` does not
+# run it, `plugins` does.
+# The Pi extension's `node --test` suite
 pi-plugin-test:
     #!/usr/bin/env bash
     set -euo pipefail
