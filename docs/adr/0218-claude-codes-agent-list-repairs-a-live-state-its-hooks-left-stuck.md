@@ -21,10 +21,12 @@ nothing (ADR 0143). Follows the template of
 [ADR 0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md).
 Amended by
 [ADR 0222](0222-claude-codes-agent-list-shows-a-known-agent-its-hooks-do-not-report.md)
-(decisions 2, 7, and 10): the poll also runs while a running Claude Code
-agent that discovery knows has no hook entry, and shows that agent's
-state on its session from the poll alone, recorded with no pid so it
-ages out when polls stop.
+(decisions 2, 7, and 10), only when the operator turns it on (`[server]
+live_poll_without_hooks`, off by default): the poll also runs while a
+running Claude Code agent that discovery knows has no hook entry, and
+shows that agent's state on its session from the poll alone, recorded
+with no pid so it ages out when polls stop. With the setting off, the
+decisions below stand as written.
 
 ## Context
 

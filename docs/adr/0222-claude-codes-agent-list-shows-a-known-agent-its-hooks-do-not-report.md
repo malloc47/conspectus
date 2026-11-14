@@ -2,9 +2,10 @@
 
 ## Status
 
-Accepted, awaiting the operator's approval (backlog CSP-871 asks for it;
-until then this record and its code can be reverted together). A
-further application of
+Accepted by the operator on 2026-11-13 as an opt-in, off by default:
+everything below applies only while `[server] live_poll_without_hooks`
+is `true` (see the second amendment at the end). A further application
+of
 [ADR 0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md)
 decision 4, for a hook record that is *absent*. Amends decisions 2, 7,
 and 10 of
@@ -15,8 +16,9 @@ stand unchanged. Uses the read rule of
 as it is and adds a step to the binding of
 [ADR 0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md).
 Adds no program, subcommand, socket, signal, or write path (ADR 0117,
-ADR 0143), and no snapshot field. Amended 2026-11-13 (see the end): an
-entry that names the tmux pane the agent was found in reports it.
+ADR 0143), and no snapshot field. Amended twice on 2026-11-13 (see the
+end): an entry that names the tmux pane the agent was found in reports
+it, and the whole decision is an opt-in, off by default.
 
 ## Context
 
@@ -124,7 +126,8 @@ status` already counts the running agents no store entry describes
 
 - **Keep ADR 0218 decision 7** (no state without a hook entry). Leaves
   hook-less sessions dark though the harness reports their state.
-  Rejected, subject to the operator's approval.
+  Rejected as the only behavior; it stays the default (second
+  amendment).
 - **Bind every listed session the store has no entry for, by session
   id.** States would appear for sessions no process is known for, only
   while some other agent keeps the poller running: the accident decision
@@ -178,3 +181,63 @@ Alternatives considered: matching by the mux alone, which would let one
 agent's entry report every agent in the session's panes; and recording
 each process's pane on its node, a snapshot field for what the probe's
 pane listing already says.
+
+## Amendment: an opt-in, off by default (2026-11-13)
+
+The operator approved this decision on 2026-11-13 as an opt-in, off by
+default, and kept ADR 0218's repair exactly as it was, on by default.
+The reason is what the poll does: while a hook-less agent runs, it
+starts a subprocess every 30 s, and that subprocess is the `claude`
+first on the `PATH` of the daemon or the TUI, which is often a wrapper
+the operator controls (one that sets up credentials or an account, say)
+rather than Claude Code itself. A repair runs rarely and only after the
+operator's own hooks reported a session; a timer that runs the
+operator's wrapper on its own initiative is the operator's call, not a
+default. Everything above stands as it was written, but applies only
+while the setting is on.
+
+1. **The setting.** `[server] live_poll_without_hooks = true` in the
+   user or project config file turns it on; the default is `false`, and
+   a value that is not a boolean is a config diagnostic and leaves it
+   off. It sits under `[server]` because it governs a background
+   cadence, as `[server.intervals]` does, and is read by the processes
+   that poll: `conspectus serve` and a TUI with no daemon, each when it
+   starts. `hook status` reads it too. No environment variable turns it
+   on: the processes that poll are long-lived and already read the
+   config file, and a second way to turn it on would be a second place
+   to look when it is on unexpectedly.
+2. **Off (the default).** The poller runs only as ADR 0218 decision 2
+   says: an unreported agent never makes it run, and no unreported
+   agents are even counted. The binding folds in no poll-only state
+   (decision 3), on the discovery pass or in the TUI's overlay, so a
+   hook-less agent listed by a repair poll of another session still
+   shows nothing: decision 7 of ADR 0218 holds. `hook status` counts no
+   agents shown from the agent list; when running agents of a harness
+   with a poll have no live state, it ends the health line with how many
+   could be shown from their agent list and the setting that shows them.
+3. **On.** Decisions 1 to 6 and the first amendment, unchanged, and
+   `hook status` counts the agents shown from the agent list as
+   decision 6 says.
+4. **The switch wins.** `CONSPECTUS_DISABLE_LIVE_POLL` still builds no
+   poller, whatever the setting says, so `claude` is never run for live
+   state, the repair included.
+5. **Which process decides.** Each process binds by its own
+   configuration: the daemon's snapshot carries the poll, and a TUI
+   binds an agent from it alone only when its own setting is on. The two
+   read the same files, so they agree unless a project file overrides
+   the setting for one of them; turning the setting on or off takes a
+   restart of each.
+
+Consequences: an operator who wants hook-less Claude Code agents shown
+sets one line and restarts `conspectus serve` or the TUI; one who does
+not pays nothing beyond ADR 0218's repair, and `hook status` says the
+setting exists whenever it would show something. The setting carries no
+snapshot field, so `graph.bin` is unchanged.
+
+Alternatives considered: keeping it on by default (rejected for the
+reason above); reverting this decision and its code (rejected: the
+code is tested and costs nothing while off); an environment variable
+beside the config key (rejected in item 1); and recording on each poll
+in the snapshot whether it may show an agent alone, so that a TUI
+follows the daemon's setting, which would need a snapshot format bump
+for a disagreement only a project file can cause.

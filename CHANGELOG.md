@@ -46,17 +46,23 @@ forms, lists, readers, and keys look and behave alike.
   Pi and the installed file is the same whatever they are; run
   `conspectus hook init pi` again to upgrade a version 2 copy, which
   `hook status pi` reports `outdated`.
-- **Claude Code agents with no hooks show their live state** from Claude
-  Code's own agent list (`claude agents --json`), when Conspectus knows
-  the agent's process (the process tree finds agents in tmux sessions'
-  active panes) and no hook has reported for it: untrusted, disabled, or
-  uninstalled hooks. With `conspectus serve` or a TUI running, the list
-  is asked at most every 30 s while such an agent runs, the state shows
-  on its session with `source: harness_poll`, and it is gone when the
-  process ends or the list stops listing it; if the calls stop, it reads
-  quiet after ten minutes of work and `unknown` fifteen minutes after
-  the last call. `hook status claude-code` adds how many agents it
-  shows (`1 agent shown from its agent list`).
+- **Claude Code agents with no hooks can show their live state** from
+  Claude Code's own agent list (`claude agents --json`), once you turn
+  it on with `[server] live_poll_without_hooks = true` (off by default,
+  since each call runs the `claude` first on your `PATH`, often a
+  wrapper of yours). Then, when Conspectus knows the agent's process
+  (the process tree finds agents in tmux sessions' active panes) and no
+  hook has reported for it (untrusted, disabled, or uninstalled hooks),
+  with `conspectus serve` or a TUI running, the list is asked at most
+  every 30 s while such an agent runs, the state shows on its session
+  with `source: harness_poll`, and it is gone when the process ends or
+  the list stops listing it; if the calls stop, it reads quiet after ten
+  minutes of work and `unknown` fifteen minutes after the last call.
+  `hook status claude-code` adds how many agents it shows (`1 agent
+  shown from its agent list`); with the setting off, it names the
+  setting when Claude Code agents run with no live state. The repair of
+  a stuck hook state is unchanged and on by default, and
+  `CONSPECTUS_DISABLE_LIVE_POLL` still turns every call off.
 - **History.** Conspectus remembers every mux, checkout, repo, and PR it
   sees under `$XDG_STATE_HOME/conspectus/history/`, so an entity that
   disappears stays visible as *gone* (decided by a targeted check, never

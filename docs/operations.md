@@ -216,7 +216,8 @@ source needs no hook: the title Codex sets on its tmux pane, which shows
 when it waits on you and when it works
 ([Codex's pane title](#codexs-pane-title)). Another repairs what Claude
 Code's hooks miss: when they go quiet on a session that works or waits,
-Conspectus asks Claude Code's own list of its sessions
+Conspectus asks Claude Code's own list of its sessions, which can also
+show an agent whose hooks report nothing if you turn that on
 ([Claude Code's agent list](#claude-codes-agent-list)).
 Conspectus only watches. It never answers a prompt or types into an
 agent's pane; to act on a waiting agent, attach to its mux as usual.
@@ -551,17 +552,18 @@ the turn reads `working` until your next prompt, and approving a
 permission prompt fires none until the approved tool ends, so the session
 reads `waiting` meanwhile. Claude Code also lists its own sessions with
 their status, `claude agents --json`, and Conspectus asks it to repair
-those two, and to show an agent whose hooks report nothing:
+those two and, if you turn it on, to show an agent whose hooks report
+nothing:
 
 - **When.** A Claude Code session's hooks last said `working` or
   `waiting`, ten seconds have passed with no event, and no earlier call
   has already answered it; at most one call every 30 s. Only
   `conspectus serve` and a TUI with no daemon (at its refresh, in the
   background) make the call. A one-shot command such as `conspectus
-  table` never does, but shows a running daemon's answer. It also runs,
-  at most every 30 s, while a Claude Code agent runs whose hooks report
-  nothing (see below). Nothing runs while every Claude Code agent
-  reports through its hooks and is ready or keeps reporting.
+  table` never does, but shows a running daemon's answer. With the
+  setting below on, it also runs, at most every 30 s, while a Claude Code
+  agent runs whose hooks report nothing. Nothing runs while every Claude
+  Code agent reports through its hooks and is ready or keeps reporting.
 - **What it reads.** Each session's status: busy reads `working`, waiting
   reads `waiting` (detail `permission` for a permission prompt or a
   sandbox request, `input` for anything else), idle reads `ready` with no
@@ -575,22 +577,39 @@ those two, and to show an agent whose hooks report nothing:
   at once. A hook's `ready`, `error`, `compacting`, and `exited` never
   change on the list's account.
 - **An agent whose hooks report nothing** (untrusted, turned off, or not
-  installed) shows what the list says, with `source` `harness_poll`, when
-  Conspectus knows its process: an agent process the process tree found
-  (in a tmux session's active pane) that no hook has reported for. The
-  state shows on that agent's session and is refreshed by the next call,
-  30 s later, for as long as the agent runs without hooks. It is gone as
-  soon as the process ends or the list stops listing it. If the calls
+  installed), only once you turn it on (below), shows what the list says,
+  with `source` `harness_poll`, when Conspectus knows its process: an
+  agent process the process tree found (in a tmux session's active pane)
+  that no hook has reported for. The state shows on that agent's session
+  and is refreshed by the next call, 30 s later, for as long as the agent
+  runs without hooks. It is gone as soon as the process ends or the list
+  stops listing it. If the calls
   stop (they fail, or `claude` is gone), it ages like any state whose
   process cannot be checked: `working` goes quiet after ten minutes, and
   every state reads `unknown` fifteen minutes after the last call that
   listed it. Hooks still say more (whether a turn finished or was
   interrupted, which question waits), and once they report, they take
   over.
+- **Turning it on for agents without hooks.** It is off by default,
+  because while such an agent runs it starts `claude`, the one first on
+  your `PATH`, every 30 s, and that is often a wrapper of yours rather
+  than Claude Code itself. Turn it on in the
+  [configuration file](#configuration-file) and restart `conspectus
+  serve` or the TUI:
+
+  ```toml
+  [server]
+  live_poll_without_hooks = true
+  ```
+
+  While it is off, the repair above still runs, a Claude Code agent with
+  no hooks shows no state, and `hook status claude-code` ends its health
+  line with `1 agent could be shown from its agent list` and the setting
+  when such an agent runs.
 - **What it costs.** About half a second of one CPU per call. While an
   agent works through a long tool or waits on you, that is one call every
-  30 s; an interrupted session left idle costs one call; an agent with no
-  hooks costs one call every 30 s while it runs.
+  30 s; an interrupted session left idle costs one call; with the setting
+  on, an agent with no hooks costs one call every 30 s while it runs.
 - **What it keeps.** Each listed session's pid, session id, and status,
   read in memory as the output arrives. Its name (which can be a title
   made from your prompt), its directory, and every other field are
@@ -599,7 +618,8 @@ those two, and to show an agent whose hooks report nothing:
   Conspectus runs it with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
   so the call reaches no network, and kills it after 3 s.
 - **Turning it off.** Set `CONSPECTUS_DISABLE_LIVE_POLL` where
-  `conspectus serve` or the TUI starts.
+  `conspectus serve` or the TUI starts. It turns off the repair too, and
+  wins over `live_poll_without_hooks`.
 
 What it cannot see:
 
@@ -609,6 +629,9 @@ What it cannot see:
 - **A session whose hooks recorded another process** than the one Claude
   Code lists (the pid each records), unless both name the same session
   id.
+- **An agent with no hooks while `live_poll_without_hooks` is off** (the
+  default): it shows nothing, and `hook status` says how many the list
+  could show.
 - **An agent with no hooks whose process Conspectus does not know**,
   such as one outside tmux or in a pane that is not active: it shows
   nothing, and `hook status` still says `silent`.
@@ -928,10 +951,15 @@ against the running processes. It starts no process and asks no daemon.
 For Codex, any of them may end with `; 1 agent shown from its pane title`
 (or `2 agents ... their pane titles`): agents the saved graph shows from
 [Codex's pane title](#codexs-pane-title), with or without hooks. For
-Claude Code, `; 1 agent shown from its agent list` (or `2 agents ...
-their agent list`) counts the agents the saved graph shows from
+Claude Code with `[server] live_poll_without_hooks` on, `; 1 agent shown
+from its agent list` (or `2 agents ... their agent list`) counts the
+agents the saved graph shows from
 [Claude Code's agent list](#claude-codes-agent-list), repaired or
-reported by the list alone.
+reported by the list alone. With it off (the default) that count is left
+out, and when Claude Code agents run with no live state the line ends
+with ``; 1 agent could be shown from its agent list: set
+`live_poll_without_hooks = true` under `[server]` in the config file``
+(or `2 agents ... their agent list: ...`).
 
 ### Troubleshooting live state
 
@@ -964,6 +992,10 @@ Start from the health label:
     `settings.json`.
   - The lines above the health line say `partial` or `outdated`: run
     `conspectus hook init <harness>` again.
+  - Claude Code without hooks there: its agent list can show the agent
+    instead, once you turn on `live_poll_without_hooks` (see
+    [Claude Code's agent list](#claude-codes-agent-list)); the message
+    names the setting while it is off.
   - Claude Code and Codex: the command the entries run no longer
     exists, as when the install recorded a path a package upgrade
     removed. Run `conspectus hook init <harness> --command "conspectus
@@ -1048,6 +1080,9 @@ filters = { harness = ["codex"], max_age = "7d", mux_state = ["attached"] }
 [tui.detail]
 show_edge_meta = false      # provenance · confidence · state on link rows
 
+[server]
+live_poll_without_hooks = false  # also ask Claude Code's agent list for agents without hooks (ADR 0222)
+
 [server.intervals]          # conspectus serve cadence; also the CLI's warm-start TTL (ADR 0079)
 harness = "5s"
 mux = "5s"
@@ -1125,6 +1160,11 @@ teardown_grace = "3s"
   A mux a rebuild ran in, or one recorded without a session id, also waits
   for the refresh. Each mux clears on its own: attaching another mux right
   away never keeps the first one spinning.
+- **Agents without hooks:** `[server] live_poll_without_hooks` (default
+  `false`) lets `conspectus serve` and a TUI with no daemon ask Claude
+  Code's agent list every 30 s while a Claude Code agent runs whose hooks
+  report nothing, and show its state; each reads it when it starts. See
+  [Claude Code's agent list](#claude-codes-agent-list).
 - **Forge concurrency:** `[forge] concurrency` (default 4) sets how many
   `gh` calls run at once. Higher fetches faster but can trip a forge's
   rate limits.
