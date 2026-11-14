@@ -4083,6 +4083,124 @@ fn mux_view_header_counts_sessions_in_visible_muxes() {
     );
 }
 
+/// Under a narrowing filter the PRs view's `N/M sessions` counts each
+/// session it lists once, though it lists a checkout's sessions under
+/// each pull request of the checkout's branch, as its group header does.
+#[test]
+fn prs_view_header_counts_a_session_under_two_pull_requests_once() {
+    use crate::model::{
+        BranchId, BranchNode, Confidence, ForgePrId, ForgePrNode, Freshness, GraphLink,
+        LinkEndpoint, LinkState, Provenance, RelationKind, SourceMetadata,
+    };
+    let repo = RepoId::new("/r/.git");
+    let checkout = CheckoutId::new(repo.clone(), "/r");
+    let branch = BranchId::new(repo.clone(), "refs/heads/feature");
+    let mut snapshot = GraphSnapshot::empty();
+    let mut repo_node = RepoNode::new(repo);
+    repo_node.common_dir = "/r/.git".to_string();
+    snapshot.nodes.push(GraphNode::Repo(repo_node));
+    snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+        id: checkout.clone(),
+        root: "/r".to_string(),
+        git_dir: None,
+        current_branch: Some(branch.clone()),
+        worktree: None,
+        head_commit: None,
+    }));
+    snapshot.nodes.push(GraphNode::Branch(BranchNode {
+        id: branch.clone(),
+        refname: "refs/heads/feature".to_string(),
+        current_commit: None,
+        upstream: None,
+    }));
+    let link = |id: String, source: NodeId, target: NodeId, relation| GraphLink {
+        id,
+        source,
+        target: LinkEndpoint::Node { id: target },
+        relation,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata::default(),
+        state: LinkState::Active,
+    };
+    snapshot.candidate_links.push(link(
+        "checked-out".to_string(),
+        NodeId::Checkout(checkout),
+        NodeId::Branch(branch.clone()),
+        RelationKind::CheckedOutBranch,
+    ));
+    // Two open pull requests from the checkout's branch.
+    for number in [1, 2] {
+        let id = ForgePrId::new("github", "github.com", "o", "r", number);
+        snapshot.nodes.push(GraphNode::ForgePr(ForgePrNode {
+            id: id.clone(),
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            number,
+            state: Some("OPEN".to_string()),
+            title: None,
+            url: None,
+            updated_epoch: None,
+            is_draft: false,
+            head_ref: Some("feature".to_string()),
+        }));
+        snapshot.candidate_links.push(link(
+            format!("pr-branch-{number}"),
+            NodeId::ForgePr(id),
+            NodeId::Branch(branch.clone()),
+            RelationKind::BranchHasForgePr,
+        ));
+    }
+    // A Claude Code session in the checkout, and a Codex one elsewhere.
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", "in-checkout"),
+            "claude-code".to_string(),
+        )
+        .with_cwd("/r".to_string()),
+    ));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "elsewhere"),
+            "codex".to_string(),
+        )
+        .with_cwd("/elsewhere".to_string()),
+    ));
+    let snapshot = resolve_snapshot(snapshot);
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Prs;
+    let mut app = App::new(config);
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+        &snapshot, &app,
+    ));
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app.update(Msg::SetFilter(RowFilter {
+        harness: Some(crate::filter::HarnessFilter::from_values(["claude-code"])),
+        ..RowFilter::default()
+    }));
+    let listed = app
+        .tree()
+        .rows
+        .iter()
+        .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
+        .count();
+    assert_eq!(listed, 2, "the session is listed under each pull request");
+    let header = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 120, 12)))
+        .lines()
+        .next()
+        .expect("header line")
+        .to_string();
+    assert!(header.contains("1/2 sessions"), "{header}");
+}
+
 /// Under a narrowing filter the Mux view's `N/M sessions` counts the
 /// sessions its listed muxes hold, each once: their listed agents and,
 /// while the agent state is the only session predicate, the sessions

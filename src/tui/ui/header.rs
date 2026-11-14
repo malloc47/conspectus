@@ -192,7 +192,8 @@ pub(super) fn format_count_with_filtered(visible: usize, total: usize) -> String
 /// than there are, so it never reads as if something were filtered out
 /// when nothing was.
 ///
-/// - Sessions lists the sessions themselves: count its session rows.
+/// - Sessions lists the sessions themselves: count the sessions its
+///   session rows stand for.
 /// - Search lists the sessions the search it shows found, as session
 ///   rows or, in the flat listing, as the hits that name them. Before
 ///   any search it lists nothing and hides nothing: the plain total.
@@ -203,18 +204,27 @@ pub(super) fn format_count_with_filtered(visible: usize, total: usize) -> String
 ///   filter narrows them, then the sessions their visible rows hold: in
 ///   the Mux view each mux's listed agents and, when it is listed for
 ///   what its mark counts, the counted sessions no link attaches
-///   ([`MuxSessionRow::held_sessions`](crate::tui::rows::MuxSessionRow::held_sessions)).
+///   ([`MuxSessionRow::held_sessions`](crate::tui::rows::MuxSessionRow::held_sessions)),
+///   and in the PRs view the sessions its session rows stand for.
 /// - Pinned and History list entities of every kind and ignore the
 ///   filter: the plain total.
+///
+/// A session counts once however many rows list it, as a group header
+/// counts it: the PRs view lists a checkout's sessions under each of its
+/// branch's pull requests.
 pub(super) fn visible_agent_session_count(app: &App, total: usize) -> usize {
     let rows = &app.tree().rows;
-    let session_rows = || {
+    let listed_sessions = || {
         rows.iter()
-            .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
-            .count()
+            .filter_map(|row| match &row.kind {
+                RowKind::AgentSession(session) => Some(&session.primary_node),
+                _ => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
     };
     match app.active_view() {
-        View::Sessions => session_rows(),
+        View::Sessions => listed_sessions(),
         View::Search if app.search_history().viewed().is_none() => total,
         View::Search => {
             let mut found = std::collections::BTreeSet::new();
@@ -235,7 +245,7 @@ pub(super) fn visible_agent_session_count(app: &App, total: usize) -> usize {
                 _ => None,
             })
             .sum(),
-        View::Prs => session_rows(),
+        View::Prs => listed_sessions(),
         View::Pinned | View::History => total,
     }
 }

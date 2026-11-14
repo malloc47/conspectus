@@ -916,7 +916,9 @@ forms, lists, readers, and keys look and behave alike.
   checkout with two pull requests on one branch lists the branch's
   sessions under each, and its header's `(N)` counted them twice, so it
   could read `(2)  ! 1` over one waiting session. `(N)` now counts each
-  session once, as the waiting count beside it does.
+  session once, as the waiting count beside it does, and so does the
+  header line's `N/M sessions` under a filter, which could read `8/11`
+  over four listed sessions.
 - **`conspectus table mux --contains TEXT` lists the muxes whose
   sessions mention the text.** It looked each attached session's
   transcript up by the wrong key, so no session matched and the table

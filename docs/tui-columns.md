@@ -749,6 +749,12 @@ Each ends with the count of sessions beneath its PRs, the waiting count
 of those sessions (a session under two of the group's PRs counts once),
 and `▲` when one of them has an ambiguous mux link.
 
+Unfiltered, the header line counts every session. Under a narrowing
+filter, or a PR state or branch filter, its `matching/total sessions`
+counts the sessions listed beneath the PRs, each once: a session under
+two pull requests of its checkout's branch counts once, as in its group
+header.
+
 ### PR row
 
 | # | Cell | Source | Condition | Width and style |
