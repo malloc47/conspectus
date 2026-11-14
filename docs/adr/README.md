@@ -258,9 +258,10 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0211](0211-tui-the-header-counts-every-agent-waiting-on-you.md) | The Header Counts Every Agent Waiting On You | Accepted |
 | [0212](0212-tui-a-session-row-shows-its-running-subagents-after-its-label.md) | A Session Row Shows Its Running Subagents After Its Label | Accepted |
 | [0213](0213-tui-the-detail-pane-says-what-a-nodes-agents-are-doing.md) | The Detail Pane Says What A Node's Agents Are Doing | Accepted (amended by 0214) |
-| [0214](0214-tui-a-finished-turn-reads-unseen-until-you-look-at-it.md) | A Finished Turn Reads Unseen Until You Look At It | Accepted |
+| [0214](0214-tui-a-finished-turn-reads-unseen-until-you-look-at-it.md) | A Finished Turn Reads Unseen Until You Look At It | Accepted (amended by 0231) |
 | [0215](0215-tui-rows-float-and-filter-by-live-state-only-when-the-tree-is-built.md) | Rows Float And Filter By Live State Only When The Tree Is Built | Accepted (amended) |
 | [0216](0216-tui-one-key-jumps-to-the-agent-that-has-waited-longest.md) | One Key Jumps To The Agent That Has Waited Longest | Accepted |
+| [0231](0231-tui-a-turn-watched-in-an-attached-client-reads-seen-when-the-client-comes-back.md) | A Turn Watched In An Attached Client Reads Seen When The Client Comes Back | Accepted |
 
 ## Transcript viewer
 

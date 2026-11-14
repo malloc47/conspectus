@@ -6,7 +6,11 @@ Accepted. Carries out the operator's decision 6 in section 7.1 of the
 live-state plan (`docs/plans/live-state/README.md`; the options are in
 section 5 of `tui-options.md` there): seen and unseen for `ready`,
 derived read-only, bold for unseen and plain for seen, the same shape,
-nothing persisted. Amends
+nothing persisted. Amended by
+[ADR 0231](0231-tui-a-turn-watched-in-an-attached-client-reads-seen-when-the-client-comes-back.md):
+a turn that ended while the client watched its mux reads seen when the
+client comes back to the TUI's session (decision 1, and the first
+consequence). Amends
 [ADR 0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md)
 decision 2 (the ready mark gains a weight) and
 [ADR 0213](0213-tui-the-detail-pane-says-what-a-nodes-agents-are-doing.md)
