@@ -32,12 +32,14 @@ that process.
 
 <sub>The sessions view on the built-in showcase world (`just screenshots`
 renders these images). Sessions are grouped under the workspace and repo they
-belong to; `⊸` marks a session linked to a tmux session you can attach to,
-and `∘` one that isn't. The right pane shows the selected session's fields,
-its relationships, and its conversation in the Preview. The `project` group is
-flagged (`▲`, drawn as a box by the screenshot font) because two sessions
-could own one tmux session, so Conspectus lists both under "Other" instead of
-guessing.</sub>
+belong to. Before the link mark, the live-state mark says what the agent is
+doing: `!` waiting on you, `»` working, `›` ready for a prompt; the header's
+`! 4` and a group's `! N` count the agents waiting on you. `⊸` marks a session
+linked to a tmux session you can attach to, and `∘` one that isn't. The right
+pane shows the selected session's fields, its live state among them, its
+relationships, and its conversation in the Preview. The `project` group is
+flagged (`▲`) because two sessions could own one tmux session, so Conspectus
+lists both under "Other" instead of guessing.</sub>
 
 ## Why Conspectus exists
 
@@ -355,7 +357,7 @@ conspectus serve                   # keep the graph warm in the background
 | **Pinned pins** | **Gone entities, ready to rebuild** |
 | ![The Pinned view: pins for a live mux, a gone mux, a session, a removed worktree, and a merged PR, grouped by project, each with its status and age](docs/images/pinned-view.png) | ![The History view: gone muxes and worktrees with how long ago they were last seen](docs/images/history-view.png) |
 | **Find a session by what was said in it** | |
-| ![The Search view: sessions that mention a word, ranked by the number of matching turns, each with its best snippet and the match picked out](docs/images/search-view.png) | |
+| ![The Search view: sessions and a tmux pane that mention a word, ranked by the number of matching turns, with the match picked out in the Preview](docs/images/search-view.png) | |
 
 ### Scriptable CLI
 
