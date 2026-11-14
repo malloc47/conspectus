@@ -509,10 +509,11 @@ Where the build differs from, or settles, the draft above:
 - **Plugin reducers are verified with `node --test`.** The opencode reducer
   and the Pi state machine are TypeScript modules with no harness imports,
   tested by `just opencode-plugin-test` and `just pi-plugin-test` (Node
-  22.6 or later, run by hand). The scripted event fixtures are shared: the
+  22.6 or later). The scripted event fixtures are shared: the
   TypeScript tests replay them through the reducer, and the Rust tests
   feed the expected snapshots through the payload parser and the store.
-  Neither CI nor the dev shell runs the plugin tests yet (CSP-849).
+  The dev shell has Node and CI runs the tests and a type check of both
+  plugins (`just plugins`, ADR 0235, CSP-849).
 - **The writer parses only what it reads.** `hook write` parses stdin
   against the fields its adapter names (`HarnessAdapter::hook_payload_fields`)
   and skips every other value unbuilt, so a large `tool_response` is never

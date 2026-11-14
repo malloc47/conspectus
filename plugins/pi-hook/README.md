@@ -155,6 +155,13 @@ runs its handlers against a stand-in Pi and a stand-in writer. The Rust
 tests feed the same scripts' payloads through Conspectus's parser and
 store.
 
+`just plugins` also type-checks `conspectus-hook.ts` against Pi's types
+(`npm ci` and `tsc --noEmit` in this directory), and CI runs it on every
+change. `package.json`, `tsconfig.json`, and the lock file hold only that
+check's dev dependencies (Pi's package, for its types); the extension is
+still the one file `conspectus hook init pi` copies, and it imports
+nothing from Pi at run time.
+
 ## Opt out
 
 ```sh

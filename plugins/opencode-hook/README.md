@@ -186,11 +186,14 @@ entry only in `cli.json` reports only the sessions a client shows.
 ## Development
 
 ```sh
-npm run typecheck   # needs npm install
+npm run typecheck   # needs npm install (npm ci, to match the lock file)
 npm test            # Node 22.6 or later; no install needed
 ```
 
-`npm test` (or `just opencode-plugin-test` from the repository root)
+From the repository root, `just plugins` runs both plugins' tests and type
+checks (`npm ci` and `tsc --noEmit` in each), and the dev shell provides Node.
+CI runs it on every change, so a test or a type error fails the `plugins` job.
+`npm test` (or `just opencode-plugin-test`)
 replays the event scripts in
 [`tests/fixtures/hooks/opencode-live/`](../../tests/fixtures/hooks/opencode-live/)
 through `src/live.ts` and compares every payload it emits.
@@ -198,8 +201,8 @@ through `src/live.ts` and compares every payload it emits.
 stand-ins for opencode's plugin context and for `conspectus`; it needs
 Node 22.15 or later and is skipped on an older one. The Rust tests
 feed the same payloads through `conspectus hook write opencode`'s parser
-and the live-state store. CI runs neither the build nor these tests, so
-run both after a change here.
+and the live-state store. CI does not build the plugin (`dist/` is not
+checked in or published); it type-checks `src/` with `tsc --noEmit`.
 
 ## Implementation notes
 

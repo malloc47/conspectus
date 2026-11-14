@@ -705,10 +705,15 @@ the work moved from building to hardening.
 ## Development
 
 ```sh
-nix develop    # Rust toolchain, cargo-nextest, just, tmux, gh, termshot, backlog, strace
+nix develop    # Rust toolchain, cargo-nextest, just, tmux, gh, termshot, backlog, strace, Node
 just check     # fmt, clippy -D warnings, nextest, tuikit alone with its features off (when it changed), rustdoc, git diff --check
 just test      # cargo test, which CI runs besides nextest: each test binary's tests share a process
+just plugins   # the opencode plugin's and the Pi extension's tests and type checks; needs the npm registry
 ```
+
+`just check` needs neither Node nor the network. `just plugins` is its own
+recipe, which CI runs as a separate job: run it after a change under
+`plugins/` or to the event scripts in `tests/fixtures/hooks/`.
 
 Outside the shell, `scripts/dev-env.sh COMMAND` runs a command in the same
 environment, loaded from a copy kept under `target/dev-env/` (about 0.05 s
