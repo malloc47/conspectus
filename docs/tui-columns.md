@@ -317,8 +317,10 @@ the entity's last activity, not when its live state began.
   last mux no longer runs. When the label already is that mux's name it
   reads `(mux stopped)`. Sessions view only.
 - **Counts.** A group header ends with `(N)`: the number of agent
-  sessions anywhere beneath it, shown only when N is more than zero.
-  Pinned and History buckets have none.
+  sessions anywhere beneath it, each counted once however many rows
+  beneath the header list it (a session under two pull requests of one
+  checkout counts once, as in the waiting count), shown only when N is
+  more than zero. Pinned and History buckets have none.
 - **Waiting count.** After `(N)`, `! N` in the waiting mark's yellow:
   how many agents beneath the header wait on you, shown only when N is
   more than zero. Each agent counts once however many rows beneath the

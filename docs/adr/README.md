@@ -254,7 +254,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0200](0200-tui-the-application-runtime-stays-in-conspectus-until-a-second-program-needs-it.md) | The Application Runtime Stays In Conspectus Until A Second Program Needs It | Accepted; framework-owned in part |
 | [0202](0202-tui-each-view-reopens-with-the-rows-it-had-expanded-and-selected.md) | Each View Reopens With The Rows It Had Expanded And Selected | Accepted |
 | [0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md) | Session And Mux Rows Show Live State In A One-Cell Column After The Age | Accepted (amended by 0212, 0214, 0215) |
-| [0210](0210-tui-group-headers-count-the-agents-waiting-beneath-them.md) | Group Headers Count The Agents Waiting Beneath Them | Accepted |
+| [0210](0210-tui-group-headers-count-the-agents-waiting-beneath-them.md) | Group Headers Count The Agents Waiting Beneath Them | Accepted (amended) |
 | [0211](0211-tui-the-header-counts-every-agent-waiting-on-you.md) | The Header Counts Every Agent Waiting On You | Accepted |
 | [0212](0212-tui-a-session-row-shows-its-running-subagents-after-its-label.md) | A Session Row Shows Its Running Subagents After Its Label | Accepted |
 | [0213](0213-tui-the-detail-pane-says-what-a-nodes-agents-are-doing.md) | The Detail Pane Says What A Node's Agents Are Doing | Accepted (amended by 0214) |

@@ -447,11 +447,15 @@ pub(super) fn empty_left_panel(app: &App) -> EmptyState {
 
 /// What a group header counts: the sessions beneath it, how many of
 /// them have an ambiguous mux link, and how many agents beneath it wait
-/// on the operator. Counts walk the full row tree (not just the rows
-/// that show) so a collapsed group still says what is inside.
+/// on the operator, each once however many rows beneath the header list
+/// it. Counts walk the full row tree (not just the rows that show) so a
+/// collapsed group still says what is inside.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct GroupSummary {
+    /// The sessions listed beneath the header, each once: a session
+    /// under two pull requests of one checkout counts once.
     pub(super) agents: usize,
+    /// How many of those sessions have an ambiguous mux link.
     pub(super) ambiguous: usize,
     /// The agents beneath the header waiting on the operator, each once
     /// ([`waiting_of`]).
@@ -461,9 +465,10 @@ pub(super) struct GroupSummary {
 /// Walk the row tree once and compute the [`GroupSummary`] for every
 /// group row. Each group's summary aggregates every row that sits below
 /// it in the flat tree (continuous depth > group depth) until the next
-/// sibling-or-shallower row: its `AgentSession` rows for the session
-/// count and the warning, and the agents those rows (or, in the Mux
-/// view, its muxes) stand for for the waiting count.
+/// sibling-or-shallower row: the sessions its `AgentSession` rows stand
+/// for, each once, for the session count and the warning, and the agents
+/// those rows (or, in the Mux view, its muxes) stand for for the waiting
+/// count.
 pub(super) fn compute_group_summaries(
     tree: &crate::tui::rows::RowTree,
 ) -> std::collections::HashMap<RowId, GroupSummary> {
@@ -475,12 +480,15 @@ pub(super) fn compute_group_summaries(
         }
         let parent_depth = row.depth;
         let mut summary = GroupSummary::default();
+        let mut sessions = std::collections::HashSet::new();
         let mut counted = std::collections::HashSet::new();
         for child in &rows[i + 1..] {
             if child.depth <= parent_depth {
                 break;
             }
-            if let RowKind::AgentSession(session) = &child.kind {
+            if let RowKind::AgentSession(session) = &child.kind
+                && sessions.insert(&session.primary_node)
+            {
                 summary.agents += 1;
                 if matches!(session.mux_state, MuxIndicator::Ambiguous { .. }) {
                     summary.ambiguous += 1;

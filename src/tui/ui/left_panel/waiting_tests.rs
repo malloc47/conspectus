@@ -145,8 +145,8 @@ fn text(line: &Line<'_>) -> String {
 fn a_header_counts_the_sessions_beneath_it_that_wait_each_once() {
     use LiveState::{Ready, Waiting, Working};
     // The same waiting session listed twice beneath one header (under two
-    // pull requests of one checkout) counts once; the session count, which
-    // counts rows, is unchanged by this rule.
+    // pull requests of one checkout) counts once, in the waiting count and
+    // in the session count alike.
     let rows = vec![
         header("~/src/project", 0),
         session("aaaa", 2, Some(Waiting)),
@@ -161,8 +161,33 @@ fn a_header_counts_the_sessions_beneath_it_that_wait_each_once() {
             panic!("one header");
         };
         assert_eq!(summary.waiting, 2, "{view:?}");
-        assert_eq!(summary.agents, 6, "{view:?}");
+        assert_eq!(summary.agents, 5, "{view:?}");
     }
+}
+
+#[test]
+fn a_session_listed_under_two_pull_requests_counts_once_in_its_header() {
+    let theme = Theme::default();
+    let mut ambiguous = session("aaaa", 2, Some(LiveState::Waiting));
+    if let RowKind::AgentSession(session) = &mut ambiguous.kind {
+        session.mux_state = MuxIndicator::Ambiguous { candidate_count: 2 };
+    }
+    // Under each of a checkout's two pull requests on one branch, and so
+    // twice beneath the checkout's header and its repo's.
+    let rows = vec![
+        header("~/src/project", 0),
+        header("~/src/project/checkout", 1),
+        ambiguous.clone(),
+        ambiguous,
+    ];
+    let found = summaries(ViewLabel::Prs, rows.clone());
+    for summary in &found {
+        assert_eq!(summary.agents, 1, "{found:?}");
+        assert_eq!(summary.waiting, 1, "{found:?}");
+        assert_eq!(summary.ambiguous, 1, "{found:?}");
+    }
+    let drawn = text(&lay_out_in(ViewLabel::Prs, &rows, &theme, 0, 120, None)[0]);
+    assert!(drawn.trim_end().ends_with("(1)  ! 1  ▲"), "{drawn:?}");
 }
 
 #[test]
@@ -206,7 +231,10 @@ fn a_mux_view_header_counts_the_agents_its_muxes_host() {
     ];
     let found = summaries(ViewLabel::Mux, rows);
     assert_eq!(found[0].waiting, 4);
-    assert_eq!(found[0].agents, 3, "the session count still counts rows");
+    assert_eq!(
+        found[0].agents, 3,
+        "the session count counts the listed sessions"
+    );
     assert_eq!(found[1].waiting, 1);
     assert_eq!(found[1].agents, 0, "no session row, no session count");
 }

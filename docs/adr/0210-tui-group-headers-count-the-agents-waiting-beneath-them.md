@@ -10,7 +10,9 @@ decision 3, whose precedence this record keeps). Amends
 [ADR 0072](0072-mux-indicator-attachable-binary.md): a group row ends
 with its session count, then the waiting count, then the ambiguity
 glyph. Reads the row models' live values as ADR 0209 decision 7 does;
-adds no theme role (ADR 0153) and no glyph (ADR 0154).
+adds no theme role (ADR 0153) and no glyph (ADR 0154). Amended (see
+the amendment below): `(N)` counts each session once, as the waiting
+count does.
 
 ## Context
 
@@ -98,3 +100,23 @@ mux (its preferred one). Pinned and History buckets carry no counts.
 - *Does the warning still need a session count?* Yes, unchanged: `▲`
   says a listed session's mux link is ambiguous, and shows only with
   `(N)`.
+
+## Amendment: the session count counts each session once (2026-11-13)
+
+Consequence 3 kept `(N)` counting rows, so a session listed twice
+beneath one header (a PRs view checkout with two pull requests on one
+branch lists the branch's sessions under each) counted twice there and
+once in the waiting count beside it, and a header could read `(2)  ! 1`
+over one waiting session. The two counts now agree on what one session
+is. Everything above stands except as follows.
+
+1. **`(N)` counts sessions, each once.** A header counts the sessions
+   its session rows stand for, each once however many rows beneath it
+   list it, the way decision 1 counts waiting agents. A session listed
+   under two sibling headers still counts in each. The `▲` warning reads
+   the same set: it shows while one of those sessions has an ambiguous
+   mux link.
+2. **Nothing else moves.** A header whose sessions are each listed once
+   beneath it reads as before, so the showcase's frames are unchanged.
+   In the Mux view `(N)` still counts the agents nested under its muxes,
+   so a header can still wait without a `(N)` (decision 2).

@@ -470,9 +470,9 @@ impl LeftColumns<'_> {
 impl LeftColumns<'_> {
     /// A group header's cells after its prefix: the bold label, the path
     /// or members (with `(cwd)` on the launch directory's group), the
-    /// count of sessions beneath it, `! N` when N agents beneath it wait
-    /// on the operator, and `▲` when one of the sessions has an ambiguous
-    /// mux link.
+    /// count of sessions beneath it (each once), `! N` when N agents
+    /// beneath it wait on the operator, and `▲` when one of the sessions
+    /// has an ambiguous mux link.
     fn header_cells(&self, group: &GroupRow, summary: GroupSummary) -> Cells<Col> {
         let theme = self.theme;
         let cwd_style = Style::default()
