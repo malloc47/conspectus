@@ -913,6 +913,15 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **Claude Code's `CLAUDE_CONFIG_DIR` is honored.** Claude Code keeps
+  its settings and transcripts there instead of `~/.claude` when it is
+  set, but `hook init|status|remove claude-code` edited
+  `~/.claude/settings.json` and discovery looked for sessions under
+  `~/.claude`, so the hooks never ran and the sessions never showed.
+  Both now use `$CLAUDE_CONFIG_DIR` when it is set and not empty, from
+  one rule. `CONSPECTUS_CLAUDE_CODE_STATE` still points discovery
+  elsewhere and wins, but it no longer has to stand in for the variable,
+  and it does not move the hooks, which go where Claude Code reads them.
 - **A mux pane's preview is captured in the background.** Moving onto a
   live mux row ran `tmux capture-pane` before the next frame (5 to 10 ms
   on a healthy server), so scrolling the mux view stacked those waits on

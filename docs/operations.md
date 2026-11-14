@@ -36,16 +36,26 @@ explicit absolute path. The override path is used verbatim, so it can
 point at a fixture directory in tests or a non-standard install
 location.
 
-| Variable                       | Default                       | Provider     |
-| ------------------------------ | ----------------------------- | ------------ |
-| `CONSPECTUS_CODEX_STATE`       | `$HOME/.codex`                | codex        |
-| `CONSPECTUS_CLAUDE_CODE_STATE` | `$HOME/.claude`               | claude-code  |
-| `CONSPECTUS_OPENCODE_STATE`    | `$HOME/.local/share/opencode` | opencode     |
-| `CONSPECTUS_PI_STATE`          | `$HOME/.pi/agent/sessions`    | pi           |
+| Variable                       | Default                                    | Provider     |
+| ------------------------------ | ------------------------------------------ | ------------ |
+| `CONSPECTUS_CODEX_STATE`       | `$HOME/.codex`                             | codex        |
+| `CONSPECTUS_CLAUDE_CODE_STATE` | `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude` | claude-code  |
+| `CONSPECTUS_OPENCODE_STATE`    | `$HOME/.local/share/opencode`              | opencode     |
+| `CONSPECTUS_PI_STATE`          | `$HOME/.pi/agent/sessions`                 | pi           |
 
 The aider adapter is per-repo rather than per-state-root, so it
 walks scan roots looking for `.aider*` markers and is not gated by an
 environment variable.
+
+When `CONSPECTUS_CLAUDE_CODE_STATE` is unset, the claude-code provider
+follows Claude Code's own `CLAUDE_CONFIG_DIR`, which moves `~/.claude`
+(settings, transcripts under `projects/`, and `sessions/`), and
+`conspectus hook init|status|remove claude-code` edit `settings.json` in
+that same directory (ADR 0239). The `CONSPECTUS_` override moves
+discovery alone: Claude Code never reads it, so the hooks stay where
+Claude Code does. Set `CLAUDE_CONFIG_DIR` alike in the shell that runs
+`hook init`, the one Claude Code starts from, and the one that starts
+`conspectus serve`. An empty value counts as unset.
 
 When `CONSPECTUS_PI_STATE` is unset, the pi provider follows Pi's own
 settings (ADR 0121): `PI_CODING_AGENT_SESSION_DIR`, then an absolute
@@ -105,6 +115,8 @@ conspectus hook init codex         # 11 hook entries in ~/.codex/config.toml
 conspectus hook init pi            # <agent-dir>/extensions/conspectus-hook.ts
 ```
 
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `PI_CODING_AGENT_DIR` move the
+user-scope files, as they move each harness's own directory.
 `--scope project` installs into the current project instead
 (`.claude/`, `.codex/`, `.pi/extensions/`). The commands are idempotent.
 A settings file that is a symlink, as a dotfile manager leaves it, is
@@ -161,7 +173,8 @@ matcher `hook init` uses where it uses one; for session start:
 }
 ```
 
-Place that in `~/.claude/settings.json` or a local Claude Code
+Place that in `settings.json` in Claude Code's directory
+(`$CLAUDE_CONFIG_DIR`, else `~/.claude`) or a local Claude Code
 settings file. The subcommand reads Claude's hook JSON from stdin,
 records `session_id`, `transcript_path`, `cwd`, and the tmux session
 and pane the hook runs in (`TMUX_PANE`'s) when available, then exits
@@ -1004,11 +1017,10 @@ Start from the health label:
     is not turning hooks off.
   - Codex: trust the Conspectus entries in `/hooks`, again after any
     `hook init` that changed them.
-  - Claude Code with `CLAUDE_CONFIG_DIR` set reads its settings from
-    that directory, but `hook init claude-code` writes
-    `~/.claude/settings.json`. Install with `--scope project` in each
-    project, or copy the Conspectus entries into that directory's
-    `settings.json`.
+  - Claude Code started with a different `CLAUDE_CONFIG_DIR` from the
+    shell that ran `hook init claude-code` reads another `settings.json`
+    (`hook status` names the file it read). Set the variable alike in
+    both, then run `hook init` again.
   - The lines above the health line say `partial` or `outdated`: run
     `conspectus hook init <harness>` again.
   - Claude Code without hooks there: its agent list can show the agent
