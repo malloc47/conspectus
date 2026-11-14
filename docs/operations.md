@@ -38,7 +38,7 @@ location.
 
 | Variable                       | Default                                    | Provider     |
 | ------------------------------ | ------------------------------------------ | ------------ |
-| `CONSPECTUS_CODEX_STATE`       | `$HOME/.codex`                             | codex        |
+| `CONSPECTUS_CODEX_STATE`       | `$CODEX_HOME`, else `$HOME/.codex`         | codex        |
 | `CONSPECTUS_CLAUDE_CODE_STATE` | `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude` | claude-code  |
 | `CONSPECTUS_OPENCODE_STATE`    | `$HOME/.local/share/opencode`              | opencode     |
 | `CONSPECTUS_PI_STATE`          | `$HOME/.pi/agent/sessions`                 | pi           |
@@ -51,11 +51,15 @@ When `CONSPECTUS_CLAUDE_CODE_STATE` is unset, the claude-code provider
 follows Claude Code's own `CLAUDE_CONFIG_DIR`, which moves `~/.claude`
 (settings, transcripts under `projects/`, and `sessions/`), and
 `conspectus hook init|status|remove claude-code` edit `settings.json` in
-that same directory (ADR 0239). The `CONSPECTUS_` override moves
-discovery alone: Claude Code never reads it, so the hooks stay where
-Claude Code does. Set `CLAUDE_CONFIG_DIR` alike in the shell that runs
-`hook init`, the one Claude Code starts from, and the one that starts
-`conspectus serve`. An empty value counts as unset.
+that same directory (ADR 0239). Likewise, when `CONSPECTUS_CODEX_STATE`
+is unset, the codex provider follows Codex's own `CODEX_HOME`, which
+moves `~/.codex` (`config.toml`, rollouts under `sessions/`, and the
+`state_<N>.sqlite` and `logs_<N>.sqlite` databases), where `hook
+init|status|remove codex` edit `config.toml`. A `CONSPECTUS_` override
+moves discovery alone: the harness never reads it, so the hooks stay
+where the harness does. Set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` alike in
+the shell that runs `hook init`, the one the harness starts from, and
+the one that starts `conspectus serve`. An empty value counts as unset.
 
 When `CONSPECTUS_PI_STATE` is unset, the pi provider follows Pi's own
 settings (ADR 0121): `PI_CODING_AGENT_SESSION_DIR`, then an absolute
@@ -1050,8 +1054,8 @@ Start from the health label:
   none is bound to that session. The entry may be on the session's tmux
   mux instead, when Conspectus has no session for it yet (look at
   `conspectus table mux --columns +live`), or Conspectus may not discover
-  the session at all, as for Codex sessions under a `CODEX_HOME` other
-  than `~/.codex` (see
+  the session at all, as when the harness runs with a different
+  `CODEX_HOME` or `CLAUDE_CONFIG_DIR` from Conspectus (see
   [Harness state-root overrides](#harness-state-root-overrides)). An agent
   outside tmux with no discovered session shows nowhere. `receiving` also
   counts entries kept after their session ended; the newest event's age

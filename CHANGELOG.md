@@ -922,6 +922,15 @@ forms, lists, readers, and keys look and behave alike.
   one rule. `CONSPECTUS_CLAUDE_CODE_STATE` still points discovery
   elsewhere and wins, but it no longer has to stand in for the variable,
   and it does not move the hooks, which go where Claude Code reads them.
+- **Codex discovery honors `CODEX_HOME`.** `hook init|status|remove
+  codex` already edited `$CODEX_HOME/config.toml`, but discovery read
+  rollouts and the state and log databases under `~/.codex` only, so the
+  hooks reported live state for sessions that never showed. Discovery now
+  reads `$CODEX_HOME` when it is set and not empty, by the same rule the
+  installer uses (`CONSPECTUS_CODEX_STATE` still wins), and a session only
+  a hook has reported gets the same identity discovery gives it under a
+  moved home. An empty `CODEX_HOME` no longer sends `hook init codex` to a
+  `config.toml` in the current directory.
 - **A mux pane's preview is captured in the background.** Moving onto a
   live mux row ran `tmux capture-pane` before the next frame (5 to 10 ms
   on a healthy server), so scrolling the mux view stacked those waits on
