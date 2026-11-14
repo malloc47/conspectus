@@ -786,3 +786,77 @@ fn a_store_change_redraws_the_mark_in_place() {
     assert_eq!(mark_of_hosted(&mut app), "›", "the row reads ready");
     assert_eq!(app.selection().cloned(), selected, "the cursor stays");
 }
+
+/// [`live_world`] with its two agents working, each last heard from the
+/// given number of minutes before `now_ms`, which the rows read at (they
+/// read the clock, so a time that moves state must be relative to it).
+fn working_since(now_ms: i64, hosted_minutes: i64, beside_minutes: i64) -> GraphSnapshot {
+    let mut snapshot = live_world();
+    let working = |minutes: i64| {
+        LiveBinding::new(
+            LiveObservation::new(
+                LiveState::Working,
+                LiveSource::Hook,
+                now_ms - minutes * 60_000,
+            )
+            .with_detail(LiveDetail::Tool),
+            Liveness::Alive,
+        )
+    };
+    snapshot.node_live = BTreeMap::from([
+        (session(HOSTED), working(hosted_minutes)),
+        (session(BESIDE), working(beside_minutes)),
+    ]);
+    snapshot
+}
+
+/// The color and modifiers the left pane draws the first `»` of the line
+/// that names `label` in, as the mark of the row.
+fn mark_style_of(app: &mut App, label: &str) -> (ratatui::style::Color, ratatui::style::Modifier) {
+    let buffer = buffer_of(app, 220, 40);
+    let lines = tuikit::testkit::buffer::rows(&buffer);
+    let y = lines
+        .iter()
+        .position(|line| line.contains(label) && line.contains("»"))
+        .unwrap_or_else(|| panic!("no `»` on the row of {label}"));
+    let x = lines[y]
+        .split("»")
+        .next()
+        .map(|before| before.chars().count())
+        .expect("the mark");
+    let cell = &buffer[(u16::try_from(x).unwrap(), u16::try_from(y).unwrap())];
+    (cell.fg, cell.modifier)
+}
+
+#[test]
+fn a_mux_mark_recedes_in_place_once_every_agent_in_its_state_is_quiet() {
+    let theme = crate::tui::Theme::default();
+    let now_ms = now_ms();
+    let later = now_ms + 2 * 60_000;
+    let soon = Instant::now() + std::time::Duration::from_secs(5);
+
+    // Both agents were last heard from nine minutes ago: working, and
+    // fresh. Two minutes on, neither has news, so the mux's mark recedes.
+    let snapshot = working_since(now_ms, 9, 9);
+    let mut app = listing_with(View::Mux, &snapshot, LiveOverlay::off());
+    let (color, modifier) = mark_style_of(&mut app, "conspectus-main");
+    assert_eq!(color, theme.info);
+    assert!(!modifier.contains(theme.muted), "fresh work is bright");
+    let rebuilds = app.tree_rebuilds;
+    app.poll_live(soon, later);
+    let (color, modifier) = mark_style_of(&mut app, "conspectus-main");
+    assert_eq!(color, theme.info, "the same shape and color");
+    assert!(modifier.contains(theme.muted), "every agent in it is quiet");
+    assert_eq!(app.tree_rebuilds, rebuilds, "the rows refilled in place");
+
+    // One of the two heard from a minute ago stays fresh, and keeps the
+    // mark bright.
+    let snapshot = working_since(now_ms, 9, 1);
+    let mut app = listing_with(View::Mux, &snapshot, LiveOverlay::off());
+    app.poll_live(soon, later);
+    let (_, modifier) = mark_style_of(&mut app, "conspectus-main");
+    assert!(
+        !modifier.contains(theme.muted),
+        "one fresh agent in the state keeps it bright"
+    );
+}

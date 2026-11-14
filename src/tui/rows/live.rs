@@ -80,11 +80,15 @@ impl LiveCell {
 }
 
 /// What a mux's row knows of its agents' live state: how many are in
-/// each state, and how many of its ready ones ended a turn the operator
-/// has not seen.
+/// each state, how many of those have gone quiet, and how many of its
+/// ready ones ended a turn the operator has not seen.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct MuxLive {
     pub counts: LiveCounts,
+    /// Of [`Self::counts`], how many agents in each state are quiet
+    /// (work with no news past its source's quiet window). Only the
+    /// states that can go quiet are ever above zero.
+    pub quiet: LiveCounts,
     pub unseen: u32,
 }
 
@@ -96,9 +100,12 @@ impl MuxLive {
 }
 
 impl From<LiveCounts> for MuxLive {
-    /// Counts with no unseen turn among them.
+    /// Counts with no quiet agent and no unseen turn among them.
     fn from(counts: LiveCounts) -> Self {
-        Self { counts, unseen: 0 }
+        Self {
+            counts,
+            ..Self::default()
+        }
     }
 }
 
@@ -123,6 +130,9 @@ pub struct LiveValues {
     cells: BTreeMap<NodeId, LiveCell>,
     panes: BTreeMap<LivePane, LiveCell>,
     counts: BTreeMap<MuxSessionId, LiveCounts>,
+    /// For each mux, how many of the agents in `counts` are quiet, by
+    /// state.
+    quiet: BTreeMap<MuxSessionId, LiveCounts>,
     /// For each mux, how many ready agents counted on it ended a turn the
     /// operator has not seen.
     unseen: BTreeMap<MuxSessionId, u32>,
@@ -168,6 +178,7 @@ impl LiveValues {
             cells,
             panes,
             counts: snapshot.live_counts_by_mux(tables, now_ms),
+            quiet: snapshot.quiet_counts_by_mux(tables, now_ms),
             unseen,
             waiting,
         }
@@ -231,10 +242,12 @@ impl LiveValues {
         self.cells.get(id).copied()
     }
 
-    /// A mux's counts and its unseen turns; empty without evidence.
+    /// A mux's counts, its quiet agents, and its unseen turns; empty
+    /// without evidence.
     pub(crate) fn mux(&self, id: &MuxSessionId) -> MuxLive {
         MuxLive {
             counts: self.counts.get(id).copied().unwrap_or_default(),
+            quiet: self.quiet.get(id).copied().unwrap_or_default(),
             unseen: self.unseen.get(id).copied().unwrap_or_default(),
         }
     }

@@ -1145,15 +1145,17 @@ fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
             )
         },
         // Two agents in panes of `project` that no session matches yet:
-        // one working, and a newer one starting beside it.
+        // one working that has had no news for eleven minutes (quiet, like
+        // `showcase-hook-current` beside it, so the mux's `»` is dimmed),
+        // and a newer one starting beside it.
         Report {
             pane: Some("%3"),
             ..report(
                 "showcase-new-pane",
                 LiveState::Working,
                 Some(LiveDetail::Generating),
-                3 * minute,
-                minute / 3,
+                14 * minute,
+                11 * minute,
             )
         },
         Report {

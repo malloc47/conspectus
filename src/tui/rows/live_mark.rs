@@ -149,17 +149,18 @@ impl LiveSign {
 
     /// A mux's sign: the state of its agents that ranks first by the
     /// model's default precedence (waiting, error, ready, working, then
-    /// the rest), or none when no agent of it has live state. The counts
-    /// say how many agents are in each state, not how fresh each one's
-    /// evidence is, so a mux's mark is never drawn quiet; the agents'
-    /// own rows are. A ready mark is unseen while any of the mux's ready
-    /// agents ended a turn the operator has not seen.
+    /// the rest), or none when no agent of it has live state. It is
+    /// drawn quiet when every agent in that state is quiet, and bright
+    /// while any of them is fresh; the agents in other states do not
+    /// count, and a state that never goes quiet never dims. A ready mark
+    /// is unseen while any of the mux's ready agents ended a turn the
+    /// operator has not seen.
     pub fn of_mux(live: MuxLive) -> Self {
         live.counts.dominant().map_or(Self::NONE, |state| {
             let mark = LiveMark::of_state(state);
             Self {
                 mark,
-                quiet: false,
+                quiet: live.quiet.get(state) >= live.counts.get(state),
                 unseen: mark == LiveMark::Ready && live.unseen > 0,
             }
         })

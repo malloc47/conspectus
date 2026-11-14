@@ -190,9 +190,11 @@ A mux has no state of its own: its mark is the state of its agents that
 needs the operator first, waiting, then error, then ready, then working,
 then the rest. The agents nested under a mux keep their own marks. A
 quiet state (work with no news past its source's quiet window) draws the
-same mark dimmed; a mux's mark is never dimmed, since its counts do not
-say how fresh each agent's evidence is. Nothing animates: the Braille
-spinner keeps meaning a pending refresh.
+same mark dimmed. A mux's mark is dimmed when every agent in the state it
+shows is quiet, and bright while any agent in that state is fresh;
+agents in other states do not count, and a wait, a finished turn, or an
+error never goes quiet, so a mux that shows one never dims. Nothing
+animates: the Braille spinner keeps meaning a pending refresh.
 
 A finished turn is **unseen** until you have looked at it, and its `›`
 is bold until then. For an agent in a mux (a session's preferred mux,
@@ -675,7 +677,7 @@ mux, so a header can show `! N` with no `(N)`.
 | 2 | Name | the mux name without its backend prefix | always | blue; a column of 18 cells, 20 once the row leaves it 37 cells, 24 from 71, and 30 from 103 (counted after the cursor gutter, the indent, and the prefix); long names keep their start and end |
 | 3 | Chip | its agents' harness chips, as many as fit in a column of at most two, with `+N` for the rest; else the pane's harness; else a program chip; else ` no agent ` | always | 10 cells each; the column is as wide as the widest row's chips, so the age lines up |
 | 4 | Age | the mux's own last activity | always | 4 cells |
-| 5 | Live | the state of its agents that needs you first (see [The live cell](#the-live-cell)) | always | 1 cell; never dimmed; bold while a ready agent's finished turn is unseen; keeps its mark while a refresh is pending |
+| 5 | Live | the state of its agents that needs you first (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when every agent in the state it shows is quiet; bold while a ready agent's finished turn is unseen; keeps its mark while a refresh is pending |
 | 6 | State | `⊸` a client is attached, `∘` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
 | 7 | Preview | last message of the one agent | only with exactly one visible agent, and at least 7 cells for it | dim italic |
 

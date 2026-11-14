@@ -4339,8 +4339,8 @@
       "pane": "%3",
       "state": "working",
       "detail": "generating",
-      "since_ms": 1790769420000,
-      "observed_ms": 1790769580000,
+      "since_ms": 1790768760000,
+      "observed_ms": 1790768940000,
       "source": "hook",
       "liveness": "unknown"
     },

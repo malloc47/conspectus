@@ -400,3 +400,96 @@ fn the_waiting_agents_are_the_ones_counted_the_longest_wait_first() {
         ]
     );
 }
+
+/// The live value of the mux row in `tree`.
+fn row_of_main(tree: &RowTree) -> MuxLive {
+    tree.rows
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) if mux.mux == main_mux() => Some(mux.live),
+            _ => None,
+        })
+        .expect("the mux has a row")
+}
+
+/// `world` with two agents working in the mux: the hosted session and an
+/// entry put on the mux itself, heard from `session_ago` and `entry_ago`
+/// minutes before.
+fn working_in_main(session_ago: i64, entry_ago: i64) -> GraphSnapshot {
+    let mut snapshot = world();
+    snapshot
+        .node_live
+        .insert(hosted(), running(LiveState::Working, session_ago));
+    snapshot.node_live.insert(
+        NodeId::MuxSession(main_mux()),
+        running(LiveState::Working, entry_ago),
+    );
+    snapshot
+}
+
+#[test]
+fn a_mux_row_counts_its_quiet_agents_per_state_in_the_pass_that_counts_them() {
+    // One agent heard from a minute ago, one eleven minutes ago (quiet).
+    let snapshot = working_in_main(11, 1);
+    let live = row_of_main(&built(&snapshot, View::Mux, NOW_MS));
+    assert_eq!(live.counts.working, 2);
+    assert_eq!(live.quiet.working, 1);
+    assert_eq!(live.quiet.total(), 1, "no other state is quiet");
+    assert!(!LiveSign::of_mux(live).quiet, "one agent is fresh");
+
+    // Both quiet: the mux's mark recedes with them.
+    let snapshot = working_in_main(11, 12);
+    let live = row_of_main(&built(&snapshot, View::Mux, NOW_MS));
+    assert_eq!((live.counts.working, live.quiet.working), (2, 2));
+    assert!(LiveSign::of_mux(live).quiet);
+}
+
+#[test]
+fn a_mux_pins_row_carries_the_same_quiet_counts_as_the_mux_row() {
+    let snapshot = working_in_main(11, 12);
+    let tree = built(&snapshot, View::Pinned, NOW_MS);
+    let pinned = tree
+        .rows
+        .iter()
+        .find_map(|row| match (&row.id, &row.kind) {
+            (RowId::Pin { pin_id }, RowKind::Mixed(mixed)) if pin_id == "conspectus-main" => {
+                Some(mixed.live)
+            }
+            _ => None,
+        })
+        .expect("a pin row for the mux");
+    assert_eq!(pinned, MixedLive::Mux(tree.live.mux(&main_mux())));
+    assert_eq!(tree.live.mux(&main_mux()).quiet.working, 2);
+}
+
+#[test]
+fn filling_the_rows_again_later_dims_the_mux_mark_in_place() {
+    let snapshot = working_in_main(9, 9);
+    let mut tree = built(&snapshot, View::Mux, NOW_MS);
+    let before = row_of_main(&tree);
+    assert!(
+        !LiveSign::of_mux(before).quiet,
+        "heard from nine minutes ago"
+    );
+    let rows = tree.rows.len();
+
+    // Two minutes on, the same rows are filled from the same table.
+    let later = NOW_MS + 2 * MINUTE_MS;
+    annotate(
+        &mut tree,
+        &snapshot,
+        &LiveValues::at(
+            &snapshot,
+            snapshot.live_tables(),
+            later,
+            crate::tui::rows::seen::SeenContext::nothing(),
+        ),
+    );
+    assert_eq!(tree.rows.len(), rows, "no row was rebuilt");
+    let after = row_of_main(&tree);
+    assert_eq!(after.counts, before.counts, "the same agents are counted");
+    assert!(
+        LiveSign::of_mux(after).quiet,
+        "both have passed the quiet window"
+    );
+}

@@ -1,6 +1,6 @@
 //! The `GraphSnapshot` container and the `SnapshotIndex` lookups built over it.
 
-use super::live::{EffectiveLive, LiveBinding, LiveCounts};
+use super::live::{EffectiveLive, LiveBinding, LiveConfidence, LiveCounts};
 use super::*;
 
 #[derive(
@@ -603,6 +603,42 @@ impl GraphSnapshot {
         now_ms: i64,
     ) -> BTreeMap<MuxSessionId, LiveCounts> {
         let mut counts: BTreeMap<MuxSessionId, LiveCounts> = BTreeMap::new();
+        for (mux, binding) in self.live_agents_by_mux(tables) {
+            counts
+                .entry(mux)
+                .or_default()
+                .add(binding.effective(now_ms).state);
+        }
+        counts
+    }
+
+    /// Of the agents [`Self::live_counts_by_mux`] counts toward each mux,
+    /// how many in each state have gone quiet at `now_ms`: work with no
+    /// news past its source's quiet window ([`LiveConfidence::Quiet`]).
+    /// Only a mux with a quiet agent has an entry, and a state that never
+    /// goes quiet (a wait, a finished turn, an error) always counts none.
+    pub(crate) fn quiet_counts_by_mux(
+        &self,
+        tables: LiveTables<'_>,
+        now_ms: i64,
+    ) -> BTreeMap<MuxSessionId, LiveCounts> {
+        let mut quiet: BTreeMap<MuxSessionId, LiveCounts> = BTreeMap::new();
+        for (mux, binding) in self.live_agents_by_mux(tables) {
+            let effective = binding.effective(now_ms);
+            if effective.confidence == LiveConfidence::Quiet {
+                quiet.entry(mux).or_default().add(effective.state);
+            }
+        }
+        quiet
+    }
+
+    /// Every entry of `tables` that counts toward a mux, with that mux:
+    /// a session's toward its preferred mux, an agent in a pane no
+    /// session matched toward that pane's.
+    fn live_agents_by_mux<'a>(
+        &'a self,
+        tables: LiveTables<'a>,
+    ) -> impl Iterator<Item = (MuxSessionId, &'a LiveBinding)> + 'a {
         let sessions = tables
             .nodes
             .iter()
@@ -611,13 +647,7 @@ impl GraphSnapshot {
             .panes
             .iter()
             .map(|(pane, binding)| (pane.mux.clone(), binding));
-        for (mux, binding) in sessions.chain(panes) {
-            counts
-                .entry(mux)
-                .or_default()
-                .add(binding.effective(now_ms).state);
-        }
-        counts
+        sessions.chain(panes)
     }
 
     /// The mux whose counts the `node_live` entry keyed on `id` joins: a

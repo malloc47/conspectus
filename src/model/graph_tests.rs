@@ -658,3 +658,48 @@ fn counts_for_every_mux_at_once_agree_with_each_muxs_own() {
         )])
     );
 }
+
+#[test]
+fn a_mux_counts_how_many_of_its_agents_in_each_state_are_quiet() {
+    let mut snapshot = hosted(&[
+        ("a", "main", Provenance::StrongDiscovered),
+        ("b", "main", Provenance::StrongDiscovered),
+        ("c", "main", Provenance::StrongDiscovered),
+        ("d", "main", Provenance::StrongDiscovered),
+        ("e", "side", Provenance::StrongDiscovered),
+    ]);
+    // Work with no news for eleven minutes is quiet; ten is not yet. A
+    // wait, a finished turn, and anything else never goes quiet.
+    for (key, state, minutes) in [
+        ("a", LiveState::Working, 11),
+        ("b", LiveState::Working, 1),
+        ("c", LiveState::Waiting, 60),
+        ("d", LiveState::Compacting, 11),
+        ("e", LiveState::Ready, 60),
+    ] {
+        snapshot
+            .node_live
+            .insert(session(key), alive(observed(state, minutes)));
+    }
+    snapshot.pane_live.insert(
+        LivePane::new(mux("main"), Some("%9".into())),
+        alive(observed(LiveState::Working, 30)),
+    );
+
+    let quiet = snapshot.quiet_counts_by_mux(snapshot.live_tables(), NOW_MS);
+    assert_eq!(
+        quiet.get(&mux("main")).copied(),
+        Some(LiveCounts {
+            working: 2,
+            compacting: 1,
+            ..LiveCounts::default()
+        }),
+        "two quiet working (a session and a pane's agent) and a quiet compaction"
+    );
+    assert!(!quiet.contains_key(&mux("side")), "nothing quiet there");
+
+    // The counts of the same table agree on how many agents there are.
+    let counts = snapshot.live_counts_by_mux(snapshot.live_tables(), NOW_MS);
+    assert_eq!(counts[&mux("main")].working, 3);
+    assert_eq!(counts[&mux("main")].waiting, 1);
+}

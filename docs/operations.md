@@ -320,7 +320,9 @@ state has its own shape, so it reads without color:
 | `·` | No live state: the harness's hooks are off, or the session has ended | dim |
 
 - **Quiet** work (no news past the quiet window) draws the same `»`
-  dimmed.
+  dimmed. A mux's mark dims when every agent in the state it shows is
+  quiet, and stays bright while any of them is fresh, so a running mux
+  whose agents have all gone silent recedes like they do.
 - **Unseen** finished turns draw the same `›` bold, until you have looked
   at them; then it is plain. For an agent in a mux, looking is attaching
   a tmux client to that mux after the turn ended, through Conspectus or

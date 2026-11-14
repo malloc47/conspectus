@@ -177,7 +177,7 @@ fn a_mux_shows_the_operators_order_whatever_the_counts() {
                 LiveMark::of_state(*first),
                 "one {first:?} beside nine {later:?}"
             );
-            assert!(!sign.quiet, "a mux's mark is never dimmed");
+            assert!(!sign.quiet, "no quiet agent is counted");
         }
     }
 }
@@ -234,4 +234,63 @@ fn a_mixed_row_reads_the_sign_of_what_it_stands_for() {
         LiveMark::Waiting
     );
     assert_eq!(LiveSign::of_mixed(MixedLive::None), LiveSign::NONE);
+}
+
+/// A mux with the agents given, each in a state and quiet or fresh.
+fn mux_of(agents: &[(LiveState, bool)]) -> MuxLive {
+    let mut live = MuxLive::default();
+    for (state, quiet) in agents {
+        live.counts.add(*state);
+        if *quiet {
+            live.quiet.add(*state);
+        }
+    }
+    live
+}
+
+#[test]
+fn a_mux_mark_is_dimmed_when_every_agent_in_its_dominant_state_is_quiet() {
+    use LiveState::{Compacting, Starting, Working};
+    let quiet = |agents: &[(LiveState, bool)]| LiveSign::of_mux(mux_of(agents)).quiet;
+    assert!(quiet(&[(Working, true)]), "its only agent is quiet");
+    assert!(quiet(&[(Working, true), (Working, true)]), "all of two");
+    assert!(
+        !quiet(&[(Working, true), (Working, false)]),
+        "one fresh agent in the state keeps it bright"
+    );
+    assert!(!quiet(&[(Working, false)]), "a fresh agent");
+    assert!(quiet(&[(Compacting, true)]));
+    assert!(quiet(&[(Starting, true)]));
+}
+
+#[test]
+fn only_the_agents_in_the_dominant_state_decide_whether_a_mux_mark_is_dimmed() {
+    use LiveState::{Compacting, Ready, Waiting, Working};
+    let sign = |agents: &[(LiveState, bool)]| LiveSign::of_mux(mux_of(agents));
+    // The dominant state is working; a fresh compaction is another state.
+    let working = sign(&[(Working, true), (Compacting, false)]);
+    assert_eq!(working.mark, LiveMark::Working);
+    assert!(working.quiet);
+    // A wait outranks quiet work, and a wait is never quiet.
+    let waiting = sign(&[(Waiting, false), (Working, true)]);
+    assert_eq!(waiting.mark, LiveMark::Waiting);
+    assert!(!waiting.quiet);
+    // Quiet work under a ready mark does not dim it.
+    let ready = sign(&[(Ready, false), (Working, true)]);
+    assert_eq!(ready.mark, LiveMark::Ready);
+    assert!(!ready.quiet);
+    // No agent: nothing to dim.
+    assert_eq!(LiveSign::of_mux(MuxLive::default()), LiveSign::NONE);
+}
+
+#[test]
+fn a_dimmed_mux_mark_is_drawn_in_its_color_with_the_muted_look() {
+    let theme = Theme::default();
+    let mark = |agents: &[(LiveState, bool)]| LiveSign::of_mux(mux_of(agents)).style(&theme);
+    let quiet = mark(&[(LiveState::Working, true)]);
+    let fresh = mark(&[(LiveState::Working, false)]);
+    assert_eq!(quiet.fg, Some(theme.info));
+    assert!(quiet.add_modifier.contains(theme.muted));
+    assert_eq!(fresh.fg, Some(theme.info));
+    assert!(!fresh.add_modifier.contains(theme.muted));
 }

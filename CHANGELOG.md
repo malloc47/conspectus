@@ -188,7 +188,8 @@ forms, lists, readers, and keys look and behave alike.
   `!` waiting on you, `»` working (dimmed once it has been quiet past the
   quiet window), `›` ready for a prompt, `×` the turn failed, `?` can't
   tell, `·` no live state. A mux shows the state of its agents that needs
-  you first (waiting, then error, ready, working). In Pinned, a session
+  you first (waiting, then error, ready, working), dimmed when every
+  agent in that state is quiet and bright while any of them is fresh. In Pinned, a session
   whose agent is waiting, working, ready, or failed reads `waiting`,
   `working`, `ready`, or `error` instead of `in mux` or `resumable`. The
   colors are the theme's `warning`, `info`, `success`, and `error`; the
