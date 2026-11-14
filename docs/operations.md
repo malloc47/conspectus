@@ -1346,8 +1346,10 @@ running `conspectus serve` and rebuild in-process) and `--no-cache`
 
 A running `conspectus serve` that takes a request and never answers (one
 stuck behind its own work, or stopped) does not hang anything that asks
-it. Each request gives up after a bound that fits it, counted afresh for
-each read and write on the socket:
+it, nor does one stopped long enough for unanswered connections to fill
+its socket's queue. Each request gives up after a bound that fits it,
+counted afresh for the connect and for each read and write on the
+socket:
 
 | Request | Gives up after | Then |
 | :- | :- | :- |

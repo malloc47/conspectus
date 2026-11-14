@@ -136,14 +136,17 @@ const RULES: &[Rule] = &[
         allowed_in: &[],
         why: "start processes through `exec::command`",
     },
+    // The daemon client makes its `UnixStream` with libc so its connect
+    // can be bounded (ADR 0219); every other socket goes through the
+    // daemon's `UnixListener`/`UnixStream`.
     Rule {
         pattern: "libc::socket",
-        allowed_in: &[],
+        allowed_in: &["src/server/mod.rs"],
         why: "sockets go through the daemon's `UnixListener`/`UnixStream`",
     },
     Rule {
         pattern: "libc::connect",
-        allowed_in: &[],
+        allowed_in: &["src/server/mod.rs"],
         why: "sockets go through the daemon's `UnixListener`/`UnixStream`",
     },
     Rule {

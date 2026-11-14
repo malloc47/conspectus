@@ -951,7 +951,10 @@ forms, lists, readers, and keys look and behave alike.
   `status` says the daemon did not answer after 5 s; `refresh` says so
   after 15 s for `--class mux` or `harness` and after 2 minutes
   otherwise, and does not rebuild in-process while the daemon may still
-  finish; the TUI shows an in-process rebuild with a warning.
+  finish; the TUI shows an in-process rebuild with a warning. The same
+  bound now covers the connect: a daemon stopped long enough for
+  unanswered connections to fill its socket's queue no longer makes the
+  next caller wait forever to connect.
 - **Agents in split panes of one tmux session keep their own
   attribution.** The hook spool kept one record per tmux session, so a
   session start in one pane replaced the record of the agent in the

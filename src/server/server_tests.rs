@@ -858,6 +858,48 @@ fn a_daemon_that_never_accepts_times_the_call_out() {
 }
 
 #[test]
+fn a_daemon_whose_backlog_is_full_times_the_call_out() {
+    use std::os::fd::AsRawFd;
+    let (_dir, path) = client_socket();
+    // A listener that queues no connection beyond the one already
+    // waiting, and never accepts: a stopped daemon whose backlog filled
+    // with abandoned connections. A plain connect would wait for it to
+    // accept, forever.
+    let listener = UnixListener::bind(&path).expect("bind");
+    // SAFETY: `listen(2)` on a socket this test owns takes no pointers;
+    // listening again sets the backlog of a listening socket.
+    assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
+    let _queued = UnixStream::connect(&path).expect("the one queued connection");
+    let bound = Duration::from_millis(200);
+    let (sent, outcome) = std::sync::mpsc::channel();
+    let started = Instant::now();
+    thread::spawn(move || {
+        let _ = sent.send(call_socket(
+            &path,
+            "status",
+            serde_json::Value::Null,
+            "t",
+            bound,
+        ));
+    });
+    let outcome = outcome
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the call returns while the backlog stays full");
+    let waited = started.elapsed();
+    drop(listener);
+    if cfg!(target_os = "linux") {
+        // Linux waits for room in the backlog for the socket's send
+        // timeout, which the call sets to its bound.
+        assert!(times_out(&outcome, bound), "{outcome:?}");
+        assert!(waited >= bound, "{waited:?}");
+    } else {
+        // Elsewhere a full backlog refuses the connection at once.
+        assert!(!matches!(outcome, ClientOutcome::Ok(_)), "{outcome:?}");
+    }
+    assert!(waited < Duration::from_secs(5), "{waited:?}");
+}
+
+#[test]
 fn a_daemon_that_reads_the_request_and_never_answers_times_the_call_out() {
     let (_dir, path) = client_socket();
     let listener = UnixListener::bind(&path).expect("bind");

@@ -564,8 +564,9 @@ fn call_command(
 }
 
 /// [`call_command`] against the socket at `path`. `timeout` bounds
-/// each read and write on the connection, so a daemon that accepts and
-/// never answers ends the call as `TimedOut`.
+/// the connect and each read and write on the connection, so a daemon
+/// that accepts and never answers, or that stopped accepting with its
+/// backlog full, ends the call as `TimedOut`.
 fn call_socket(
     path: &Path,
     command: &str,
@@ -573,7 +574,7 @@ fn call_socket(
     id: &str,
     timeout: Duration,
 ) -> ClientOutcome<serde_json::Value> {
-    let mut stream = match UnixStream::connect(path) {
+    let mut stream = match connect_within(path, timeout) {
         Ok(stream) => stream,
         Err(err)
             if err.kind() == std::io::ErrorKind::NotFound
@@ -581,18 +582,20 @@ fn call_socket(
         {
             return ClientOutcome::NoDaemon;
         }
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) =>
+        {
+            return ClientOutcome::TimedOut(timeout);
+        }
         Err(err) => {
             return ClientOutcome::Transport(
                 anyhow!(err).context(format!("connect to {}", path.display())),
             );
         }
     };
-    if let Err(err) = stream
-        .set_read_timeout(Some(timeout))
-        .and_then(|()| stream.set_write_timeout(Some(timeout)))
-    {
-        return ClientOutcome::Transport(anyhow!(err).context("set socket timeout"));
-    }
     let request = serde_json::json!({
         "command": command,
         "args": args,
@@ -644,6 +647,73 @@ fn call_socket(
         }
         _ => ClientOutcome::Transport(anyhow!("response envelope missing result: {envelope}")),
     }
+}
+
+/// Connect to the Unix socket at `path` with `timeout` as the
+/// connection's read and write bound, waiting at most that long for the
+/// listener to take the connection.
+///
+/// A plain `UnixStream::connect` waits while the listener's backlog is
+/// full, as when a daemon's accept loop has stopped and abandoned
+/// connections have filled its queue, and no read or write bound has
+/// started yet. Linux bounds that wait by the socket's send timeout and
+/// then fails with `EAGAIN` (`WouldBlock`), so the socket is made and
+/// given its timeouts first, and connected after. Elsewhere a full
+/// backlog refuses the connection at once.
+fn connect_within(path: &Path, timeout: Duration) -> std::io::Result<UnixStream> {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    let bytes = path.as_os_str().as_bytes();
+    // SAFETY: `sockaddr_un` is plain data; all zeroes is a valid value.
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.is_empty() || bytes.contains(&0) || bytes.len() >= addr.sun_path.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the socket path does not fit a Unix socket address",
+        ));
+    }
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (slot, byte) in addr.sun_path.iter_mut().zip(bytes) {
+        *slot = libc::c_char::from_ne_bytes([*byte]);
+    }
+    // The path and its terminating zero, which the zeroed address holds.
+    let len = std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let kind = libc::SOCK_STREAM | libc::SOCK_CLOEXEC;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let kind = libc::SOCK_STREAM;
+    // SAFETY: `socket(2)` takes no pointers; the result is checked.
+    let fd = unsafe { libc::socket(libc::AF_UNIX, kind, 0) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `fd` is the socket just opened, owned by nothing else.
+    let stream = UnixStream::from(unsafe { OwnedFd::from_raw_fd(fd) });
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        // SAFETY: `fcntl(2)` on a descriptor this function owns, with an
+        // integer argument.
+        if unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    // SAFETY: `addr` is an initialized `sockaddr_un` whose first `len`
+    // bytes hold the family and the zero-terminated path.
+    let connected = unsafe {
+        libc::connect(
+            stream.as_raw_fd(),
+            (&raw const addr).cast::<libc::sockaddr>(),
+            len as libc::socklen_t,
+        )
+    };
+    if connected < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(stream)
 }
 
 /// Whether a framing error is a socket timeout running out. Unix
