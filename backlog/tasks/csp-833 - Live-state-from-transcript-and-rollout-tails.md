@@ -4,11 +4,11 @@ title: Live state from transcript and rollout tails
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
-updated_date: '2026-11-12 20:06'
+updated_date: '2026-11-14 05:38'
 labels:
   - live-state
   - ls-policy
-  - needs-decision
+  - parked
 milestone: m-26
 dependencies:
   - CSP-812
@@ -48,4 +48,6 @@ Blockers: Operator decision 11.
 
 <!-- SECTION:NOTES:BEGIN -->
 Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 item 11: not approved for now. Leave this story alone unless the operator asks.
+
+Operator, 2026-11-13: keep open as parked. Transcript and rollout tails as a state source were declined for now on 2026-11-12; revisit when the operator asks.
 <!-- SECTION:NOTES:END -->

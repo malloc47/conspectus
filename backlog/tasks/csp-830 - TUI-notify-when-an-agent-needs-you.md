@@ -4,11 +4,11 @@ title: 'TUI: notify when an agent needs you'
 status: To Do
 assignee: []
 created_date: '2026-11-12 01:48'
-updated_date: '2026-11-12 20:06'
+updated_date: '2026-11-14 05:38'
 labels:
   - live-state
   - ls-tui
-  - needs-decision
+  - parked
 milestone: m-26
 dependencies:
   - CSP-823
@@ -48,4 +48,6 @@ Blockers: Operator decision 9 and the cell story.
 
 <!-- SECTION:NOTES:BEGIN -->
 Operator decision (2026-11-12), see docs/plans/live-state/README.md section 7.1 item 9: no notifications in v1, because the harnesses already notify. Deferred, not decided against; revisit if the operator asks (a terminal bell while the TUI is open and unfocused, per-state toggles). Do not start this story.
+
+Operator, 2026-11-13: keep open as parked. Notifications were deferred on 2026-11-12 (the harnesses already notify), not decided against; revisit when the operator asks.
 <!-- SECTION:NOTES:END -->
