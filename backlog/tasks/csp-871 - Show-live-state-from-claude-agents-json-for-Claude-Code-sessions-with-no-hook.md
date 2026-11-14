@@ -3,15 +3,14 @@ id: CSP-871
 title: >-
   Show live state from claude agents --json for Claude Code sessions with no
   hook
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-13 05:22'
-updated_date: '2026-11-13 21:39'
+updated_date: '2026-11-14 05:38'
 labels:
   - live-state
   - ls-policy
-  - needs-decision
 milestone: m-26
 dependencies:
   - CSP-832
@@ -29,9 +28,10 @@ Showing those sessions from the poll needs a cadence of its own (a regular poll 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An ADR decides the cadence, the cost bound, how a poll-only state ages, and how it binds to a session or pane, and the operator approves it
-- [x] #2 A Claude Code session with no hook entry shows the poll's state with source harness_poll, and loses it when polls stop, by tests with a fake runner and clock
-- [x] #3 hook status reports how many Claude Code agents the poll shows, as it does for Codex pane titles
+- [x] #1 An ADR decides the cadence, the cost bound, how a poll-only state ages, and how it binds to a session or pane, and records the operator's decision (2026-11-13): kept as an opt-in, off by default (`[server] live_poll_without_hooks`), with ADR 0218's repair unchanged and on by default
+- [x] #2 With the setting on, a Claude Code session with no hook entry shows the poll's state with source harness_poll, and loses it when polls stop, by tests with a fake runner and clock
+- [x] #3 With the setting off (the default), a hook-less agent starts no poll and gets no poll-only observation, in the discovery pass and the TUI's overlay, while the repair poll behaves as before; `CONSPECTUS_DISABLE_LIVE_POLL` builds no poller whatever the setting says
+- [x] #4 `hook status` reports how many Claude Code agents the poll shows only with the setting on, as it does for Codex pane titles; with it off it counts none and, when hook-less Claude Code agents run, names the setting and how to turn it on
 <!-- AC:END -->
 
 ## Definition of Done
@@ -50,6 +50,13 @@ Staleness story first; build only if it holds (it does, below). New ADR 0222 ame
 4. hook status adds "N agents shown from the agent list" from the saved graph's harness_poll bindings.
 5. Tests with a fake runner and clock (poller cadence for unreported agents; bind, drop on gone pid, drop when unlisted, quiet/stale when polls stop), unreported-agent detection, hook status count. Docs: ADR 0222, ADR 0218 note, index, operations, design, CHANGELOG.
 AC #1 asks for the operator's approval of the ADR: leave it unchecked and the task not Done, label needs-decision.
+
+Operator decision 2026-11-13: keep the code, but make the hook-less poll opt-in, off by default; the repair poll of ADR 0218 is unchanged and stays on.
+6. Config key `[server] live_poll_without_hooks` (bool, default false), parsed into a `PollScope` (`Repair` | `WithoutHooks`) on `ServerConfig`; a wrong type is a diagnostic and keeps the default. No environment variable turns it on; `CONSPECTUS_DISABLE_LIVE_POLL` still builds no poller whatever the key says.
+7. The scope rides on each `LivePoller` (`from_env(scope)`): a `Repair` poller ignores unreported agents, so no poll runs for them; `apply_live_state` counts unreported agents only for a `WithoutHooks` poller and binds poll-only agents only then (`bind_live_scoped`); `bind_live` keeps the default (repair only). The TUI's overlay binds with the TUI's scope; serve and the TUI read it from config.
+8. `hook status` counts agents shown from the agent list only with the key on; with it off, when running agents have no entry, it says which setting shows them from the agent list.
+9. Tests: config parse/default/diagnostic; poller does not run for unreported agents in `Repair`; poll-only binding is empty in `Repair` and unchanged in `WithoutHooks`; the overlay; kill switch over the key (pure pollers fn plus a daemon test with the key on in a scratch config); hook status note/hint text.
+10. Docs: ADR 0222 status and amendment, ADR 0218 note, ADR index, operations (how to turn it on), CHANGELOG, design.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -62,4 +69,31 @@ Staleness story (the reason it was built): the poll runs at most every 30 s and 
 Choices for the operator: (1) approve ADR 0222 as is, then check AC #1, remove needs-decision, and set Done; (2) reject it: revert the CSP-871 code and docs commits (ADR 0218 decision 7 stands again); (3) adjust: e.g. bind by session id without a known process (rejected in the ADR as the "accident" case), or a separate opt-in switch for the hook-less poll (today only CONSPECTUS_DISABLE_LIVE_POLL turns all polling off).
 
 Validation: new live_poll_only_tests (binding by process and by session id, unknown/background/subagent/no-pid agents get nothing, hook entries keep the hook rules, gone/changed pid and unlisted agents drop, cadence every 30 s with a scripted runner and clock, quiet then stale when polls fail, nothing without a poller, sentinel through JSON/Debug/graph.bin), a poller cadence test, and hook status count/note tests. checks.sh green; full suite 5,680 passed, 0 failed (before a test rename and the sentinel test, which pass alone).
+
+Operator decision 2026-11-13: keep the hook-less poll, but opt-in and off by default; the repair poll of ADR 0218 stays as it was and on. Implemented in bdaf0ce1 (code and tests) and 41564bfd (docs): `[server] live_poll_without_hooks` (bool, default false) parsed into `PollScope` (`Repair` | `WithoutHooks`); each poller carries the scope (`live_poller::from_env(scope)`), a `Repair` poller ignores unreported agents, `apply_live_state` counts them and binds poll-only agents only for a `WithoutHooks` poller (`bind_live_scoped`; `bind_live` keeps the default), and the TUI overlay binds with the TUI's configured scope. No environment variable turns it on; `CONSPECTUS_DISABLE_LIVE_POLL` builds no poller whatever the setting says. `hook status` counts agents shown from the agent list only with the setting on; off, it ends the line with "N agent(s) could be shown from its/their agent list: set `live_poll_without_hooks = true` under `[server]` in the config file" when running agents have no live state.
+Validation: checks.sh green; full cargo test 5,716 passed, 0 failed; `just check` (nextest, doctests, rustdoc, framework matrix) exit 0, 5,716 passed, 1 skipped.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Kept the hook-less part of the `claude agents --json` poll (ADR 0222) and made it opt-in, off by default, as the operator decided on 2026-11-13. The poll starts the `claude` first on PATH, often an operator's wrapper, every 30 s, so running it on a timer is the operator's call. The repair of stuck hook entries (ADR 0218) is unchanged and on by default.
+
+- Setting: `[server] live_poll_without_hooks = true` (default false; a value that is not a boolean is a config diagnostic and leaves it off). `conspectus serve` and a daemonless TUI read it when they start. No environment variable turns it on, and `CONSPECTUS_DISABLE_LIVE_POLL` still builds no poller whatever it says.
+- Off: a hook-less Claude Code agent starts no poll and gets no poll-only state, in the discovery pass or the TUI's overlay. `hook status` counts no agents shown from the agent list, and when hook-less agents run it ends the health line with "1 agent could be shown from its agent list: set `live_poll_without_hooks = true` under `[server]` in the config file".
+- On: the behavior is the same as before.
+- Docs: ADR 0222 (status, plus a second amendment giving the reason and the rules), the ADR 0218 note, the ADR index, operations (how to turn it on, the config reference, health and troubleshooting), design, and CHANGELOG.
+
+Visible change: by default, a Claude Code agent with no hooks shows no live state again, as before CSP-871. That is the intended change; no layout changed.
+
+Verified by tests:
+- config default, true/false, project over user, and a bad value;
+- the poller runs nothing for unreported agents in `Repair` and still repairs a stuck entry;
+- the kill switch builds no poller in either scope;
+- with a fake runner and clock, poll-only binding and the pass are empty with the setting off and unchanged with it on (sentinel test still green);
+- the overlay shows the poll-only state only when configured;
+- `hook status` note and hint unit tests, and smoke tests through the binary with the setting on and off;
+- a daemon test where the kill switch wins over the setting turned on in a scratch config.
+
+checks.sh green; full cargo test 5,716 passed; `just check` exit 0.
+<!-- SECTION:FINAL_SUMMARY:END -->
