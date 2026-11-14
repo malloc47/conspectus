@@ -301,7 +301,7 @@ Follow-ups the stories filed (labels `live-state`, milestone m-26):
 |---|---|---|
 | CSP-836 | Bound the daemon socket calls the TUI and CLI make | To Do |
 | CSP-837 | Stop reading the undocumented `CLAUDE_CODE_VERSION` in the hook writer | To Do |
-| CSP-838 | Honor `CLAUDE_CONFIG_DIR` for Claude Code discovery and hook install | To Do |
+| CSP-838 | Honor `CLAUDE_CONFIG_DIR` for Claude Code discovery and hook install | Done |
 | CSP-839 | Keep a stable `conspectus` path in installed hook commands | To Do |
 | CSP-840 | Parse only the whitelisted fields of a hook payload in `hook write` | To Do |
 | CSP-841 | Count every pane-only agent on its mux (`pane_live`) | Done |
