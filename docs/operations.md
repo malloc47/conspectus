@@ -2519,6 +2519,15 @@ keys the menu takes, and a paste types into the focused field. A stream
 of keys that never pauses still redraws at least every 100 ms, so a long
 scroll shows its progress. A key that arrives alone draws at once.
 
+The Preview waits for the cursor to rest. A row the cursor passes through
+starts no preview load (no git commands, transcript reads, or `gh`
+calls), and the row it stops on starts loading about a tenth of a second
+after the last key. A row passed shows the preview it already has, or the
+loading placeholder. `r` and `Ctrl-r` load the selected row's preview at
+once. A git preview still loading when the cursor leaves its row starts
+no further commands, and the row reloads the next time the cursor rests
+on it.
+
 ## Keys on the right pane
 
 With the right pane focused (and no dialog open), these keys drive the

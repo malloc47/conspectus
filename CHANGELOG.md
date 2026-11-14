@@ -913,6 +913,17 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **The Preview loads only for the row the cursor rests on.** Every
+  cursor move started a preview load for the row it landed on, so a held
+  key or a fast scroll started git (four commands for a repo row, `git
+  status` for a checkout), transcript reads, and `gh` calls for every row
+  it crossed, competing for CPU with the screen just when it was busiest.
+  A load now starts once the cursor has stayed on its row for 100 ms
+  (`r` loads at once), a row passed shows the preview it already has or
+  the loading placeholder, and a git preview still loading when the
+  cursor leaves its row starts no further commands. A 90-key sweep over
+  the sessions view that began and ended on one row started 174 git
+  commands before and none now.
 - **Scrolling fast no longer leaves the screen catching up.** A
   terminal turns each mouse-wheel notch into several cursor keys (three
   per tick in Ghostty, more as a spin speeds up), and the TUI drew a full

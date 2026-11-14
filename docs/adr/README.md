@@ -190,7 +190,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179); framework-owned in part |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181); framework-owned in part |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended by 0112) |
-| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144, 0213; see 0147) |
+| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144, 0213, 0237; see 0147) |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
 | [0114](0114-prs-view-grouped-by-checkout.md) | A PRs View Grouped By Checkout | Accepted (amended by 0129, 0130, 0151) |
 | [0115](0115-forge-discovery-over-discovered-repos.md) | Forge Discovery Over Every Discovered Repo | Accepted (amended by 0136) |
@@ -266,6 +266,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0233](0233-tui-a-mux-mark-recedes-when-every-agent-in-its-state-is-quiet.md) | A Mux's Mark Recedes When Every Agent In Its State Is Quiet | Accepted |
 | [0234](0234-tui-a-pinned-mux-reads-the-word-of-its-agents-mark.md) | A Pinned Mux Reads The Word Of Its Agents' Mark | Accepted |
 | [0236](0236-tui-the-event-loop-takes-the-input-that-is-waiting-before-it-draws.md) | The Event Loop Takes The Input That Is Waiting Before It Draws | Accepted |
+| [0237](0237-tui-a-preview-loads-once-the-cursor-rests-on-its-row.md) | A Preview Loads Once The Cursor Rests On Its Row | Accepted |
 
 ## Transcript viewer
 
