@@ -14,6 +14,13 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **`conspectus hook status opencode`.** It reads where opencode's
+  config files (`opencode.json`, `opencode.jsonc`, `config.json`, and
+  `cli.json`, or a project's) list the plugin, prints one line per file
+  with what it loads (1.x, 2.x, or 2.x client only), and ends with the
+  live-state health line like the other harnesses; its `off` message
+  says to build and list the plugin, since there is no `hook init
+  opencode`. It reads nothing else of opencode's and writes nothing.
 - **opencode 2.x reports live state with the plugin only in
   `cli.json`.** That install loads only the plugin's TUI entrypoint,
   which used to give pane attribution and no live state. Each client

@@ -159,6 +159,10 @@ entry instead.
 
 ## Verify
 
+`conspectus hook status opencode` (add `--scope project` for a
+project's config) says which of opencode's config files list the plugin
+and what each loads, then whether live state is arriving.
+
 After starting an opencode session and sending a prompt, list the live
 state Conspectus has for it:
 

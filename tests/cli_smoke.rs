@@ -1716,6 +1716,166 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     );
 }
 
+/// Every file under `root` with its contents, to show a command wrote
+/// nothing there.
+fn tree_of(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).expect("readable dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let body = fs::read(&path).expect("readable file");
+                files.push((path, body));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn hook_status_opencode_reads_where_its_config_lists_the_plugin() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let config = home.path().join(".config/opencode");
+    let status = || {
+        isolated_cmd(home.path())
+            .args(["hook", "status", "opencode"])
+            .assert()
+            .success()
+    };
+
+    // Nothing listed anywhere: off, with how to turn it on.
+    status()
+        .stdout(predicate::str::contains(format!(
+            "not-installed\topencode\t{}\n",
+            config.display()
+        )))
+        .stdout(predicate::str::contains("off\topencode\t"))
+        .stdout(predicate::str::contains(
+            "build the Conspectus plugin and list it in opencode's config",
+        ))
+        .stdout(predicate::str::contains("hook init").not());
+    assert!(!config.exists(), "status writes nothing");
+
+    // Listed only in cli.json, as plugin 0.2.0 asked.
+    fs::create_dir_all(&config).expect("config dir");
+    let dist = "/home/user/src/conspectus/plugins/opencode-hook/dist/v2";
+    fs::write(
+        config.join("cli.json"),
+        format!("{{\n  // TUI plugins\n  \"plugins\": [\"{dist}\",],\n}}\n"),
+    )
+    .expect("cli.json");
+    status()
+        .stdout(predicate::str::contains(format!(
+            "installed\topencode\t{}\n",
+            config.display()
+        )))
+        .stdout(predicate::str::contains(format!(
+            "installed\topencode\t{}\t2.x client only",
+            config.join("cli.json").display()
+        )))
+        .stdout(predicate::str::contains("no-events\topencode\t"))
+        .stderr(predicate::str::contains("only in cli.json"));
+
+    // Also in opencode.jsonc, beside an unrelated opencode.json and an
+    // unreadable config.json.
+    fs::write(
+        config.join("opencode.jsonc"),
+        format!("{{ /* server plugins */ \"plugins\": [{{ \"package\": \"{dist}\" }}] }}"),
+    )
+    .expect("opencode.jsonc");
+    fs::write(
+        config.join("opencode.json"),
+        r#"{"plugin": ["someone-elses-plugin"]}"#,
+    )
+    .expect("opencode.json");
+    fs::write(config.join("config.json"), "{ not json").expect("config.json");
+    let before = tree_of(home.path());
+    status()
+        .stdout(predicate::str::contains(format!(
+            "installed\topencode\t{}\t2.x\n",
+            config.join("opencode.jsonc").display()
+        )))
+        .stdout(predicate::str::contains(format!(
+            "not-installed\topencode\t{}\n",
+            config.join("opencode.json").display()
+        )))
+        .stdout(predicate::str::contains(format!(
+            "unreadable\topencode\t{}\n",
+            config.join("config.json").display()
+        )))
+        .stderr(predicate::str::contains("twice"))
+        .stderr(predicate::str::contains("can't read"));
+    assert_eq!(tree_of(home.path()), before, "status writes nothing");
+
+    // The 1.x key.
+    fs::write(
+        config.join("config.json"),
+        r#"{"plugin": ["/home/user/src/conspectus/plugins/opencode-hook"]}"#,
+    )
+    .expect("config.json");
+    status().stdout(predicate::str::contains(format!(
+        "installed\topencode\t{}\t1.x\n",
+        config.join("config.json").display()
+    )));
+
+    // Once a snapshot is in the store, the line says so.
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_millis();
+    let payload = format!(
+        r#"{{"session_id":"ses_7Kq2mX9vB4nL1pZ8","cwd":"/home/user/project","hook_event_name":"seed",
+            "live":{{"instance":"lq2c2a02-4a8e2c6b0f5d9a31","seq":1,"observed_ms":{now_ms},"heartbeat_s":60,
+            "state":"waiting","detail":"permission","subagents":0,"via_subagent":false,"since_ms":{now_ms}}}}}"#
+    );
+    isolated_cmd(home.path())
+        .args(["hook", "write", "opencode"])
+        .write_stdin(payload)
+        .assert()
+        .success();
+    status().stdout(predicate::str::contains("receiving\topencode\t"));
+
+    // There is still no install command for opencode.
+    isolated_cmd(home.path())
+        .args(["hook", "init", "opencode"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn hook_status_opencode_reads_the_project_scope() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = tempfile::TempDir::new().expect("project temp");
+    let hidden = project.path().join(".opencode");
+    fs::create_dir_all(&hidden).expect("project config dir");
+    fs::write(
+        hidden.join("opencode.jsonc"),
+        r#"{"plugins": ["/srv/conspectus/plugins/opencode-hook/dist/v2"]}"#,
+    )
+    .expect("project opencode.jsonc");
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["hook", "status", "opencode", "--scope", "project"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "installed\topencode\t{}\t2.x\n",
+            hidden.join("opencode.jsonc").display()
+        )))
+        .stdout(predicate::str::contains("no-events\topencode\t"));
+    // The user scope is another scope.
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["hook", "status", "opencode"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("off\topencode\t"));
+}
+
 #[test]
 fn hook_init_and_remove_pi_leave_a_foreign_file_alone() {
     let home = tempfile::TempDir::new().expect("home temp");

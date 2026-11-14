@@ -1031,6 +1031,16 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
     )
     .expect("seed pins.toml");
 
+    // `hook status opencode` reads opencode's plugin config and writes
+    // nothing.
+    let opencode_config = world.root.join("xdg/config/opencode");
+    fs::create_dir_all(&opencode_config).expect("opencode config dir");
+    fs::write(
+        opencode_config.join("cli.json"),
+        "{ // TUI plugins\n \"plugins\": [\"/src/conspectus/plugins/opencode-hook/dist/v2\"] }\n",
+    )
+    .expect("seed cli.json");
+
     // Read-only commands: discovery, tables, exports, the TUI.
     let mut reads = vec![
         world.run(&strace, "graph", &["graph", "--format", "json"], project),
@@ -1046,6 +1056,12 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             project,
         ),
         world.run(&strace, "pin-list", &["pin", "list"], project),
+        world.run(
+            &strace,
+            "hook-status-opencode",
+            &["hook", "status", "opencode"],
+            project,
+        ),
         world.run(&strace, "history-list", &["history", "list"], project),
         world.run(
             &strace,

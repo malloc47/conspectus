@@ -107,9 +107,9 @@ impl Health {
         }
     }
 
-    /// The line's last field, for a reader. `init_command` is the command
-    /// that installs the hooks.
-    pub(super) fn message(self, now_ms: i64, init_command: &str) -> String {
+    /// The line's last field, for a reader. `off_hint` says how to turn
+    /// the hooks on, for [`Health::Off`].
+    pub(super) fn message(self, now_ms: i64, off_hint: &str) -> String {
         match self {
             Health::Receiving {
                 sessions,
@@ -139,9 +139,7 @@ impl Health {
                  disabled, or the agent was started before they were installed"
                 .to_string(),
             Health::NoEvents => "live state: no events yet, and no running agent seen".to_string(),
-            Health::Off => {
-                format!("live state: off; `{init_command}` installs the hooks that report it")
-            }
+            Health::Off => format!("live state: off; {off_hint}"),
             Health::Unsupported => "live state: not reported by this harness's hook".to_string(),
         }
     }
@@ -247,9 +245,8 @@ pub(super) fn title_note(count: usize) -> Option<String> {
 /// Print the health line for `harness`:
 /// `<label>\t<harness>\t<store file>\t<message>`. `installed` says
 /// whether the hooks are installed in the scope `hook status` looked at,
-/// and `scope_flag` is that scope's flag for the install hint (empty for
-/// the user scope).
-pub(super) fn print_health(harness: &str, installed: bool, scope_flag: &str) {
+/// and `off_hint` how to install them there, for the `off` message.
+pub(super) fn print_health(harness: &str, installed: bool, off_hint: &str) {
     let adapter = crate::discovery::harness::registered_adapters()
         .find(|adapter| adapter.harness_key() == harness);
     let reports_live_state =
@@ -269,10 +266,6 @@ pub(super) fn print_health(harness: &str, installed: bool, scope_flag: &str) {
     } else {
         0
     };
-    let init_command = format!(
-        "{} hook init {harness}{scope_flag}",
-        crate::invocation::invoked_name()
-    );
     let path = store
         .as_ref()
         .map_or_else(|| PathBuf::from("-"), LiveStore::path);
@@ -283,7 +276,7 @@ pub(super) fn print_health(harness: &str, installed: bool, scope_flag: &str) {
     } else {
         0
     };
-    let mut message = health.message(crate::live_store::now_ms(), &init_command);
+    let mut message = health.message(crate::live_store::now_ms(), off_hint);
     for note in [title_note(titles), poll_note(polled)]
         .into_iter()
         .flatten()

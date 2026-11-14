@@ -145,6 +145,7 @@ use hook::HookArgs;
 mod hook_claude;
 mod hook_codex;
 mod hook_health;
+mod hook_opencode;
 mod hook_write;
 mod json_splice;
 

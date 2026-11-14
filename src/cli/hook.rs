@@ -7,6 +7,8 @@
 //! in [`super::hook_codex`]; an owned extension file for Pi), and
 //! `status` (reports whether the hook is installed, then whether it
 //! feeds live state; that line comes from [`super::hook_health`]).
+//! `status` also takes opencode, whose plugin is listed by hand: it
+//! reports where opencode's config lists it ([`super::hook_opencode`]).
 //!
 //! Both settings files are edited in place: `config.toml` through
 //! `toml_edit`, and `settings.json` by [`super::json_splice`], which
@@ -33,6 +35,7 @@ use super::hook_codex::{
     ensure_codex_hook, hooks_json_note, remove_codex_hook,
 };
 use super::hook_health::print_health;
+use super::hook_opencode::{FileStatus, Loads, config_files, file_status, listing_note};
 use super::hook_write::HookWriteArgs;
 use super::json_splice::splice;
 
@@ -63,7 +66,8 @@ enum HookCommand {
     /// Install a Conspectus hook into harness configuration.
     Init(HookInitArgs),
     /// Report whether a Conspectus hook is installed (for Claude Code and
-    /// Codex, event by event) and whether it feeds live state.
+    /// Codex, event by event; for opencode, where its config lists the
+    /// plugin) and whether it feeds live state.
     Status(HookStatusArgs),
     /// Remove a Conspectus hook from harness configuration.
     Remove(HookRemoveArgs),
@@ -97,7 +101,7 @@ struct HookInitArgs {
 struct HookStatusArgs {
     /// Harness whose hook config should be inspected.
     #[arg(value_enum)]
-    harness: HookHarnessFlag,
+    harness: HookStatusHarness,
     /// Configuration scope to inspect.
     #[arg(long, value_enum, default_value_t = HookScopeFlag::User)]
     scope: HookScopeFlag,
@@ -120,6 +124,16 @@ struct HookRemoveArgs {
 enum HookHarnessFlag {
     ClaudeCode,
     Codex,
+    Pi,
+}
+
+/// The harnesses `hook status` reports on: those `hook init` installs,
+/// and opencode, whose plugin is built and listed by hand.
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum HookStatusHarness {
+    ClaudeCode,
+    Codex,
+    Opencode,
     Pi,
 }
 
@@ -244,11 +258,23 @@ impl HookStatusArgs {
     /// (`<health>\t<harness>\t<store file>\t<message>`).
     fn run(self) -> Result<()> {
         let (harness, installed) = match self.harness {
-            HookHarnessFlag::ClaudeCode => ("claude-code", self.run_claude_status()?),
-            HookHarnessFlag::Codex => ("codex", self.run_codex_status()?),
-            HookHarnessFlag::Pi => ("pi", self.run_pi_status()?),
+            HookStatusHarness::ClaudeCode => ("claude-code", self.run_claude_status()?),
+            HookStatusHarness::Codex => ("codex", self.run_codex_status()?),
+            HookStatusHarness::Opencode => ("opencode", self.run_opencode_status()?),
+            HookStatusHarness::Pi => ("pi", self.run_pi_status()?),
         };
-        print_health(harness, installed, self.scope_flag());
+        let off_hint = match self.harness {
+            HookStatusHarness::Opencode => {
+                "build the Conspectus plugin and list it in opencode's config to report it"
+                    .to_string()
+            }
+            _ => format!(
+                "`{} hook init {harness}{}` installs the hooks that report it",
+                crate::invocation::invoked_name(),
+                self.scope_flag()
+            ),
+        };
+        print_health(harness, installed, &off_hint);
         Ok(())
     }
 
@@ -309,6 +335,63 @@ impl HookStatusArgs {
             eprintln!("{note}");
         }
         Ok(overall != "not-installed")
+    }
+
+    /// One line for the scope, `<label>\topencode\t<config dir>`, then one
+    /// per config file that exists, `<label>\topencode\t<path>[\t<loads>]`:
+    /// `installed` with what it loads (`1.x`, `2.x`, or `2.x client
+    /// only`), `not-installed`, or `unreadable`. On stderr, what a listing
+    /// in `cli.json` means and why a file could not be read. Returns
+    /// whether any file lists the plugin.
+    fn run_opencode_status(&self) -> Result<bool> {
+        let files = config_files(matches!(self.scope, HookScopeFlag::User))?;
+        let mut lines = Vec::new();
+        let mut loads: Vec<Loads> = Vec::new();
+        for (path, kind) in &files {
+            let Some(status) = file_status(path, *kind)? else {
+                continue;
+            };
+            match status {
+                FileStatus::Lists(found) => {
+                    for each in &found {
+                        lines.push(format!(
+                            "installed\topencode\t{}\t{}",
+                            path.display(),
+                            each.label()
+                        ));
+                    }
+                    loads.extend(found);
+                }
+                FileStatus::NotListed => {
+                    lines.push(format!("not-installed\topencode\t{}", path.display()));
+                }
+                FileStatus::Unreadable(err) => {
+                    lines.push(format!("unreadable\topencode\t{}", path.display()));
+                    eprintln!(
+                        "can't read {} as JSON ({err}); it counts as listing no plugin",
+                        path.display()
+                    );
+                }
+            }
+        }
+        let installed = !loads.is_empty();
+        let scope = files
+            .first()
+            .and_then(|(path, _)| path.parent())
+            .map_or_else(|| "-".to_string(), |dir| dir.display().to_string());
+        let overall = if installed {
+            "installed"
+        } else {
+            "not-installed"
+        };
+        println!("{overall}\topencode\t{scope}");
+        for line in lines {
+            println!("{line}");
+        }
+        if let Some(note) = listing_note(&loads) {
+            eprintln!("{note}");
+        }
+        Ok(installed)
     }
 
     /// One line, `<label>\tpi\t<path>`; on stderr, what an older copy

@@ -107,8 +107,30 @@ refused.
 `conspectus hook status <harness>` reports whether the hook is present
 and ends with a [live-state health line](#live-state-health), and
 `conspectus hook remove <harness>` removes only what Conspectus
-installed. The opencode hook is a plugin; see
+installed. The opencode hook is a plugin you build and list in
+opencode's config yourself; see
 [`plugins/opencode-hook/README.md`](../plugins/opencode-hook/README.md).
+`conspectus hook status opencode` reads where that config lists it:
+
+```text
+installed	opencode	/home/user/.config/opencode
+installed	opencode	/home/user/.config/opencode/opencode.jsonc	2.x
+not-installed	opencode	/home/user/.config/opencode/opencode.json
+```
+
+The first line is the scope's, then one per config file that exists:
+`installed` with what it loads (`1.x` for a `plugin` entry, `2.x` for a
+`plugins` entry of `opencode.json`, `opencode.jsonc`, or `config.json`,
+which loads the server entrypoint and each client's, and `2.x client
+only` for one in `cli.json`), `not-installed`, or `unreadable` (not
+JSON even with its comments and trailing commas dropped). An entry
+counts when it is a path through `opencode-hook` or the
+`@conspectus/opencode-hook` package. The user scope reads those four
+files under `$XDG_CONFIG_HOME/opencode` (`~/.config/opencode`), `--scope
+project` reads `opencode.json` and `opencode.jsonc` in the current
+directory and its `.opencode/`; nothing else of opencode's is read, and
+nothing is written. It cannot tell which build of the plugin a listing
+points at.
 
 Manual Claude Code hook setup puts the same handler under each event
 listed in [Claude Code live state](#claude-code-live-state), with the
@@ -768,8 +790,10 @@ running subagent. Beyond the [known gaps](#known-gaps):
   when it starts, and reports those sessions waiting at once. It needs an
   opencode whose server plugins can list sessions; a pending form, which
   a server plugin cannot list, shows from its session's next event.
-- `hook status` does not cover opencode yet; check with `conspectus table
-  sessions --columns +live`.
+- `conspectus hook status opencode` says where opencode's config lists
+  the plugin (see [Hook sidecar state](#hook-sidecar-state)) and ends with
+  the health line. A listing only in `cli.json` adds a note that each
+  client reports only the sessions it has shown.
 
 ### Pi live state
 
@@ -892,8 +916,8 @@ against the running processes. It starts no process and asks no daemon.
 | `receiving` | The file has entries for the harness: `live state: 2 sessions, newest event 12s ago`. When some of its running agents have none, the message ends with how many: `; 1 running agent has no live state` (see below). |
 | `silent` | The hooks are installed and one of the harness's agents runs, but no event has arrived: the hooks may be untrusted, disabled, or the agent was started before they were installed. Restart the agent after `hook init`, and accept the workspace trust prompt (for Codex, trust the entries in `/hooks`). |
 | `no-events` | The hooks are installed, nothing has arrived, and no running agent of the harness is known. Start one, or run a command that discovers, such as `conspectus table sessions`, so the saved graph lists it. |
-| `off` | The hooks are not installed in this scope, or for Pi the installed extension is too old to report live state; the message names the `conspectus hook init` command that installs them. |
-| `unsupported` | The harness's hook reports sessions but no live state. Claude Code, Codex, and Pi all report it now; the line stays for harnesses added later. |
+| `off` | The hooks are not installed in this scope, or for Pi the installed extension is too old to report live state; the message names the `conspectus hook init` command that installs them, or for opencode says to build the plugin and list it in opencode's config. |
+| `unsupported` | The harness's hook reports sessions but no live state. Claude Code, Codex, opencode, and Pi all report it now; the line stays for harnesses added later. |
 
 For Codex, any of them may end with `; 1 agent shown from its pane title`
 (or `2 agents ... their pane titles`): agents the saved graph shows from
@@ -911,7 +935,10 @@ Start from the health label:
   the same `--scope` you checked; an install in one scope does not count
   in the other. For Pi, `outdated` on the line above means an extension
   too old to report live state: run `conspectus hook init pi` and restart
-  Pi or run `/reload`.
+  Pi or run `/reload`. For opencode, list the plugin in the config file
+  of the scope you checked (its README says which), or check the other
+  scope; a line `unreadable` above means a file status could not parse,
+  whose entries do not count.
 - **`no-events`**: nothing has arrived and no agent of the harness is
   known to run. Start one and give it a prompt. If one already runs, the
   saved graph has not seen it: run `conspectus table sessions` (or keep
@@ -971,8 +998,7 @@ Start from the health label:
   `CONSPECTUS_DISABLE_LIVE_POLL` is set. A `--refresh` command reads the
   hooks only.
 - **`unsupported`**: the harness's hook reports no live state. No harness
-  says this today. opencode has no health line yet; check it with
-  `conspectus table sessions --columns +live`.
+  says this today.
 
 ## Configuration File
 

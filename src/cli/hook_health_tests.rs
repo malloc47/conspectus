@@ -49,7 +49,7 @@ fn entries_for_the_harness_mean_its_hooks_report_whatever_the_install_says() {
     }
     assert_eq!(receiving.label(), "receiving");
     assert_eq!(
-        receiving.message(NOW_MS, "conspectus hook init claude-code"),
+        receiving.message(NOW_MS, "an install hint"),
         "live state: 2 sessions, newest event 12s ago"
     );
     let single = Health::Receiving {
@@ -92,7 +92,10 @@ fn a_hook_not_installed_says_how_to_install_it() {
     assert_eq!(off, Health::Off);
     assert_eq!(off.label(), "off");
     assert_eq!(
-        off.message(NOW_MS, "csp hook init claude-code --scope project"),
+        off.message(
+            NOW_MS,
+            "`csp hook init claude-code --scope project` installs the hooks that report it"
+        ),
         "live state: off; `csp hook init claude-code --scope project` installs the hooks \
          that report it"
     );

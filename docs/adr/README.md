@@ -75,6 +75,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |
+| [0230](0230-hook-status-opencode-reads-where-opencodes-config-lists-the-plugin.md) | `hook status opencode` Reads Where opencode's Config Lists The Plugin | Accepted |
 
 ## User intent and the write envelope
 
