@@ -976,10 +976,13 @@ Start from the health label:
   hooks report and another's are silent, for the reasons `silent` lists:
   its workspace's trust prompt was never accepted, or it was started
   before `hook init`. An agent counts as reporting when an entry records
-  its process, or names a session the saved graph ties that process to,
-  so an agent behind a wrapper process still counts once its session is
-  discovered. The count goes by the graph the last discovery saved, so
-  an agent started since then is not counted until the next one.
+  its process, names a session the saved graph ties that process to, or
+  names the tmux pane the agent was found in (its server, session, and
+  pane) and has neither exited nor lost its process, so an agent behind a
+  wrapper process counts even in a new session with no transcript. An
+  entry from another pane of the same tmux session is another agent's.
+  The count goes by the graph the last discovery saved, so an agent
+  started since then is not counted until the next one.
 - **`receiving`, but a session shows `—`**: the file has entries, but
   none is bound to that session. The entry may be on the session's tmux
   mux instead, when Conspectus has no session for it yet (look at

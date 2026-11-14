@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::*;
+use crate::discovery::live_state::AgentPane;
 use crate::live_store::{LiveEntry, PidProbe, PidStatus};
 use crate::model::{RelationKind, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole};
 
@@ -25,6 +26,7 @@ fn agents(pids: &[i64]) -> Vec<RunningAgent> {
         .map(|pid| RunningAgent {
             pid: *pid,
             sessions: BTreeSet::new(),
+            panes: BTreeSet::new(),
         })
         .collect()
 }
@@ -43,7 +45,7 @@ fn entries_for_the_harness_mean_its_hooks_report_whatever_the_install_says() {
     };
     for installed in [true, false] {
         assert_eq!(
-            Health::assess("claude-code", true, installed, &store, Vec::new),
+            Health::assess("claude-code", true, installed, &store, &NOBODY, Vec::new),
             receiving
         );
     }
@@ -66,7 +68,7 @@ fn entries_for_the_harness_mean_its_hooks_report_whatever_the_install_says() {
 #[test]
 fn an_installed_hook_with_a_running_agent_and_no_entries_is_silent() {
     let store = file(&[("codex", "c", NOW_MS)]);
-    let silent = Health::assess("claude-code", true, true, &store, || agents(&[10]));
+    let silent = Health::assess("claude-code", true, true, &store, &NOBODY, || agents(&[10]));
     assert_eq!(silent, Health::Silent);
     assert_eq!(silent.label(), "silent");
     assert_eq!(
@@ -75,7 +77,7 @@ fn an_installed_hook_with_a_running_agent_and_no_entries_is_silent() {
          was started before they were installed"
     );
 
-    let idle = Health::assess("claude-code", true, true, &store, Vec::new);
+    let idle = Health::assess("claude-code", true, true, &store, &NOBODY, Vec::new);
     assert_eq!(idle, Health::NoEvents);
     assert_eq!(idle.label(), "no-events");
 }
@@ -87,6 +89,7 @@ fn a_hook_not_installed_says_how_to_install_it() {
         true,
         false,
         &LiveFile::default(),
+        &NOBODY,
         never_asked,
     );
     assert_eq!(off, Health::Off);
@@ -104,7 +107,14 @@ fn a_hook_not_installed_says_how_to_install_it() {
 #[test]
 fn a_hook_that_reports_no_live_state_is_never_called_silent() {
     for installed in [true, false] {
-        let health = Health::assess("aider", false, installed, &LiveFile::default(), never_asked);
+        let health = Health::assess(
+            "aider",
+            false,
+            installed,
+            &LiveFile::default(),
+            &NOBODY,
+            never_asked,
+        );
         assert_eq!(health, Health::Unsupported);
         assert_eq!(health.label(), "unsupported");
     }
@@ -125,6 +135,9 @@ fn the_claude_code_codex_opencode_and_pi_hooks_report_live_state() {
 }
 
 struct Table(&'static [i64]);
+
+/// A process table in which nothing runs.
+static NOBODY: Table = Table(&[]);
 
 impl PidProbe for Table {
     fn status(&self, pid: i64) -> PidStatus {
@@ -396,7 +409,7 @@ fn a_running_agent_with_no_entry_is_counted_beside_one_that_reports() {
         // An exited agent's entry describes no running one.
         entry_with_pid("claude-code", "b", Some(12)),
     ]);
-    let health = Health::assess("claude-code", true, true, &store, || {
+    let health = Health::assess("claude-code", true, true, &store, &probe, || {
         running_agents(&snapshot, "claude-code", &probe)
     });
     assert_eq!(
@@ -490,7 +503,9 @@ fn an_entry_of_the_agents_session_reports_for_it_whatever_pid_it_recorded() {
         entry_with_pid("claude-code", "s-candidate", None),
         entry_with_pid("claude-code", "s-one", Some(9022)),
     ]);
-    let health = Health::assess("claude-code", true, true, &store, || running.clone());
+    let health = Health::assess("claude-code", true, true, &store, &NOBODY, || {
+        running.clone()
+    });
     assert!(
         matches!(health, Health::Receiving { unreported: 1, .. }),
         "only the agent with two candidate sessions is unreported: {health:?}"
@@ -500,6 +515,164 @@ fn an_entry_of_the_agents_session_reports_for_it_whatever_pid_it_recorded() {
 #[test]
 fn entries_of_a_harness_that_reports_no_live_state_count_no_agent() {
     let store = store_of(vec![entry_with_pid("aider", "a", Some(10))]);
-    let health = Health::assess("aider", false, true, &store, never_asked);
+    let health = Health::assess("aider", false, true, &store, &NOBODY, never_asked);
     assert!(matches!(health, Health::Receiving { unreported: 0, .. }));
+}
+
+const DEFAULT_SOCKET: &str = "/tmp/tmux-1000/default";
+
+/// Tmux session `editor` on the default server, whose probe read the
+/// socket path and listed panes `%1` (active) and `%2`, and Claude Code
+/// processes found under its active pane (`active`) or seen only by a
+/// hook (`hooked`), each a main agent.
+fn editor_with_agents(active: &[(&str, i64)], hooked: &[(&str, i64)]) -> GraphSnapshot {
+    use crate::model::{
+        LinkEndpoint, MuxProbe, MuxProbeStatus, MuxSessionId, MuxSessionNode, ProbedPane,
+        Provenance,
+    };
+    let mux_id = MuxSessionId::new("tmux:editor");
+    let mut nodes = vec![GraphNode::MuxSession(MuxSessionNode::new(
+        mux_id.clone(),
+        "tmux",
+        "editor",
+    ))];
+    let mut candidate_links = Vec::new();
+    let observed = active
+        .iter()
+        .map(|agent| (agent, "active_pane_process_observation"))
+        .chain(
+            hooked
+                .iter()
+                .map(|agent| (agent, "hook_process_observation")),
+        );
+    for ((key, pid), evidence) in observed {
+        nodes.push(process(
+            key,
+            "claude-code",
+            *pid,
+            RuntimeProcessRole::HumanAgent,
+        ));
+        let mut link = crate::model::GraphLink::new(
+            format!("test:contains:{key}"),
+            NodeId::MuxSession(mux_id.clone()),
+            LinkEndpoint::Node {
+                id: NodeId::RuntimeProcess(RuntimeProcessId::new(*key)),
+            },
+            RelationKind::MuxContainsProcess,
+            Provenance::StrongDiscovered,
+        );
+        link.source_metadata.evidence = Some(evidence.to_string());
+        candidate_links.push(link);
+    }
+    let mut probe = MuxProbe::new(MuxProbeStatus::Listed, NOW_MS / 1000);
+    probe.socket_path = Some(DEFAULT_SOCKET.to_string());
+    for (pane, active) in [("%1", true), ("%2", false)] {
+        probe.panes.insert(
+            pane.to_string(),
+            ProbedPane {
+                session: "editor".to_string(),
+                command: Some("claude".to_string()),
+                active,
+            },
+        );
+    }
+    GraphSnapshot {
+        nodes,
+        candidate_links,
+        mux_probes: std::collections::BTreeMap::from([("tmux".to_string(), probe)]),
+        ..GraphSnapshot::empty()
+    }
+}
+
+/// A store entry of Claude Code session `session` that recorded `pid`
+/// and names pane `pane` of tmux session `editor` on the server whose
+/// socket is at `socket`.
+fn entry_in_pane(session: &str, pid: i64, socket: &str, pane: &str) -> LiveEntry {
+    let mut entry = entry_with_pid("claude-code", session, Some(pid));
+    entry.tmux = Some(crate::live_store::LiveTmux {
+        socket: Some(socket.to_string()),
+        session: Some("editor".to_string()),
+        pane: Some(pane.to_string()),
+    });
+    entry
+}
+
+#[test]
+fn running_agents_names_the_active_pane_its_mux_found_the_process_under() {
+    let snapshot = editor_with_agents(&[("tree", 30)], &[("hook", 31)]);
+    let running = running_agents(&snapshot, "claude-code", &Table(&[30, 31]));
+    let panes: Vec<Vec<AgentPane>> = running
+        .iter()
+        .map(|agent| agent.panes.iter().cloned().collect())
+        .collect();
+    assert_eq!(
+        panes,
+        [
+            vec![AgentPane {
+                server: None,
+                socket_path: Some(DEFAULT_SOCKET.to_string()),
+                session: "editor".to_string(),
+                pane: "%1".to_string(),
+            }],
+            // A hook's observation does not say which pane.
+            vec![],
+        ]
+    );
+}
+
+#[test]
+fn an_entry_naming_the_agents_pane_reports_for_it_whatever_pid_it_recorded() {
+    // The graph found a wrapper (pid 30) under pane %1 and ties it to no
+    // session yet; the hook recorded the harness process beneath it.
+    let snapshot = editor_with_agents(&[("wrapper", 30)], &[]);
+    let probe = Table(&[30, 9030, 9031]);
+    let running = running_agents(&snapshot, "claude-code", &probe);
+    let [agent] = running.as_slice() else {
+        panic!("one running agent: {running:?}")
+    };
+    let in_pane = entry_in_pane("new", 9030, DEFAULT_SOCKET, "%1");
+    assert!(agent.reported_by(&in_pane, &probe));
+
+    // Another pane of the same mux runs another agent.
+    assert!(!agent.reported_by(&entry_in_pane("beside", 9031, DEFAULT_SOCKET, "%2"), &probe));
+    // The same session and pane on another server.
+    assert!(!agent.reported_by(
+        &entry_in_pane("elsewhere", 9031, "/run/other/tmux-1000/default", "%1"),
+        &probe
+    ));
+    // An agent that ran in the pane before: exited, or its process gone.
+    let mut exited = entry_in_pane("before", 9031, DEFAULT_SOCKET, "%1");
+    exited.observation.state = crate::model::live::LiveState::Exited;
+    assert!(!agent.reported_by(&exited, &probe));
+    assert!(!agent.reported_by(&entry_in_pane("gone", 9032, DEFAULT_SOCKET, "%1"), &probe));
+    // An entry that names no session or no pane names no pane.
+    let mut no_session = in_pane.clone();
+    no_session.tmux.as_mut().expect("tmux").session = None;
+    assert!(!agent.reported_by(&no_session, &probe));
+    let mut no_pane = in_pane.clone();
+    no_pane.tmux.as_mut().expect("tmux").pane = None;
+    assert!(!agent.reported_by(&no_pane, &probe));
+
+    let store = store_of(vec![in_pane]);
+    let health = Health::assess("claude-code", true, true, &store, &probe, || {
+        running.clone()
+    });
+    assert!(
+        matches!(health, Health::Receiving { unreported: 0, .. }),
+        "{health:?}"
+    );
+}
+
+#[test]
+fn an_entry_for_another_pane_of_the_mux_leaves_its_agent_unreported() {
+    let snapshot = editor_with_agents(&[("left", 30)], &[]);
+    let probe = Table(&[30, 9031]);
+    let store = store_of(vec![entry_in_pane("right", 9031, DEFAULT_SOCKET, "%2")]);
+    let health = Health::assess("claude-code", true, true, &store, &probe, || {
+        running_agents(&snapshot, "claude-code", &probe)
+    });
+    assert!(
+        matches!(health, Health::Receiving { unreported: 1, .. }),
+        "{health:?}"
+    );
 }

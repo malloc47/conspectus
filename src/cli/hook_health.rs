@@ -9,8 +9,10 @@
 //! count. It reads those two files and `/proc`, starts no process, and
 //! asks no daemon, so `hook status` stays fast and read-only. When the
 //! store holds entries for the harness, the line also counts its running
-//! agents that none of them describes, so one agent whose hooks are
-//! silent is not hidden by another that reports. For a harness whose
+//! agents that none of them describes (by the agent's pid, a session the
+//! graph ties its process to, or the tmux pane the graph saw it in), so
+//! one agent whose hooks are silent is not hidden by another that
+//! reports. For a harness whose
 //! pane titles the mux probe reads (ADR 0217), the line also says how
 //! many of its agents that graph shows from their titles, and for one
 //! whose own list of its sessions a poll reads (ADRs 0218, 0222), how
@@ -19,7 +21,7 @@
 
 use std::path::PathBuf;
 
-use crate::live_store::{LiveFile, LiveStore, ProcProbe};
+use crate::live_store::{LiveFile, LiveStore, PidProbe, ProcProbe};
 use crate::model::live::LiveSource;
 use crate::model::{GraphNode, GraphSnapshot, NodeId};
 
@@ -53,12 +55,15 @@ impl Health {
     /// no entries, and no entries. `running_agents` is asked when the
     /// store holds entries of a harness whose hooks report live state,
     /// to count the agents none of them describes, and when the hooks
-    /// are installed and the store holds nothing.
+    /// are installed and the store holds nothing. `probe` says whether
+    /// an entry's process still runs, for an entry that describes an
+    /// agent by its pane.
     pub(super) fn assess(
         harness: &str,
         reports_live_state: bool,
         installed: bool,
         file: &LiveFile,
+        probe: &dyn PidProbe,
         running_agents: impl FnOnce() -> Vec<RunningAgent>,
     ) -> Self {
         let entries: Vec<_> = file
@@ -74,7 +79,7 @@ impl Health {
             let unreported = if reports_live_state {
                 running_agents()
                     .iter()
-                    .filter(|agent| !entries.iter().any(|entry| agent.reported_by(entry)))
+                    .filter(|agent| !entries.iter().any(|entry| agent.reported_by(entry, probe)))
                     .count()
             } else {
                 0
@@ -256,11 +261,19 @@ pub(super) fn print_health(harness: &str, installed: bool, off_hint: &str) {
     let file = store.as_ref().map(LiveStore::read).unwrap_or_default();
     let graph = std::cell::OnceCell::new();
     let saved = || graph.get_or_init(saved_graph).as_ref();
-    let health = Health::assess(harness, reports_live_state, installed, &file, || {
-        saved().map_or_else(Vec::new, |snapshot| {
-            running_agents(snapshot, harness, &ProcProbe::system())
-        })
-    });
+    let probe = ProcProbe::system();
+    let health = Health::assess(
+        harness,
+        reports_live_state,
+        installed,
+        &file,
+        &probe,
+        || {
+            saved().map_or_else(Vec::new, |snapshot| {
+                running_agents(snapshot, harness, &probe)
+            })
+        },
+    );
     let titles = if reads_titles {
         saved().map_or(0, |snapshot| title_agents(snapshot, harness))
     } else {

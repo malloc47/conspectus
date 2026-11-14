@@ -324,7 +324,7 @@ mod title;
 #[path = "live_poll.rs"]
 mod poll;
 
-pub use poll::{RunningAgent, running_agents};
+pub use poll::{AgentPane, RunningAgent, running_agents};
 
 #[cfg(test)]
 #[path = "live_state_tests.rs"]

@@ -36,9 +36,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::discovery::live_poller::{PollCandidate, SETTLE_MS};
-use crate::live_store::{LiveEntry, LiveFile, PidProbe, PidStatus};
+use crate::live_store::{LiveEntry, LiveFile, LiveTmux, PidProbe, PidStatus};
 use crate::model::live::{LiveBinding, LiveObservation, LivePoll, LiveSource, LiveState, Liveness};
-use crate::model::{GraphNode, GraphSnapshot, LivePane, NodeId, RelationKind, RuntimeProcessRole};
+use crate::model::{
+    GraphNode, GraphSnapshot, LivePane, MatchKind, MuxSessionNode, NodeId, RelationKind,
+    RuntimeProcessRole, effective_socket, probe_key,
+};
 
 use super::{BoundLive, Winners};
 
@@ -145,13 +148,59 @@ pub struct RunningAgent {
     /// The native ids of the sessions the graph says the process runs:
     /// those its links identify, or its only candidate.
     pub sessions: BTreeSet<String>,
+    /// The tmux panes the graph saw the process in: the active pane of
+    /// each mux whose active pane it was found under.
+    pub panes: BTreeSet<AgentPane>,
+}
+
+/// A tmux pane a running agent was seen in.
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct AgentPane {
+    /// The server, by the name tmux gives it; `None` is the default.
+    pub server: Option<String>,
+    /// The full path of the server's socket, when its probe read one.
+    pub socket_path: Option<String>,
+    pub session: String,
+    /// The pane id (`%3`).
+    pub pane: String,
+}
+
+impl AgentPane {
+    /// Whether an entry's tmux names this pane: the same pane of the
+    /// same session, on a server matched as the binding matches an
+    /// entry's.
+    fn named_by(&self, tmux: &LiveTmux) -> bool {
+        let (Some(socket), Some(session), Some(pane)) = (
+            tmux.socket.as_deref(),
+            tmux.session.as_deref(),
+            tmux.pane.as_deref(),
+        ) else {
+            return false;
+        };
+        pane == self.pane
+            && session == self.session
+            && super::server_of(socket).is_some_and(|server| server == self.server.as_deref())
+            && super::names_server(socket, self.socket_path.as_deref())
+    }
 }
 
 impl RunningAgent {
     /// Whether store entry `entry` describes this agent: it recorded the
-    /// agent's pid, or is one of the sessions the agent runs.
-    pub fn reported_by(&self, entry: &LiveEntry) -> bool {
-        entry.observation.pid == Some(self.pid) || self.sessions.contains(&entry.session_id)
+    /// agent's pid, or is one of the sessions the agent runs, or names a
+    /// pane the agent runs in. A wrapper's hook records another pid, and
+    /// a new session is tied to no process yet, but its entry still
+    /// names its pane. An entry that has exited, or whose process
+    /// `probe` finds dead, speaks for no agent in its pane: the pane may
+    /// run another agent now.
+    pub fn reported_by(&self, entry: &LiveEntry, probe: &dyn PidProbe) -> bool {
+        entry.observation.pid == Some(self.pid)
+            || self.sessions.contains(&entry.session_id)
+            || (entry
+                .tmux
+                .as_ref()
+                .is_some_and(|tmux| self.panes.iter().any(|pane| pane.named_by(tmux)))
+                && entry.observation.state != LiveState::Exited
+                && probe.liveness(&entry.observation) != Liveness::Dead)
     }
 }
 
@@ -163,7 +212,8 @@ pub fn running_agents(
     harness: &str,
     probe: &dyn PidProbe,
 ) -> Vec<RunningAgent> {
-    let mut agents: BTreeMap<i64, BTreeSet<String>> = BTreeMap::new();
+    let mut agents: BTreeMap<i64, RunningAgent> = BTreeMap::new();
+    let mut panes = None;
     for node in &snapshot.nodes {
         let GraphNode::RuntimeProcess(process) = node else {
             continue;
@@ -176,16 +226,83 @@ pub fn running_agents(
         {
             continue;
         }
-        agents.entry(pid).or_default().extend(sessions_of(
-            snapshot,
-            &NodeId::RuntimeProcess(process.id.clone()),
-        ));
+        let id = NodeId::RuntimeProcess(process.id.clone());
+        let agent = agents.entry(pid).or_insert_with(|| RunningAgent {
+            pid,
+            ..RunningAgent::default()
+        });
+        agent.sessions.extend(sessions_of(snapshot, &id));
+        let panes = panes.get_or_insert_with(|| active_panes(snapshot));
+        agent
+            .panes
+            .extend(panes.get(&id).into_iter().flatten().cloned());
     }
     agents
-        .into_iter()
-        .filter(|(pid, _)| matches!(probe.status(*pid), PidStatus::Running { .. }))
-        .map(|(pid, sessions)| RunningAgent { pid, sessions })
+        .into_values()
+        .filter(|agent| matches!(probe.status(agent.pid), PidStatus::Running { .. }))
         .collect()
+}
+
+/// The panes each process runs in, by the graph's links: for each tmux
+/// mux that found it under its active pane (the pane's process tree,
+/// open files, or command line), that pane, as the mux's probe listed
+/// it. A hook's own observation of a process names the record's pane,
+/// which its link does not keep; the hook's entry records that pid
+/// anyway.
+fn active_panes(snapshot: &GraphSnapshot) -> BTreeMap<&NodeId, Vec<AgentPane>> {
+    // Each listed session's active pane, by probe and session.
+    let mut active: BTreeMap<(&str, &str), &str> = BTreeMap::new();
+    for (key, probe) in &snapshot.mux_probes {
+        for (pane, listed) in &probe.panes {
+            if listed.active {
+                active.insert((key.as_str(), listed.session.as_str()), pane.as_str());
+            }
+        }
+    }
+    let muxes: BTreeMap<NodeId, &MuxSessionNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) if mux.backend == crate::discovery::tmux::TMUX_BACKEND => {
+                Some((node.id(), mux))
+            }
+            _ => None,
+        })
+        .collect();
+    let mut panes: BTreeMap<&NodeId, Vec<AgentPane>> = BTreeMap::new();
+    for link in &snapshot.candidate_links {
+        if link.relation != RelationKind::MuxContainsProcess
+            || !matches!(
+                link.source_metadata.match_kind(),
+                Some(
+                    MatchKind::ActivePaneProcessObservation
+                        | MatchKind::ActivePaneFdSessionMatch
+                        | MatchKind::ActivePaneFdCommandSessionMatch
+                        | MatchKind::ActivePaneCommandSessionMatch
+                )
+            )
+        {
+            continue;
+        }
+        let (Some(process), Some(mux)) = (link.target_node_id(), muxes.get(&link.source)) else {
+            continue;
+        };
+        let key = probe_key(&mux.backend, mux.socket.as_deref());
+        let session = mux.session_name();
+        let Some(pane) = active.get(&(key.as_str(), session)) else {
+            continue;
+        };
+        panes.entry(process).or_default().push(AgentPane {
+            server: effective_socket(mux.socket.as_deref()).map(str::to_string),
+            socket_path: snapshot
+                .mux_probes
+                .get(&key)
+                .and_then(|probe| probe.socket_path.clone()),
+            session: session.to_string(),
+            pane: (*pane).to_string(),
+        });
+    }
+    panes
 }
 
 /// The native ids of the sessions `process` runs, by the graph's links:
@@ -227,7 +344,7 @@ pub fn unreported(
         .collect();
     running_agents(snapshot, harness, probe)
         .into_iter()
-        .filter(|agent| !entries.iter().any(|entry| agent.reported_by(entry)))
+        .filter(|agent| !entries.iter().any(|entry| agent.reported_by(entry, probe)))
         .collect()
 }
 

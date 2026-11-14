@@ -892,6 +892,16 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **`hook status` counts an agent whose entry names its tmux pane as
+  reporting.** An agent counted as having no live state unless an entry
+  recorded its process or named a session the saved graph tied that
+  process to, so an agent behind a wrapper process in a new session (no
+  transcript yet) was counted though its hooks reported. An entry that
+  names the pane the agent was found in (its server, session, and pane)
+  now reports it, unless that entry has exited or its process is gone,
+  and an entry from another pane of the same tmux session is still
+  another agent's. Claude Code's agent list no longer shows such an agent
+  from the list alone either. The command still starts no process.
 - **A hook record is tied to a mux on its own tmux server.** A record
   was matched to the tmux session of its name on whichever server
   listed one, so an agent on a default server under another

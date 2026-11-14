@@ -1260,6 +1260,108 @@ fn hook_status_counts_a_running_agent_without_live_state_beside_one_that_reports
 }
 
 #[test]
+fn hook_status_counts_an_agent_whose_entry_names_its_tmux_pane_as_reporting() {
+    use conspectus::live_store::{
+        LiveContext, LiveEvent, LiveEventKind, LiveStore, LiveTmux, now_ms,
+    };
+    use conspectus::model::{
+        GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, MuxProbe, MuxProbeStatus, MuxSessionId,
+        MuxSessionNode, NodeId, ProbedPane, Provenance, RelationKind, RuntimeProcessId,
+        RuntimeProcessNode, RuntimeProcessRole,
+    };
+
+    let home = tempfile::TempDir::new().expect("home temp");
+    install_claude_hooks(home.path());
+    // The process discovery found under the active pane of tmux session
+    // `editor` (a wrapper, say) is not the one whose hook reports (this
+    // test's own process), and no session ties them.
+    let mut wrapper = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn a stand-in wrapper");
+    let socket = "/tmp/tmux-1000/default";
+    let mux = MuxSessionId::new("tmux:editor");
+    let process = RuntimeProcessId::new("mux_session:tmux:editor:root:1:pid:2");
+    let mut contains = GraphLink::new(
+        "cross_link:editor:mux_contains_process",
+        NodeId::MuxSession(mux.clone()),
+        LinkEndpoint::Node {
+            id: NodeId::RuntimeProcess(process.clone()),
+        },
+        RelationKind::MuxContainsProcess,
+        Provenance::StrongDiscovered,
+    );
+    contains.source_metadata.evidence = Some("active_pane_process_observation".to_string());
+    let mut probe = MuxProbe::new(MuxProbeStatus::Listed, now_ms() / 1000);
+    probe.socket_path = Some(socket.to_string());
+    probe.panes.insert(
+        "%1".to_string(),
+        ProbedPane {
+            session: "editor".to_string(),
+            command: Some("claude".to_string()),
+            active: true,
+        },
+    );
+    let graph = GraphSnapshot {
+        nodes: vec![
+            GraphNode::MuxSession(MuxSessionNode::new(mux, "tmux", "editor")),
+            GraphNode::RuntimeProcess(RuntimeProcessNode {
+                id: process,
+                observation_key: "mux_session:tmux:editor:root:1:pid:2".to_string(),
+                pid: Some(i64::from(wrapper.id())),
+                parent_pid: None,
+                root_pane_pid: None,
+                command: Some("claude".to_string()),
+                cwd: None,
+                harness_key: Some("claude-code".to_string()),
+                role: Some(RuntimeProcessRole::HumanAgent),
+                depth: Some(0),
+                observed_epoch: None,
+            }),
+        ],
+        candidate_links: vec![contains],
+        mux_probes: std::collections::BTreeMap::from([("tmux".to_string(), probe)]),
+        ..GraphSnapshot::empty()
+    };
+    conspectus::snapshot::write_atomic(
+        &home.path().join(".local/share/conspectus/graph.bin"),
+        &graph,
+    )
+    .expect("write graph.bin");
+    let store = LiveStore::at(home.path().join(".local/state/conspectus"));
+    let report = |pane: &str| {
+        store
+            .apply_event(
+                &LiveEvent::new("claude-code", "new", now_ms(), LiveEventKind::TurnStarted)
+                    .with_context(LiveContext {
+                        pid: Some(i64::from(std::process::id())),
+                        tmux: Some(LiveTmux {
+                            socket: Some(socket.to_string()),
+                            session: Some("editor".to_string()),
+                            pane: Some(pane.to_string()),
+                        }),
+                        ..LiveContext::default()
+                    }),
+            )
+            .expect("write live state");
+    };
+
+    // An entry from another pane of the session is another agent's.
+    report("%2");
+    let beside = health_line(home.path(), "claude-code");
+    report("%1");
+    let in_pane = health_line(home.path(), "claude-code");
+    let _ = wrapper.kill();
+    let _ = wrapper.wait();
+    assert!(
+        beside.ends_with("; 1 running agent has no live state"),
+        "{beside}"
+    );
+    assert!(in_pane.starts_with("receiving\tclaude-code\t"), "{in_pane}");
+    assert!(!in_pane.contains("no live state"), "{in_pane}");
+}
+
+#[test]
 fn hook_status_reports_codex_live_state_health() {
     use conspectus::live_store::{LiveEvent, LiveEventKind, LiveStore, now_ms};
 

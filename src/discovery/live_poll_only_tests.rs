@@ -290,6 +290,63 @@ fn unreported_agents_are_the_running_main_agents_no_entry_reports() {
     assert!(unreported(&snapshot, &LiveFile::default(), &Gone, CLAUDE).is_empty());
 }
 
+#[test]
+fn an_entry_naming_the_agents_pane_reports_it_whatever_pid_it_recorded() {
+    use crate::model::{MuxProbe, MuxProbeStatus, MuxSessionId, MuxSessionNode, ProbedPane};
+    // Process 4242 was found under the active pane %1 of tmux session
+    // `editor`, tied to no session yet (a new one with no transcript).
+    let mux = MuxSessionId::new("tmux:editor");
+    let mut contains = GraphLink::new(
+        "test:editor:contains:4242",
+        NodeId::MuxSession(mux.clone()),
+        LinkEndpoint::Node {
+            id: NodeId::RuntimeProcess(RuntimeProcessId::new("proc:4242")),
+        },
+        RelationKind::MuxContainsProcess,
+        Provenance::StrongDiscovered,
+    );
+    contains.source_metadata.evidence = Some("active_pane_process_observation".to_string());
+    let mut snapshot = graph(
+        vec![
+            GraphNode::MuxSession(MuxSessionNode::new(mux, "tmux", "editor")),
+            agent_process(RuntimeProcessRole::HumanAgent),
+        ],
+        vec![contains],
+        Vec::new(),
+    );
+    let mut probe = MuxProbe::new(MuxProbeStatus::Listed, NOW_MS / SECOND);
+    probe.panes.insert(
+        "%1".to_string(),
+        ProbedPane {
+            session: "editor".to_string(),
+            command: Some("claude".to_string()),
+            active: true,
+        },
+    );
+    snapshot.mux_probes.insert("tmux".to_string(), probe);
+    assert_eq!(
+        unreported(&snapshot, &LiveFile::default(), &Alive, CLAUDE).len(),
+        1
+    );
+
+    // The hook recorded no pid it could check, and names the pane.
+    let mut entry = LiveEntry::new(CLAUDE, SESSION, NOW_MS);
+    entry.tmux = Some(crate::live_store::LiveTmux {
+        socket: Some("/tmp/tmux-1000/default".to_string()),
+        session: Some("editor".to_string()),
+        pane: Some("%1".to_string()),
+    });
+    let mut file = LiveFile::default();
+    file.entries.insert(entry.key(), entry.clone());
+    assert!(unreported(&snapshot, &file, &Alive, CLAUDE).is_empty());
+
+    // An entry for pane %2 is another agent's.
+    entry.tmux.as_mut().expect("tmux").pane = Some("%2".to_string());
+    let mut file = LiveFile::default();
+    file.entries.insert(entry.key(), entry);
+    assert_eq!(unreported(&snapshot, &file, &Alive, CLAUDE).len(), 1);
+}
+
 // --- with a poller, a scripted runner, and a clock --------------------
 
 /// A runner that answers with its outcomes in turn, then fails.
