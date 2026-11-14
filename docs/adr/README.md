@@ -253,7 +253,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0198](0198-tui-quick-select-and-reveal-promise-only-a-view-that-lists-the-entity.md) | Quick Select And Reveal Promise Only A View That Lists The Entity | Accepted |
 | [0199](0199-tui-framework-separation-is-rehearsed-in-ci.md) | The Framework's Separation Is Rehearsed In CI | Accepted; framework-owned in part |
 | [0200](0200-tui-the-application-runtime-stays-in-conspectus-until-a-second-program-needs-it.md) | The Application Runtime Stays In Conspectus Until A Second Program Needs It | Accepted; framework-owned in part |
-| [0202](0202-tui-each-view-reopens-with-the-rows-it-had-expanded-and-selected.md) | Each View Reopens With The Rows It Had Expanded And Selected | Accepted |
+| [0202](0202-tui-each-view-reopens-with-the-rows-it-had-expanded-and-selected.md) | Each View Reopens With The Rows It Had Expanded And Selected | Accepted (amended: `--no-resume-view` writes nothing) |
 | [0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md) | Session And Mux Rows Show Live State In A One-Cell Column After The Age | Accepted (amended by 0212, 0214, 0215, 0233, 0234) |
 | [0210](0210-tui-group-headers-count-the-agents-waiting-beneath-them.md) | Group Headers Count The Agents Waiting Beneath Them | Accepted (amended) |
 | [0211](0211-tui-the-header-counts-every-agent-waiting-on-you.md) | The Header Counts Every Agent Waiting On You | Accepted |

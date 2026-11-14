@@ -1017,7 +1017,9 @@ back returns each view to its prior state. Across restarts,
 expanded rows, and selected row (the Search view's rows excepted), the
 rows named by stable keys; each view reopens with them the first time it
 lists rows, a gone row falling back to the deepest row above it still
-listed, then the first row (ADR 0202). Each view has its own
+listed, then the first row (ADR 0202). `--no-resume-view` reopens none
+of it and writes none of it, but still applies the saved sort, filters,
+and groupings (ADR 0202's amendment). Each view has its own
 grouping enum (`SessionsGrouping`, `MuxGrouping`, `PrsGrouping`,
 `PinnedGrouping`, `HistoryGrouping`, `SearchGrouping`) and the same
 `Grouping` dispatch type backs config, CLI flags, and TUI controls.

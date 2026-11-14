@@ -9,7 +9,8 @@ the selected row now do too, for every view but Search. The left-panel
 scroll offset still does not: the pane scrolls to the restored selection.
 Writes stay inside [ADR 0143](0143-mutation-envelope-with-history-pins-and-clone.md) category 2: the
 file is a rebuildable observation under `$XDG_STATE_HOME/conspectus/`,
-and no write path is added.
+and no write path is added. Amended 2026-11-13: a `--no-resume-view`
+run writes nothing (see the amendment at the end).
 
 ## Context
 
@@ -97,7 +98,8 @@ Three things make the tree harder to keep than a filter:
    `RunConfig::resume_view` carries the flag into the TUI, which drops
    each saved tree unapplied when its view first lists rows; a view the
    run never showed is written back unchanged. `--snapshot` reads and
-   writes nothing, as before.
+   writes nothing, as before. (A `--no-resume-view` run now writes
+   nothing at all; see the amendment.)
 
 ## Consequences
 
@@ -109,9 +111,9 @@ Three things make the tree harder to keep than a filter:
   generic and name nothing of Conspectus.
 - A saved selection beats the launch directory's group, which only
   picks the first load's row when the file has none for the view.
-- Under `--no-resume-view` the run still writes its own views' state,
-  as it already did for the view and settings; whether that flag should
-  stop writes is open work (backlog CSP-835).
+- Under `--no-resume-view` the run first still wrote its own views'
+  state, as it already did for the view and settings; the amendment at
+  the end settles that the flag stops writes.
 - The file's keys lean on `NodeId`'s text form. A change to it that
   keeps its parse in step keeps the keys; one that changes what an id's
   text says should bump `row_keys`.
@@ -148,3 +150,42 @@ Three things make the tree harder to keep than a filter:
   directory still picks the first row.
 - *Is a malformed key fatal to the view's tree?* No: each entry stands
   alone, and a key that names nothing is ignored like a gone row.
+
+## Amendment: `--no-resume-view` writes nothing (2026-11-13)
+
+Decision 7 had `--no-resume-view` skip only what a run reopens; the run
+still wrote the state file, `last_view` included, so a scripted run's
+last view and rows became the next interactive run's. The operator
+decided the flag should be the opt-out its name and its use in scripts
+suggest: a run that was not asked to resume does not leave a place to
+resume from.
+
+- **The run reads the state file and never writes it.** A
+  `--no-resume-view` run opens on the default view (or `--view`) and
+  every view on its default folds, as before, and makes no write to
+  `tui-state.json`: not on a view switch, not on a settings change, not
+  before a hand-off of the terminal, not when the loop ends, and not
+  when the file is absent (no file and no directory is made). The file
+  is byte-identical afterwards.
+- **It still restores what is not a place.** The saved sort, filters,
+  groupings, mux recency, and preview settings apply as in any run
+  (explicit command-line flags still win), since the flag opts out of
+  resuming where the operator was, not of the choices they made. What a
+  run changes of these dies with it.
+- **How.** The app's use of the file is one of three modes: off
+  (`--snapshot` and test apps), read-only (this flag), and read-write
+  (every other run). Reading and writing were one switch; they are now
+  split, and every write already went through one method, which writes
+  only in read-write mode. The reducer still asks for a write on each
+  of those events; the write itself is skipped.
+- **Alternatives.** Keep writing (the first behavior): a run meant to be
+  repeatable still moves the operator's remembered view and rows, which
+  the help had once claimed it did not. Skip persistence entirely under
+  the flag: it would also skip restoring sort, filters, and groupings,
+  so a scripted run would ignore the operator's saved settings, which
+  the operator did not want.
+- **Tests.** Unit tests through `resumed_app` pin the file staying
+  byte-identical, or absent, across a view switch, each settings
+  change, and the end of the run, and the saved settings still
+  applying; two tests of the live TUI in a private tmux server
+  (`tests/tui_tmux_e2e.rs`) pin the same through the command line.
