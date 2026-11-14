@@ -451,6 +451,8 @@ for its pane until a fresher record for that pane supersedes it; a stale one,
 whose process is gone, whose mux was created after it, or whose own pane now
 runs another harness (by the mux probe's pane listing, ADR 0220), is ignored
 rather than overriding process evidence. No time limit applies (ADR 0146).
+A record that names its tmux server's socket is matched only to a mux of that
+server, by the socket path the probe read (ADR 0028's amendment).
 A record written from a harness's background process, such as opencode 2.x's
 shared service, carries no pane context and never produces mux links; opencode
 2.x pane attribution comes from the plugin's TUI entrypoint, which runs in the

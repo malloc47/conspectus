@@ -211,9 +211,11 @@ Everything above stands except as follows.
    cold-rebuilds anyway at format 16), keeps the name match.
 
 Rule 1 (an entry that matches a session binds to it, whatever its socket)
-is unchanged, and so is the hook sidecar's attribution, which matches a
-record's mux by session name and pane process, not by socket. The
-snapshot format moves to 16.
+is unchanged. The hook sidecar's attribution, which matched a record's
+mux by session name and pane process, not by socket, was left alone
+here; it now matches a record's mux on the record's server by this same
+rule ([ADR 0028](0028-hook-sidecar-mux-attribution.md)'s amendment of
+2026-11-13). The snapshot format moves to 16.
 
 Alternatives considered: computing the expected path of each probed
 server from Conspectus's own `TMUX_TMPDIR` and uid, which repeats tmux's

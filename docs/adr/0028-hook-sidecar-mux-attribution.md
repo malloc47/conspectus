@@ -7,7 +7,9 @@ with or without a daemon, and a daemon ingest writes it too. Amended:
 the SQLite store below was retired with the rest of SQLite (ADR 0082)
 for the latest-record spool, which keeps one record per pane, and no
 time limit applies to a record (ADR 0146's amendment). See the
-amendment at the end. Its carve-out for already-visible status
+amendment at the end. Amended again 2026-11-13: a record that names
+its tmux server's socket is matched to a mux of that server only (the
+last amendment). Its carve-out for already-visible status
 surfaces is used once, by ADR 0217: the title a Codex pane sets, read
 for live state only. Its exception for a harness-documented,
 non-mutating control channel audited as safe is used once, by ADR 0218:
@@ -229,3 +231,38 @@ code. The decision to attribute through `conspectus hook write` stands.
   active pane (checked on tmux 3.6 and 3.7). A `TMUX_PANE` that is not a
   pane id leaves the question untargeted; a pane tmux doesn't know gets
   no answer rather than another pane's.
+
+## Amendment: a record's mux is on its own tmux server (2026-11-13)
+
+Matching order step 2 compared a record's tmux session name with each
+mux's native id, whatever server the mux was on, and step 4 took any
+mux in the record's directory. A record from a default server under
+another `TMUX_TMPDIR` or another uid's, whose session shares a name
+with one on the probed default server, was tied to that mux by a strong
+hook link. A record from a `-L work` server never matched by name (its
+mux's native id is `work:<name>`) and fell back to any mux in its
+directory, on any server. The live-state binding already matched an
+entry's server by its full socket path
+([ADR 0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md)'s
+amendment of 2026-11-13); attribution now uses the same rule.
+
+1. **A record that names its server's socket path** (`tmux.socket_path`,
+   which `hook write` takes from `$TMUX`) matches only a tmux mux of that
+   server: the server's name is the path's last component (`tmux -L`
+   names the socket file), and where the mux's probe read the server's
+   `#{socket_path}`, the record's path must be that path exactly. Step 2
+   then matches the record's session name against the mux's bare session
+   name, so a `-L` server's record matches its own session; step 4 takes
+   a mux in the record's directory on that server only.
+2. **A record that names no socket path**, from a tmux that left `$TMUX`
+   without one or a record written before the field, matches by name and
+   directory as before. A probe that read no socket path leaves the
+   server's name to decide.
+3. **Step 3 is unchanged.** A mux whose active pane runs the record's
+   process is that process's, whichever server the record names.
+
+Alternatives considered: comparing names only for `-L` servers, which
+leaves the default server under another `TMUX_TMPDIR` attributed to
+yours; and keeping the directory fallback on every server, which ties a
+record from a server Conspectus does not list to a session of yours
+that shares its directory, with the same strong link a name match makes.

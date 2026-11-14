@@ -53,7 +53,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0011](0011-forge-discovery-via-gh.md) | Forge Discovery Via The `gh` CLI | Accepted |
 | [0013](0013-opencode-sqlite-session-store.md) | Read opencode Sessions From SQLite | Accepted |
 | [0027](0027-workspace-detection-precedence.md) | Workspace Detection And Provider Precedence | Accepted |
-| [0028](0028-hook-sidecar-mux-attribution.md) | Hook Sidecar Mux Attribution | Accepted (amended, and by 0220; refined by 0146; live state added by 0204, 0206; status surface used by 0217; control channel used by 0218) |
+| [0028](0028-hook-sidecar-mux-attribution.md) | Hook Sidecar Mux Attribution | Accepted (amended twice, and by 0220; refined by 0146; live state added by 0204, 0206; status surface used by 0217; control channel used by 0218) |
 | [0046](0046-process-tree-pane-linker.md) | Process-Tree Pane Linker | Accepted |
 | [0048](0048-codex-state-and-log-readers.md) | Codex State and Log Readers for Mux Attribution | Accepted (amended) |
 | [0049](0049-opencode-hook-plugin-distribution.md) | OpenCode Hook Plugin Distribution | Accepted (amended by 0126, 0206) |
