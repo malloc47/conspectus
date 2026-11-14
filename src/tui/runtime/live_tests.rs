@@ -48,7 +48,6 @@ impl Rig {
         let dir = tempfile::tempdir().expect("a scratch state directory");
         let store = LiveStore::at(dir.path().join("conspectus"));
         let (result_tx, result_rx) = mpsc::channel();
-        let (preview_tx, preview_rx) = mpsc::channel();
         let (confirmed_tx, confirmed_rx) = mpsc::channel();
         let discoveries = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&discoveries);
@@ -64,8 +63,7 @@ impl Rig {
             tmux: Box::new(crate::discovery::tmux::FakeTmux::with_sessions("")),
             result_tx,
             result_rx,
-            preview_tx,
-            preview_rx,
+            loads: PreviewLoads::new(),
             confirmed_tx,
             confirmed_rx,
             probe: Arc::new(NeverAsked),

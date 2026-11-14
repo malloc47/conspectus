@@ -4,6 +4,8 @@
 //! Time here is the script's: events arrive at the times a test gives, a
 //! key and a frame cost what the test says, and nothing sleeps.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use ratatui::crossterm::event::{Event, KeyCode};
@@ -11,6 +13,7 @@ use ratatui::crossterm::event::{Event, KeyCode};
 use super::console::scripted::{Scripted, key};
 use super::*;
 use crate::model::{AgentSessionId, AgentSessionNode, GraphNode, GraphSnapshot, NodeId};
+use crate::tui::preview::{PreviewContent, PreviewSource};
 use crate::tui::rows::RowId;
 
 fn ms(millis: u64) -> Duration {
@@ -68,12 +71,16 @@ impl Run {
 
 /// A [`LoopMode`] with the scenario TUI's keys and no discovery, over a
 /// scripted console. A key costs `key_cost` of the script's time, and a
-/// preview load is recorded instead of run.
+/// preview load is recorded, stamped with the script's clock, and
+/// answered at once with text naming the session, instead of run.
 struct Probe {
     inner: StaticMode,
     key_cost: Duration,
     /// When the last key was handled.
     last_key: Duration,
+    clock: Rc<Cell<Duration>>,
+    /// Every load the loop started, and when.
+    loads: Vec<(Duration, PreviewSource)>,
 }
 
 impl LoopMode for Probe {
@@ -106,7 +113,13 @@ impl LoopMode for Probe {
         self.inner.tmux.as_ref()
     }
 
-    fn load_preview(&mut self, _app: &mut App, _source: PreviewSource) {}
+    fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
+        self.loads.push((self.clock.get(), source.clone()));
+        if let PreviewSource::Transcript(session) = &source {
+            let content = PreviewContent::Unavailable(format!("cached {}", session.session_key));
+            app.update(Msg::SetPreview { source, content });
+        }
+    }
 }
 
 /// Run the loop over `snapshot` until `console` ends. The list is flat,
@@ -125,6 +138,8 @@ fn run(snapshot: GraphSnapshot, console: Scripted, key_cost: Duration) -> Run {
         },
         key_cost,
         last_key: Duration::ZERO,
+        clock: console.clock_handle(),
+        loads: Vec::new(),
     };
     let mut console = console;
     let config = app.config().clone();
@@ -348,5 +363,112 @@ fn a_quit_inside_a_batch_ends_the_loop_with_the_rest_unread() {
         run.frames_at(ms(10)),
         0,
         "no frame is drawn once the app has quit"
+    );
+}
+
+/// When each load started and for which session.
+fn loads(run: &Run) -> Vec<(Duration, String)> {
+    run.mode
+        .loads
+        .iter()
+        .map(|(at, source)| match source {
+            PreviewSource::Transcript(session) => (*at, session.session_key.clone()),
+            other => panic!("a load for {other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_burst_of_moves_starts_one_load_for_the_row_it_rests_on() {
+    let console = Scripted::new(100, 30)
+        .keys_at(ms(200), downs(20))
+        .ends_at(ms(600));
+    let run = run(sessions(50), console, Duration::ZERO);
+
+    // The first row loads when the data lands, with no key behind it;
+    // the twenty rows the burst passes load nothing.
+    assert_eq!(
+        loads(&run),
+        [(ms(0), "000".to_string()), (ms(300), "020".to_string())]
+    );
+}
+
+#[test]
+fn moves_that_each_arrive_alone_still_load_only_where_the_cursor_rests() {
+    // A key every 20 ms, each in a pass of its own: faster than a load
+    // may start, so none starts until the keys stop.
+    let mut console = Scripted::new(100, 30).ends_at(ms(900));
+    for n in 0..30 {
+        console = console.key_at(ms(200 + 20 * n), KeyCode::Down);
+    }
+    let run = run(sessions(50), console, Duration::ZERO);
+
+    let loads = loads(&run);
+    assert_eq!(loads.len(), 2, "{loads:?}");
+    assert_eq!(loads[1].1, "030");
+    let rested = loads[1].0 - ms(200 + 20 * 29);
+    assert!(
+        rested >= previews::REST && rested <= ms(150),
+        "the row loaded {rested:?} after the last key"
+    );
+}
+
+#[test]
+fn one_move_then_a_pause_loads_the_new_row() {
+    let console = Scripted::new(100, 30)
+        .key_at(ms(300), KeyCode::Down)
+        .ends_at(ms(800));
+    let run = run(sessions(50), console, Duration::ZERO);
+
+    assert_eq!(
+        loads(&run),
+        [(ms(0), "000".to_string()), (ms(400), "001".to_string())]
+    );
+}
+
+#[test]
+fn a_row_passed_shows_its_cached_preview_or_the_placeholder() {
+    // The cursor rests on 000 and then 001, so both are cached; then it
+    // steps down to 002 and back up to 001 inside the rest.
+    let console = Scripted::new(120, 30)
+        .key_at(ms(200), KeyCode::Down)
+        .key_at(ms(500), KeyCode::Down)
+        .key_at(ms(510), KeyCode::Up)
+        .ends_at(ms(900));
+    let run = run(sessions(10), console, Duration::ZERO);
+
+    let at = |t: u64| {
+        run.console
+            .frames()
+            .iter()
+            .find(|frame| frame.at == ms(t))
+            .unwrap_or_else(|| panic!("no frame at {t} ms"))
+            .text()
+    };
+    // On 002 no preview was ever loaded: the placeholder, not 001's.
+    assert!(at(500).contains("loading transcript"), "{}", at(500));
+    assert!(!at(500).contains("cached 001"), "{}", at(500));
+    // Back on 001 before the rest: its cached preview, with no new load.
+    assert!(at(510).contains("cached 001"), "{}", at(510));
+    assert_eq!(
+        loads(&run)
+            .into_iter()
+            .map(|(_, key)| key)
+            .collect::<Vec<_>>(),
+        ["000", "001"],
+        "the row passed loads nothing, and 001 is not loaded again"
+    );
+}
+
+#[test]
+fn a_refresh_loads_the_selection_without_waiting_for_the_rest() {
+    let console = Scripted::new(100, 30)
+        .keys_at(ms(300), [KeyCode::Down, KeyCode::Down, KeyCode::Char('r')])
+        .ends_at(ms(800));
+    let run = run(sessions(50), console, Duration::ZERO);
+
+    assert_eq!(
+        loads(&run),
+        [(ms(0), "000".to_string()), (ms(300), "002".to_string())]
     );
 }

@@ -2,6 +2,11 @@ use std::process::Command;
 
 use super::*;
 
+/// `query` loaded with nothing to stop it.
+fn load_git_preview(query: &GitQuery, muted: Modifier) -> PreviewContent {
+    load_git_preview_unless(query, muted, &|| false).expect("nothing stops this load")
+}
+
 /// A repo with two commits on `main` and a branch `topic` one
 /// commit ahead.
 fn repo_fixture() -> tempfile::TempDir {
@@ -144,4 +149,49 @@ fn a_missing_ref_or_checkout_says_so() {
         ),
         PreviewContent::Unavailable("not a git repository".to_string())
     );
+}
+
+/// Run `query` with a stop that lets `allowed` git commands start, and
+/// say how it ended and how many commands asked to start (the last one
+/// refused when the load was stopped).
+fn load_stopping_after(
+    query: &GitQuery,
+    allowed: usize,
+) -> (Result<PreviewContent, Stopped>, usize) {
+    let asked = std::sync::atomic::AtomicUsize::new(0);
+    let stop = || asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= allowed;
+    let outcome = load_git_preview_unless(query, crate::tui::Theme::default().muted, &stop);
+    (outcome, asked.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+#[test]
+fn a_stopped_load_starts_no_more_git_commands() {
+    let repo = repo_fixture();
+    let dir = repo.path().to_path_buf();
+    let queries = [
+        GitQuery::Status { root: dir.clone() },
+        GitQuery::Repo { dir: dir.clone() },
+        GitQuery::Log {
+            dir: dir.clone(),
+            rev: "topic".to_string(),
+            ahead_behind: Some(("topic".to_string(), "main".to_string())),
+        },
+        GitQuery::Show {
+            dir,
+            commit: "HEAD".to_string(),
+        },
+    ];
+    for query in &queries {
+        // Nothing stops it: how many commands the preview runs.
+        let (full, commands) = load_stopping_after(query, usize::MAX);
+        assert!(full.is_ok(), "{query:?}");
+        assert!(commands >= 1, "{query:?} ran no git");
+        // Stopped after each number of commands: it ends there, with the
+        // command it was refused never started.
+        for allowed in 0..commands {
+            let (outcome, asked) = load_stopping_after(query, allowed);
+            assert_eq!(outcome, Err(Stopped), "{query:?} after {allowed} commands");
+            assert_eq!(asked, allowed + 1, "{query:?} after {allowed} commands");
+        }
+    }
 }

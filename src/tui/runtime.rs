@@ -53,6 +53,7 @@ mod live_tests;
 mod loop_tests;
 mod mux_name;
 mod overlay_keys;
+mod previews;
 mod term;
 mod visibility;
 mod worktree_exec;
@@ -60,6 +61,7 @@ mod worktree_exec;
 use console::Console;
 use executor::*;
 use launch::*;
+use previews::{PreviewLoads, PreviewRest};
 use worktree_exec::*;
 
 #[cfg(test)]
@@ -124,6 +126,11 @@ trait LoopMode {
     fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
         load_preview_now(app, self.tmux(), source);
     }
+
+    /// The preview source the cursor is on, each pass: a load still
+    /// running for any other source should stop starting subprocesses
+    /// (ADR 0237). The default has no workers to tell.
+    fn keep_previews_for(&mut self, _cursor: Option<&PreviewSource>) {}
 }
 
 /// Shared event loop driver. Consumes any
@@ -162,19 +169,28 @@ fn drive_loop<M: LoopMode>(
     let poll_timeout = Duration::from_millis(100);
     mode.init(terminal, app, config)?;
 
-    // The preview source the last pass resolved, and whether the last
-    // input asked for a refresh.
-    let mut shown: Option<PreviewSource> = None;
+    // Where the cursor rests, whether the last input asked for a refresh,
+    // and whether the pass follows input at all.
+    let mut rest = PreviewRest::default();
     let mut force_preview = false;
+    let mut keyed = false;
     while !app.should_quit() {
+        let now = terminal.now();
         // A contents query that has rested starts its scan.
-        app.search_overlay_tick(terminal.now(), false);
+        app.search_overlay_tick(now, false);
         mode.drain(app, config)?;
-        shown = refresh_preview_if_needed(app, config, mode, shown, force_preview);
+        refresh_preview_if_needed(app, config, mode, &mut rest, now, keyed, force_preview);
         terminal.draw(app)?;
         force_preview = false;
-        if terminal.poll(poll_timeout)? {
+        keyed = false;
+        // A cursor still on its way wakes the loop when it will have
+        // rested, so the row it stops on loads then.
+        let wait = rest
+            .until_rest(terminal.now())
+            .map_or(poll_timeout, |left| left.min(poll_timeout));
+        if terminal.poll(wait)? {
             force_preview = take_queued_input(terminal, app, config, mode)?;
+            keyed = true;
         }
     }
     Ok(())
@@ -238,8 +254,8 @@ struct LiveMode {
     tmux: Box<dyn MuxBackend>,
     result_tx: mpsc::Sender<DiscoveryResult>,
     result_rx: mpsc::Receiver<DiscoveryResult>,
-    preview_tx: mpsc::Sender<(PreviewSource, PreviewContent)>,
-    preview_rx: mpsc::Receiver<(PreviewSource, PreviewContent)>,
+    /// The preview loads running on worker threads.
+    loads: PreviewLoads,
     /// Muxes the existence check after a hand-off confirmed.
     confirmed_tx: mpsc::Sender<handoff::Confirmed>,
     confirmed_rx: mpsc::Receiver<handoff::Confirmed>,
@@ -492,9 +508,7 @@ impl LoopMode for LiveMode {
 
     fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()> {
         self.content.pump(app);
-        while let Ok((source, content)) = self.preview_rx.try_recv() {
-            app.update(Msg::SetPreview { source, content });
-        }
+        self.loads.drain(app);
         // The operator came back to this pane (inside tmux an attach
         // returns as soon as the client is switched away): whatever
         // they did in the other session is not on screen yet.
@@ -709,20 +723,11 @@ impl LoopMode for LiveMode {
             load_preview_now(app, self.tmux(), source);
             return;
         }
-        let tx = self.preview_tx.clone();
-        let muted = app.theme().muted;
-        std::thread::spawn(move || {
-            // A loader panic still has to end the load, or the preview
-            // would wait on it forever and `r` couldn't retry.
-            let content = std::panic::catch_unwind(|| load_offline_preview(&source, muted))
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| {
-                    PreviewContent::Failed("the preview reader crashed".to_string())
-                });
-            // The receiver is gone only when the TUI is exiting.
-            let _ = tx.send((source, content));
-        });
+        self.loads.start(app, source);
+    }
+
+    fn keep_previews_for(&mut self, cursor: Option<&PreviewSource>) {
+        self.loads.keep_only(cursor);
     }
 }
 
@@ -1074,15 +1079,13 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         crate::tui::live_overlay::LiveOverlay::from_env().with_poll_scope(config.live_poll),
     );
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
-    let (preview_tx, preview_rx) = mpsc::channel();
     let (confirmed_tx, confirmed_rx) = mpsc::channel();
     let refresh_interval = config.refresh_interval;
     let mode = LiveMode {
         tmux: Box::new(SystemTmux::new()),
         result_tx,
         result_rx,
-        preview_tx,
-        preview_rx,
+        loads: PreviewLoads::new(),
         confirmed_tx,
         confirmed_rx,
         probe: Arc::new(handoff::TmuxIncarnation::default()),
@@ -1927,21 +1930,25 @@ fn plan_preview_load(
     Some(source)
 }
 
-/// Load the selection's preview when [`plan_preview_load`] says it
-/// needs one. Returns the source the selection now shows, for the next
-/// pass to compare against.
+/// Load the selection's preview when [`plan_preview_load`] says it needs
+/// one and the cursor has rested on its row ([`PreviewRest`]). `keyed`
+/// says the pass follows input, and `force` that the input asked for a
+/// refresh.
 fn refresh_preview_if_needed(
     app: &mut App,
     config: &RunConfig,
     mode: &mut impl LoopMode,
-    shown: Option<PreviewSource>,
+    rest: &mut PreviewRest,
+    now: Instant,
+    keyed: bool,
     force: bool,
-) -> Option<PreviewSource> {
-    if let Some(source) = plan_preview_load(app, config, shown.as_ref(), force) {
+) {
+    let plan = rest.pass(app, config, now, keyed, force);
+    mode.keep_previews_for(rest.cursor());
+    if let Some(source) = plan {
         app.update(Msg::PreviewLoadStarted(source.clone()));
         mode.load_preview(app, source);
     }
-    preview_source(app)
 }
 
 /// A preview a materialized scenario recorded in place of a live

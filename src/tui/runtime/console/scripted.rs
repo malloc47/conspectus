@@ -111,6 +111,12 @@ impl Scripted {
         self.clock.get()
     }
 
+    /// The clock, to read from somewhere the console is not passed to,
+    /// such as a fake that stamps what it is asked to do.
+    pub fn clock_handle(&self) -> Rc<Cell<Duration>> {
+        Rc::clone(&self.clock)
+    }
+
     /// The frames drawn so far, oldest first.
     pub fn frames(&self) -> &[Frame] {
         &self.frames

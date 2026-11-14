@@ -1293,6 +1293,7 @@ impl App {
             Msg::PreviewLoadStarted(source) => {
                 self.preview_store.start_loading(source);
             }
+            Msg::PreviewLoadAbandoned(source) => self.preview_store.abandon(&source),
             Msg::SetProviderStatus(status) => {
                 self.provider_status = status;
             }

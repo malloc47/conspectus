@@ -10,7 +10,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tuikit::glyphs::marks;
 
-use super::PreviewContent;
+use super::{PreviewContent, Stop, Stopped};
 
 /// Commits a log preview shows.
 const LOG_LIMIT: &str = "30";
@@ -35,23 +35,29 @@ pub enum GitQuery {
     Show { dir: PathBuf, commit: String },
 }
 
-/// Run `query`. Notes and dates take `muted`, the theme's muted
-/// modifier.
-pub fn load_git_preview(query: &GitQuery, muted: Modifier) -> PreviewContent {
+/// Run `query`, asking `stop` before each git command: a load it ends is
+/// `Err(Stopped)`, with nothing more started. Notes and dates take
+/// `muted`, the theme's muted modifier.
+pub fn load_git_preview_unless(
+    query: &GitQuery,
+    muted: Modifier,
+    stop: Stop<'_>,
+) -> Result<PreviewContent, Stopped> {
     let result = match query {
-        GitQuery::Status { root } => status(root, muted),
-        GitQuery::Repo { dir } => repo(dir, muted),
+        GitQuery::Status { root } => status(root, muted, stop),
+        GitQuery::Repo { dir } => repo(dir, muted, stop),
         GitQuery::Log {
             dir,
             rev,
             ahead_behind,
-        } => log(dir, rev, ahead_behind.as_ref(), muted),
-        GitQuery::Show { dir, commit } => show(dir, commit),
+        } => log(dir, rev, ahead_behind.as_ref(), muted, stop),
+        GitQuery::Show { dir, commit } => show(dir, commit, stop),
     };
     match result {
-        Ok(lines) => PreviewContent::Lines(lines),
-        Err(GitError::Unavailable(reason)) => PreviewContent::Unavailable(reason),
-        Err(GitError::Failed(message)) => PreviewContent::Failed(message),
+        Ok(lines) => Ok(PreviewContent::Lines(lines)),
+        Err(GitError::Unavailable(reason)) => Ok(PreviewContent::Unavailable(reason)),
+        Err(GitError::Failed(message)) => Ok(PreviewContent::Failed(message)),
+        Err(GitError::Stopped) => Err(Stopped),
     }
 }
 
@@ -59,10 +65,16 @@ pub fn load_git_preview(query: &GitQuery, muted: Modifier) -> PreviewContent {
 enum GitError {
     Unavailable(String),
     Failed(String),
+    /// The caller stopped the load before this command started.
+    Stopped,
 }
 
-/// Run a read-only git command in `dir` and return its stdout.
-fn git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
+/// Run a read-only git command in `dir` and return its stdout. Nothing
+/// starts once `stop` says to.
+fn git(dir: &Path, args: &[&str], stop: Stop<'_>) -> Result<String, GitError> {
+    if stop() {
+        return Err(GitError::Stopped);
+    }
     if !dir.exists() {
         return Err(GitError::Unavailable("no longer exists".to_string()));
     }
@@ -92,7 +104,7 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
 }
 
 /// Whether `rev` names something in the repo at `dir`.
-fn rev_exists(dir: &Path, rev: &str) -> Result<bool, GitError> {
+fn rev_exists(dir: &Path, rev: &str, stop: Stop<'_>) -> Result<bool, GitError> {
     match git(
         dir,
         &[
@@ -101,6 +113,7 @@ fn rev_exists(dir: &Path, rev: &str) -> Result<bool, GitError> {
             "--quiet",
             &format!("{rev}^{{commit}}"),
         ],
+        stop,
     ) {
         Ok(_) => Ok(true),
         Err(GitError::Failed(_)) => Ok(false),
@@ -116,8 +129,8 @@ fn dim(text: impl Into<String>, muted: Modifier) -> Line<'static> {
     Line::styled(text.into(), Style::new().add_modifier(muted))
 }
 
-fn status(root: &Path, muted: Modifier) -> Result<Vec<Line<'static>>, GitError> {
-    let out = git(root, &["status", "--short", "--branch"])?;
+fn status(root: &Path, muted: Modifier, stop: Stop<'_>) -> Result<Vec<Line<'static>>, GitError> {
+    let out = git(root, &["status", "--short", "--branch"], stop)?;
     let mut lines = Vec::new();
     let mut entries = out.lines();
     if let Some(branch) = entries.next().and_then(|l| l.strip_prefix("## ")) {
@@ -149,8 +162,8 @@ fn status(root: &Path, muted: Modifier) -> Result<Vec<Line<'static>>, GitError> 
 
 /// The repo's default branch: the local branch `origin/HEAD` points at,
 /// that remote branch when there's no local one, else `HEAD`.
-fn default_branch(dir: &Path) -> Result<String, GitError> {
-    let Ok(remote_head) = git(
+fn default_branch(dir: &Path, stop: Stop<'_>) -> Result<String, GitError> {
+    let remote_head = match git(
         dir,
         &[
             "symbolic-ref",
@@ -158,29 +171,32 @@ fn default_branch(dir: &Path) -> Result<String, GitError> {
             "--short",
             "refs/remotes/origin/HEAD",
         ],
-    ) else {
-        return Ok("HEAD".to_string());
+        stop,
+    ) {
+        Ok(remote_head) => remote_head,
+        Err(GitError::Stopped) => return Err(GitError::Stopped),
+        Err(_) => return Ok("HEAD".to_string()),
     };
     let remote_head = remote_head.trim().to_string();
     let local = remote_head.trim_start_matches("origin/");
-    if rev_exists(dir, &format!("refs/heads/{local}"))? {
+    if rev_exists(dir, &format!("refs/heads/{local}"), stop)? {
         Ok(local.to_string())
     } else {
         Ok(remote_head)
     }
 }
 
-fn repo(dir: &Path, muted: Modifier) -> Result<Vec<Line<'static>>, GitError> {
-    let branch = default_branch(dir)?;
+fn repo(dir: &Path, muted: Modifier, stop: Stop<'_>) -> Result<Vec<Line<'static>>, GitError> {
+    let branch = default_branch(dir, stop)?;
     let mut lines = vec![heading(format!("recent commits on {branch}"))];
-    match commits(dir, &branch, muted) {
+    match commits(dir, &branch, muted, stop) {
         Ok(log) => lines.extend(log),
         Err(GitError::Failed(_)) => lines.push(dim("(no commits)", muted)),
         Err(err) => return Err(err),
     }
     lines.push(Line::raw(""));
     lines.push(heading("remotes"));
-    let remotes = git(dir, &["remote", "-v"])?;
+    let remotes = git(dir, &["remote", "-v"], stop)?;
     let mut seen = Vec::new();
     for remote in remotes.lines() {
         // `remote -v` lists each remote's fetch and push URLs; one line
@@ -203,7 +219,12 @@ fn repo(dir: &Path, muted: Modifier) -> Result<Vec<Line<'static>>, GitError> {
     Ok(lines)
 }
 
-fn commits(dir: &Path, rev: &str, muted: Modifier) -> Result<Vec<Line<'static>>, GitError> {
+fn commits(
+    dir: &Path,
+    rev: &str,
+    muted: Modifier,
+    stop: Stop<'_>,
+) -> Result<Vec<Line<'static>>, GitError> {
     let out = git(
         dir,
         &[
@@ -214,6 +235,7 @@ fn commits(dir: &Path, rev: &str, muted: Modifier) -> Result<Vec<Line<'static>>,
             rev,
             "--",
         ],
+        stop,
     )?;
     Ok(out
         .lines()
@@ -236,8 +258,9 @@ fn log(
     rev: &str,
     ahead_behind: Option<&(String, String)>,
     muted: Modifier,
+    stop: Stop<'_>,
 ) -> Result<Vec<Line<'static>>, GitError> {
-    if !rev_exists(dir, rev)? {
+    if !rev_exists(dir, rev, stop)? {
         return Err(GitError::Unavailable(format!("{rev} not found")));
     }
     let mut lines = Vec::new();
@@ -251,6 +274,7 @@ fn log(
                 &format!("{branch}...{upstream}"),
                 "--",
             ],
+            stop,
         );
         lines.push(match counts {
             Ok(counts) => {
@@ -259,19 +283,20 @@ fn log(
                 let behind = parts.next().unwrap_or("0");
                 heading(format!("ahead {ahead} · behind {behind} of {upstream}"))
             }
+            Err(GitError::Stopped) => return Err(GitError::Stopped),
             Err(_) => dim(format!("{upstream} not found"), muted),
         });
         lines.push(Line::raw(""));
     }
-    lines.extend(commits(dir, rev, muted)?);
+    lines.extend(commits(dir, rev, muted, stop)?);
     Ok(lines)
 }
 
-fn show(dir: &Path, commit: &str) -> Result<Vec<Line<'static>>, GitError> {
-    if !rev_exists(dir, commit)? {
+fn show(dir: &Path, commit: &str, stop: Stop<'_>) -> Result<Vec<Line<'static>>, GitError> {
+    if !rev_exists(dir, commit, stop)? {
         return Err(GitError::Unavailable(format!("commit {commit} not found")));
     }
-    let out = git(dir, &["show", "--stat", commit, "--"])?;
+    let out = git(dir, &["show", "--stat", commit, "--"], stop)?;
     Ok(out
         .lines()
         .map(|line| Line::raw(line.replace('\t', "    ")))

@@ -2,12 +2,13 @@
 //! right panel's Preview zone (ADR 0112 §5).
 //!
 //! A preview is a [`PreviewSource`] resolved from the selection. Its
-//! content loads when the selection lands on it and sits in
+//! content loads once the cursor has rested on it (ADR 0237) and sits in
 //! [`PreviewStore`], in memory only (ADR 0086). A source reloads on
 //! selection change, on `r`, and when a tmux hand-off returns, showing
-//! its previous content until the reload lands. Interval-driven pane
-//! refresh is open work (backlog `CSP-185`); until then
-//! `RunConfig::mux_preview_interval` is parsed but unused.
+//! its previous content until the reload lands; a cursor passing through
+//! rows starts no load for them. Interval-driven pane refresh is open
+//! work (backlog `CSP-185`); until then `RunConfig::mux_preview_interval`
+//! is parsed but unused.
 
 pub(crate) mod forge;
 mod git;
@@ -24,7 +25,7 @@ use ratatui::style::Modifier;
 use ratatui::text::Line;
 
 pub use forge::PrQuery;
-pub use git::GitQuery;
+pub use git::{GitQuery, load_git_preview_unless};
 pub use value::{glossary_entry, split_command_line, value_lines};
 
 use crate::discovery::tmux::{MuxBackend, PaneCapture, TmuxCaptureOutcome};
@@ -290,6 +291,15 @@ impl PreviewStore {
         self.loading.contains(source)
     }
 
+    /// A load for `source` ended without a result because the cursor left
+    /// its row first. Whatever is cached for it may be out of date, so it
+    /// is marked for reload, and the next time the cursor rests on the
+    /// row it loads again.
+    pub fn abandon(&mut self, source: &PreviewSource) {
+        self.loading.remove(source);
+        self.mark_stale(source);
+    }
+
     /// Mark a source for reload, keeping its content on screen until
     /// the reload lands.
     pub fn mark_stale(&mut self, source: &PreviewSource) {
@@ -553,23 +563,45 @@ pub fn pane_native_id(app: &App, mux: &MuxSessionId) -> Option<String> {
         })
 }
 
+/// Asked before a loader starts a subprocess: `true` ends the load there,
+/// so a load whose row the cursor has left starts nothing more.
+pub type Stop<'a> = &'a dyn Fn() -> bool;
+
+/// A load a [`Stop`] ended before it finished: it has no content to keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stopped;
+
 /// Load a source that needs no mux backend. Blocking: the live runtime
 /// calls it on a worker thread, so it takes the theme's `muted` modifier
 /// for secondary lines rather than the theme. `None` for a pane, which
 /// captures through the executor's mux op.
 pub fn load_offline_preview(source: &PreviewSource, muted: Modifier) -> Option<PreviewContent> {
-    match source {
+    // A load that nothing stops cannot end `Stopped`.
+    load_offline_preview_unless(source, muted, &|| false)
+        .ok()
+        .flatten()
+}
+
+/// [`load_offline_preview`] for a worker whose load can be called off:
+/// `stop` is asked before each git command, and a load it ends is
+/// `Err(Stopped)`. `Ok(None)` is a pane.
+pub fn load_offline_preview_unless(
+    source: &PreviewSource,
+    muted: Modifier,
+    stop: Stop<'_>,
+) -> Result<Option<PreviewContent>, Stopped> {
+    Ok(match source {
         PreviewSource::Pane(_) => None,
         PreviewSource::Transcript(session) => Some(load_transcript_preview(session)),
         PreviewSource::Path(path) => Some(path::load_path_preview(path, muted)),
-        PreviewSource::Git(query) => Some(git::load_git_preview(query, muted)),
+        PreviewSource::Git(query) => Some(git::load_git_preview_unless(query, muted, stop)?),
         PreviewSource::PullRequest(query) => Some(forge::load_pr_preview(query, muted)),
         PreviewSource::Process(pid) => Some(process::load_process_tree(
             std::path::Path::new("/proc"),
             *pid,
             muted,
         )),
-    }
+    })
 }
 
 /// Load a session's transcript into a [`PreviewContent`]. Blocking:

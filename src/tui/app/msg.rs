@@ -113,6 +113,10 @@ pub enum Msg {
     /// The runtime started loading a preview, so the next selection
     /// pass doesn't start another.
     PreviewLoadStarted(PreviewSource),
+    /// A preview load ended without a result: the cursor left its row
+    /// before the loader finished. The source loads again the next time
+    /// the cursor rests on it.
+    PreviewLoadAbandoned(PreviewSource),
     /// Update the provider availability status surfaced as chips
     /// in the status bar. The runtime populates this from
     /// discovery diagnostics and env-var toggles.

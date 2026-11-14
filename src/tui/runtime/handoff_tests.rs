@@ -375,7 +375,6 @@ mod live {
         /// existence check.
         fn new(snapshot: GraphSnapshot, answers: &[bool]) -> Self {
             let (result_tx, result_rx) = mpsc::channel();
-            let (preview_tx, preview_rx) = mpsc::channel();
             let (confirmed_tx, confirmed_rx) = mpsc::channel();
             let (regained, regained_rx) = mpsc::channel();
             let (discover, calls) = gated_discovery();
@@ -384,8 +383,7 @@ mod live {
                 tmux: Box::new(crate::discovery::tmux::FakeTmux::with_sessions("")),
                 result_tx,
                 result_rx,
-                preview_tx,
-                preview_rx,
+                loads: crate::tui::runtime::previews::PreviewLoads::new(),
                 confirmed_tx,
                 confirmed_rx,
                 probe: Arc::clone(&probe) as Arc<dyn IncarnationProbe>,
