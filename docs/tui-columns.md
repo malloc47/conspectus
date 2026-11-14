@@ -506,7 +506,10 @@ the number in the waiting mark's yellow, but it counts every agent that
 waits on you anywhere: every session with live state and every agent in a
 pane no session matches, whatever the view lists or the filter hides. It
 changes with the rows' marks, within about a second of the agent's
-report.
+report. The harness chips and the warning count the sessions the view
+lists, each once however many rows list it, as the group headers do: a
+session the PRs view lists under two pull requests of its checkout's
+branch counts once.
 
 When the line is too narrow its parts give way whole, in the order above,
 and the line ends with `…`; a part that gave way comes back when it fits
@@ -753,7 +756,8 @@ Unfiltered, the header line counts every session. Under a narrowing
 filter, or a PR state or branch filter, its `matching/total sessions`
 counts the sessions listed beneath the PRs, each once: a session under
 two pull requests of its checkout's branch counts once, as in its group
-header.
+header. Its harness chips and `▲ N` count those sessions each once too,
+filtered or not.
 
 ### PR row
 

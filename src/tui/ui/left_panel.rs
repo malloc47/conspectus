@@ -466,7 +466,8 @@ pub(super) struct GroupSummary {
 /// group row. Each group's summary aggregates every row that sits below
 /// it in the flat tree (continuous depth > group depth) until the next
 /// sibling-or-shallower row: the sessions its `AgentSession` rows stand
-/// for, each once, for the session count and the warning, and the agents
+/// for, each once ([`listed_sessions`]), for the session count and the
+/// warning, and the agents
 /// those rows (or, in the Mux view, its muxes) stand for for the waiting
 /// count.
 pub(super) fn compute_group_summaries(
@@ -479,21 +480,20 @@ pub(super) fn compute_group_summaries(
             continue;
         }
         let parent_depth = row.depth;
+        let beneath = &rows[i + 1..];
+        let beneath = &beneath[..beneath
+            .iter()
+            .position(|child| child.depth <= parent_depth)
+            .unwrap_or(beneath.len())];
         let mut summary = GroupSummary::default();
-        let mut sessions = std::collections::HashSet::new();
+        for session in listed_sessions(beneath) {
+            summary.agents += 1;
+            if matches!(session.mux_state, MuxIndicator::Ambiguous { .. }) {
+                summary.ambiguous += 1;
+            }
+        }
         let mut counted = std::collections::HashSet::new();
-        for child in &rows[i + 1..] {
-            if child.depth <= parent_depth {
-                break;
-            }
-            if let RowKind::AgentSession(session) = &child.kind
-                && sessions.insert(&session.primary_node)
-            {
-                summary.agents += 1;
-                if matches!(session.mux_state, MuxIndicator::Ambiguous { .. }) {
-                    summary.ambiguous += 1;
-                }
-            }
+        for child in beneath {
             if let Some((entity, waiting)) = waiting_of(child, tree.view)
                 && counted.insert(entity)
             {

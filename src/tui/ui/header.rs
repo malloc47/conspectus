@@ -85,11 +85,12 @@ pub(super) fn header_line(app: &App) -> PriorityLine {
     line
 }
 
-/// Per-harness and per-mux-state row aggregates used by the dense
+/// Per-harness and per-mux-state session aggregates used by the dense
 /// header. Walks the currently-visible row tree so the chips
 /// reflect "what's on screen" rather than raw discovery — matches
 /// the existing `visible_sessions of total` rule on the agent
-/// count.
+/// count, and like it counts each session once however many rows list
+/// it ([`listed_sessions`]).
 #[derive(Default, Debug, Clone)]
 pub(super) struct HeaderCounts {
     pub(super) by_harness: Vec<(String, usize)>,
@@ -103,19 +104,32 @@ impl HeaderCounts {
         use std::collections::BTreeMap;
         let mut by_harness: BTreeMap<String, usize> = BTreeMap::new();
         let mut counts = HeaderCounts::default();
-        for row in &app.tree().rows {
-            if let RowKind::AgentSession(session) = &row.kind {
-                *by_harness.entry(session.harness_label.clone()).or_default() += 1;
-                match session.mux_state {
-                    MuxIndicator::Attached => counts.mux_attached += 1,
-                    MuxIndicator::Ambiguous { .. } => counts.mux_ambiguous += 1,
-                    MuxIndicator::Unmuxed => counts.mux_unmuxed += 1,
-                }
+        for session in listed_sessions(&app.tree().rows) {
+            *by_harness.entry(session.harness_label.clone()).or_default() += 1;
+            match session.mux_state {
+                MuxIndicator::Attached => counts.mux_attached += 1,
+                MuxIndicator::Ambiguous { .. } => counts.mux_ambiguous += 1,
+                MuxIndicator::Unmuxed => counts.mux_unmuxed += 1,
             }
         }
         counts.by_harness = by_harness.into_iter().collect();
         counts
     }
+}
+
+/// The sessions the session rows stand for, each once by its node however
+/// many rows list it, in row order: the PRs view lists a checkout's
+/// sessions under each pull request of its branch. The header line counts
+/// its sessions, harness chips, and `▲ N` with it, and a group header the
+/// sessions beneath it, so the two agree.
+pub(super) fn listed_sessions(
+    rows: &[crate::tui::rows::Row],
+) -> impl Iterator<Item = &AgentSessionRow> {
+    let mut seen = std::collections::HashSet::new();
+    rows.iter().filter_map(move |row| match &row.kind {
+        RowKind::AgentSession(session) if seen.insert(&session.primary_node) => Some(session),
+        _ => None,
+    })
 }
 
 /// The gaps before the header's chip sections. `SECTION_SEPARATOR` sets
@@ -209,22 +223,13 @@ pub(super) fn format_count_with_filtered(visible: usize, total: usize) -> String
 /// - Pinned and History list entities of every kind and ignore the
 ///   filter: the plain total.
 ///
-/// A session counts once however many rows list it, as a group header
-/// counts it: the PRs view lists a checkout's sessions under each of its
-/// branch's pull requests.
+/// A session counts once however many rows list it ([`listed_sessions`]),
+/// as a group header counts it: the PRs view lists a checkout's sessions
+/// under each of its branch's pull requests.
 pub(super) fn visible_agent_session_count(app: &App, total: usize) -> usize {
     let rows = &app.tree().rows;
-    let listed_sessions = || {
-        rows.iter()
-            .filter_map(|row| match &row.kind {
-                RowKind::AgentSession(session) => Some(&session.primary_node),
-                _ => None,
-            })
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-    };
     match app.active_view() {
-        View::Sessions => listed_sessions(),
+        View::Sessions => listed_sessions(rows).count(),
         View::Search if app.search_history().viewed().is_none() => total,
         View::Search => {
             let mut found = std::collections::BTreeSet::new();
@@ -245,7 +250,7 @@ pub(super) fn visible_agent_session_count(app: &App, total: usize) -> usize {
                 _ => None,
             })
             .sum(),
-        View::Prs => listed_sessions(),
+        View::Prs => listed_sessions(rows).count(),
         View::Pinned | View::History => total,
     }
 }

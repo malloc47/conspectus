@@ -4083,14 +4083,14 @@ fn mux_view_header_counts_sessions_in_visible_muxes() {
     );
 }
 
-/// Under a narrowing filter the PRs view's `N/M sessions` counts each
-/// session it lists once, though it lists a checkout's sessions under
-/// each pull request of the checkout's branch, as its group header does.
-#[test]
-fn prs_view_header_counts_a_session_under_two_pull_requests_once() {
+/// The PRs view over a checkout whose branch has two open pull requests,
+/// so it lists the checkout's Claude Code session under each, and a Codex
+/// session elsewhere. The Claude Code session's mux link is ambiguous (two
+/// candidate muxes); `show_harness_chips` turns the harness chips on.
+fn prs_view_with_a_session_under_two_pull_requests(show_harness_chips: bool) -> App {
     use crate::model::{
         BranchId, BranchNode, Confidence, ForgePrId, ForgePrNode, Freshness, GraphLink,
-        LinkEndpoint, LinkState, Provenance, RelationKind, SourceMetadata,
+        LinkEndpoint, LinkState, MuxSessionNode, Provenance, RelationKind, SourceMetadata,
     };
     let repo = RepoId::new("/r/.git");
     let checkout = CheckoutId::new(repo.clone(), "/r");
@@ -4155,12 +4155,10 @@ fn prs_view_header_counts_a_session_under_two_pull_requests_once() {
         ));
     }
     // A Claude Code session in the checkout, and a Codex one elsewhere.
+    let in_checkout = AgentSessionId::new("claude-code", "/state", "in-checkout");
     snapshot.nodes.push(GraphNode::AgentSession(
-        AgentSessionNode::new(
-            AgentSessionId::new("claude-code", "/state", "in-checkout"),
-            "claude-code".to_string(),
-        )
-        .with_cwd("/r".to_string()),
+        AgentSessionNode::new(in_checkout.clone(), "claude-code".to_string())
+            .with_cwd("/r".to_string()),
     ));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -4169,9 +4167,27 @@ fn prs_view_header_counts_a_session_under_two_pull_requests_once() {
         )
         .with_cwd("/elsewhere".to_string()),
     ));
+    // Two muxes the Claude Code session may run in.
+    for native in ["one", "two"] {
+        let mux = MuxSessionId::new(native);
+        snapshot
+            .nodes
+            .push(GraphNode::MuxSession(MuxSessionNode::new(
+                mux.clone(),
+                "tmux".to_string(),
+                native.to_string(),
+            )));
+        snapshot.candidate_links.push(link(
+            format!("session-mux-{native}"),
+            NodeId::AgentSession(in_checkout.clone()),
+            NodeId::MuxSession(mux),
+            RelationKind::LinkedToMux,
+        ));
+    }
     let snapshot = resolve_snapshot(snapshot);
     let mut config = RunConfig::defaults();
     config.default_view = View::Prs;
+    config.show_harness_chips = show_harness_chips;
     let mut app = App::new(config);
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         &snapshot, &app,
@@ -4182,10 +4198,6 @@ fn prs_view_header_counts_a_session_under_two_pull_requests_once() {
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
     });
-    app.update(Msg::SetFilter(RowFilter {
-        harness: Some(crate::filter::HarnessFilter::from_values(["claude-code"])),
-        ..RowFilter::default()
-    }));
     let listed = app
         .tree()
         .rows
@@ -4193,12 +4205,54 @@ fn prs_view_header_counts_a_session_under_two_pull_requests_once() {
         .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
         .count();
     assert_eq!(listed, 2, "the session is listed under each pull request");
-    let header = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 120, 12)))
+    app
+}
+
+/// The header line of `app` drawn 120 columns wide.
+fn header_text(app: &mut App) -> String {
+    buffer_to_string(&render_to_buffer(app, Rect::new(0, 0, 120, 12)))
         .lines()
         .next()
         .expect("header line")
-        .to_string();
+        .to_string()
+}
+
+/// Narrow `app`'s filter to Claude Code sessions.
+fn filter_to_claude_code(app: &mut App) {
+    app.update(Msg::SetFilter(RowFilter {
+        harness: Some(crate::filter::HarnessFilter::from_values(["claude-code"])),
+        ..RowFilter::default()
+    }));
+}
+
+/// Under a narrowing filter the PRs view's `N/M sessions` counts each
+/// session it lists once, though it lists a checkout's sessions under
+/// each pull request of the checkout's branch, as its group header does.
+#[test]
+fn prs_view_header_counts_a_session_under_two_pull_requests_once() {
+    let mut app = prs_view_with_a_session_under_two_pull_requests(false);
+    filter_to_claude_code(&mut app);
+    let header = header_text(&mut app);
     assert!(header.contains("1/2 sessions"), "{header}");
+}
+
+/// The header line's `▲ N` and harness chips count each session the PRs
+/// view lists once, with or without a filter, like its `N/M sessions`.
+#[test]
+fn prs_view_header_chips_count_a_session_under_two_pull_requests_once() {
+    for filtered in [false, true] {
+        let mut app = prs_view_with_a_session_under_two_pull_requests(true);
+        if filtered {
+            filter_to_claude_code(&mut app);
+        }
+        let header = header_text(&mut app);
+        assert!(header.contains("▲ 1"), "filtered {filtered}: {header}");
+        let Some((_, after_chip)) = header.split_once("claude") else {
+            panic!("filtered {filtered}: no harness chip: {header}");
+        };
+        let count = after_chip.split_whitespace().next();
+        assert_eq!(count, Some("1"), "filtered {filtered}: {header}");
+    }
 }
 
 /// Under a narrowing filter the Mux view's `N/M sessions` counts the
