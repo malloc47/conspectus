@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{Event, KeyEventKind};
 use tuikit::feedback::Feedback;
 
 use crate::discovery::tmux::{MuxBackend, SystemTmux};
@@ -42,18 +42,22 @@ use crate::tui::{RunConfig, ui};
 /// Result of a completed background discovery run. The worker returns
 /// only the resolved snapshot; the main thread builds the row tree from
 /// the app's current view config.
+mod console;
 mod content;
 mod executor;
 mod handoff;
 mod launch;
 #[cfg(test)]
 mod live_tests;
+#[cfg(test)]
+mod loop_tests;
 mod mux_name;
 mod overlay_keys;
 mod term;
 mod visibility;
 mod worktree_exec;
 
+use console::Console;
 use executor::*;
 use launch::*;
 use worktree_exec::*;
@@ -80,11 +84,15 @@ struct DiscoveryResult {
 /// policy (real handlers vs "disabled" status hints). The
 /// driver stays generic over the mode.
 trait LoopMode {
+    /// The terminal the mode runs on: the real one for both modes, a
+    /// scripted one in the loop's tests.
+    type Terminal: Console;
+
     /// Called once before the loop starts. Runs mode-specific
     /// initial data population + preview capture.
     fn init(
         &mut self,
-        terminal: &mut DefaultTerminal,
+        terminal: &mut Self::Terminal,
         app: &mut App,
         config: &RunConfig,
     ) -> Result<()>;
@@ -100,7 +108,7 @@ trait LoopMode {
     /// actions and reloads the fixture on `Action::Refresh`.
     fn dispatch(
         &mut self,
-        terminal: &mut DefaultTerminal,
+        terminal: &mut Self::Terminal,
         app: &mut App,
         config: &RunConfig,
         action: Option<Action>,
@@ -122,11 +130,11 @@ trait LoopMode {
 /// [`LoopMode`]; both live and scenario runs go through here.
 /// Per-mode differences (discovery channel, refresh timer,
 /// dispatch policy) live in the mode impl.
-fn run_loop(
-    terminal: &mut DefaultTerminal,
+fn run_loop<M: LoopMode>(
+    terminal: &mut M::Terminal,
     mut app: App,
     config: RunConfig,
-    mut mode: impl LoopMode,
+    mut mode: M,
 ) -> Result<()> {
     let result = drive_loop(terminal, &mut app, &config, &mut mode);
     // The state file is written however the loop ended, a quit or an
@@ -138,46 +146,88 @@ fn run_loop(
     result
 }
 
-/// The event loop itself: draw, read a key, dispatch it, until the app
-/// signals quit or the terminal fails.
-fn drive_loop(
-    terminal: &mut DefaultTerminal,
+/// The longest the loop keeps taking queued input before it draws, so a
+/// backlog of keys that outruns the frames still shows progress at least
+/// every 100 ms (ADR 0236).
+const FRAME_BUDGET: Duration = Duration::from_millis(50);
+
+/// The event loop itself: draw, take the input that is waiting,
+/// dispatch it, until the app signals quit or the terminal fails.
+fn drive_loop<M: LoopMode>(
+    terminal: &mut M::Terminal,
     app: &mut App,
     config: &RunConfig,
-    mode: &mut impl LoopMode,
+    mode: &mut M,
 ) -> Result<()> {
     let poll_timeout = Duration::from_millis(100);
     mode.init(terminal, app, config)?;
 
     // The preview source the last pass resolved, and whether the last
-    // key asked for a refresh.
+    // input asked for a refresh.
     let mut shown: Option<PreviewSource> = None;
     let mut force_preview = false;
     while !app.should_quit() {
         // A contents query that has rested starts its scan.
-        app.search_overlay_tick(Instant::now(), false);
+        app.search_overlay_tick(terminal.now(), false);
         mode.drain(app, config)?;
         shown = refresh_preview_if_needed(app, config, mode, shown, force_preview);
-        draw_frame(app, terminal)?;
+        terminal.draw(app)?;
         force_preview = false;
-        if event::poll(poll_timeout)? {
-            let event = event::read()?;
-            if let Event::Paste(text) = &event {
-                let mut dispatched = Ok(());
-                type_paste(app, text, &mut |app, action| {
-                    if dispatched.is_ok() {
-                        dispatched = mode.dispatch(terminal, app, config, Some(action));
-                    }
-                });
-                dispatched?;
-                continue;
-            }
-            let action = action_for_event(app, event);
-            force_preview = matches!(action, Some(Action::Refresh | Action::HardRefresh));
-            mode.dispatch(terminal, app, config, action)?;
+        if terminal.poll(poll_timeout)? {
+            force_preview = take_queued_input(terminal, app, config, mode)?;
         }
     }
     Ok(())
+}
+
+/// Handle the event that is waiting and every one queued behind it, in
+/// order, before the loop draws again: a scroll that queues a key per
+/// row costs one frame, not one per key (ADR 0236). Each event resolves
+/// against what the one before it left, so a key that opens a modal is
+/// followed by keys the modal takes. The batch ends when the queue
+/// empties, when the app quits, or when [`FRAME_BUDGET`] is spent, so a
+/// stream that never pauses still draws. Returns whether any of them
+/// asked for a refresh.
+fn take_queued_input<M: LoopMode>(
+    terminal: &mut M::Terminal,
+    app: &mut App,
+    config: &RunConfig,
+    mode: &mut M,
+) -> Result<bool> {
+    let started = terminal.now();
+    let mut refresh = false;
+    loop {
+        let event = terminal.read()?;
+        refresh |= handle_event(terminal, app, config, mode, event)?;
+        let spent = terminal.now().saturating_duration_since(started) >= FRAME_BUDGET;
+        if app.should_quit() || spent || !terminal.poll(Duration::ZERO)? {
+            return Ok(refresh);
+        }
+    }
+}
+
+/// Dispatch one terminal event. Returns whether it asked for a refresh.
+fn handle_event<M: LoopMode>(
+    terminal: &mut M::Terminal,
+    app: &mut App,
+    config: &RunConfig,
+    mode: &mut M,
+    event: Event,
+) -> Result<bool> {
+    if let Event::Paste(text) = &event {
+        let mut dispatched = Ok(());
+        type_paste(app, text, &mut |app, action| {
+            if dispatched.is_ok() {
+                dispatched = mode.dispatch(terminal, app, config, Some(action));
+            }
+        });
+        dispatched?;
+        return Ok(false);
+    }
+    let action = action_for_event(app, event);
+    let refresh = matches!(action, Some(Action::Refresh | Action::HardRefresh));
+    mode.dispatch(terminal, app, config, action)?;
+    Ok(refresh)
 }
 
 /// Live-mode loop state: owns the mux runner, the background
@@ -418,6 +468,8 @@ impl LiveMode {
 }
 
 impl LoopMode for LiveMode {
+    type Terminal = DefaultTerminal;
+
     fn init(
         &mut self,
         _terminal: &mut DefaultTerminal,
@@ -805,6 +857,8 @@ impl StaticMode {
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
 impl LoopMode for StaticMode {
+    type Terminal = DefaultTerminal;
+
     fn init(
         &mut self,
         _terminal: &mut DefaultTerminal,
