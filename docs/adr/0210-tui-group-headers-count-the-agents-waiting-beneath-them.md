@@ -124,4 +124,6 @@ is. Everything above stands except as follows.
    `N/M sessions` in the PRs view (and the Sessions view) counts the
    sessions its rows stand for, each once, by the same rule, so it no
    longer reads `8/11` over the four sessions a checkout's two pull
-   requests both list. (Added 2026-11-13.)
+   requests both list. (Added 2026-11-13.) So do the header line's
+   opt-in harness chips and its `▲ N`, filtered or not, which read
+   `▲ 8` over the same four sessions. (Added 2026-11-13.)
