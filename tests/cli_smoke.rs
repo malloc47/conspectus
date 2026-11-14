@@ -1647,7 +1647,7 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     let body = fs::read_to_string(&installed).expect("installed extension");
     assert!(body.starts_with("// conspectus-hook:"));
     assert!(body.contains(r#"["hook", "write", "pi"]"#));
-    assert!(body.contains(r#"const EXTENSION_VERSION = "2";"#));
+    assert!(body.contains(r#"const EXTENSION_VERSION = "3";"#));
     hook(&["status", "pi"])
         .stdout(predicate::str::contains("installed\tpi"))
         .stdout(predicate::str::contains("no-events\tpi"))
@@ -1676,10 +1676,24 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
         .stdout(predicate::str::contains("outdated\tpi"))
         .stdout(predicate::str::contains("off\tpi"))
         .stderr(predicate::str::contains(
-            "is version 1 and this build installs version 2",
+            "is version 1 and this build installs version 3",
         ));
     hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
     assert_eq!(fs::read_to_string(&installed).expect("reinstalled"), body);
+    // Version 2 reports live state but reads no subagent tool names.
+    fs::write(
+        &installed,
+        "// conspectus-hook: installed by `conspectus hook init pi`\nconst EXTENSION_VERSION = \"2\";\n",
+    )
+    .expect("version 2");
+    hook(&["status", "pi"])
+        .stdout(predicate::str::contains("outdated\tpi"))
+        .stdout(predicate::str::contains("no-events\tpi"))
+        .stderr(predicate::str::contains(
+            "is version 2 and this build installs version 3",
+        ))
+        .stderr(predicate::str::contains("no live state").not());
+    hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
     // A newer version than this build's still reports live state.
     fs::write(
         &installed,

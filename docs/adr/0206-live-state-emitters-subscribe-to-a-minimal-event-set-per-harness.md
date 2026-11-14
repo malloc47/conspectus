@@ -6,7 +6,9 @@ Accepted. Part of the live agent state plan with ADRs 0203, 0204, 0205,
 and 0207. Extends ADR 0028 (hook sidecars) with state events. Hook
 installation remains operator-initiated, ADR 0143 category 5. Refines
 ADR 0086 for hook payloads. Amended by ADR 0208: the Claude Code install
-edits `settings.json` in place.
+edits `settings.json` in place. Extended by ADR 0227: the Pi extension
+also counts the tools named in `CONSPECTUS_PI_SUBAGENT_TOOLS` as
+subagents (decision 25).
 
 ## Context
 

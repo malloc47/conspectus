@@ -685,11 +685,9 @@ mod pi_extension_tests {
     use super::*;
 
     #[test]
-    fn the_embedded_extension_declares_the_version_that_reports_live_state() {
-        assert_eq!(
-            pi_extension_version(PI_EXTENSION_SOURCE),
-            Some(PI_LIVE_STATE_VERSION)
-        );
+    fn the_embedded_extension_reports_live_state() {
+        let carried = pi_extension_version(PI_EXTENSION_SOURCE).expect("a version line");
+        assert!(carried >= PI_LIVE_STATE_VERSION, "{carried}");
         assert!(PI_EXTENSION_SOURCE.starts_with(PI_EXTENSION_MARKER));
     }
 
@@ -711,7 +709,7 @@ mod pi_extension_tests {
     fn the_outdated_note_says_what_an_older_copy_lacks() {
         let first = pi_outdated_note(Some(1), false, "csp hook init pi");
         assert!(first.contains("version 1"), "{first}");
-        assert!(first.contains("installs version 2"), "{first}");
+        assert!(first.contains("installs version 3"), "{first}");
         assert!(first.contains("`csp hook init pi`"), "{first}");
         assert!(first.contains("no live state"), "{first}");
         let unnamed = pi_outdated_note(None, false, "conspectus hook init pi");

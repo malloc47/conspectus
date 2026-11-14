@@ -37,14 +37,33 @@ import extension, {
   type SessionContext,
 } from "../conspectus-hook.ts";
 
-const { COALESCE_MS, EVENTS, EXTENSION_VERSION, HEARTBEAT_S, SUBAGENT_TOOLS, classifyError, createMachine, newInstanceId, parseProcStartTime } =
-  testOnly;
+const {
+  COALESCE_MS,
+  EVENTS,
+  EXTENSION_VERSION,
+  HEARTBEAT_S,
+  SUBAGENT_TOOLS,
+  SUBAGENT_TOOLS_ENV,
+  classifyError,
+  createMachine,
+  newInstanceId,
+  parseProcStartTime,
+  subagentTools,
+} = testOnly;
 
 const EXTENSION = fileURLToPath(new URL("../conspectus-hook.ts", import.meta.url));
 const FIXTURES = fileURLToPath(new URL("../../../tests/fixtures/hooks/pi-live/", import.meta.url));
 const UPDATE = process.env.PI_LIVE_UPDATE === "1";
 
-type Header = { synthetic: boolean; scenario: string; instance: string; pid?: number; pid_start?: number };
+type Header = {
+  synthetic: boolean;
+  scenario: string;
+  instance: string;
+  pid?: number;
+  pid_start?: number;
+  /** The value of `CONSPECTUS_PI_SUBAGENT_TOOLS` the load reads. */
+  subagent_tools?: string;
+};
 
 type Shown = {
   state: string;
@@ -85,7 +104,12 @@ function scripts(): Script[] {
 }
 
 function machine(header: Header, instance: string = header.instance): Machine {
-  return createMachine({ instance, pid: header.pid, pidStart: header.pid_start });
+  return createMachine({
+    instance,
+    pid: header.pid,
+    pidStart: header.pid_start,
+    subagentTools: subagentTools(header.subagent_tools),
+  });
 }
 
 /** Whether a check is one only the store can make: a reader's confidence
@@ -300,6 +324,29 @@ test("error messages are classified and never copied", () => {
   assert.equal(classifyError("x".repeat(10_000) + " 429"), "unknown", "only the start of a long message is read");
 });
 
+test("the subagent tools are the reference tool and the names the variable lists", () => {
+  const names = (value: unknown) => [...subagentTools(value)];
+  assert.deepEqual(names(undefined), ["subagent"]);
+  assert.deepEqual(names(""), ["subagent"]);
+  assert.deepEqual(names(42), ["subagent"]);
+  assert.deepEqual(names("delegate"), ["subagent", "delegate"]);
+  assert.deepEqual(names(" delegate , team.spawn,,subagent , "), ["subagent", "delegate", "team.spawn"]);
+  assert.deepEqual(names("mcp__agents__run"), ["subagent", "mcp__agents__run"]);
+  assert.deepEqual(names(`ok,bell\u0007name,${"x".repeat(257)}`), ["subagent", "ok"], "a name that is no name is skipped");
+  assert.deepEqual(names("x".repeat(256)), ["subagent", "x".repeat(256)]);
+
+  // Names are compared exactly.
+  const live = createMachine({ instance: "test-instance", subagentTools: subagentTools("delegate") });
+  live.on("session_start", { reason: "startup" }, 1, tui());
+  live.on("agent_start", {}, 2);
+  for (const [call, toolName] of [["call_1", "delegate"], ["call_2", "Delegate"], ["call_3", "delegate2"], ["call_4", "subagent"]]) {
+    live.on("tool_execution_start", { toolCallId: call, toolName }, 3);
+  }
+  const [held] = live.flush(3 + COALESCE_MS).emit;
+  assert.equal(held.live.subagents, 2);
+  assert.ok(!JSON.stringify(held).includes("delegate"), "a tool name is never sent");
+});
+
 test("the start time is field twenty-two counted past the command name", () => {
   const stat = (command: string, start: number) => `4242 (${command}) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 ${start} 1000 10`;
   assert.equal(parseProcStartTime(stat("pi", 987654)), 987654);
@@ -316,10 +363,11 @@ test("instance ids look like ids and differ", () => {
 });
 
 test("the constants the documentation states", () => {
-  assert.equal(EXTENSION_VERSION, "2");
+  assert.equal(EXTENSION_VERSION, "3");
   assert.equal(HEARTBEAT_S, 60);
   assert.equal(COALESCE_MS, 500);
   assert.deepEqual([...SUBAGENT_TOOLS], ["subagent"]);
+  assert.equal(SUBAGENT_TOOLS_ENV, "CONSPECTUS_PI_SUBAGENT_TOOLS");
   const source = readFileSync(EXTENSION, "utf8");
   assert.ok(source.startsWith("// conspectus-hook:"), "the ownership marker is the first line");
   assert.ok(source.includes(`const EXTENSION_VERSION = "${EXTENSION_VERSION}";`), "hook status reads the version from this line");
@@ -482,6 +530,36 @@ test("print, JSON, and RPC modes, --no-session runs, and broken contexts write n
   } finally {
     if (previous === undefined) delete process.env.CONSPECTUS_HOOK_BIN;
     else process.env.CONSPECTUS_HOOK_BIN = previous;
+    rmSync(writer.dir, { recursive: true, force: true });
+  }
+});
+
+test("the default export counts the tools the variable names as subagents", async () => {
+  const writer = standInWriter();
+  const previous = { bin: process.env.CONSPECTUS_HOOK_BIN, tools: process.env[SUBAGENT_TOOLS_ENV] };
+  process.env.CONSPECTUS_HOOK_BIN = writer.bin;
+  process.env[SUBAGENT_TOOLS_ENV] = "delegate, team.spawn";
+  try {
+    const pi = standInPi();
+    extension(pi.api as never);
+    // The variable is read once, when Pi loads the extension.
+    delete process.env[SUBAGENT_TOOLS_ENV];
+    const on = (name: string, event: unknown, ctx: unknown = {}) => pi.handlers.get(name)?.(event, ctx);
+    on("session_start", { reason: "startup" }, piContext());
+    on("agent_start", {});
+    on("tool_execution_start", { toolCallId: "call_1", toolName: "team.spawn" });
+    on("tool_execution_start", { toolCallId: "call_2", toolName: "bash" });
+    const written = await eventually(writer.payloads, (all) => all.length === 3, "the held change");
+    assert.equal(written[2].payload.live.detail, "tool");
+    assert.equal(written[2].payload.live.subagents, 1);
+    assert.ok(!JSON.stringify(written).includes("team.spawn"), "a tool name is never sent");
+    on("session_shutdown", { reason: "quit" });
+    await eventually(writer.payloads, (all) => all.length === 4, "the exit");
+  } finally {
+    if (previous.bin === undefined) delete process.env.CONSPECTUS_HOOK_BIN;
+    else process.env.CONSPECTUS_HOOK_BIN = previous.bin;
+    if (previous.tools === undefined) delete process.env[SUBAGENT_TOOLS_ENV];
+    else process.env[SUBAGENT_TOOLS_ENV] = previous.tools;
     rmSync(writer.dir, { recursive: true, force: true });
   }
 });

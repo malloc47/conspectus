@@ -35,7 +35,7 @@ orders it:
 | `waiting` (`question`) | an extension's `select`, `input`, or `editor` dialog is open (a plan approval or a gate that asks with a select reads as a question) |
 | `compacting` | between `session_before_compact` and its end |
 | `working` (`retrying`, `rate_limited`) | a failed attempt's backoff; rate limited when the provider answered 429 or the error says so |
-| `working` (`tool`) | a top-level tool call runs; a call of the `subagent` tool counts as a subagent |
+| `working` (`tool`) | a top-level tool call runs; a call of a subagent tool counts as a subagent (see [Subagent tools](#subagent-tools)) |
 | `working` (`generating`) | otherwise, while a run is active |
 | `error` (`rate_limited`, `auth`, `overloaded`, `failed`) | the run settled after an error, or a compaction failed |
 | `ready` (`finished`, `interrupted`) | the run settled; interrupted when you pressed Esc |
@@ -121,6 +121,23 @@ ends compacting. A run ends only on `agent_settled` (Pi 0.80.4).
   a working session turns quiet after three minutes.
 - After `/reload` the extension reports the session afresh, so a
   finished turn reads `ready` without saying it finished.
+
+## Subagent tools
+
+Pi has no subagents of its own; a package adds them as a tool. The
+extension counts a call of the reference `subagent` extension's tool as a
+subagent, and of any tool named in `CONSPECTUS_PI_SUBAGENT_TOOLS`, a
+comma-separated list set where Pi starts:
+
+```sh
+export CONSPECTUS_PI_SUBAGENT_TOOLS="delegate,team_spawn"
+```
+
+The names add to `subagent`, are compared exactly, and are read when Pi
+loads the extension, so restart Pi or run `/reload` after changing them.
+A call another tool makes is that tool's work, whatever its name. The
+names stay inside the extension; only the count leaves it. The installed
+file doesn't change, so `hook status pi` reports it as for any copy.
 
 ## Binary lookup
 

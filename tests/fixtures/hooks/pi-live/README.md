@@ -30,7 +30,10 @@ The scripts are shared by two test suites:
  "instance": "...", "pid": 48213, "pid_start": 771234567}
 ```
 
-`instance`, `pid`, and `pid_start` are the extension load's options.
+`instance`, `pid`, and `pid_start` are the extension load's options, and
+`subagent_tools`, when present, is the value of
+`CONSPECTUS_PI_SUBAGENT_TOOLS` the load reads (the extra tool names whose
+calls count as subagents).
 Every later line is a step:
 
 - `at_ms`: when it happens, Unix epoch milliseconds (small numbers, for

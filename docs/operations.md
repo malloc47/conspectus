@@ -761,15 +761,16 @@ running subagent. Beyond the [known gaps](#known-gaps):
 
 ### Pi live state
 
-The Pi extension (version 2, which `conspectus hook init pi` installs)
+The Pi extension (version 3, which `conspectus hook init pi` installs)
 reports what its session is doing: working (generating, running a tool,
 retrying, rate limited), waiting for you, ready (finished or
 interrupted), compacting, failed (rate limited, auth, overloaded, or
-otherwise), ended, and how many subagent tool calls run. An older copy
-reports only which session a pane runs; re-run `conspectus hook init pi`
-to upgrade it, then restart Pi or run `/reload`. `hook status pi` says
-when the installed copy is older, and that waiting needs Pi 0.84.4 or
-later (1.1.0 or later is recommended).
+otherwise), ended, and how many subagent tool calls run. A copy older
+than version 2 reports only which session a pane runs, and version 2
+reads no [subagent tool names](#pi-subagent-tools); re-run `conspectus
+hook init pi` to upgrade either, then restart Pi or run `/reload`. `hook
+status pi` says when the installed copy is older, and that waiting needs
+Pi 0.84.4 or later (1.1.0 or later is recommended).
 
 The extension keeps the session's state inside Pi and sends all of it
 when what the session shows changes, and every minute while it is not
@@ -798,6 +799,28 @@ overloaded, or failed itself, and sends only the class. Beyond the
   once.
 - After `/reload` the extension reports the session afresh, so a
   finished turn reads `ready` without its detail.
+
+### Pi subagent tools
+
+Pi has no subagents of its own; a package adds them as a tool, and the
+extension counts that tool's calls in flight as the session's subagents
+(`+N`). It knows the reference `subagent` extension's tool. For a
+package whose tools have other names, list them, separated by commas, in
+`CONSPECTUS_PI_SUBAGENT_TOOLS` in the environment Pi starts with (your
+shell profile, or tmux's global environment for agents Conspectus
+launches):
+
+```sh
+export CONSPECTUS_PI_SUBAGENT_TOOLS="delegate,team_spawn"
+```
+
+The names add to `subagent` and must match a tool's name exactly. The
+extension reads the variable when Pi loads it, so restart Pi or run
+`/reload` after changing it. A call another tool makes is that tool's
+work whatever its name, and the names never leave Pi: only the count
+does. The installed file is the same whatever the variable says, so
+`hook status pi` reports `installed` for it as for any copy, and cannot
+see the names, which live in Pi's environment, not in its own.
 
 ### The live-state store
 

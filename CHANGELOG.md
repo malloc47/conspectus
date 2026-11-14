@@ -14,6 +14,14 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **Pi counts the subagent tools you name.** List the tools of a
+  third-party subagent package, separated by commas, in
+  `CONSPECTUS_PI_SUBAGENT_TOOLS` where Pi starts, and the Pi extension
+  (now version 3) counts their calls in flight as the session's
+  subagents, beside the reference `subagent` tool. The names stay inside
+  Pi and the installed file is the same whatever they are; run
+  `conspectus hook init pi` again to upgrade a version 2 copy, which
+  `hook status pi` reports `outdated`.
 - **Claude Code agents with no hooks show their live state** from Claude
   Code's own agent list (`claude agents --json`), when Conspectus knows
   the agent's process (the process tree finds agents in tmux sessions'

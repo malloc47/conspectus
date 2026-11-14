@@ -18,9 +18,10 @@ use crate::discovery::harness::{HarnessAdapter, PiAdapter};
 use crate::live_store::{Applied, LiveStore};
 use crate::model::live::{LiveDetail, LiveState};
 
-/// The scenarios the research's fixture plan and the story list, and the
-/// two the extension's own choices add (`custom-dialog`, `no-pane`).
-const SCRIPTS: [&str; 18] = [
+/// The scenarios the research's fixture plan and the story list, the two
+/// the extension's own choices add (`custom-dialog`, `no-pane`), and the
+/// tools an operator names as subagents (`subagent-configured`).
+const SCRIPTS: [&str; 19] = [
     "abort",
     "compaction-failed",
     "custom-dialog",
@@ -36,6 +37,7 @@ const SCRIPTS: [&str; 18] = [
     "retry-exhausted",
     "retry-then-success",
     "shutdown-quit",
+    "subagent-configured",
     "subagent-parallel",
     "threshold-compaction",
     "tool-run",
@@ -291,6 +293,11 @@ fn reloads() {
 #[test]
 fn subagent_tool_calls_in_parallel() {
     replay("subagent-parallel");
+}
+
+#[test]
+fn tools_the_operator_names_count_as_subagents() {
+    replay("subagent-configured");
 }
 
 #[test]

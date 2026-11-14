@@ -8,6 +8,9 @@
 //
 // - `CONSPECTUS_HOOK_BIN` picks the binary; otherwise `conspectus` is
 //   found on PATH.
+// - `CONSPECTUS_PI_SUBAGENT_TOOLS` names more tools whose calls run
+//   subagents, separated by commas, beside the reference `subagent`
+//   extension's own; it is read when Pi loads the extension.
 // - A missing binary or a failed write is ignored, so Pi is never
 //   disturbed. No handler waits on anything.
 // - `--no-session` runs and the print, JSON, and RPC modes write nothing:
@@ -65,7 +68,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // Recorded on each hook record so it's clear which extension wrote it;
 // `conspectus hook status pi` reads it from an installed copy.
-const EXTENSION_VERSION = "2";
+const EXTENSION_VERSION = "3";
 
 /** Seconds between heartbeats while the session is not ready. */
 const HEARTBEAT_S = 60;
@@ -75,6 +78,13 @@ const COALESCE_MS = 500;
 
 /** Tools whose calls run subagents: the reference `subagent` extension's. */
 const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(["subagent"]);
+
+/** The variable that names more subagent tools, separated by commas. */
+const SUBAGENT_TOOLS_ENV = "CONSPECTUS_PI_SUBAGENT_TOOLS";
+
+/** The longest tool name the variable may name; a longer one is no
+ * tool's. */
+const MAX_TOOL_NAME_LEN = 256;
 
 /** The Pi events the extension handles. */
 const EVENTS = [
@@ -625,6 +635,21 @@ function createMachine(options: MachineOptions): Machine {
   return { on, flush, heartbeat };
 }
 
+/** The tools whose calls count as subagents: {@link SUBAGENT_TOOLS} and
+ * the names `value` (the variable's value) lists, separated by commas,
+ * each trimmed. An empty name, a long one, or one holding a control
+ * character is skipped. A name is only ever compared with a call's tool
+ * name, never sent. */
+function subagentTools(value: unknown): ReadonlySet<string> {
+  const tools = new Set(SUBAGENT_TOOLS);
+  if (typeof value !== "string") return tools;
+  for (const part of value.split(",")) {
+    const name = part.trim();
+    if (name.length > 0 && name.length <= MAX_TOOL_NAME_LEN && !/\p{Cc}/u.test(name)) tools.add(name);
+  }
+  return tools;
+}
+
 /** For the extension's own tests (`test/conspectus-hook.test.ts`) only.
  * Pi loads the default export; nothing here is part of what Pi or
  * Conspectus relies on, and it may change with any version. */
@@ -634,10 +659,12 @@ export const testOnly = {
   EXTENSION_VERSION,
   HEARTBEAT_S,
   SUBAGENT_TOOLS,
+  SUBAGENT_TOOLS_ENV,
   classifyError,
   createMachine,
   newInstanceId,
   parseProcStartTime,
+  subagentTools,
 };
 
 /** This process's start time as `/proc/self/stat` gives it, the value
@@ -704,7 +731,12 @@ function write(payload: HookPayload): void {
 type Handler = (event: unknown, ctx: unknown) => void;
 
 export default function (pi: ExtensionAPI) {
-  const machine = createMachine({ instance: newInstanceId(), pid: process.pid, pidStart: ownStartTime() });
+  const machine = createMachine({
+    instance: newInstanceId(),
+    pid: process.pid,
+    pidStart: ownStartTime(),
+    subagentTools: subagentTools(process.env[SUBAGENT_TOOLS_ENV]),
+  });
   const timers: { flush?: ReturnType<typeof setTimeout>; heartbeat?: ReturnType<typeof setTimeout> } = {};
   const due: { flush?: number; heartbeat?: number } = {};
 
