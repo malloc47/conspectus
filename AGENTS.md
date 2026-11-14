@@ -13,8 +13,8 @@ behavior, read:
 - `docs/adr/` for accepted Architecture Decision Records
 - `README.md` for the project summary
 
-Use `nix develop` for local development. The shell provides Rust tooling and
-standard checks. An agent, whose every command starts a fresh shell, runs
+Use `nix develop` for local development. The shell provides Rust tooling, Node,
+and standard checks. An agent, whose every command starts a fresh shell, runs
 tools through `scripts/dev-env.sh` instead (`scripts/dev-env.sh just check`,
 or `. scripts/dev-env.sh && ...` for a command line that runs several): it
 loads the dev shell's environment from a cache that follows `flake.nix`,
@@ -229,6 +229,11 @@ Before a feature branch, squash merge, or direct commit lands on `main`:
   its build reads, and says so when it skips it.
 - The framework still leaves this repository cleanly:
   `just separation-rehearsal --self-test` (CI runs it).
+- The harness plugins still pass after a change under `plugins/` or to the event
+  scripts in `tests/fixtures/hooks/`: `just plugins` (both plugins' `node --test`
+  suites and type checks, ADR 0235). It needs Node, which the dev shell
+  provides, and the npm registry, so `just check` does not run it; CI's
+  `plugins` job does.
 - `git diff --check` passes for every change.
 - Documentation is updated when behavior, architecture, workflow, or commands
   change.
