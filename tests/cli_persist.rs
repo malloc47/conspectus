@@ -32,6 +32,7 @@ fn isolated_cmd(home: &Path, data_home: &Path) -> Command {
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
     cmd.env_remove("CONSPECTUS_CLAUDE_CODE_STATE");
+    cmd.env_remove("CLAUDE_CONFIG_DIR");
     cmd.env_remove("CONSPECTUS_OPENCODE_STATE");
     cmd.env_remove("CONSPECTUS_PI_STATE");
     cmd.env_remove("PI_CODING_AGENT_DIR");

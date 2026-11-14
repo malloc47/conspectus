@@ -652,10 +652,13 @@ fn hook_runtime_process_role(record: &HookRecord) -> RuntimeProcessRole {
     RuntimeProcessRole::HumanAgent
 }
 
+/// The `kind` Claude Code records for its process `pid` in
+/// `sessions/<pid>.json` under the directory discovery reads Claude Code
+/// from (`CLAUDE_CONFIG_DIR`, else `~/.claude`, unless
+/// `CONSPECTUS_CLAUDE_CODE_STATE` moves it).
 fn read_claude_session_kind_for_pid(pid: i64) -> Option<String> {
-    let home = std::env::var_os("HOME")?;
-    let path = PathBuf::from(home)
-        .join(".claude")
+    let path = crate::discovery::harness::claude_code::HARNESS_DIR
+        .state_root_from_env()?
         .join("sessions")
         .join(format!("{pid}.json"));
     let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;

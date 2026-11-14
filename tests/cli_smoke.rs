@@ -32,6 +32,9 @@ fn isolated_cmd(home: &Path) -> Command {
     // `hook init codex` writes under `CODEX_HOME`; one inherited from the
     // host would point it at the developer's real Codex config.
     cmd.env("CODEX_HOME", home.join(".codex"));
+    // Claude Code's settings and sessions follow `CLAUDE_CONFIG_DIR`; one
+    // inherited from the host would point at the developer's own.
+    cmd.env_remove("CLAUDE_CONFIG_DIR");
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
     cmd.env_remove("CONSPECTUS_CLAUDE_CODE_STATE");
     cmd.env_remove("CONSPECTUS_OPENCODE_STATE");
@@ -794,6 +797,121 @@ fn hook_init_claude_code_project_scope_leaves_the_user_settings_alone() {
         .stdout(predicate::str::starts_with("not-installed\tclaude-code\t"));
     hook(&["remove", "claude-code", "--scope", "project"]);
     assert_eq!(read_settings(&settings), serde_json::json!({}));
+}
+
+#[test]
+fn hook_init_status_remove_claude_code_follow_claude_config_dir() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let config = home.path().join("elsewhere/claude");
+    let settings = config.join("settings.json");
+    let hook = |env: &[(&str, &Path)], args: &[&str]| {
+        let mut cmd = isolated_cmd(home.path());
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+        cmd.arg("hook").args(args).assert().success()
+    };
+    let moved: &[(&str, &Path)] = &[("CLAUDE_CONFIG_DIR", &config)];
+
+    hook(moved, &["init", "claude-code"])
+        .stdout(predicate::str::contains(settings.display().to_string()))
+        .stdout(predicate::str::contains("(14 added, 0 updated)"));
+    assert_eq!(
+        read_settings(&settings)["hooks"]
+            .as_object()
+            .expect("hooks")
+            .len(),
+        14
+    );
+    assert!(!home.path().join(".claude").exists());
+
+    hook(moved, &["status", "claude-code"]).stdout(predicate::str::starts_with(format!(
+        "installed\tclaude-code\t{}\n",
+        settings.display()
+    )));
+    // Without the variable the hooks are in no file Claude Code reads.
+    hook(&[], &["status", "claude-code"])
+        .stdout(predicate::str::starts_with("not-installed\tclaude-code\t"));
+
+    // The discovery override moves discovery alone: Claude Code never
+    // reads it, so the hooks stay where Claude Code does.
+    let fixture = home.path().join("fixture");
+    hook(
+        &[
+            ("CLAUDE_CONFIG_DIR", &config),
+            ("CONSPECTUS_CLAUDE_CODE_STATE", &fixture),
+        ],
+        &["status", "claude-code"],
+    )
+    .stdout(predicate::str::starts_with(format!(
+        "installed\tclaude-code\t{}\n",
+        settings.display()
+    )));
+    assert!(!fixture.exists());
+
+    hook(moved, &["remove", "claude-code"]).stdout(predicate::str::contains(format!(
+        "removed Claude Code hooks from {}",
+        settings.display()
+    )));
+    assert_eq!(read_settings(&settings), serde_json::json!({}));
+
+    // An empty value counts as unset.
+    hook(
+        &[("CLAUDE_CONFIG_DIR", Path::new(""))],
+        &["init", "claude-code"],
+    );
+    assert!(home.path().join(".claude/settings.json").is_file());
+}
+
+/// One Claude Code session `key` in `/home/user/project` under `state`.
+fn write_claude_session(state: &Path, key: &str) {
+    let dir = state.join("projects").join("-home-user-project");
+    fs::create_dir_all(&dir).expect("projects dir");
+    let line = format!(
+        r#"{{"cwd":"/home/user/project","sessionId":"{key}","type":"user","uuid":"u-{key}","parentUuid":null,"message":{{"role":"user","content":[{{"type":"text","text":"hello"}}]}}}}"#
+    );
+    fs::write(dir.join(format!("{key}.jsonl")), line + "\n").expect("session file");
+}
+
+#[test]
+fn discovery_reads_claude_code_sessions_under_claude_config_dir() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let config = home.path().join("elsewhere/claude");
+    let fixture = home.path().join("fixture");
+    write_claude_session(
+        &home.path().join(".claude"),
+        "aaaaaaaa-0000-0000-0000-00000000def1",
+    );
+    write_claude_session(&config, "bbbbbbbb-0000-0000-0000-00000000c0f1");
+    write_claude_session(&fixture, "cccccccc-0000-0000-0000-00000000f1c5");
+    let sessions = |env: &[(&str, &Path)]| {
+        let mut cmd = isolated_cmd(home.path());
+        cmd.current_dir(home.path());
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+        let output = cmd
+            .args(["table", "sessions", "--wide", "--no-pager"])
+            .assert()
+            .success();
+        String::from_utf8(output.get_output().stdout.clone()).expect("utf8")
+    };
+
+    // The table shows a session key's last eight characters.
+    let default = sessions(&[]);
+    assert!(default.contains("0000def1"), "{default}");
+    assert!(!default.contains("0000c0f1"), "{default}");
+
+    let moved = sessions(&[("CLAUDE_CONFIG_DIR", &config)]);
+    assert!(moved.contains("0000c0f1"), "{moved}");
+    assert!(!moved.contains("0000def1"), "{moved}");
+
+    let overridden = sessions(&[
+        ("CLAUDE_CONFIG_DIR", &config),
+        ("CONSPECTUS_CLAUDE_CODE_STATE", &fixture),
+    ]);
+    assert!(overridden.contains("0000f1c5"), "{overridden}");
+    assert!(!overridden.contains("0000c0f1"), "{overridden}");
 }
 
 #[test]

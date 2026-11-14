@@ -157,10 +157,12 @@ act = ["SIGTERM", "SIGKILL", "0"]
 # component. `$HOME`, `$CONFIG`, `$STATE`, `$CACHE`, `$DATA`, and
 # `$RUNTIME` are the home directory and the XDG base directories;
 # `$PROJECT` is any directory Conspectus treats as a project root;
-# `$SCRATCH` is the directory the dev scenario builder was given.
+# `$SCRATCH` is the directory the dev scenario builder was given;
+# `$CLAUDE_CONFIG_DIR` is the directory that variable moves Claude
+# Code's `~/.claude` to, when it is set (ADR 0239).
 # Creating the missing parents of an allowed path is allowed too.
 [writes]
-adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0143", "0121", "0146", "0204"]
+adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0143", "0121", "0146", "0204", "0239"]
 # Terminals and the null device, in every context.
 always = ["/dev/null", "/dev/tty", "/dev/pts/*"]
 # Rebuildable caches and observations.
@@ -189,13 +191,16 @@ act = [
 # from ADR 0028. Pi's hook is one Conspectus-owned extension file that
 # `hook remove pi` deletes (ADR 0121).
 # `--scope project` writes the same files under the project,
-# `CODEX_HOME` moves the Codex one, and `PI_CODING_AGENT_DIR` moves the
-# Pi one. The Claude Code and Codex settings files are written through
-# a sibling temporary file (`.<name>.tmp-<pid>-<attempt>`), as the
-# user-intent stores are, and a symlinked one through to its target.
+# `CLAUDE_CONFIG_DIR` moves the Claude Code one (ADR 0239), `CODEX_HOME`
+# the Codex one, and `PI_CODING_AGENT_DIR` the Pi one, as each harness
+# moves its own. The Claude Code and Codex settings files are written
+# through a sibling temporary file (`.<name>.tmp-<pid>-<attempt>`), as
+# the user-intent stores are, and a symlinked one through to its target.
 hook = [
     "$HOME/.claude/settings.json",
     "$HOME/.claude/.settings.json.tmp-*",
+    "$CLAUDE_CONFIG_DIR/settings.json",
+    "$CLAUDE_CONFIG_DIR/.settings.json.tmp-*",
     "$HOME/.codex/config.toml",
     "$HOME/.codex/.config.toml.tmp-*",
     "$HOME/.pi/agent/extensions/conspectus-hook.ts",

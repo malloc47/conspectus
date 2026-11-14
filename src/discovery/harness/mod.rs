@@ -31,6 +31,7 @@ use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge
 pub mod aider;
 pub mod claude_code;
 pub mod codex;
+pub mod dirs;
 #[doc(hidden)]
 pub mod fixtures;
 pub mod opencode;

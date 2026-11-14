@@ -38,6 +38,7 @@ use super::hook_health::print_health;
 use super::hook_opencode::{FileStatus, Loads, config_files, file_status, listing_note};
 use super::hook_write::HookWriteArgs;
 use super::json_splice::splice;
+use crate::discovery::harness::claude_code;
 
 #[derive(Debug, Args)]
 pub(super) struct HookArgs {
@@ -537,13 +538,17 @@ impl HookRemoveArgs {
     }
 }
 
+/// `settings.json` in Claude Code's directory for `--scope user`
+/// (`CLAUDE_CONFIG_DIR`, else `~/.claude`, the rule discovery reads by),
+/// and `.claude/settings.json` under the current directory for
+/// `--scope project`.
 fn claude_settings_path(scope: HookScopeFlag) -> Result<PathBuf> {
     match scope {
         HookScopeFlag::User => {
-            let home = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .ok_or_else(|| anyhow!("HOME is required for --scope user"))?;
-            Ok(home.join(".claude").join("settings.json"))
+            let dir = claude_code::HARNESS_DIR
+                .dir_from_env()
+                .ok_or_else(|| anyhow!(claude_code::HARNESS_DIR.missing_message()))?;
+            Ok(dir.join("settings.json"))
         }
         HookScopeFlag::Project => {
             let cwd = crate::cwd::for_default_target("--scope user")?;

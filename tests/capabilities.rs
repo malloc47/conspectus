@@ -921,6 +921,26 @@ impl World {
         );
         dir
     }
+
+    /// [`Self::run`] with `env` added to the world's environment.
+    fn run_with(
+        &self,
+        strace: &Path,
+        label: &str,
+        args: &[&str],
+        cwd: &Path,
+        env: &[(&str, &str)],
+    ) -> PathBuf {
+        let (child, dir) = self.spawn_with(strace, label, args, cwd, env, false);
+        let output = child.wait_with_output().expect("wait for strace");
+        assert!(
+            output.status.success(),
+            "`conspectus {}` failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        dir
+    }
 }
 
 /// The pid of the traced Conspectus root: the thread whose file starts
@@ -1392,6 +1412,47 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             pager: None,
         },
         &hooks,
+        project,
+    );
+
+    // Hook installation where the harness's own variable moved its
+    // directory: the settings follow it, and nothing lands under `$HOME`.
+    let claude_config = world.root.join("claude-config");
+    let claude_config_text = claude_config.to_string_lossy().into_owned();
+    let moved_env = [("CLAUDE_CONFIG_DIR", claude_config_text.as_str())];
+    let moved = vec![
+        world.run_with(
+            &strace,
+            "hook-init-claude-moved",
+            &["hook", "init", "claude-code"],
+            project,
+            &moved_env,
+        ),
+        world.run_with(
+            &strace,
+            "hook-remove-claude-moved",
+            &["hook", "remove", "claude-code"],
+            project,
+            &moved_env,
+        ),
+    ];
+    assert!(
+        claude_config.join("settings.json").is_file(),
+        "the install followed CLAUDE_CONFIG_DIR"
+    );
+    let mut moved_vars = world.vars(None);
+    moved_vars
+        .0
+        .insert("CLAUDE_CONFIG_DIR", vec![claude_config_text.clone()]);
+    moved_vars.0.remove("HOME");
+    record(
+        &Scenario {
+            name: "hook install under CLAUDE_CONFIG_DIR",
+            contexts: &["read", "hook"],
+            vars: &moved_vars,
+            pager: None,
+        },
+        &moved,
         project,
     );
 

@@ -77,6 +77,16 @@ const TAIL_SCAN_BYTES: u64 = 32 * 1024;
 
 pub const HARNESS_KEY: &str = crate::discovery::providers::CLAUDE_CODE;
 
+/// Claude Code's directory (settings, `projects/`, `sessions/`):
+/// `CLAUDE_CONFIG_DIR`, else `~/.claude`. Discovery reads
+/// `CONSPECTUS_CLAUDE_CODE_STATE` instead when it is set; the hooks
+/// always go where Claude Code reads them (ADR 0239).
+pub const HARNESS_DIR: super::dirs::HarnessDir = super::dirs::HarnessDir {
+    state_override: "CONSPECTUS_CLAUDE_CODE_STATE",
+    variable: "CLAUDE_CONFIG_DIR",
+    home_relative: ".claude",
+};
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ClaudeCodeAdapter;
 

@@ -859,3 +859,52 @@ fn last_message_preview_collapses_whitespace() {
         Some("line one line two with tabs"),
     );
 }
+
+#[test]
+fn claude_config_dir_moves_discovery_and_the_hooks() {
+    use crate::discovery::harness::dirs::env_of;
+    use std::path::PathBuf;
+
+    let moved = env_of(&[
+        ("CLAUDE_CONFIG_DIR", "/config/claude"),
+        ("HOME", "/home/user"),
+    ]);
+    assert_eq!(
+        HARNESS_DIR.dir(&moved),
+        Some(PathBuf::from("/config/claude"))
+    );
+    assert_eq!(
+        HARNESS_DIR.state_root(&moved),
+        Some(PathBuf::from("/config/claude"))
+    );
+
+    let default = env_of(&[("CLAUDE_CONFIG_DIR", ""), ("HOME", "/home/user")]);
+    assert_eq!(
+        HARNESS_DIR.dir(&default),
+        Some(PathBuf::from("/home/user/.claude"))
+    );
+    assert_eq!(
+        HARNESS_DIR.state_root(&default),
+        Some(PathBuf::from("/home/user/.claude"))
+    );
+
+    // The Conspectus override moves discovery; the hooks stay where
+    // Claude Code reads them.
+    let overridden = env_of(&[
+        ("CONSPECTUS_CLAUDE_CODE_STATE", "/fixture/claude"),
+        ("CLAUDE_CONFIG_DIR", "/config/claude"),
+        ("HOME", "/home/user"),
+    ]);
+    assert_eq!(
+        HARNESS_DIR.state_root(&overridden),
+        Some(PathBuf::from("/fixture/claude"))
+    );
+    assert_eq!(
+        HARNESS_DIR.dir(&overridden),
+        Some(PathBuf::from("/config/claude"))
+    );
+    assert_eq!(
+        HARNESS_DIR.missing_message(),
+        "HOME or CLAUDE_CONFIG_DIR is required for --scope user"
+    );
+}

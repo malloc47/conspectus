@@ -1094,16 +1094,17 @@ pub struct LocalDiscoveryConfig {
 
 impl LocalDiscoveryConfig {
     /// Defaults derived from the process environment: harness state roots from
-    /// `CONSPECTUS_<HARNESS>_STATE` (falling back to standard `$HOME`-relative
-    /// paths) and a real `SystemTmux` runner unless `CONSPECTUS_DISABLE_TMUX`
-    /// is set.
+    /// `CONSPECTUS_<HARNESS>_STATE`, falling back to where the harness itself
+    /// keeps them (Claude Code's `CLAUDE_CONFIG_DIR`, Pi's settings, then
+    /// standard `$HOME`-relative paths), and a real `SystemTmux` runner unless
+    /// `CONSPECTUS_DISABLE_TMUX` is set.
     pub fn from_env() -> Self {
         let mut harness_state_roots = BTreeMap::new();
 
         if let Some(path) = env_state_root("CONSPECTUS_CODEX_STATE", ".codex") {
             harness_state_roots.insert(harness::codex::HARNESS_KEY.to_string(), path);
         }
-        if let Some(path) = env_state_root("CONSPECTUS_CLAUDE_CODE_STATE", ".claude") {
+        if let Some(path) = harness::claude_code::HARNESS_DIR.state_root_from_env() {
             harness_state_roots.insert(harness::claude_code::HARNESS_KEY.to_string(), path);
         }
         if let Some(path) = env_state_root("CONSPECTUS_OPENCODE_STATE", ".local/share/opencode") {
