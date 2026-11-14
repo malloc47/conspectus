@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@conspectus/pi-hook",
+  "private": true,
+  "description": "Pi extension that reports each session's live state and the session a pane shows to `conspectus hook write pi`. Not a package: `conspectus hook init pi` copies conspectus-hook.ts, and this file only holds the type check's dependencies.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.2",
+    "@types/node": "22.13.9",
+    "typescript": "5.8.2"
+  }
+}
