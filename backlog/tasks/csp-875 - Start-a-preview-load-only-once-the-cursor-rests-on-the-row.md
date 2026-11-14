@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-13 20:40'
-updated_date: '2026-11-14 22:02'
+updated_date: '2026-11-14 22:16'
 labels:
   - h-scroll
   - h-preview
@@ -69,6 +69,8 @@ The content search already waits for its query to rest before it scans (`search_
 <!-- SECTION:NOTES:BEGIN -->
 Verification: loop tests in `src/tui/runtime/loop_tests.rs` run the real loop over a scripted console with a virtual clock and a Probe mode that stamps and answers each preview load: a 20-key burst loads once (row 020 at 100 ms after the last key); 30 keys 20 ms apart load once, within the rest and 150 ms; one move then a pause loads the new row at 100 ms; a row passed shows the placeholder, and a row passed and returned to before the rest shows its cached preview with no new load; `r` loads at once. With the rest set to zero, four of these fail. `src/tui/runtime/previews_tests.rs`: a load for another row is stopped and abandoned (cached entry marked stale), a load for the cursor's row keeps running, a loader panic still ends the load. `src/tui/preview/git_tests.rs`: for status, repo, ref with ahead/behind, and show, stopping after every number of commands ends the load with exactly that many started and the refused one never run. Existing `preview_loading` tests (PR reuse until the forge interval, hard refresh, failed PR retry, reselect reloads transcript, no-live-preview) pass unchanged. The mux preview interval refresh named in the story does not exist yet (`mux_preview_interval` is parsed and unused, CSP-185), so there was nothing to preserve beyond the stale-mark reload after a hand-off, which plan_preview_load still decides.
 Measurement (release build, sessions view, 184x85, operator's real data on a COPY of the state and cache dirs, tmux and forge off, strace -f execve counting git commands that ran, startup git work waited out first so a 0-key control shows 0; numbers only; harness /tmp/csp-fu/wheel/pty_sweep.py, not committed): 90-key sweep in 15-row down/up sweeps, 25 keys/s (a held key): 174 git commands before, 0 after (the sweep returns to its row). 200 keys/s: 60-72 before (pre-batching 60-72, post-batching 56-60), 0 after. 80 keys at 200 keys/s, ending 5 rows below the start on a repo row: 56-72 before, 4 after (one repo row's symbolic-ref, rev-parse, log, remote). frames.sh: nine frames byte-identical to the pre-CSP-874 baseline.
+
+Method (harness not committed, as for CSP-874): the TUI runs under `strace -f -qq -e trace=execve` in a pty on copies of the state and cache directories with `--refresh-interval 1h`; the harness waits until the strace log has been still for 3 s (startup discovery runs git across every repo), types 15-row down/up sweeps of cursor keys at the given rate, waits for output to go quiet, and counts the `git` execve lines that ran (`= 0`; strace also logs each failed PATH lookup) added since the keys began. A run with no keys counts 0. Only counts and subcommand names are printed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

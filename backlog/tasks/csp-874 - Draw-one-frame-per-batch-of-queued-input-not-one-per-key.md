@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-13 20:40'
-updated_date: '2026-11-14 21:36'
+updated_date: '2026-11-14 22:16'
 labels:
   - h-scroll
   - tui
@@ -64,6 +64,8 @@ Conspectus moves exactly one row per cursor key, and mosh delivers each key once
 <!-- SECTION:NOTES:BEGIN -->
 Verification: runtime tests in `src/tui/runtime/loop_tests.rs` drive the real `drive_loop` over a scripted console (virtual clock, frame counter). With the loop temporarily put back to one event per pass, the five frame-counting tests fail (60 queued keys drew 60 frames); with the 50 ms frame budget removed, the 100 ms test fails (one gap of about 2 s). `frames.sh` before/after: nine frames byte-identical. `tui --snapshot --snapshot-keys 'jjj?jj'` on the showcase fixture: the help page opens and the two keys after `?` scroll it, the selection stays on the third row. `just check` passes on the tree (5760 tests).
 Measurement (release build, sessions view, 184x85, operator's real data on a COPY of the state and cache dirs, numbers only; harness `/tmp/csp-fu/wheel/pty_burst.py` and `mosh_burst.py`, not committed): 900 keys, `ESC O B`/`ESC O A` sweeps of 15 at 300 keys/s for 3 s. Through mosh-server/mosh-client behind a UDP relay (80 ms round trip, 2 Mbps): settles 1.46 and 2.13 s after the last key before, 0.144, 0.162, and 0.163 s after. Straight into a pty: 0.98, 2.57, 2.17, 2.00 s before; 0.006, 0.014, 0.006 s after. A 180-key burst written at once: 0.68 and 0.99 s before, under 10 ms after. The mux view was not measured on real data: that needs the host tmux server, which these runs keep off.
+
+Method, to rebuild the harnesses (not committed; the repository has no place for measurement tools and the runs read an operator's real data): in Python with `pty`, run through a memory-capped scope with a wall-clock limit. Direct: spawn `conspectus tui --view sessions --no-resume-view` in a 85x184 pty on COPIES of the state and cache directories (tmux and forge discovery off), wait for output to go quiet, type `ESC O B` x15 then `ESC O A` x15, repeating, at 300 keys/s for 3 s while reading the output, and report the time from the last key to the last output chunk over 64 bytes (byte counts only; screen content is never printed or kept). Over mosh: the same TUI as the command of `mosh-server new -i 127.0.0.1`, a `mosh-client` in the pty, and a UDP relay between them that delays each direction 40 ms and serializes packets at 250 kB/s (2 Mbps).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
