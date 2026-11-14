@@ -18,9 +18,10 @@ use crate::discovery::harness::{HarnessAdapter, OpenCodeAdapter};
 use crate::live_store::{Applied, LiveStore};
 use crate::model::live::{LiveDetail, LiveState};
 
-/// The scenarios the research's fixture plan and the story list, and the
-/// asks the server plugin reads when it starts (`v2-seed-pending`).
-const SCRIPTS: [&str; 20] = [
+/// The scenarios the research's fixture plan and the story list, the asks
+/// the server plugin reads when it starts (`v2-seed-pending`), and the 2.x
+/// TUI entrypoint's fallback (`v2-tui-*`).
+const SCRIPTS: [&str; 22] = [
     "v1-busy-idle",
     "v1-compaction",
     "v1-delete",
@@ -41,6 +42,8 @@ const SCRIPTS: [&str; 20] = [
     "v2-seed-pending",
     "v2-shutdown-dispose",
     "v2-subagent-background",
+    "v2-tui-fallback",
+    "v2-tui-server-reports",
 ];
 
 fn fixture_dir() -> PathBuf {
@@ -288,6 +291,20 @@ fn a_v2_shutdown_and_unload() {
 #[test]
 fn a_v2_background_subagent() {
     replay("v2-subagent-background");
+}
+
+#[test]
+fn a_v2_client_reports_the_sessions_it_shows_when_no_server_plugin_does() {
+    replay("v2-tui-fallback");
+}
+
+#[test]
+fn a_v2_client_sends_no_live_state_while_the_server_plugin_reports() {
+    replay("v2-tui-server-reports");
+    assert!(
+        emitted("v2-tui-server-reports").is_empty(),
+        "the client sends nothing"
+    );
 }
 
 fn snapshots(name: &str) -> Vec<LiveSnapshot> {

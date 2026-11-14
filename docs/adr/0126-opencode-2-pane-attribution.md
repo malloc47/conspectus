@@ -3,7 +3,10 @@
 ## Status
 
 Accepted. Amends ADR 0049 for opencode 2.x. Decision 3 is amended by
-ADR 0206 for live state; see the amendment below.
+ADR 0206 for live state; see the amendment below. Amended by ADR 0229:
+the TUI entrypoint asks the service for its plugin list through
+opencode's client, and reports live state while no server entrypoint
+of the plugin is active.
 
 ## Context
 

@@ -65,7 +65,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0111](0111-launch-directory-is-optional.md) | The Launch Directory Is An Optional Input | Accepted |
 | [0138](0138-provider-workspaces-from-observed-cwds.md) | Provider Workspaces From Observed Cwds | Accepted |
 | [0204](0204-the-live-state-store-folds-agent-events-per-session.md) | The Live-State Store Folds Agent Events Per Session | Accepted |
-| [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208, 0227, 0228) |
+| [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208, 0227, 0228, 0229) |
 | [0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted (applied by 0217, 0218, 0222) |
 | [0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md) | A Codex Pane's Title Fills In Its Live State Where Hooks Cannot | Accepted (amended by 0221) |
 | [0218](0218-claude-codes-agent-list-repairs-a-live-state-its-hooks-left-stuck.md) | Claude Code's Agent List Repairs A Live State Its Hooks Left Stuck | Accepted (amended by 0222) |
@@ -74,6 +74,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0222](0222-claude-codes-agent-list-shows-a-known-agent-its-hooks-do-not-report.md) | Claude Code's Agent List Shows A Known Agent Its Hooks Do Not Report | Accepted, awaiting the operator's approval |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
+| [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |
 
 ## User intent and the write envelope
 
@@ -300,7 +301,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0100](0100-comments-carry-rationale-not-backlog-ids.md) | Comments Carry Rationale, Not Backlog IDs | Accepted; framework-owned in part |
 | [0124](0124-sibling-test-files.md) | Large Unit-Test Modules Live In Sibling Files | Accepted; framework-owned in part |
 | [0125](0125-opencode-2-reference-findings.md) | OpenCode 2.x Reference Findings | Accepted |
-| [0126](0126-opencode-2-pane-attribution.md) | OpenCode 2.x Session-To-Pane Attribution | Accepted (amended by 0206) |
+| [0126](0126-opencode-2-pane-attribution.md) | OpenCode 2.x Session-To-Pane Attribution | Accepted (amended by 0206, 0229) |
 | [0127](0127-launches-keep-the-tui-drawn-behind-a-spinner.md) | Launches Keep The TUI Drawn Behind A Spinner | Accepted (amended by 0133) |
 | [0128](0128-github-hosts-gh-is-signed-in-to.md) | Forge Discovery Queries The GitHub Hosts `gh` Is Signed In To | Accepted |
 | [0129](0129-pr-local-branch-symbol-filter-and-ranking.md) | PRs Show Whether They Have A Local Branch, With A Filter And A Ranking | Accepted (amended by 0130, 0131) |

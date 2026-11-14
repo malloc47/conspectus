@@ -14,6 +14,15 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **opencode 2.x reports live state with the plugin only in
+  `cli.json`.** That install loads only the plugin's TUI entrypoint,
+  which used to give pane attribution and no live state. Each client
+  (plugin 0.4.0) now reports the sessions it has shown, their families,
+  and their subagents, from the events it receives and its own stores,
+  while the service runs no server entrypoint of the plugin (it asks the
+  service for its plugin list every minute). Sessions no client has
+  shown are missed, and a session reads `exited` once every client that
+  showed it has closed; `opencode.jsonc` still sees every session.
 - **opencode 2.x reports a permission ask that was pending when its
   plugin started.** opencode never repeats an ask, so a server
   entrypoint that started or reloaded while a session waited on you

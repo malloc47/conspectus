@@ -10,7 +10,9 @@ edits `settings.json` in place. Extended by ADR 0227: the Pi extension
 also counts the tools named in `CONSPECTUS_PI_SUBAGENT_TOOLS` as
 subagents (decision 25). Extended by ADR 0228: the opencode 2.x server
 entrypoint reads the permission asks pending when it starts (decisions
-20 and 23).
+20 and 23). Amended by ADR 0229: with no server entrypoint active, the
+TUI entrypoint reports the sessions its client shows (decision 23's
+last sentence).
 
 ## Context
 

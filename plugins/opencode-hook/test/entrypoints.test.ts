@@ -156,3 +156,116 @@ test("the server entrypoint reports a permission ask pending when it starts", { 
   );
   assert.ok(!JSON.stringify(written).includes("SENTINEL"));
 });
+
+/** A stand-in for the TUI plugin context: an event stream to push into,
+ * a route to set, session stores, and the service's plugin list. */
+function standInClient(answer: () => unknown) {
+  const listeners = new Set<(event: { details: unknown }) => void>();
+  const asked: unknown[] = [];
+  const state = { route: { type: "home" } as { type: string; sessionID?: string } };
+  const permissions: Record<string, unknown[]> = {};
+  const session = {
+    status(this: unknown, sessionID: string) {
+      assert.equal(this, session, "status is called as a method");
+      return sessionID in permissions ? "running" : "idle";
+    },
+    family: (sessionID: string) => [sessionID],
+    permission: { list: (sessionID: string) => permissions[sessionID] },
+    form: { list: () => [] },
+  };
+  const plugin = {
+    async list(this: unknown, input: unknown) {
+      assert.equal(this, plugin, "plugin.list is called as a method");
+      asked.push(input);
+      return answer();
+    },
+  };
+  const ctx = {
+    location: { directory: "/work" },
+    data: {
+      listen(handler: (event: { details: unknown }) => void) {
+        listeners.add(handler);
+        return () => listeners.delete(handler);
+      },
+      session,
+    },
+    ui: { router: { current: () => state.route } },
+    client: { plugin },
+  };
+  return {
+    ctx,
+    asked,
+    permissions,
+    show(sessionID: string) {
+      state.route = { type: "session", sessionID };
+    },
+    push(details: unknown) {
+      for (const listener of listeners) listener({ details });
+    },
+  };
+}
+
+const named = (sessionID: string) => (payload: HookPayload) => payload.session_id === sessionID;
+
+test("the TUI entrypoint reports the sessions its client shows when no server entrypoint does", { skip }, async () => {
+  const { default: plugin } = await import("../src/v2/tui.ts");
+  const client = standInClient(() => ({ location: { directory: "/work" }, data: [{ id: "conspectus-hook", features: { tui: true }, state: { status: "active" } }] }));
+  client.permissions.ses_fallback01 = [ask("per_t1", "ses_fallback01")];
+  const cleanup = (await plugin.setup(client.ctx as never)) as () => void;
+  try {
+    await eventually(() => client.asked, (asked) => asked.length === 1, "the plugin list");
+    assert.deepEqual(client.asked, [{ location: { directory: "/work" } }]);
+    client.show("ses_fallback01");
+    client.push({ type: "session.step.started", data: { sessionID: "ses_fallback01" }, location: { directory: "/work" } });
+    let written = await eventually(
+      writer.payloads,
+      (all) => all.filter(named("ses_fallback01")).length === 2,
+      "the route and the session's state",
+    );
+    const mine = written.filter(named("ses_fallback01"));
+    assert.deepEqual(
+      mine.map((payload) => [payload.hook_event_name, payload.live?.state, payload.live?.detail]).sort(),
+      [["seed", "waiting", "permission"], ["tui.route", undefined, undefined]],
+    );
+    const snapshot = mine.find((payload) => payload.live)!;
+    assert.equal(snapshot.live?.pid, process.pid, "the client's own process");
+    assert.equal(snapshot.attribution, undefined, "live state takes no attribution path");
+    assert.equal(snapshot.cwd, "/work");
+
+    client.push({ type: "permission.replied", data: { sessionID: "ses_fallback01", requestID: "per_t1", reply: "once" }, location: { directory: "/work" } });
+    written = await eventually(writer.payloads, (all) => all.filter(named("ses_fallback01")).length === 3, "the answer");
+    assert.deepEqual(
+      written.filter(named("ses_fallback01")).filter((payload) => payload.live).map((payload) => payload.live?.state),
+      ["waiting", "working"],
+    );
+    assert.ok(!JSON.stringify(written).includes("SENTINEL"));
+  } finally {
+    cleanup();
+  }
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(writer.payloads().filter(named("ses_fallback01")).length, 3, "closing the client ends nothing");
+});
+
+test("the TUI entrypoint sends no live state while the server entrypoint reports", { skip }, async () => {
+  const { default: plugin } = await import("../src/v2/tui.ts");
+  const client = standInClient(() => ({ location: { directory: "/work" }, data: [{ id: "conspectus-hook", features: { server: true, tui: true }, state: { status: "active" } }] }));
+  client.permissions.ses_withserver = [ask("per_t2", "ses_withserver")];
+  const cleanup = (await plugin.setup(client.ctx as never)) as () => void;
+  try {
+    await eventually(() => client.asked, (asked) => asked.length === 1, "the plugin list");
+    client.show("ses_withserver");
+    client.push({ type: "session.status", data: { sessionID: "ses_withserver", status: { type: "busy" } }, location: { directory: "/work" } });
+    client.push({ type: "permission.asked", data: { id: "per_t3", sessionID: "ses_withserver" }, location: { directory: "/work" } });
+    const written = await eventually(writer.payloads, (all) => all.filter(named("ses_withserver")).length >= 2, "the attribution records");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const mine = writer.payloads().filter(named("ses_withserver"));
+    assert.ok(written.length > 0);
+    assert.deepEqual(
+      mine.map((payload) => [payload.hook_event_name, payload.live]).sort(),
+      [["session.status", undefined], ["tui.route", undefined]],
+      "attribution only",
+    );
+  } finally {
+    cleanup();
+  }
+});

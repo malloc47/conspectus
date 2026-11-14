@@ -736,8 +736,14 @@ attribution record, then restart opencode.
   and restart the `opencode serve --service` process too. That loads the
   plugin's server entrypoint in the shared service, which sees every
   session, as well as its TUI entrypoint in each client. Listed only in
-  `cli.json`, the plugin still says which session each pane shows but
-  reports no live state.
+  `cli.json` (plugin 0.4.0 or later), each client reports the sessions it
+  has shown itself: the session it routes to, that session's family, and
+  their subagents, from the first time it shows them until it closes.
+  Sessions no client has shown, and work that goes on after a session's
+  last client closed, are missed, and such a session reads `exited`
+  (`killed`) once every client that showed it has closed. A client stays
+  quiet while the service runs the plugin's server entrypoint, which it
+  checks every minute, so the two never both report a session.
 
 See [`plugins/opencode-hook/README.md`](../plugins/opencode-hook/README.md)
 for the details. The plugin sends a session's whole state whenever it
@@ -752,7 +758,8 @@ running subagent. Beyond the [known gaps](#known-gaps):
   failure publishes an error either, so a failed 1.x turn may read
   `ready`.
 - On 2.x the process Conspectus checks is the shared service's, so
-  closing a client leaves its sessions as the service runs them.
+  closing a client leaves its sessions as the service runs them (with
+  the plugin only in `cli.json`, it is the client's; see above).
 - When opencode reloads the plugin without restarting (1.x instance
   disposal, a 2.x plugin unload), sessions still working or waiting read
   `exited` until their next event. opencode never repeats a permission

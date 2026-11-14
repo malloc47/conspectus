@@ -2,7 +2,7 @@
 // drives the live-state reducer (`live.ts`): its snapshots go out on
 // every change, and again every heartbeat while a session is not ready.
 // Shared by the opencode 1.x plugin (`index.ts`) and the 2.x entrypoints
-// (`v2/server.ts`, `v2/tui.ts`).
+// (`v2/server.ts`, and `v2/tui.ts` through its fallback).
 //
 // Nothing here may disturb opencode: a write is a detached process that
 // is never awaited and never keeps opencode running, and every failure
@@ -65,10 +65,14 @@ export function ownStartTime(): number | undefined {
   }
 }
 
-export type LiveDriver = {
+/** What {@link driveLiveState} runs: the reducer, or something that
+ * wraps it. */
+export type Driven = Pick<LiveReducer, "heartbeat" | "dispose" | "needsHeartbeat">;
+
+export type LiveDriver<T extends Driven = LiveReducer> = {
   /** Apply one input to the reducer at the current time and send what it
    * emits. */
-  send(step: (live: LiveReducer, now: number) => HookPayload[]): void;
+  send(step: (live: T, now: number) => HookPayload[]): void;
   /** The instance is going away: send the last snapshots and stop the
    * heartbeat. */
   dispose(): void;
@@ -76,7 +80,7 @@ export type LiveDriver = {
 
 /** Run `live`: send its snapshots, and keep a heartbeat timer only while
  * a session is due one. */
-export function driveLiveState(live: LiveReducer): LiveDriver {
+export function driveLiveState<T extends Driven>(live: T): LiveDriver<T> {
   let timer: ReturnType<typeof setInterval> | undefined;
   let disposed = false;
 
@@ -85,7 +89,7 @@ export function driveLiveState(live: LiveReducer): LiveDriver {
     timer = undefined;
   };
 
-  const run = (step: (live: LiveReducer, now: number) => HookPayload[]) => {
+  const run = (step: (live: T, now: number) => HookPayload[]) => {
     try {
       for (const payload of step(live, Date.now())) writeHook(payload);
       if (disposed || !live.needsHeartbeat()) {

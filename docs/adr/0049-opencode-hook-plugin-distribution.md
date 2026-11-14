@@ -3,7 +3,9 @@
 ## Status
 
 Accepted. Amended for opencode 2.x by ADR 0126 and for live state by
-ADR 0206; see the amendments below.
+ADR 0206; see the amendments below. ADR 0229 amends the live-state
+amendment's item 2: listed only in `cli.json`, the TUI entrypoint
+reports the live state of the sessions its client shows.
 
 ## Context
 

@@ -22,7 +22,9 @@ The scripts are shared by two test suites:
 ## Layout
 
 `v1-<scenario>.jsonl` drives the opencode 1.x plugin, `v2-<scenario>.jsonl`
-the 2.x server entrypoint. The first line is a header:
+the 2.x server entrypoint, and `v2-tui-<scenario>.jsonl` the 2.x TUI
+entrypoint's fallback, which reports the sessions its client has shown
+when no server entrypoint does. The first line is a header:
 
 ```json
 {"fixture": "opencode live event script", "synthetic": true, "major": 1,
@@ -31,7 +33,8 @@ the 2.x server entrypoint. The first line is a header:
 ```
 
 `instance`, `pid`, `pid_start`, and `directory` are the plugin instance's
-options. Every later line is a step:
+options, and `"entrypoint": "tui"` marks a TUI entrypoint's script.
+Every later line is a step:
 
 - `at_ms`: when it happens, Unix epoch milliseconds (small numbers, for
   reading).
@@ -44,7 +47,12 @@ options. Every later line is a step:
   instance going away), or `seed` (what opencode lists of sessions, by
   session id: `{"permissions": [...], "forms": [...], "status": ...}`,
   as the 2.x server entrypoint reads the pending permissions of its
-  location's sessions when it starts).
+  location's sessions when it starts). A TUI entrypoint's script also
+  has `route` (the session the client shows, or `null` for none),
+  `plugins` (the service's plugin list as `ctx.client.plugin.list`
+  answers it, or `null` for a call that failed), and `stores` (what the
+  client's session stores list from then on, by session id: `status`,
+  `permissions`, `forms`, and `family`), which sends nothing itself.
 - `emit`: the payloads the reducer sends after the input, in order, each
   exactly as `conspectus hook write opencode` reads it on stdin.
 - `shown`: what a session reads as after the step, by session id:
@@ -75,6 +83,12 @@ confirm:
 - A 2.x retry is rate limited when its error has status 429 or a
   `retryAfterMs`; a failed execution's class comes from its error's status,
   retry delay, or type word.
+- A 2.x client's `ctx.data.listen` delivers the same events as the
+  server's stream; `ctx.client.plugin.list({location})` answers `{location,
+  data: [{id, source, features: {server?, tui?}, state: {status}}]}`;
+  the session stores answer `status(id)` with `idle` or `running`,
+  `permission.list(id)` and `form.list(id)` with arrays, and `family(id)`
+  with session ids.
 - The server plugin context's `session.list({directory, limit})` returns
   pages `{data: [{id}], cursor: {next}}`, and `permission.list({sessionID})`
   the session's pending permission requests, each `{id, sessionID, ...}`,

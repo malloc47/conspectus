@@ -222,6 +222,13 @@ export type LiveReducer = {
    * fills in a session it has no evidence for. Nothing is removed, and an
    * ask the instance saw end is not brought back. */
   seed(sessionID: unknown, listed: Listed, now: number): HookPayload[];
+  /** The current snapshot of every session `include` accepts that shows
+   * something, sent again whether or not it changed: for a source that
+   * starts reporting sessions it already follows. */
+  resend(include: (sessionID: string) => boolean, name: string, now: number): HookPayload[];
+  /** The ids of a session's ancestors, nearest first, as far as the
+   * instance has heard of them. */
+  lineage(sessionID: string): string[];
   /** Whether any session is due heartbeats. */
   needsHeartbeat(): boolean;
 };
@@ -896,6 +903,28 @@ export function createLiveState(options: LiveOptions): LiveReducer {
     return publish([s], "seed", now);
   }
 
+  function resend(include: (sessionID: string) => boolean, name: string, now: number): HookPayload[] {
+    const out: HookPayload[] = [];
+    for (const s of sessions.values()) {
+      if (!include(s.id)) continue;
+      const next = view(s);
+      if (!next) continue;
+      s.shown = next;
+      out.push(snapshot(s, next, name, now));
+    }
+    return out;
+  }
+
+  function lineage(sessionID: string): string[] {
+    const chain: string[] = [];
+    let parent = sessions.get(sessionID)?.parent;
+    while (parent !== undefined && parent !== sessionID && !chain.includes(parent)) {
+      chain.push(parent);
+      parent = sessions.get(parent)?.parent;
+    }
+    return chain;
+  }
+
   function heartbeat(now: number): HookPayload[] {
     const out: HookPayload[] = [];
     for (const s of sessions.values()) {
@@ -918,7 +947,7 @@ export function createLiveState(options: LiveOptions): LiveReducer {
     return false;
   }
 
-  return { v1, v2, compacting, heartbeat, dispose, needsHeartbeat, seed };
+  return { v1, v2, compacting, heartbeat, dispose, needsHeartbeat, seed, resend, lineage };
 }
 
 /** Call `owner[name](input)`, keeping `owner` as `this`; reject when it

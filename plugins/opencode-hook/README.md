@@ -54,8 +54,19 @@ On **opencode 2.x** sessions run in one shared background service.
   records which session that client shows: whenever the client's route
   moves to a session (including in-app switches, as `tui.route`), and on
   `session.created`, `session.renamed`, `session.status`, and
-  `session.idle` of that session. Events for other sessions are ignored,
-  since every client receives them.
+  `session.idle` of that session. Events for other sessions are ignored
+  for this, since every client receives them.
+- When no server entrypoint of this plugin is active in the service
+  (the package is listed only in `cli.json`), the TUI entrypoint also
+  reports live state itself (`src/v2/fallback.ts`), for the sessions its
+  client has shown: the routed session, its family, and their
+  subagents, from the first time the client shows them until it closes.
+  It runs the same reducer over the events the client receives, fills a
+  session in from the client's stores (its turn's status and pending
+  permissions and forms) when it joins, and asks the service for its
+  plugin list (through opencode's client) when it loads and every
+  minute, staying quiet while the list shows this plugin's server
+  entrypoint active, or has not answered.
 
 Only ids, paths, state names, counts, and times leave the plugin: never a
 title, a message, a permission's patterns or resources, a question, a
@@ -109,10 +120,14 @@ next client starts it again. `opencode plugin list` shows the entry once
 it resolves.
 
 Listing `dist/v2` in `~/.config/opencode/cli.json` instead, as plugin
-0.2.0 asked, loads only the TUI entrypoint: Conspectus learns which
-session each pane shows, but not what the sessions are doing. When you
-move the entry to `opencode.jsonc`, remove it from `cli.json`, or each
-client loads the TUI entrypoint twice.
+0.2.0 asked, loads only the TUI entrypoint. Conspectus learns which
+session each pane shows, and, from plugin 0.4.0, what the sessions each
+client has shown are doing; sessions no client has shown (a background
+subagent of a session nobody opened, a turn that goes on after its last
+client closed) are missed, and a session reads `exited` once every
+client that showed it has closed. `opencode.jsonc` sees every session.
+When you move the entry to `opencode.jsonc`, remove it from `cli.json`,
+or each client loads the TUI entrypoint twice.
 
 ### Upgrading from 0.2.0
 
@@ -161,9 +176,8 @@ conspectus graph --format json \
 If either is empty after a few seconds of activity, check stderr for the
 plugin's one-shot spawn warning and confirm that `conspectus` is on
 `PATH` from inside the opencode process environment. On opencode 2.x,
-also confirm that `opencode plugin list` shows the `dist/v2` entry, and
-that it is in `opencode.jsonc`: an entry in `cli.json` reports no live
-state.
+also confirm that `opencode plugin list` shows the `dist/v2` entry; an
+entry only in `cli.json` reports only the sessions a client shows.
 
 ## Development
 
@@ -187,10 +201,12 @@ run both after a change here.
 
 - `src/live.ts` is the reducer. It imports nothing, does nothing when
   loaded, and uses only TypeScript that Node can strip, so its tests run
-  without a build. The entrypoints (`src/index.ts`, `src/v2/server.ts`)
-  hand it events; `src/write.ts` sends what it returns, keeps the
-  heartbeat timer, and spawns the writer detached and unawaited, so a
-  write never holds opencode up or keeps it running.
+  without a build; so is `src/v2/fallback.ts`, which imports only types.
+  The entrypoints (`src/index.ts`, `src/v2/server.ts`, and
+  `src/v2/tui.ts` through the fallback) hand it events; `src/write.ts`
+  sends what it returns, keeps the heartbeat timer, and spawns the writer
+  detached and unawaited, so a write never holds opencode up or keeps it
+  running.
 - Payload: flat JSON over stdin, `{session_id, cwd?, hook_event_name?,
   attribution?, live?}`, where `live` is `{instance, seq, observed_ms,
   heartbeat_s, pid, pid_start, state, detail, subagents, via_subagent,

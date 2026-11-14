@@ -1,8 +1,10 @@
-// The live-state reducer (`src/live.ts`) against the shared event
+// The live-state reducer (`src/live.ts`), and the 2.x TUI entrypoint's
+// fallback around it (`src/v2/fallback.ts`), against the shared event
 // scripts in `tests/fixtures/hooks/opencode-live/`. Each script is an
 // opencode major, a header with the plugin instance's options, and steps:
 // an input (an `event`, the 1.x `compacting` hook, a `heartbeat`,
-// `dispose`, or what opencode lists of sessions to `seed`), the payloads
+// `dispose`, what opencode lists of sessions to `seed`, and for the TUI
+// entrypoint a `route`, a `plugins` answer, or its `stores`), the payloads
 // the reducer must `emit` after it, in order,
 // and what each session it names is `shown` as. The Rust tests feed the
 // same payloads through `conspectus hook write opencode`'s parser and
@@ -17,6 +19,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { PLUGIN_ID, createTuiFallback, serverReports, type ClientStores } from "../src/v2/fallback.ts";
 import {
   MAX_LISTED_SESSIONS,
   MAX_SESSIONS,
@@ -38,6 +41,9 @@ const UPDATE = process.env.OPENCODE_LIVE_UPDATE === "1";
 type Header = {
   synthetic: boolean;
   major: 1 | 2;
+  /** The 2.x entrypoint the script drives: the server's (the default) or
+   * the TUI's fallback. */
+  entrypoint?: "server" | "tui";
   scenario: string;
   instance: string;
   pid?: number;
@@ -63,6 +69,9 @@ type Step = {
   heartbeat?: boolean;
   dispose?: boolean;
   seed?: Record<string, Listed>;
+  route?: string | null;
+  plugins?: unknown;
+  stores?: Record<string, Record<string, unknown>>;
   emit?: HookPayload[];
   shown?: Record<string, Shown>;
 };
@@ -89,6 +98,38 @@ function reducer(header: Header): LiveReducer {
     pidStart: header.pid_start,
     directory: header.directory,
   });
+}
+
+/** What a script drives: one step's payloads, `undefined` for a step
+ * that only checks or sets up. */
+type Driver = (step: Step) => HookPayload[] | undefined;
+
+function driver(header: Header): Driver {
+  const live = reducer(header);
+  if (header.entrypoint !== "tui") return (step) => run(live, header.major, step);
+  // The client's stores, as the script's `stores` steps set them.
+  let listed: Record<string, Record<string, unknown>> = {};
+  const read = (field: string) => (sessionID: string) => listed[sessionID]?.[field];
+  const stores: ClientStores = {
+    status: read("status"),
+    permissions: read("permissions"),
+    forms: read("forms"),
+    family: read("family"),
+  };
+  const fallback = createTuiFallback(live, stores);
+  return (step) => {
+    if (step.stores !== undefined) {
+      listed = step.stores;
+      return undefined;
+    }
+    if (step.event !== undefined) return fallback.event(step.event, step.at_ms);
+    if (step.route !== undefined) return fallback.route(step.route ?? undefined, step.at_ms);
+    if ("plugins" in step) return fallback.plugins(step.plugins ?? undefined, step.at_ms);
+    if (step.heartbeat) return fallback.heartbeat(step.at_ms);
+    if (step.dispose) return fallback.dispose(step.at_ms);
+    assert.equal(step.seed, undefined, "the TUI entrypoint seeds from its stores");
+    return undefined;
+  };
 }
 
 /** The payloads `step`'s input makes the reducer emit; `undefined` for a
@@ -130,7 +171,7 @@ function checkShown(latest: Map<string, LiveSnapshot>, step: Step, place: string
 /** The script with each step's keys in reading order: when, why, the
  * input, what it emits, what that shows. */
 function rewrite(script: Script): void {
-  const order = ["at_ms", "note", "event", "compacting", "heartbeat", "dispose", "seed", "emit", "shown"];
+  const order = ["at_ms", "note", "stores", "event", "compacting", "route", "plugins", "heartbeat", "dispose", "seed", "emit", "shown"];
   const ordered = script.steps.map((step) => {
     const entries = Object.entries(step);
     const rank = (key: string) => (order.includes(key) ? order.indexOf(key) : order.length);
@@ -143,12 +184,12 @@ function rewrite(script: Script): void {
 for (const script of scripts()) {
   test(`${script.name}: ${script.header.scenario}`, () => {
     assert.equal(script.header.synthetic, true, "every script is labeled synthetic");
-    const live = reducer(script.header);
+    const drive = driver(script.header);
     const latest = new Map<string, LiveSnapshot>();
     let seq = 0;
     script.steps.forEach((step, index) => {
       const place = `${script.name} step ${index + 1}${step.note ? ` (${step.note})` : ""}`;
-      const emitted = run(live, script.header.major, step);
+      const emitted = drive(step);
       if (emitted === undefined) {
         assert.equal(step.emit, undefined, `${place}: a check-only step emits nothing`);
         return;
@@ -158,8 +199,15 @@ for (const script of scripts()) {
       for (const payload of emitted) {
         assert.ok(!JSON.stringify(payload).includes("SENTINEL"), `${place}: payload text left the reducer`);
         if (payload.live) {
-          seq += 1;
-          assert.equal(payload.live.seq, seq, `${place}: seq counts up by one`);
+          if (script.header.entrypoint === "tui") {
+            // The fallback leaves out the snapshots of sessions it does
+            // not report, so its numbers only increase.
+            assert.ok(payload.live.seq > seq, `${place}: seq increases`);
+            seq = payload.live.seq;
+          } else {
+            seq += 1;
+            assert.equal(payload.live.seq, seq, `${place}: seq counts up by one`);
+          }
           latest.set(payload.session_id, payload.live);
         }
       }
@@ -192,7 +240,7 @@ test("the scripts plant a sentinel in every payload-bearing field", () => {
       for (const [key, item] of Object.entries(value)) walk(item, [...keys, key]);
     }
   };
-  for (const script of scripts()) for (const step of script.steps) walk([step.event, step.seed], []);
+  for (const script of scripts()) for (const step of script.steps) walk([step.event, step.seed, step.stores, step.plugins], []);
   for (const field of [
     "title",
     "message",
@@ -484,4 +532,47 @@ test("reading pending asks stops at its limit, when the plugin unloads, and with
   await readPending(failing, "/work", () => assert.fail("the list failed"));
   const odd = { session: { list: async () => ({ data: [{ id: "has space" }, { id: 7 }, {}] }) }, permission: { list: async () => assert.fail("no session to ask") } };
   await readPending(odd, "/work", () => assert.fail("no session"));
+});
+
+test("the fallback reads only an entry's id, server entrypoint, and status from the plugin list", () => {
+  const reads = new Set<string>();
+  const entry = (id: string, server: boolean, status: string) => ({
+    id,
+    source: { type: "local", path: "/SENTINEL/plugins/opencode-hook/dist/v2" },
+    features: server ? { server: true, tui: true } : { tui: true },
+    state: status === "failed" ? { status, error: "SENTINEL error" } : { status },
+  });
+  const answer = (...entries: unknown[]) => watched({ location: { directory: "/work" }, data: entries }, reads);
+  assert.equal(serverReports(answer(entry(PLUGIN_ID, true, "active"))), true);
+  assert.equal(serverReports(answer(entry(PLUGIN_ID, true, "failed"))), false);
+  assert.equal(serverReports(answer(entry(PLUGIN_ID, false, "active"))), false, "listed as a TUI plugin only");
+  assert.equal(serverReports(answer(entry("another-plugin", true, "active"))), false);
+  assert.equal(serverReports(answer()), false);
+  assert.ok(![...reads].some((read) => read.includes("source") || read.includes("error")), [...reads].join(", "));
+  for (const odd of [undefined, null, "SENTINEL", {}, { data: "x" }]) assert.equal(serverReports(odd), undefined);
+  assert.equal(serverReports([entry(PLUGIN_ID, true, "active")]), true, "a bare list");
+});
+
+test("the plugin list is checked against the id both 2.x entrypoints declare", () => {
+  for (const file of ["../src/v2/server.ts", "../src/v2/tui.ts"]) {
+    const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
+    assert.ok(source.includes(`id: "${PLUGIN_ID}"`), file);
+  }
+});
+
+test("a fallback store that throws counts as no answer", () => {
+  const live = createLiveState({ instance: "test-instance", directory: "/work" });
+  const throwing = () => {
+    throw new Error("SENTINEL");
+  };
+  const fallback = createTuiFallback(live, { status: throwing, permissions: throwing, forms: throwing, family: throwing });
+  assert.equal(fallback.reporting(), undefined);
+  assert.deepEqual(fallback.plugins({ data: [] }, 1), []);
+  assert.equal(fallback.reporting(), true);
+  assert.deepEqual(fallback.route("ses_8charsok", 2), [], "nothing known of it yet");
+  assert.deepEqual(fallback.route(42, 3), []);
+  const busy = fallback.event({ type: "session.execution.started", data: { sessionID: "ses_8charsok" } }, 4);
+  assert.deepEqual(busy.map((payload) => payload.live?.state), ["working"]);
+  assert.equal(fallback.needsHeartbeat(), true);
+  assert.deepEqual(fallback.dispose(5), []);
 });
