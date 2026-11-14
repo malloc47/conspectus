@@ -1146,8 +1146,9 @@ body and checks, a process its process tree, and a pin slot its target's
 preview, or its snapshot when the target is gone. Sessions in tmux show the transcript by
 default; the controls overlay switches them to the live pane, and
 `[tui] session_preview` sets the starting choice. Previews read only,
-load off the UI thread, and are cached in memory; `--no-live-preview`
-hides transcripts and pane captures.
+load off the UI thread once the cursor rests on the row (ADR 0237, ADR
+0238), and are cached in memory; `--no-live-preview` hides transcripts
+and pane captures.
 
 A transcript is bottom-anchored on its newest turns, or anchored at the
 search match it opens on, and `J` / `K` scroll from there; a step past

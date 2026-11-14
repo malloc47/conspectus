@@ -191,7 +191,7 @@ named.
 | 0020, 0021 | The host's command-line tables and their column allocator, which stays its own (record 0060). |
 | 0068, 0069, 0070, 0113 | The host's fixture modes, its showcase scenario, and its screenshots. |
 | 0115, 0116 | When the host fetches remote data, and how it refreshes. |
-| 0236, 0237 | How much input the host's event loop takes before it draws, and when it starts loading the preview of a row the cursor has reached. The runtime stays with the host (record 0002); the framework draws what it is given. |
+| 0236, 0237, 0238 | How much input the host's event loop takes before it draws, when it starts loading what the cursor has reached, and which thread loads it. The runtime stays with the host (record 0002); the framework draws what it is given. |
 | 0111, 0117 | The host's rule for reading the working directory, and its manifest of programs, sockets, signals, and write paths. The framework reads no working directory and starts and writes nothing, so it needs neither (record 0004). |
 | 0118, 0119 | The host's short name and its logo. |
 | 0007, 0010, 0016, 0017, 0109, 0110, 0223, 0224, 0225, 0226 | How the host's repository is built, checked, tracked, distributed, and placed, its toolchain, and its build profile. A separated framework decides its own. |

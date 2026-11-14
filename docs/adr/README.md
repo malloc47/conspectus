@@ -267,6 +267,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0234](0234-tui-a-pinned-mux-reads-the-word-of-its-agents-mark.md) | A Pinned Mux Reads The Word Of Its Agents' Mark | Accepted |
 | [0236](0236-tui-the-event-loop-takes-the-input-that-is-waiting-before-it-draws.md) | The Event Loop Takes The Input That Is Waiting Before It Draws | Accepted |
 | [0237](0237-tui-a-preview-loads-once-the-cursor-rests-on-its-row.md) | A Preview Loads Once The Cursor Rests On Its Row | Accepted |
+| [0238](0238-tui-a-mux-panes-capture-runs-on-a-worker-thread.md) | A Mux Pane's Capture Runs On A Worker Thread | Accepted |
 
 ## Transcript viewer
 

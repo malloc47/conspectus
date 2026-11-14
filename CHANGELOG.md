@@ -913,6 +913,15 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A mux pane's preview is captured in the background.** Moving onto a
+  live mux row ran `tmux capture-pane` before the next frame (5 to 10 ms
+  on a healthy server), so scrolling the mux view stacked those waits on
+  the frame cost, and a `tmux` that stopped answering froze the whole TUI.
+  The capture now runs on a worker thread: the pane shows its last
+  capture, or the loading placeholder, until the new one lands, a pane is
+  never captured twice at once, and keys and frames carry on while a
+  capture waits (a key pressed during a six-second capture used to wait
+  out the rest of it).
 - **The Preview loads only for the row the cursor rests on.** Every
   cursor move started a preview load for the row it landed on, so a held
   key or a fast scroll started git (four commands for a repo row, `git

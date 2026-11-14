@@ -66,8 +66,9 @@ The content search already waits for its query to rest before it scans
 6. **Unchanged.** A load in flight for a source is not started again, a
    loaded pull request is reused until the forge interval or a hard
    refresh (ADR 0116), `--no-live-preview` still loads nothing, and a
-   mux pane is captured as before (its own story moves that off the UI
-   thread).
+   mux pane's capture waits for the rest like the other sources (it runs
+   on a worker thread, ADR 0238, and is not stopped between commands,
+   being one).
 
 ## Consequences
 

@@ -2528,6 +2528,12 @@ once. A git preview still loading when the cursor leaves its row starts
 no further commands, and the row reloads the next time the cursor rests
 on it.
 
+A mux pane's capture runs in the background too, so a `tmux` that is slow
+or has stopped answering never holds up a key or a frame: the pane keeps
+its last capture, or the loading placeholder if it has none, until its
+capture lands, and a capture that lands after the cursor has moved on is
+kept for the next time without changing what is on screen.
+
 ## Keys on the right pane
 
 With the right pane focused (and no dialog open), these keys drive the
