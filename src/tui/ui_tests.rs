@@ -2302,6 +2302,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         client_attached: Some(true),
         cwd_display: None,
         attached_count: 1,
+        held_sessions: 1,
         recency: None,
         activity_epoch: None,
         created_epoch: None,
@@ -2522,6 +2523,7 @@ fn mux_session_row_mirrors_session_column_order() {
         client_attached: Some(true),
         cwd_display: Some("~/src/conspectus".into()),
         attached_count: 1,
+        held_sessions: 1,
         recency: Some("3s".into()),
         activity_epoch: Some(now - 3),
         created_epoch: None,
@@ -4081,6 +4083,134 @@ fn mux_view_header_counts_sessions_in_visible_muxes() {
     );
 }
 
+/// Under a narrowing filter the Mux view's `N/M sessions` counts the
+/// sessions its listed muxes hold, each once: their listed agents and,
+/// while the agent state is the only session predicate, the sessions
+/// their marks count in a kept state that no link attaches. An agent in
+/// a pane no session matches is no session and adds none.
+#[test]
+fn mux_view_header_counts_the_sessions_a_listed_mux_s_mark_counts() {
+    use crate::filter::{HarnessFilter, LiveStateFilter, LiveStateKey};
+    use crate::model::live::{LiveBinding, LiveObservation, LiveSource, LiveState, Liveness};
+    use crate::model::{
+        Confidence, GraphLink, LinkEndpoint, LinkState, LivePane, MuxSessionNode, Provenance,
+        RelationKind,
+    };
+    let session = |key: &str| NodeId::AgentSession(AgentSessionId::new("codex", "/state", key));
+    let link = |key: &str, native: &str, evidence: Option<&str>| GraphLink {
+        id: format!("{key}-{native}"),
+        source: session(key),
+        target: LinkEndpoint::Node {
+            id: NodeId::MuxSession(MuxSessionId::new(format!("tmux:{native}"))),
+        },
+        relation: RelationKind::LinkedToMux,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::Medium,
+        freshness: crate::model::Freshness::Fresh,
+        source_metadata: crate::model::SourceMetadata {
+            evidence: evidence.map(str::to_string),
+            ..crate::model::SourceMetadata::default()
+        },
+        state: LinkState::Active,
+    };
+    let running = |state| {
+        LiveBinding::new(
+            LiveObservation::new(state, LiveSource::Hook, 1_000_000),
+            Liveness::Alive,
+        )
+    };
+    // `torn` waits and `rift` works, both in `eta`'s directory: the
+    // resolver can't tell which of them the mux runs, so no link attaches
+    // either and each counts on `eta`, its preferred mux. `calm` works,
+    // attached to `zeta`, where an agent no session matches waits in a
+    // pane. `idle` has no mux and no live state.
+    let mut snapshot = GraphSnapshot::empty();
+    for native in ["eta", "zeta"] {
+        snapshot.nodes.push(GraphNode::MuxSession(
+            MuxSessionNode::new(
+                MuxSessionId::new(format!("tmux:{native}")),
+                "tmux".to_string(),
+                native.to_string(),
+            )
+            .with_cwd(format!("/home/op/src/{native}")),
+        ));
+    }
+    for key in ["torn", "rift", "calm", "idle"] {
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(AgentSessionId::new("codex", "/state", key), "codex")
+                .with_cwd(format!("/home/op/src/{key}")),
+        ));
+    }
+    snapshot
+        .candidate_links
+        .push(link("torn", "eta", Some("exact_cwd_match")));
+    snapshot
+        .candidate_links
+        .push(link("rift", "eta", Some("exact_cwd_match")));
+    snapshot.candidate_links.push(link("calm", "zeta", None));
+    for (key, state) in [
+        ("torn", LiveState::Waiting),
+        ("rift", LiveState::Working),
+        ("calm", LiveState::Working),
+    ] {
+        snapshot.node_live.insert(session(key), running(state));
+    }
+    snapshot.pane_live.insert(
+        LivePane::new(MuxSessionId::new("tmux:zeta"), Some("%2".into())),
+        running(LiveState::Waiting),
+    );
+    let snapshot = resolve_snapshot(snapshot);
+
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Mux;
+    let mut app = App::new(config);
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree: crate::tui::rows::RowTree::default(),
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let area = Rect::new(0, 0, 120, 12);
+    let mut header = |filter: RowFilter| {
+        app.update(Msg::SetFilter(filter));
+        buffer_to_string(&render_to_buffer(&mut app, area))
+            .lines()
+            .next()
+            .expect("header line")
+            .to_string()
+    };
+    let states = |keys: &[LiveStateKey]| RowFilter {
+        live_state: Some(LiveStateFilter::from_values(keys.iter().copied())),
+        ..RowFilter::default()
+    };
+
+    let waiting = header(states(&[LiveStateKey::Waiting]));
+    assert!(
+        waiting.contains("1/4 sessions"),
+        "the waiting session `eta`'s mark counts, not the pane's agent: {waiting}"
+    );
+    let working = header(states(&[LiveStateKey::Working]));
+    assert!(
+        working.contains("2/4 sessions"),
+        "the working session `eta` counts and the one `zeta` lists: {working}"
+    );
+    let either = header(states(&[LiveStateKey::Waiting, LiveStateKey::Working]));
+    assert!(either.contains("3/4 sessions"), "each once: {either}");
+    let codex = header(RowFilter {
+        harness: Some(HarnessFilter::from_values(["codex"])),
+        ..RowFilter::default()
+    });
+    assert!(
+        codex.contains("1/4 sessions"),
+        "another predicate lists muxes by their attached agents only: {codex}"
+    );
+    let codex_waiting = header(RowFilter {
+        harness: Some(HarnessFilter::from_values(["codex"])),
+        ..states(&[LiveStateKey::Waiting])
+    });
+    assert!(codex_waiting.contains("0/4 sessions"), "{codex_waiting}");
+}
+
 #[test]
 fn reported_failure_leads_the_rows_preview_until_a_later_success() {
     use crate::tui::messages::{CommandRecord, LogEntry, LogEntryExt, LogTarget};
@@ -4303,6 +4433,7 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
         client_attached: Some(false),
         cwd_display: None,
         attached_count: 0,
+        held_sessions: 0,
         recency: Some("1m".into()),
         activity_epoch: None,
         created_epoch: None,
@@ -4421,6 +4552,7 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         client_attached: Some(true),
         cwd_display: None,
         attached_count: 0,
+        held_sessions: 0,
         recency: Some("3s".into()),
         activity_epoch: None,
         created_epoch: None,

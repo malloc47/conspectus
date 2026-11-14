@@ -228,8 +228,11 @@ forms, lists, readers, and keys look and behave alike.
   off by default, which lift the rows marked `!` above the rest of their
   group, and an **agent state** row that steps `any`, `waiting`, `ready`,
   `working`, `error` to list only the sessions in that state and the
-  muxes with an agent in it, shown as `agent:waiting` in the status bar.
-  Both are kept per view between runs and cleared by `F`. Rows keep still
+  muxes with an agent in it, shown as `agent:waiting` in the status bar;
+  in the Mux view the header's `matching/total sessions` then counts the
+  sessions those muxes hold, a session no link ties to one mux counting
+  on the mux whose mark counts it. Both are kept per view between runs
+  and cleared by `F`. Rows keep still
   between your actions: the order and the rows follow the agents' states
   when the list is next built (a Controls change, `r`, a new snapshot),
   while the marks change at once. `--state waiting,ready,…` on `table`,

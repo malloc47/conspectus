@@ -79,6 +79,7 @@ fn mux(name: &str, depth: u8, states: &[LiveState]) -> Row {
             client_attached: Some(false),
             cwd_display: None,
             attached_count: states.len(),
+            held_sessions: states.len(),
             recency: Some("1m".into()),
             activity_epoch: None,
             created_epoch: None,

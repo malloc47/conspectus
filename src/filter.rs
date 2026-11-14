@@ -766,6 +766,12 @@ impl LiveStates {
         self.sessions.get(id).copied().unwrap_or(LiveStateKey::None)
     }
 
+    /// Every session with live state, with its state: the sessions a
+    /// mux's mark can count.
+    pub fn sessions(&self) -> impl Iterator<Item = (&NodeId, LiveStateKey)> + '_ {
+        self.sessions.iter().map(|(id, key)| (id, *key))
+    }
+
     /// The states of the agents `mux`'s mark counts, as
     /// [`GraphSnapshot::live_counts_of_mux`] counts them: empty when none
     /// has live state.

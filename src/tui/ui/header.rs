@@ -200,7 +200,10 @@ pub(super) fn format_count_with_filtered(visible: usize, total: usize) -> String
 ///   them (a single agent sits inline in its mux row; a PR lists only
 ///   the sessions on its branch), so counting rows there would read
 ///   `0/M` or `4/M` unfiltered. They report the plain total until a
-///   filter narrows them, then the sessions their visible rows hold.
+///   filter narrows them, then the sessions their visible rows hold: in
+///   the Mux view each mux's listed agents and, when it is listed for
+///   what its mark counts, the counted sessions no link attaches
+///   ([`MuxSessionRow::held_sessions`](crate::tui::rows::MuxSessionRow::held_sessions)).
 /// - Pinned and History list entities of every kind and ignore the
 ///   filter: the plain total.
 pub(super) fn visible_agent_session_count(app: &App, total: usize) -> usize {
@@ -228,7 +231,7 @@ pub(super) fn visible_agent_session_count(app: &App, total: usize) -> usize {
         View::Mux => rows
             .iter()
             .filter_map(|row| match &row.kind {
-                RowKind::MuxSession(mux) => Some(mux.attached_count),
+                RowKind::MuxSession(mux) => Some(mux.held_sessions),
                 _ => None,
             })
             .sum(),

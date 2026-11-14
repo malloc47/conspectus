@@ -18,7 +18,9 @@ refills the cells in place") this record keeps for every refill and
 qualifies for a build. Relies on
 [ADR 0182](0182-tui-the-tree-keeps-its-state-by-identity-and-draws-lines-its-host-lays-out.md)
 for the cursor across a rebuild. Adds no theme role (ADR 0153), no glyph
-(ADR 0154), no key, no effect, and no write path (ADR 0143).
+(ADR 0154), no key, no effect, and no write path (ADR 0143). Amended (see
+the amendment below): the Mux view's `N/M sessions` counts the sessions
+a listed mux's mark counts.
 
 ## Context
 
@@ -165,3 +167,33 @@ combines with the controls it sits beside.
   session reads `!`, and the float reads the root's mark.
 - *Does a mux with one waiting agent among several float?* Yes: its
   mark is `!` by the rollup's precedence.
+
+## Amendment: the Mux view counts the sessions a mux's mark counts (2026-11-13)
+
+Consequence 2 left `N/M sessions` in the Mux view counting only the
+sessions attached to the listed muxes, so a mux listed for the agents
+its mark counts added none: under `agent:waiting` the showcase's
+`ambiguous` mux, whose mark says two agents wait, sat beside `0/11
+sessions`. The header and the mark now agree on what the mux holds.
+Everything above stands except as follows.
+
+1. **N counts the sessions the listed muxes hold, each once.** Under a
+   narrowing filter, each listed mux holds the agents it lists (its one
+   agent inline, or those nested under it), and, while the agent state
+   is the only session predicate (when decision 2 lists a mux for what
+   its mark counts), the sessions its mark counts in a state the filter
+   keeps that no link attaches to any mux: a session the resolver can't
+   tie to one mux counts on its preferred one. A session attached to a
+   mux is held there, so none counts twice. N is read when the tree is
+   built, with the order and the rows (decision 6).
+2. **Pane agents add nothing.** An agent in a pane no session matches
+   keeps its mux listed and counts in the mark and the header's `! N`,
+   but it is not one of the M sessions, so it is not in N either.
+3. **Other filters are unchanged.** A session predicate other than the
+   agent state lists a mux only by its attached agents, so N counts
+   those, as before; so does a filter with no live state.
+
+In the showcase, `agent:waiting` lists the `ambiguous` mux and reads
+`2/11 sessions`, and `agent:working`, which lists it and `project`
+(whose working agent runs in a pane no session matches), reads `2/11`
+for the two working sessions `ambiguous` counts.

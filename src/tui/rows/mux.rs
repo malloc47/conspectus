@@ -122,6 +122,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             }
         }
     }
+    let counted_unattached = counted_unattached_sessions(snapshot, &attachments, &inputs.filter);
     for mux in &muxes {
         let attached = attachments.get(&mux.node_id).cloned().unwrap_or_default();
         let visible_attached: Vec<AttachedAgent> = attached
@@ -156,6 +157,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             client_attached: mux.node.client_attached,
             cwd_display: cwd.as_deref().map(|cwd| shorten_home(cwd, inputs.home)),
             attached_count,
+            held_sessions: attached_count + counted_unattached.get(&mux.id).copied().unwrap_or(0),
             recency: Age::of(activity_epoch, now).map(Age::label),
             activity_epoch,
             created_epoch: mux.node.created_epoch,
@@ -674,6 +676,44 @@ fn mux_matches_filter(
         && all_attached.is_empty()
 }
 
+/// For each mux, how many sessions its mark counts that the filter keeps
+/// and no link attaches to any mux (a session the resolver can't tie to
+/// one mux still counts on its preferred one), while the agent state is
+/// the only session predicate, when a mux is listed for what its mark
+/// counts. Empty under any other filter, and without one. A session the
+/// Mux view lists under its mux is held there instead, and an agent in a
+/// pane no session matches is no session.
+fn counted_unattached_sessions(
+    snapshot: &GraphSnapshot,
+    attachments: &HashMap<String, Vec<AttachedAgent>>,
+    filter: &RowFilter,
+) -> HashMap<MuxSessionId, usize> {
+    let mut counted = HashMap::new();
+    let Some(wanted) = &filter.live_state else {
+        return counted;
+    };
+    if filter.has_session_only_predicates() {
+        return counted;
+    }
+    let attached: HashSet<&AgentSessionId> = attachments
+        .values()
+        .flatten()
+        .map(|agent| &agent.id)
+        .collect();
+    for (node, state) in filter.live.sessions() {
+        let NodeId::AgentSession(id) = node else {
+            continue;
+        };
+        if !wanted.admits(state) || attached.contains(id) {
+            continue;
+        }
+        if let Some(mux) = snapshot.preferred_mux_for(node) {
+            *counted.entry(mux).or_insert(0) += 1;
+        }
+    }
+    counted
+}
+
 fn agent_matches_filter(agent: &AttachedAgent, now: Option<i64>, filter: &RowFilter) -> bool {
     if !filter.has_narrowing_predicates() {
         return true;
@@ -765,6 +805,7 @@ fn collect_ghosts(
                     client_attached: None,
                     cwd_display: cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
                     attached_count: 0,
+                    held_sessions: 0,
                     recency: None,
                     activity_epoch: None,
                     created_epoch: mux.created_epoch,

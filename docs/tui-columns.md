@@ -647,6 +647,15 @@ By default the view lists running muxes, plus stopped muxes that a pin
 points at. A control shows every stopped mux; any narrowing filter
 hides all stopped ones. The header counts stopped muxes either way.
 
+Under a narrowing filter the header line's `matching/total sessions`
+counts the sessions the listed muxes hold, each once: the agents each
+mux lists (its one agent inline, or those nested under it) and, while
+`agent state` is the only filter on sessions, the sessions its mark
+counts in a state the filter keeps that no link ties to one mux (the
+showcase's `ambiguous` mux holds the two waiting sessions in its
+directory, so `agent:waiting` reads `2/11 sessions`). An agent in a pane
+no session matches is not a session and adds nothing.
+
 Group headers are the same as in Sessions, and carry a count only when
 sessions are listed beneath a mux. Their waiting count counts every agent
 of the muxes beneath them, listed as a row or not, each once through its

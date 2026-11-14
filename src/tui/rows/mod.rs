@@ -664,6 +664,12 @@ pub struct MuxSessionRow {
     pub client_attached: Option<bool>,
     pub cwd_display: Option<String>,
     pub attached_count: usize,
+    /// The sessions the row stands for under the view's filter, which the
+    /// header's `N/M sessions` adds up: the agents it lists
+    /// (`attached_count`) and, while the agent state is the only session
+    /// predicate, the sessions its mark counts in a state the filter keeps
+    /// that no link attaches to any mux. Each session is held by one row.
+    pub held_sessions: usize,
     pub recency: Option<String>,
     pub activity_epoch: Option<i64>,
     /// `session_created` epoch, carried so the mux view can order by
