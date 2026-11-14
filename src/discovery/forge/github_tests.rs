@@ -1099,12 +1099,40 @@ fn prefetch_asks_only_for_missing_or_expired_listings() {
     );
 }
 
-/// A runner that sleeps on each call and records how many calls ran at
-/// once.
-#[derive(Clone, Default)]
+/// A runner whose calls each stay open until `target` of them are in
+/// flight at once (or a generous deadline, shared by every call, passes),
+/// then a moment longer, and that records the most that ever were. Held
+/// open until the limit is reached, the calls show the peak however the
+/// threads are scheduled: a limiter that lets fewer through leaves the
+/// peak short once the deadline passes. The moment after gives calls a
+/// limiter should have held back a chance to raise the peak past
+/// `target`; it cannot raise the peak of a limiter that holds them back.
+#[derive(Clone)]
 struct OverlapGh {
-    running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    peak: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    target: usize,
+    deadline: std::time::Instant,
+    state: std::sync::Arc<(std::sync::Mutex<Overlap>, std::sync::Condvar)>,
+}
+
+/// The calls of an [`OverlapGh`] in flight now, and the most at once.
+#[derive(Default)]
+struct Overlap {
+    running: usize,
+    peak: usize,
+}
+
+impl OverlapGh {
+    fn holding_until(target: usize) -> Self {
+        Self {
+            target,
+            deadline: std::time::Instant::now() + std::time::Duration::from_secs(10),
+            state: std::sync::Arc::default(),
+        }
+    }
+
+    fn peak(&self) -> usize {
+        self.state.0.lock().expect("overlap lock").peak
+    }
 }
 
 impl crate::discovery::forge::GhRunner for OverlapGh {
@@ -1114,11 +1142,23 @@ impl crate::discovery::forge::GhRunner for OverlapGh {
         _filter: &crate::discovery::forge::PrListFilter,
         _fields: &str,
     ) -> anyhow::Result<GhOutcome> {
-        use std::sync::atomic::Ordering::SeqCst;
-        let now = self.running.fetch_add(1, SeqCst) + 1;
-        self.peak.fetch_max(now, SeqCst);
-        std::thread::sleep(std::time::Duration::from_millis(30));
-        self.running.fetch_sub(1, SeqCst);
+        let (lock, changed) = &*self.state;
+        let mut overlap = lock.lock().expect("overlap lock");
+        overlap.running += 1;
+        overlap.peak = overlap.peak.max(overlap.running);
+        changed.notify_all();
+        while overlap.peak < self.target {
+            let left = self
+                .deadline
+                .saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            overlap = changed.wait_timeout(overlap, left).expect("overlap lock").0;
+        }
+        drop(overlap);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        lock.lock().expect("overlap lock").running -= 1;
         Ok(GhOutcome::PullRequests("[]".to_string()))
     }
 
@@ -1134,16 +1174,13 @@ impl crate::discovery::forge::GhRunner for OverlapGh {
 
 #[test]
 fn fetches_run_at_most_the_configured_number_of_gh_calls_at_once() {
+    // Six repos, two listings each: twelve calls.
     let repos: Vec<ForgeRepo> = (0..6).map(|n| octo(&format!("r{n}"))).collect();
     for (limit, expected_peak) in [(1, 1), (3, 3), (64, 12)] {
-        let runner = OverlapGh::default();
+        let runner = OverlapGh::holding_until(expected_peak);
         let context = DiscoveryContext::default().with_forge_concurrency(limit);
         GitHubForgeProvider::with_runner(runner.clone()).prefetch(&repos, &context);
-        assert_eq!(
-            runner.peak.load(std::sync::atomic::Ordering::SeqCst),
-            expected_peak,
-            "limit {limit}"
-        );
+        assert_eq!(runner.peak(), expected_peak, "limit {limit}");
     }
     assert_eq!(
         DiscoveryContext::default().forge_concurrency(),
