@@ -66,12 +66,13 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0138](0138-provider-workspaces-from-observed-cwds.md) | Provider Workspaces From Observed Cwds | Accepted |
 | [0204](0204-the-live-state-store-folds-agent-events-per-session.md) | The Live-State Store Folds Agent Events Per Session | Accepted |
 | [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208, 0227, 0228, 0229) |
-| [0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted (applied by 0217, 0218, 0222) |
-| [0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md) | A Codex Pane's Title Fills In Its Live State Where Hooks Cannot | Accepted (amended by 0221) |
+| [0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted (applied by 0217, 0218, 0222; excepted by 0217, 0232) |
+| [0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md) | A Codex Pane's Title Fills In Its Live State Where Hooks Cannot | Accepted (amended by 0221, 0232) |
 | [0218](0218-claude-codes-agent-list-repairs-a-live-state-its-hooks-left-stuck.md) | Claude Code's Agent List Repairs A Live State Its Hooks Left Stuck | Accepted (amended by 0222) |
 | [0220](0220-a-hook-record-is-judged-by-the-harness-its-own-pane-runs.md) | A Hook Record Is Judged By The Harness Its Own Pane Runs | Accepted |
 | [0221](0221-every-panes-title-is-read-from-the-pane-listing.md) | Every Pane's Title Is Read From The Pane Listing | Accepted |
 | [0222](0222-claude-codes-agent-list-shows-a-known-agent-its-hooks-do-not-report.md) | Claude Code's Agent List Shows A Known Agent Its Hooks Do Not Report | Accepted as an opt-in, off by default (amended) |
+| [0232](0232-a-held-action-required-marker-raises-a-fresh-hook-working-to-waiting.md) | A Held Action Required Marker Raises A Fresh Hook `working` To `waiting` | Accepted |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |

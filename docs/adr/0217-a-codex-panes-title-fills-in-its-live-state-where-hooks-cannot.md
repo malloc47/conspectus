@@ -15,6 +15,10 @@ and a step to the binding of
 [ADR 0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md);
 bumps the snapshot format to 13 (ADR 0083). Adds no program, subcommand,
 socket, signal, or write path (ADR 0117, ADR 0143). Amended by
+[ADR 0232](0232-a-held-action-required-marker-raises-a-fresh-hook-working-to-waiting.md):
+a held `Action Required` marker raises a fresh hook `working` to
+`waiting` (decision 7 gains rule 5, and the third consequence is
+answered). Amended by
 [ADR 0221](0221-every-panes-title-is-read-from-the-pane-listing.md):
 every pane's title is read from the pane listing of ADR 0220, and a
 pane running one of a harness's launchers (`node` for Codex) is read as
@@ -138,7 +142,8 @@ running Codex yet; they come from its source and the research notes.
       if probes stop. It replaces an entry an exited agent left in that
       slot. `neither` binds nothing.
    2. **A fresh hook entry wins** (confidence `fresh`, in any state but
-      `unknown`), apart from rule 4.
+      `unknown`), apart from rule 4 (and rule 5 of
+      [ADR 0232](0232-a-held-action-required-marker-raises-a-fresh-hook-working-to-waiting.md)).
    3. **A quiet, stale, or `unknown` hook entry gives way** to a
       `waiting` or `working` mark in its own slot (session or pane),
       source `pane_title`, observed at the probe. It keeps the hook
@@ -191,8 +196,8 @@ running Codex yet; they come from its source and the research notes.
   elicitation, a sign-in, a question) still reads `working` until the
   hook entry goes quiet after ten minutes, when the title's `waiting`
   takes over. Raising a fresh `working` to `waiting` on the title alone
-  would need a second carve-out to ADR 0207 decision 4; it is left to
-  the operator.
+  needed a second carve-out to ADR 0207 decision 4, which the operator
+  approved: ADR 0232.
 - Only a session's active pane is read: a Codex in another pane of a
   split window, or in a window that is not current, gives this source
   nothing.
