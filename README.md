@@ -724,7 +724,8 @@ every command starts a fresh shell, use it instead of `nix develop`.
 
 To iterate on the TUI, use snapshot mode instead of screenshots. It lives
 behind the developer-only `snapshot` cargo feature, which `just check` and CI
-enable through `--all-features`:
+enable through `--all-features`. It builds in release too (`cargo build
+--release --features snapshot`), for timing a frame with an optimized binary:
 
 ```sh
 cargo run --features snapshot -- tui --snapshot --snapshot-pane left --snapshot-keys 'jj<Enter>'

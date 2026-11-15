@@ -913,6 +913,13 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A release build with the `snapshot` feature compiles.** `cargo build
+  --release --features snapshot` failed because snapshot mode reads the
+  dev scenarios' recorded worlds, which were compiled into debug builds
+  only. They now build whenever the feature is on, so a frame can be
+  rendered and timed with an optimized binary; a release build without
+  the feature still carries neither, and `conspectus dev` stays
+  debug-only. CI checks the release build with and without the feature.
 - **Hook commands outlive an upgrade.** `hook init claude-code|codex`
   wrote the running binary's own path into every entry, so a Nix store
   path (or a cargo build directory) left the hooks failing on every event

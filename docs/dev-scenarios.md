@@ -152,7 +152,10 @@ fixture I/O on the `tui` subcommand (ADRs 0067, 0068, 0069). The flags do
 not appear in builds without `--features snapshot`; `just check` and CI
 build with `--all-features`, so they cover it. For manual use, run
 `cargo run --features snapshot -- tui …` (the examples below abbreviate
-that as `conspectus tui …`).
+that as `conspectus tui …`). The feature builds in release too (`cargo
+build --release --features snapshot`), which timing work needs; there
+`conspectus dev` is still missing, so materialize a scenario world for
+`--snapshot-fixture-root` with a debug build.
 
 ```sh
 # Render one frame to stdout with ANSI styling preserved and exit

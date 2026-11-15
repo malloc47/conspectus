@@ -8,7 +8,9 @@ framework's test kit (`tuikit::testkit`), the writer also encodes the blink,
 hidden, and crossed-out modifiers, and every key an open overlay takes reaches
 the reducer, with the effects that would reach outside the snapshot (a copy, an
 attach, a resume, a launch, a rebuild, a mux command, a store write) skipped
-with a stderr note naming them.
+with a stderr note naming them. Amended 2026-11-14: the feature builds in
+release too, and CI checks the release build with and without it (the
+amendment at the end).
 
 ## Context
 
@@ -173,3 +175,22 @@ the same expressiveness with less typing.
   side-effect-full but could be stubbed in snapshot mode to
   record "would have attached to X" rather than skipping. Defer
   until a real use case asks for it.
+
+## Amendment: the feature builds in release too (2026-11-14)
+
+The `snapshot` feature compiled only in debug builds. Snapshot mode reads
+a materialized scenario world's recorded panes and PR views through
+`dev_scenarios`, which was compiled for tests and debug builds alone, so
+`cargo build --release --features snapshot` failed, and timing work that
+needed an optimized binary had to build one without the feature.
+
+1. **`dev_scenarios` compiles whenever the feature is on**: in tests, in
+   debug builds, and in a release build with `--features snapshot`. A
+   release build without the feature, which is what downstream packagers
+   and end users build, still carries neither the snapshot code nor the
+   scenario builder. The `conspectus dev` commands stay debug-only, so a
+   release build with the feature renders frames (live, or from
+   `--snapshot-fixture`) but builds no scenario world.
+2. **CI checks both release builds.** Every other check runs with
+   `debug_assertions` on, so the Rust job also runs `cargo check
+   --release -p conspectus` with and without `--features snapshot`.

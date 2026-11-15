@@ -305,7 +305,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0226](0226-commands-load-the-dev-shells-environment-from-a-cache.md) | Commands Load The Dev Shell's Environment From A Cache | Accepted |
 | [0235](0235-node-joins-the-dev-shell-and-a-ci-job-tests-and-type-checks-the-harness-plugins.md) | Node Joins The Dev Shell, And A CI Job Tests And Type-Checks The Harness Plugins | Accepted |
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
-| [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164); framework-owned in part |
+| [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164; amended 2026-11-14); framework-owned in part |
 | [0068](0068-snapshot-fixture-mode.md) | Fixture Mode For The Snapshot Tool | Accepted |
 | [0069](0069-interactive-fixture-mode-for-tui.md) | Interactive Fixture Mode For The TUI | Accepted |
 | [0070](0070-showcase-scenario.md) | Showcase Scenario For Comprehensive Functionality Exercise | Accepted |
