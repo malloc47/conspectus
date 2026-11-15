@@ -53,7 +53,39 @@ fn isolated(mut cmd: Command, home: &Path) -> Command {
     cmd.env_remove("CONSPECTUS_PI_STATE");
     cmd.env_remove("PI_CODING_AGENT_DIR");
     cmd.env_remove("PI_CODING_AGENT_SESSION_DIR");
+    cmd.env("PATH", hermetic_path());
     cmd
+}
+
+/// The inherited PATH without any directory that holds a `conspectus`,
+/// behind a directory whose `conspectus` is a stub. `hook init` and `hook
+/// status` look the hooks' program up on PATH and warn when it is
+/// missing, so what they print must not depend on whether the machine
+/// running the tests has `conspectus` installed. A test of a PATH with
+/// none, or with another build, sets PATH itself.
+fn hermetic_path() -> std::ffi::OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let kept = std::env::split_paths(&inherited).filter(|dir| !dir.join("conspectus").exists());
+    std::env::join_paths(std::iter::once(stub_conspectus_dir()).chain(kept)).expect("PATH")
+}
+
+/// A directory under cargo's scratch directory for tests whose only file
+/// is a stub `conspectus` script, written once per process.
+fn stub_conspectus_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("cli-smoke-path");
+        fs::create_dir_all(&dir).expect("stub PATH dir");
+        // Test processes run side by side: each writes its own copy aside
+        // and renames it into place, so none sees a half-written stub.
+        let staged = dir.join(format!(".conspectus.{}", std::process::id()));
+        fs::write(&staged, "#!/bin/sh\nexit 0\n").expect("stub conspectus");
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).expect("chmod");
+        fs::rename(&staged, dir.join("conspectus")).expect("stub in place");
+        dir
+    })
+    .clone()
 }
 
 #[test]
@@ -681,6 +713,19 @@ fn hook_init_status_remove_claude_code_preserves_existing_settings() {
         .stdout(predicate::str::contains("\tSessionStart\n"))
         .stdout(predicate::str::contains("\tSessionEnd\n"))
         .stderr(predicate::str::is_empty());
+    // With no `conspectus` on this shell's PATH, status says so.
+    let empty_path = home.path().join("empty-path");
+    fs::create_dir_all(&empty_path).expect("empty PATH dir");
+    isolated_cmd(home.path())
+        .env("PATH", &empty_path)
+        .args(["hook", "status", "claude-code"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("installed\tclaude-code\t"))
+        .stderr(predicate::str::contains(
+            "the hooks run `conspectus` from the PATH Claude Code starts with, and this \
+             shell's PATH has none",
+        ));
 
     let installed = read_settings(&settings);
     assert_eq!(installed["theme"], "dark");
@@ -1981,6 +2026,19 @@ fn hook_init_status_remove_codex_keeps_an_operators_tables_byte_for_byte() {
         .stdout(predicate::str::contains("installed\tcodex\t").count(CODEX_EVENTS + 1))
         .stdout(predicate::str::contains("\tSessionStart\n"))
         .stderr(predicate::str::is_empty());
+    // With no `conspectus` on this shell's PATH, status says so.
+    let empty_path = home.join("empty-path");
+    fs::create_dir_all(&empty_path).expect("empty PATH dir");
+    isolated_cmd(home)
+        .env("PATH", &empty_path)
+        .args(["hook", "status", "codex"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("installed\tcodex\t"))
+        .stderr(predicate::str::contains(
+            "the hooks run `conspectus` from the PATH Codex starts with, and this shell's \
+             PATH has none",
+        ));
     codex_hook(home, &["init", "codex"])
         .success()
         .stdout(predicate::str::contains("Codex hooks already installed"))
