@@ -359,6 +359,10 @@ conspectus serve                   # keep the graph warm in the background
 | **Find a session by what was said in it** | |
 | ![The Search view: sessions and a tmux pane that mention a word, ranked by the number of matching turns, with the match picked out in the Preview](docs/images/search-view.png) | |
 
+The font these screenshots are rendered with has no branch glyph `⌥`, so the
+PRs view shows an empty box where a terminal draws it (a pull request whose
+branch exists locally).
+
 ### Scriptable CLI
 
 ```sh

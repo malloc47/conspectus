@@ -1,9 +1,11 @@
 ---
 id: CSP-881
 title: README screenshots draw the branch glyph ⌥ as a box
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-11-14 02:48'
+updated_date: '2026-11-15 01:15'
 labels:
   - live-state
   - ls-tui
@@ -24,11 +26,23 @@ Options, for the operator: accept it and say so in the caption under the image t
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 docs/images/prs-view.png draws the branch glyph, or the README says why it shows a box
+- [x] #1 docs/images/prs-view.png draws the branch glyph, or the README says why it shows a box
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Operator, 2026-11-14: note it in the caption (option 1). The PRs screenshot stays as rendered; a line under the README image table says why the branch glyph is a box.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added a line under the README's screenshot table saying that the font the screenshots are rendered with (termshot's bundled font) has no branch glyph `⌥`, so the PRs view shows an empty box where a terminal draws it, as the operator chose on 2026-11-14. No image, tool, or TUI glyph changed. Verified with `git diff --check`; the text names no ADR, backlog ID, or docs path.
+<!-- SECTION:FINAL_SUMMARY:END -->
