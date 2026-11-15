@@ -311,6 +311,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0070](0070-showcase-scenario.md) | Showcase Scenario For Comprehensive Functionality Exercise | Accepted |
 | [0100](0100-comments-carry-rationale-not-backlog-ids.md) | Comments Carry Rationale, Not Backlog IDs | Accepted; framework-owned in part |
 | [0124](0124-sibling-test-files.md) | Large Unit-Test Modules Live In Sibling Files | Accepted; framework-owned in part |
+| [0241](0241-tests-write-the-programs-they-run-from-a-child-process.md) | Tests Write The Programs They Run From A Child Process | Accepted |
 | [0125](0125-opencode-2-reference-findings.md) | OpenCode 2.x Reference Findings | Accepted |
 | [0126](0126-opencode-2-pane-attribution.md) | OpenCode 2.x Session-To-Pane Attribution | Accepted (amended by 0206, 0229) |
 | [0127](0127-launches-keep-the-tui-drawn-behind-a-spinner.md) | Launches Keep The TUI Drawn Behind A Spinner | Accepted (amended by 0133) |
