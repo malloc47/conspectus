@@ -9,6 +9,8 @@
 //! feeds live state; that line comes from [`super::hook_health`]).
 //! `status` also takes opencode, whose plugin is listed by hand: it
 //! reports where opencode's config lists it ([`super::hook_opencode`]).
+//! Which `conspectus` the installed commands run, and whether it still
+//! exists, comes from [`super::hook_program`].
 //!
 //! Both settings files are edited in place: `config.toml` through
 //! `toml_edit`, and `settings.json` by [`super::json_splice`], which
@@ -28,14 +30,16 @@ use clap::{Args, Subcommand, ValueEnum};
 use toml_edit::DocumentMut;
 
 use super::hook_claude::{
-    claude_hook_coverage, coverage_label, ensure_claude_hook, remove_claude_hook,
+    claude_hook_coverage, claude_hook_programs, coverage_label, ensure_claude_hook,
+    remove_claude_hook,
 };
 use super::hook_codex::{
     MOVED_NOTE, NoteFor, REVIEW_HINT, checked_text, codex_coverage_label, codex_hook_coverage,
-    ensure_codex_hook, hooks_json_note, remove_codex_hook,
+    codex_hook_programs, ensure_codex_hook, hooks_json_note, remove_codex_hook,
 };
 use super::hook_health::print_health;
 use super::hook_opencode::{FileStatus, Loads, config_files, file_status, listing_note};
+use super::hook_program::{self, Program, Why};
 use super::hook_write::HookWriteArgs;
 use super::json_splice::splice;
 use crate::discovery::harness::{claude_code, codex};
@@ -151,12 +155,11 @@ impl HookInitArgs {
         let path = claude_settings_path(self.scope)?;
         let settings = read_json_settings(&path)?;
         let mut document = settings.document.clone();
-        let install = ensure_claude_hook(
-            &mut document,
-            self.command.as_deref(),
-            &default_hook_command("claude-code"),
-        )
-        .with_context(|| format!("can't install the Claude Code hooks in {}", path.display()))?;
+        let plan = self.command_plan("claude-code", &claude_hook_programs(&document));
+        let install = ensure_claude_hook(&mut document, plan.command.as_deref(), &plan.default)
+            .with_context(|| {
+                format!("can't install the Claude Code hooks in {}", path.display())
+            })?;
         let counts = format!("{} added, {} updated", install.added, install.updated);
         let text = if install.changed() {
             Some(settings.text_holding(&document).with_context(|| {
@@ -181,18 +184,16 @@ impl HookInitArgs {
             }
             (false, None) => println!("Claude Code hooks already installed in {}", path.display()),
         }
+        plan.report();
         Ok(())
     }
 
     fn run_codex_install(self) -> Result<()> {
         let path = codex_config_path(self.scope)?;
         let mut document = read_toml_document(&path)?;
-        let install = ensure_codex_hook(
-            &mut document,
-            self.command.as_deref(),
-            &default_hook_command("codex"),
-        )
-        .with_context(|| format!("can't install the Codex hooks in {}", path.display()))?;
+        let plan = self.command_plan("codex", &codex_hook_programs(&document));
+        let install = ensure_codex_hook(&mut document, plan.command.as_deref(), &plan.default)
+            .with_context(|| format!("can't install the Codex hooks in {}", path.display()))?;
         let counts = format!("{} added, {} updated", install.added, install.updated);
         let text =
             if install.changed() {
@@ -214,11 +215,83 @@ impl HookInitArgs {
             }
             (false, None) => println!("Codex hooks already installed in {}", path.display()),
         }
+        plan.report();
         println!("{REVIEW_HINT}");
         if let Some(note) = hooks_json_note(&path, NoteFor::Init) {
             eprintln!("{note}");
         }
         Ok(())
+    }
+
+    /// The command `hook init <harness>` installs, given the programs the
+    /// entries already in the file run (ADR 0240). `--command` wins. Else
+    /// a fresh install runs the program [`hook_program::choose`] picks;
+    /// installed entries keep their command unless its program is gone, or
+    /// it is a store or build path and a path that stays now runs this
+    /// build, when they move to that pick as `--command` would move them.
+    fn command_plan(&self, harness: &str, installed: &[String]) -> CommandPlan {
+        if let Some(given) = &self.command {
+            return CommandPlan {
+                command: Some(given.clone()),
+                default: given.clone(),
+                said: None,
+            };
+        }
+        let env = |key: &str| std::env::var_os(key);
+        let Ok(exe) = std::env::current_exe() else {
+            let default = format!("conspectus hook write {harness}");
+            return CommandPlan {
+                command: None,
+                default,
+                said: None,
+            };
+        };
+        let choice = hook_program::choose(&exe, &env);
+        let default = choice.command(harness);
+        let init_command = format!(
+            "{} hook init {harness}{}",
+            crate::invocation::invoked_name(),
+            scope_flag(self.scope)
+        );
+        let warning = choice.warning(&init_command);
+        if installed.is_empty() {
+            return CommandPlan {
+                command: None,
+                default,
+                said: Some((choice.describe(), warning)),
+            };
+        }
+        let gone = installed
+            .iter()
+            .find(|program| hook_program::standing(program, &env) == Program::Gone);
+        let replaced = if let Some(gone) = gone {
+            Some(format!("{gone}, which no longer exists"))
+        } else if matches!(choice.why, Why::OnPath | Why::Profile) {
+            let first = &installed[0];
+            let all_fragile = installed
+                .iter()
+                .all(|program| hook_program::fragile(Path::new(program), &env).is_some());
+            hook_program::fragile(Path::new(first), &env)
+                .filter(|_| all_fragile && Path::new(first) != choice.program)
+                .map(|fragile| format!("{first}, {}", fragile.place()))
+        } else {
+            None
+        };
+        match replaced {
+            Some(replaced) => CommandPlan {
+                command: Some(default.clone()),
+                default,
+                said: Some((
+                    format!("{}, in place of {replaced}", choice.describe()),
+                    warning,
+                )),
+            },
+            None => CommandPlan {
+                command: None,
+                default,
+                said: None,
+            },
+        }
     }
 
     fn run_pi_install(self) -> Result<()> {
@@ -282,9 +355,57 @@ impl HookStatusArgs {
 
     /// The scope's flag as an install hint spells it.
     fn scope_flag(&self) -> &'static str {
-        match self.scope {
-            HookScopeFlag::User => "",
-            HookScopeFlag::Project => " --scope project",
+        scope_flag(self.scope)
+    }
+
+    /// On stderr, each program an installed hook runs that can't be found,
+    /// with `fix`.
+    fn report_programs(&self, runs: &str, harness: &str, programs: &[String], fix: &str) {
+        let env = |key: &str| std::env::var_os(key);
+        for program in programs {
+            match hook_program::standing(program, &env) {
+                Program::Found => {}
+                Program::Gone => {
+                    eprintln!("{runs} {program}, which no longer exists, so each one fails; {fix}");
+                }
+                Program::NotOnPath => eprintln!(
+                    "{runs} `{program}` from the PATH {harness} starts with, and this shell's \
+                     PATH has none; if {harness}'s has none either, {fix}"
+                ),
+            }
+        }
+    }
+
+    /// The fix for a Claude Code or Codex hook whose program is gone.
+    fn reinstall_fix(&self, harness: &str) -> String {
+        format!(
+            "`{} hook init {harness}{}` installs a command that exists",
+            crate::invocation::invoked_name(),
+            self.scope_flag()
+        )
+    }
+
+    /// On stderr, when the program the Pi extension or opencode plugin
+    /// runs (`$CONSPECTUS_HOOK_BIN`, else `conspectus` from `PATH`)
+    /// can't be found here.
+    fn report_plugin_program(&self, runs: &str, harness: &str) {
+        let bin = std::env::var("CONSPECTUS_HOOK_BIN")
+            .ok()
+            .filter(|bin| !bin.is_empty());
+        let fix = "set CONSPECTUS_HOOK_BIN to a conspectus that exists, or put one on PATH";
+        match bin {
+            Some(bin) if !bin.contains('/') => {
+                self.report_programs(runs, harness, &[bin], fix);
+            }
+            Some(bin) => {
+                if hook_program::standing(&bin, &|key| std::env::var_os(key)) == Program::Gone {
+                    eprintln!(
+                        "{runs} {bin} (CONSPECTUS_HOOK_BIN), which does not exist, so it \
+                         records nothing when {harness} starts with this environment; {fix}"
+                    );
+                }
+            }
+            None => self.report_programs(runs, harness, &["conspectus".to_string()], fix),
         }
     }
 
@@ -311,6 +432,12 @@ impl HookStatusArgs {
                 self.scope_flag()
             );
         }
+        self.report_programs(
+            "the hooks run",
+            "Claude Code",
+            &claude_hook_programs(&document),
+            &self.reinstall_fix("claude-code"),
+        );
         Ok(overall != "not-installed")
     }
 
@@ -336,6 +463,12 @@ impl HookStatusArgs {
         if let Some(note) = hooks_json_note(&path, NoteFor::Status) {
             eprintln!("{note}");
         }
+        self.report_programs(
+            "the hooks run",
+            "Codex",
+            &codex_hook_programs(&document),
+            &self.reinstall_fix("codex"),
+        );
         Ok(overall != "not-installed")
     }
 
@@ -393,6 +526,9 @@ impl HookStatusArgs {
         if let Some(note) = listing_note(&loads) {
             eprintln!("{note}");
         }
+        if installed {
+            self.report_plugin_program("the plugin runs", "opencode");
+        }
         Ok(installed)
     }
 
@@ -437,6 +573,7 @@ impl HookStatusArgs {
             PiExtensionState::Installed | PiExtensionState::Outdated
         ) {
             eprintln!("{PI_VERSION_NOTE}");
+            self.report_plugin_program("the extension runs", "Pi");
         }
         Ok(reports_live_state)
     }
@@ -689,22 +826,35 @@ fn write_pi_extension(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn default_hook_command(harness: &str) -> String {
-    let program = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.into_os_string().into_string().ok())
-        .unwrap_or_else(|| "conspectus".to_string());
-    format!("{} hook write {harness}", shell_quote(&program))
+/// What `hook init` passes its installer, and what it says about it.
+struct CommandPlan {
+    /// The command every Conspectus entry moves to: the operator's
+    /// `--command`, or the chosen one when the installed entries must
+    /// move. `None` keeps the installed entries' own.
+    command: Option<String>,
+    /// The command new entries run when no entry is installed yet.
+    default: String,
+    /// When Conspectus chose the command: the line naming it, for
+    /// stdout, and the warning about a fragile fallback, for stderr.
+    said: Option<(String, Option<String>)>,
 }
 
-fn shell_quote(value: &str) -> String {
-    if value
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-'))
-    {
-        value.to_string()
-    } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
+impl CommandPlan {
+    fn report(&self) {
+        if let Some((line, warning)) = &self.said {
+            println!("{line}");
+            if let Some(warning) = warning {
+                eprintln!("{warning}");
+            }
+        }
+    }
+}
+
+/// A scope's flag as a suggested command spells it.
+fn scope_flag(scope: HookScopeFlag) -> &'static str {
+    match scope {
+        HookScopeFlag::User => "",
+        HookScopeFlag::Project => " --scope project",
     }
 }
 

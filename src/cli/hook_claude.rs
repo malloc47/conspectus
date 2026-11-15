@@ -15,8 +15,10 @@
 //!   brings an older group up to date (its matcher, a timeout), so
 //!   re-running it upgrades a session-start-only install and otherwise
 //!   changes nothing. New handlers run the command given with
-//!   `--command`, else the command the existing handlers run, else this
-//!   binary's; `--command` also moves the existing handlers to it.
+//!   `--command`, else the command the existing handlers run, else the
+//!   default `hook init` picks ([`super::hook_program`]); `--command` also
+//!   moves the existing handlers to it, and `hook init` passes its pick
+//!   as one when the installed program is gone.
 //! - Remove takes every Conspectus handler out of every event, then the
 //!   groups and event lists that leaves empty, and nothing else.
 //! - Status reports each subscribed event as installed, outdated, or
@@ -235,6 +237,34 @@ pub(super) fn remove_claude_hook(document: &mut Value) -> bool {
         settings.remove("hooks");
     }
     changed
+}
+
+/// The programs Conspectus's handlers in `document` run, each once, in
+/// the file's order: an exec-form handler's `command`, or a shell-form
+/// one's first word.
+pub(super) fn claude_hook_programs(document: &Value) -> Vec<String> {
+    let mut programs: Vec<String> = Vec::new();
+    let handlers = hooks_of(document)
+        .into_iter()
+        .flat_map(|hooks| hooks.values())
+        .filter_map(Value::as_array)
+        .flatten()
+        .flat_map(handlers_of)
+        .filter(|handler| hook_is_conspectus_command(handler));
+    for handler in handlers {
+        let command = handler.get("command").and_then(Value::as_str);
+        let program = if handler.get("args").is_some_and(Value::is_array) {
+            command.map(str::to_string)
+        } else {
+            command.and_then(super::hook_program::program_of)
+        };
+        if let Some(program) = program
+            && !programs.contains(&program)
+        {
+            programs.push(program);
+        }
+    }
+    programs
 }
 
 /// Whether a handler's command line is Conspectus's Claude Code writer.

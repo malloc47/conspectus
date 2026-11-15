@@ -16,7 +16,14 @@ use std::process::Command as ProcessCommand;
 /// the daemon running. Tests that want harness or tmux discovery override
 /// these env vars explicitly.
 fn isolated_cmd(home: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
+    isolated(
+        Command::cargo_bin("conspectus").expect("conspectus binary exists"),
+        home,
+    )
+}
+
+/// [`isolated_cmd`] for `cmd`, a command of any `conspectus` binary.
+fn isolated(mut cmd: Command, home: &Path) -> Command {
     cmd.env("HOME", home);
     cmd.env("XDG_RUNTIME_DIR", home.join("no-daemon-runtime-dir"));
     // Pin every XDG base directory under the temp home: CI runners set
@@ -36,6 +43,10 @@ fn isolated_cmd(home: &Path) -> Command {
     // Claude Code's settings and sessions follow `CLAUDE_CONFIG_DIR`; one
     // inherited from the host would point at the developer's own.
     cmd.env_remove("CLAUDE_CONFIG_DIR");
+    // Which program `hook init` installs and `hook status` checks
+    // depends on these.
+    cmd.env_remove("NIX_STORE_DIR");
+    cmd.env_remove("CONSPECTUS_HOOK_BIN");
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
     cmd.env_remove("CONSPECTUS_CLAUDE_CODE_STATE");
     cmd.env_remove("CONSPECTUS_OPENCODE_STATE");
@@ -705,18 +716,31 @@ fn hook_init_status_remove_claude_code_preserves_existing_settings() {
         .stdout(predicate::str::contains("Claude Code hooks not installed"));
 }
 
+/// A stand-in for the `conspectus` an older install recorded, under
+/// `home`, as an absolute path that exists.
+fn old_conspectus(home: &Path) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    let program = home.join("old/bin/conspectus");
+    fs::create_dir_all(program.parent().expect("parent")).expect("old bin");
+    fs::write(&program, "#!/bin/sh\nexit 0\n").expect("old program");
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("chmod");
+    program.to_str().expect("utf8").to_string()
+}
+
 #[test]
 fn hook_init_claude_code_upgrades_a_session_start_only_install() {
     let home = tempfile::TempDir::new().expect("home temp");
     let settings = home.path().join(".claude/settings.json");
     fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    let program = old_conspectus(home.path());
+    let command = format!("{program} hook write claude-code");
     // What `hook init claude-code` wrote when it installed one entry.
     let old = serde_json::json!({
         "hooks": {
             "SessionStart": [
                 {
                     "matcher": "resume|startup|clear|compact",
-                    "hooks": [{ "type": "command", "command": "/old/bin/conspectus hook write claude-code" }]
+                    "hooks": [{ "type": "command", "command": command }]
                 }
             ]
         }
@@ -749,15 +773,16 @@ fn hook_init_claude_code_upgrades_a_session_start_only_install() {
             "matcher": "startup|resume|clear|compact|fork",
             "hooks": [{
                 "type": "command",
-                "command": "/old/bin/conspectus hook write claude-code",
+                "command": command,
                 "timeout": 5
             }]
         })
     );
-    // New events run the command the old install ran.
+    // New events run the command the old install ran, whose program
+    // still exists.
     assert_eq!(
         upgraded["hooks"]["Notification"][0]["hooks"][0]["command"],
-        "/old/bin/conspectus hook write claude-code"
+        command.as_str()
     );
     hook(&["status", "claude-code"])
         .stdout(predicate::str::starts_with("installed\tclaude-code\t"))
@@ -1105,7 +1130,7 @@ fn hook_init_claude_code_upgrades_an_old_entry_where_it_stands() {
     fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
     // What an older `hook init claude-code` wrote, as a formatter later
     // left it: four spaces, `hooks` before `matcher`, `command` first.
-    let original = r#"{
+    let template = r#"{
     "model": "opus",
     "hooks": {
         "SessionStart": [
@@ -1122,6 +1147,7 @@ fn hook_init_claude_code_upgrades_an_old_entry_where_it_stands() {
     },
     "theme": "dark"
 }"#;
+    let original = &template.replace("/old/bin/conspectus", &old_conspectus(home.path()));
     fs::write(&settings, original).expect("write settings");
     let hook = |args: &[&str]| hook_in(home.path(), home.path(), args).success();
 
@@ -1604,6 +1630,222 @@ fn hook_status_reports_codex_live_state_health() {
         )),
         "{line}"
     );
+}
+
+/// The built binary in a fake Nix store, hard-linked (the scratch
+/// directory is beside the build, on its filesystem) or else copied, with
+/// the store's root and the binary's path in it.
+fn binary_in_a_store() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let scratch = tempfile::Builder::new()
+        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .expect("scratch beside the build");
+    let store = scratch.path().join("nix/store");
+    let bin = store.join("0abc-conspectus-0.2.0/bin");
+    fs::create_dir_all(&bin).expect("store bin");
+    let program = bin.join("conspectus");
+    let built = assert_cmd::cargo::cargo_bin("conspectus");
+    if fs::hard_link(&built, &program).is_err() {
+        fs::copy(&built, &program).expect("copy the binary");
+    }
+    (scratch, store, program)
+}
+
+/// A `conspectus` from another build: a script under `home`.
+fn another_conspectus(home: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let program = home.join("other/bin/conspectus");
+    fs::create_dir_all(program.parent().expect("parent")).expect("other bin");
+    fs::write(&program, "#!/bin/sh\nexit 0\n").expect("other program");
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("chmod");
+    program
+}
+
+#[test]
+fn hook_init_installs_a_path_that_stays_for_a_binary_in_the_nix_store() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let (_scratch, store, program) = binary_in_a_store();
+    let profile_bin = home.path().join(".nix-profile/bin");
+    fs::create_dir_all(&profile_bin).expect("profile bin");
+    let profile_link = profile_bin.join("conspectus");
+    std::os::unix::fs::symlink(&program, &profile_link).expect("profile link");
+    let other = another_conspectus(home.path());
+    let from_store = |path: &[&Path], args: &[&str]| {
+        isolated(Command::new(&program), home.path())
+            .env("NIX_STORE_DIR", &store)
+            .env("PATH", std::env::join_paths(path).expect("PATH"))
+            .current_dir(home.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
+
+    // The `conspectus` on PATH is another build, so the profile's link,
+    // which is this one, is installed.
+    from_store(&[other.parent().expect("dir")], &["init", "claude-code"])
+        .stdout(predicate::str::contains(format!(
+            "hooks run {} (the conspectus in your Nix profile, which is this build)",
+            profile_link.display()
+        )))
+        .stderr(predicate::str::is_empty());
+    let settings = read_settings(&home.path().join(".claude/settings.json"));
+    let command = format!("{} hook write claude-code", profile_link.display());
+    for (event, groups) in settings["hooks"].as_object().expect("hooks") {
+        assert_eq!(
+            groups[0]["hooks"][0]["command"],
+            command.as_str(),
+            "{event}"
+        );
+    }
+
+    // With the link's directory on PATH, it is the PATH name.
+    from_store(&[&profile_bin], &["init", "codex"]).stdout(predicate::str::contains(format!(
+        "hooks run {} (the conspectus on PATH, which is this build)",
+        profile_link.display()
+    )));
+    let config = fs::read_to_string(home.path().join(".codex/config.toml")).expect("config");
+    assert!(
+        config.contains(&format!("{} hook write codex", profile_link.display())),
+        "{config}"
+    );
+
+    // With neither, the store path is installed, and the warning says why.
+    fs::remove_file(&profile_link).expect("drop the link");
+    let settings = home.path().join(".claude/settings.json");
+    fs::remove_file(&settings).expect("start over");
+    from_store(&[other.parent().expect("dir")], &["init", "claude-code"])
+        .stdout(predicate::str::contains(format!(
+            "hooks run {} (this binary, in the Nix store)",
+            program.display()
+        )))
+        .stderr(predicate::str::contains("Nix store"))
+        .stderr(predicate::str::contains("hook init claude-code"));
+
+    // Once a link runs this build again, re-running the install moves the
+    // entries off the store path.
+    std::os::unix::fs::symlink(&program, &profile_link).expect("profile link again");
+    from_store(&[other.parent().expect("dir")], &["init", "claude-code"])
+        .stdout(predicate::str::contains("(0 added, 14 updated)"))
+        .stdout(predicate::str::contains(format!(
+            "hooks run {} (the conspectus in your Nix profile, which is this build), \
+             in place of {}, in the Nix store",
+            profile_link.display(),
+            program.display()
+        )))
+        .stderr(predicate::str::is_empty());
+    let settings = read_settings(&settings);
+    for (event, groups) in settings["hooks"].as_object().expect("hooks") {
+        assert_eq!(
+            groups[0]["hooks"][0]["command"],
+            command.as_str(),
+            "{event}"
+        );
+    }
+}
+
+#[test]
+fn hook_status_reports_a_hook_whose_program_is_gone_and_init_repairs_it() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let empty_path = home.path().join("empty-path");
+    fs::create_dir_all(&empty_path).expect("empty PATH dir");
+    let gone = home.path().join("nix/store/0old-conspectus/bin/conspectus");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .env("PATH", &empty_path)
+            .current_dir(home.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
+    let built = fs::canonicalize(assert_cmd::cargo::cargo_bin("conspectus")).expect("built");
+
+    for harness in ["claude-code", "codex"] {
+        hook(&[
+            "init",
+            harness,
+            "--command",
+            &format!("{} hook write {harness}", gone.display()),
+        ]);
+        hook(&["status", harness])
+            .stdout(predicate::str::starts_with(format!(
+                "installed\t{harness}\t"
+            )))
+            .stderr(predicate::str::contains(format!(
+                "the hooks run {}, which no longer exists",
+                gone.display()
+            )))
+            .stderr(predicate::str::contains(format!(
+                "`conspectus hook init {harness}` installs a command that exists"
+            )));
+
+        // This build is a cargo build with no PATH name or profile link,
+        // so the entries move to it, with the warning.
+        hook(&["init", harness])
+            .stdout(predicate::str::contains(format!(
+                "hooks run {} (this binary, in a cargo build directory), in place of {}, \
+                 which no longer exists",
+                built.display(),
+                gone.display()
+            )))
+            .stderr(predicate::str::contains("cargo build directory"));
+        hook(&["status", harness]).stderr(predicate::str::contains("no longer exists").not());
+    }
+    let settings = read_settings(&home.path().join(".claude/settings.json"));
+    let command = format!("{} hook write claude-code", built.display());
+    for (event, groups) in settings["hooks"].as_object().expect("hooks") {
+        assert_eq!(
+            groups[0]["hooks"][0]["command"],
+            command.as_str(),
+            "{event}"
+        );
+    }
+    let config = fs::read_to_string(home.path().join(".codex/config.toml")).expect("config");
+    assert!(!config.contains("0old-conspectus"), "{config}");
+    assert_eq!(
+        config
+            .matches(&format!("{} hook write codex", built.display()))
+            .count(),
+        11,
+        "{config}"
+    );
+
+    // An install whose program exists is left alone.
+    hook(&["init", "claude-code"])
+        .stdout(predicate::str::contains("already installed"))
+        .stdout(predicate::str::contains("hooks run").not());
+}
+
+#[test]
+fn hook_status_pi_reports_a_writer_it_cannot_find() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let empty_path = home.path().join("empty-path");
+    fs::create_dir_all(&empty_path).expect("empty PATH dir");
+    let found = another_conspectus(home.path());
+    let status = |path: &Path, bin: Option<&Path>| {
+        let mut cmd = isolated_cmd(home.path());
+        cmd.env("PATH", path).current_dir(home.path());
+        if let Some(bin) = bin {
+            cmd.env("CONSPECTUS_HOOK_BIN", bin);
+        }
+        cmd.args(["hook", "status", "pi"]).assert().success()
+    };
+    isolated_cmd(home.path())
+        .args(["hook", "init", "pi"])
+        .assert()
+        .success();
+
+    status(&empty_path, None).stderr(predicate::str::contains(
+        "the extension runs `conspectus` from the PATH Pi starts with, and this shell's PATH has none",
+    ));
+    status(found.parent().expect("dir"), None)
+        .stderr(predicate::str::contains("the extension runs").not());
+    let gone = home.path().join("gone/conspectus");
+    status(&empty_path, Some(&gone)).stderr(predicate::str::contains(format!(
+        "the extension runs {} (CONSPECTUS_HOOK_BIN), which does not exist",
+        gone.display()
+    )));
+    status(&empty_path, Some(&found)).stderr(predicate::str::contains("the extension runs").not());
 }
 
 #[test]

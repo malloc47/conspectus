@@ -24,8 +24,10 @@
 //!   brings an older group up to date (no matcher, a timeout on every
 //!   handler), so re-running it upgrades an older install and otherwise
 //!   changes nothing. New handlers run the command given with
-//!   `--command`, else the command the existing handlers run, else this
-//!   binary's; `--command` also moves the existing handlers to it.
+//!   `--command`, else the command the existing handlers run, else the
+//!   default `hook init` picks ([`super::hook_program`]); `--command` also
+//!   moves the existing handlers to it, and `hook init` passes its pick
+//!   as one when the installed program is gone.
 //! - Remove takes every Conspectus handler out of every event, then the
 //!   groups and lists that leaves empty, and nothing else.
 //! - Status reports each subscribed event as installed, outdated, or
@@ -443,6 +445,30 @@ fn first_command(document: &DocumentMut) -> Option<String> {
         .flat_map(handlers_of)
         .find(|handler| is_conspectus_handler(*handler))
         .and_then(|handler| handler.get("command")?.as_str().map(str::to_string))
+}
+
+/// The programs Conspectus's handlers in `document` run (each command's
+/// first word), each once, in the file's order.
+pub(super) fn codex_hook_programs(document: &DocumentMut) -> Vec<String> {
+    let mut programs: Vec<String> = Vec::new();
+    let Some(hooks) = hooks_of(document) else {
+        return programs;
+    };
+    let commands = hooks
+        .iter()
+        .map(|(_, list)| list)
+        .flat_map(tables)
+        .flat_map(handlers_of)
+        .filter(|handler| is_conspectus_handler(*handler))
+        .filter_map(|handler| handler.get("command")?.as_str().map(str::to_string));
+    for command in commands {
+        if let Some(program) = super::hook_program::program_of(&command)
+            && !programs.contains(&program)
+        {
+            programs.push(program);
+        }
+    }
+    programs
 }
 
 /// Whether a new event list goes inline into `hooks`: an inline table can
