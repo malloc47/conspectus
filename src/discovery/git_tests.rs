@@ -501,24 +501,25 @@ fn git_discovery_enumerates_sibling_worktrees_end_to_end() {
 }
 
 /// A directory with every permission removed for the life of the
-/// guard. `None` when the process can still enter it (e.g. running as
-/// root), in which case the caller can't exercise the denial.
-struct LockedDir(std::path::PathBuf);
+/// guard, which then gives back the permissions it was created with.
+/// `None` when the process can still enter it (e.g. running as root), in
+/// which case the caller can't exercise the denial.
+struct LockedDir(std::path::PathBuf, std::fs::Permissions);
 
 impl LockedDir {
     fn new(path: std::path::PathBuf) -> Option<Self> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::create_dir(&path).expect("create dir");
+        let created = std::fs::metadata(&path).expect("stat dir").permissions();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("lock dir");
-        let locked = Self(path);
+        let locked = Self(path, created);
         locked.0.join(".").metadata().is_err().then_some(locked)
     }
 }
 
 impl Drop for LockedDir {
     fn drop(&mut self) {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        let _ = std::fs::set_permissions(&self.0, self.1.clone());
     }
 }
 
