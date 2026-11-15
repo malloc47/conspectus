@@ -60,6 +60,11 @@ moves discovery alone: the harness never reads it, so the hooks stay
 where the harness does. Set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` alike in
 the shell that runs `hook init`, the one the harness starts from, and
 the one that starts `conspectus serve`. An empty value counts as unset.
+Tying a running agent to its tmux pane by the transcript it holds open
+follows the same directory: a Claude Code process with a file open under
+`projects/` or `tasks/` of the claude-code root, or a Codex process with
+one under `sessions/` or `tmp/` of the codex root, identifies its session
+as one under `~/.claude` or `~/.codex` does.
 
 When `CONSPECTUS_PI_STATE` is unset, the pi provider follows Pi's own
 settings (ADR 0121): `PI_CODING_AGENT_SESSION_DIR`, then an absolute

@@ -913,6 +913,14 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **An agent in a moved Claude Code or Codex directory is tied to its
+  pane by the transcript it holds open.** Conspectus ties a running
+  agent to its tmux pane partly by the session files the process holds
+  open, but it recognized them only under `~/.claude` and `~/.codex`, so
+  under `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or a `CONSPECTUS_CLAUDE_CODE_STATE`
+  or `CONSPECTUS_CODEX_STATE` override that signal was lost and the
+  binding fell back to the pane's command and working directory. Open
+  files under the directory discovery reads now count the same way.
 - **A release build with the `snapshot` feature compiles.** `cargo build
   --release --features snapshot` failed because snapshot mode reads the
   dev scenarios' recorded worlds, which were compiled into debug builds

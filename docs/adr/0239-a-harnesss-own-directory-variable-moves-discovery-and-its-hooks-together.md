@@ -9,7 +9,9 @@ sibling) to the hook installer's write paths in `docs/capabilities.toml`,
 inside ADR 0143 category 5 (operator-initiated hook installation, from
 [ADR 0028](0028-hook-sidecar-mux-attribution.md)); adds no program,
 socket, signal, or dependency (ADR 0117). Claude Code lands with
-CSP-838, Codex discovery with CSP-844.
+CSP-838, Codex discovery with CSP-844. Amended 2026-11-14: process-tree
+evidence matches open files under the same roots (the amendment at the
+end, CSP-884).
 
 ## Context
 
@@ -84,11 +86,10 @@ Codex installer moved to per-event entries.
 - `tests/capabilities.rs` traces `hook init` and `hook remove
   claude-code` with `CLAUDE_CONFIG_DIR` set and fails on any write under
   `$HOME`.
-- Process-tree evidence still matches open transcripts by the fixed
-  fragments `/.claude/projects/` and `/.codex/sessions/`, so a process
-  holding a transcript in a moved directory gives no fd evidence (backlog
-  CSP-884); hooks, pane commands, and cwd still attribute such a
-  session.
+- Process-tree evidence matched open transcripts by the fixed
+  fragments `/.claude/projects/` and `/.codex/sessions/` alone, so a
+  process holding a transcript in a moved directory gave no fd evidence;
+  the amendment below closes that gap.
 
 ## Alternatives Considered
 
@@ -110,3 +111,26 @@ Codex installer moved to per-event entries.
 - *Does `hook init` follow `CONSPECTUS_CLAUDE_CODE_STATE`?* No:
   decision 3.
 - *Does an empty `CLAUDE_CONFIG_DIR` count?* No: decision 4.
+
+## Amendment: open files under the moved directory are fd evidence (2026-11-14)
+
+Session-to-pane binding reads an agent pane's open files and matches
+them against each adapter's fixed fragments (`/.claude/projects/`,
+`/.claude/tasks/`, `/.codex/sessions/`, `/.codex/tmp/`), which name
+the home defaults only. Under `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or a
+`CONSPECTUS_<HARNESS>_STATE` override, discovery found the session but
+its process gave no fd evidence, so the binding fell back to weaker
+signals.
+
+1. **Each adapter names its directories under the state root.** A
+   `RuntimeSignature::fd_state_dirs` entry is a directory under the
+   harness's root whose open files identify it: Claude Code's
+   `projects` and `tasks`, Codex's `sessions` and `tmp`. opencode, Pi,
+   and aider name none, so their matching is unchanged.
+2. **The match uses discovery's roots.** Cross-link inference takes the
+   `state_root` discovery read for each harness (decision 2), so a file
+   matches when the fixed fragment names it, as before, or when it lies
+   under one of those directories, compared by whole path components
+   (`projects-old/` is not `projects/`). A root reached through a
+   symlink matches by its target too, since `/proc/<pid>/fd` names the
+   resolved file. The first registered adapter to match still wins.
