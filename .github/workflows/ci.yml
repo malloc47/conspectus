@@ -72,6 +72,16 @@ jobs:
           cargo test -p tuikit --no-default-features
           cargo test -p tuikit --no-default-features --features richtext
 
+      # Every step above builds with debug assertions on, so only a
+      # release build compiles out what is gated on them (the dev
+      # scenarios, `conspectus dev`): check one without the snapshot
+      # feature, as packagers build it, and one with it, which snapshot
+      # timing work needs (ADR 0067).
+      - name: Check the release build with and without the snapshot feature
+        run: |
+          cargo check --release -p conspectus
+          cargo check --release -p conspectus --features snapshot
+
       - name: Check docs
         run: cargo doc --workspace --no-deps
         env:

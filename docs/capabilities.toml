@@ -23,7 +23,10 @@
 # - `act`: commands the operator runs to change something (pin, mux,
 #   rename, declared, worktree, launch and attach from the TUI).
 # - `hook`: `conspectus hook init` and `hook remove`.
-# - `dev`: the dev scenario builder, compiled into debug builds only.
+# - `dev`: the dev scenario builder, which only debug builds can run
+#   (`conspectus dev`). A release build with the `snapshot` feature
+#   compiles it for the recorded worlds snapshot mode reads, with no
+#   command that builds one (ADR 0067).
 
 # Programs Conspectus starts. Argument patterns are matched against the
 # arguments after the program name and its leading global options.

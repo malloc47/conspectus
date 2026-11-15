@@ -1,8 +1,10 @@
 //! Debug-only replay scenarios for manual graph/TUI inspection.
 //!
-//! This module is compiled only for tests and debug builds. It deliberately
-//! keeps scenario materialization out of normal production discovery while
-//! giving developers stable names for edge-case worlds.
+//! This module is compiled only for tests, debug builds, and builds with
+//! the `snapshot` feature, whose snapshot mode reads a scenario world's
+//! recorded panes and PR views (ADR 0067). It deliberately keeps scenario
+//! materialization out of normal production discovery while giving
+//! developers stable names for edge-case worlds.
 
 use std::collections::BTreeMap;
 use std::fs;

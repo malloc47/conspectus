@@ -169,9 +169,11 @@ workspace = true
 # TUI frame to stdout with ANSI styling preserved so agents can
 # iterate on renderer changes without a manual screenshot loop.
 # Off by default; `just check` and CI enable it through
-# `--all-features`, while release/downstream builds leave it off. The
-# key-script parser, the one-frame driver, and the ANSI writer it uses
-# are the framework's test kit.
+# `--all-features`, while release/downstream builds leave it off. It
+# builds in release too, for timing work, and brings in the dev
+# scenarios module, whose recorded worlds it reads. The key-script
+# parser, the one-frame driver, and the ANSI writer it uses are the
+# framework's test kit.
 snapshot = ["tuikit/testkit"]
 
 [dependencies]

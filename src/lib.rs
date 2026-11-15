@@ -18,7 +18,9 @@ pub mod content_search;
 #[doc(hidden)]
 pub mod cwd;
 pub mod declared;
-#[cfg(any(test, debug_assertions))]
+// Snapshot mode reads a scenario world's recorded panes and PR views, so
+// the module builds with the `snapshot` feature in a release build too.
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 #[doc(hidden)]
 pub mod dev_scenarios;
 pub mod discovery;
