@@ -197,9 +197,15 @@ impl ScenarioWorld {
     }
 
     pub fn snapshot(&self) -> Result<GraphSnapshot> {
-        let mut snapshot = discover_local_with(self.scan_roots.clone(), self.discovery_config())?;
+        let config = self.discovery_config();
+        let harness_state_roots = config.harness_state_roots.clone();
+        let mut snapshot = discover_local_with(self.scan_roots.clone(), config)?;
         if !self.fd_paths_by_pid.is_empty() {
-            cross_link::infer_with_fd_paths(&mut snapshot, &self.fd_paths_by_pid);
+            cross_link::infer_with_fd_paths(
+                &mut snapshot,
+                &self.fd_paths_by_pid,
+                &harness_state_roots,
+            );
             // `discover_local_with` already ran `cross_link::infer*`, and
             // `infer_with_fd_paths` re-runs the cwd-based pass. The
             // re-emitted links are byte-identical to the first pass; dedupe

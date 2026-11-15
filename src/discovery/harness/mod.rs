@@ -95,6 +95,12 @@ pub struct RuntimeSignature {
     /// `contains(...)` so paths with leading directories
     /// (e.g. `/home/alice/.codex/sessions/…`) still match.
     pub fd_path_patterns: &'static [&'static str],
+    /// Directories under the harness's state root, the one discovery
+    /// reads it from, whose open files identify this harness the way
+    /// `fd_path_patterns` do under the home default (e.g. `"sessions"`
+    /// for codex). They keep the fd evidence when the operator moves the
+    /// harness's directory (ADR 0239). Matched by whole path components.
+    pub fd_state_dirs: &'static [&'static str],
     /// Extract session keys from a text (fd path or command).
     /// Different harnesses use different session-id grammars —
     /// opencode's `ses_<alphanumeric>` vs. codex/claude-code's
@@ -522,6 +528,7 @@ static STUB_RUNTIME_SIGNATURE: RuntimeSignature = RuntimeSignature {
     command_substrings: &[],
     command_token_basenames: &[],
     fd_path_patterns: &[],
+    fd_state_dirs: &[],
     extract_session_keys: generic_uuid_like_session_keys,
     is_background_process: no_match,
     is_subagent_process: no_match,

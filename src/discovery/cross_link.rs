@@ -25,7 +25,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::model::workspace_paths::{WorkspacePaths, normalize_path, path_at_or_under};
 use crate::model::{
@@ -38,17 +38,32 @@ const ADAPTER_NAME: &str = crate::discovery::providers::CROSS_LINK;
 const PROCESS_TREE_MAX_DEPTH: usize = 4;
 const SESSION_FILE_ACTIVITY_WINDOW_SECONDS: i64 = 15 * 60;
 
-pub fn infer(snapshot: &mut GraphSnapshot) {
+/// Infer cross-provider links, reading the process table and each agent
+/// pane's open files. `harness_state_roots` are the roots discovery read
+/// each harness from, keyed by harness: a file open under one of them
+/// identifies the harness's session as one under its home default does.
+pub fn infer(snapshot: &mut GraphSnapshot, harness_state_roots: &BTreeMap<String, PathBuf>) {
     let process_snapshot = LinuxProcSnapshot;
+    let fd_dirs = HarnessFdDirs::new(harness_state_roots);
     infer_with_readers(
         snapshot,
-        active_pane_fd_session_evidence,
+        |pid| active_pane_fd_session_evidence(pid, &fd_dirs),
         Some(&process_snapshot),
     );
 }
 
-pub fn infer_without_process_tree(snapshot: &mut GraphSnapshot) {
-    infer_with_readers(snapshot, active_pane_fd_session_evidence, None);
+/// [`infer`] without the process table: agent panes still give the
+/// evidence of their open files.
+pub fn infer_without_process_tree(
+    snapshot: &mut GraphSnapshot,
+    harness_state_roots: &BTreeMap<String, PathBuf>,
+) {
+    let fd_dirs = HarnessFdDirs::new(harness_state_roots);
+    infer_with_readers(
+        snapshot,
+        |pid| active_pane_fd_session_evidence(pid, &fd_dirs),
+        None,
+    );
 }
 
 /// Infer cross-provider links while injecting active-pane fd targets by pid.
@@ -61,18 +76,22 @@ pub fn infer_without_process_tree(snapshot: &mut GraphSnapshot) {
 pub fn infer_with_fd_paths(
     snapshot: &mut GraphSnapshot,
     fd_paths_by_pid: &BTreeMap<i64, Vec<String>>,
+    harness_state_roots: &BTreeMap<String, PathBuf>,
 ) {
+    let fd_dirs = HarnessFdDirs::new(harness_state_roots);
     infer_with_readers(
         snapshot,
         |pid| {
             fd_paths_by_pid
                 .get(&pid)
-                .map(session_key_evidence_from_fd_paths)
+                .map(|paths| session_key_evidence_from_fd_paths(paths, &fd_dirs))
         },
         None,
     );
 }
 
+/// [`infer`] over `process_snapshot`, a test seam. Open files match by
+/// the harnesses' home defaults alone.
 #[doc(hidden)]
 pub fn infer_with_process_snapshot(
     snapshot: &mut GraphSnapshot,
@@ -80,7 +99,7 @@ pub fn infer_with_process_snapshot(
 ) {
     infer_with_readers(
         snapshot,
-        active_pane_fd_session_evidence,
+        |pid| active_pane_fd_session_evidence(pid, &HarnessFdDirs::default()),
         Some(process_snapshot),
     );
 }
@@ -1490,7 +1509,51 @@ struct SessionKeyEvidence {
     harnesses: BTreeSet<String>,
 }
 
-fn active_pane_fd_session_evidence(pid: i64) -> Option<SessionKeyEvidence> {
+/// The directories under each harness's state root whose open files
+/// identify it (its `fd_state_dirs`), from the roots discovery read, so
+/// a directory the harness's own variable or a Conspectus override moved
+/// gives the evidence the home default's fixed fragments give (ADR 0239).
+#[derive(Default)]
+struct HarnessFdDirs {
+    dirs: Vec<(&'static str, PathBuf)>,
+}
+
+impl HarnessFdDirs {
+    fn new(harness_state_roots: &BTreeMap<String, PathBuf>) -> Self {
+        let mut dirs = Vec::new();
+        for adapter in crate::discovery::harness::registered_adapters() {
+            let key = adapter.harness_key();
+            let Some(root) = harness_state_roots.get(key) else {
+                continue;
+            };
+            for dir in adapter.runtime_signature().fd_state_dirs {
+                let dir = root.join(dir);
+                // `/proc/<pid>/fd` names a file with its symlinks
+                // resolved, so a root reached through one matches by its
+                // target too.
+                if let Ok(resolved) = fs::canonicalize(&dir)
+                    && resolved != dir
+                {
+                    dirs.push((key, resolved));
+                }
+                dirs.push((key, dir));
+            }
+        }
+        Self { dirs }
+    }
+
+    /// Whether `path` lies in one of `harness_key`'s directories.
+    fn holds(&self, harness_key: &str, path: &Path) -> bool {
+        self.dirs
+            .iter()
+            .any(|(key, dir)| *key == harness_key && path.starts_with(dir))
+    }
+}
+
+fn active_pane_fd_session_evidence(
+    pid: i64,
+    fd_dirs: &HarnessFdDirs,
+) -> Option<SessionKeyEvidence> {
     let fd_dir = fs::read_dir(format!("/proc/{pid}/fd")).ok()?;
     let paths = fd_dir
         .filter_map(std::result::Result::ok)
@@ -1499,10 +1562,10 @@ fn active_pane_fd_session_evidence(pid: i64) -> Option<SessionKeyEvidence> {
                 .ok()
                 .and_then(|path| path.into_os_string().into_string().ok())
         });
-    Some(session_key_evidence_from_fd_paths(paths))
+    Some(session_key_evidence_from_fd_paths(paths, fd_dirs))
 }
 
-fn session_key_evidence_from_fd_paths<I, S>(paths: I) -> SessionKeyEvidence
+fn session_key_evidence_from_fd_paths<I, S>(paths: I, fd_dirs: &HarnessFdDirs) -> SessionKeyEvidence
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
@@ -1511,14 +1574,17 @@ where
 
     for path in paths {
         let path = path.as_ref();
-        // Match the path against every registered
-        // adapter's `fd_path_patterns`. First match wins so
-        // paths that contain multiple harness fragments
-        // (rare) resolve to the first-registered adapter.
+        // Match the path against every registered adapter's
+        // `fd_path_patterns` (the home default) and its directories
+        // under the state root discovery read. First match wins so
+        // paths that contain multiple harness fragments (rare)
+        // resolve to the first-registered adapter.
         let mut matched: Option<&'static dyn crate::discovery::harness::HarnessAdapter> = None;
         for adapter in crate::discovery::harness::registered_adapters() {
             let sig = adapter.runtime_signature();
-            if sig.fd_path_patterns.iter().any(|p| path.contains(p)) {
+            if sig.fd_path_patterns.iter().any(|p| path.contains(p))
+                || fd_dirs.holds(adapter.harness_key(), Path::new(path))
+            {
                 matched = Some(adapter);
                 break;
             }

@@ -84,6 +84,7 @@ static CODEX_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignatur
     command_substrings: &["codex"],
     command_token_basenames: &[],
     fd_path_patterns: &["/.codex/sessions/", "/.codex/tmp/"],
+    fd_state_dirs: &["sessions", "tmp"],
     extract_session_keys: super::generic_uuid_like_session_keys,
     is_background_process: super::no_match,
     is_subagent_process: super::no_match,

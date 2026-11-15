@@ -131,9 +131,14 @@ impl ReplayWorld {
             config = config.with_tmux_runner(FakeTmux::with_sessions(self.tmux_stdout()));
         }
 
+        let harness_state_roots = config.harness_state_roots.clone();
         let mut snapshot = discover_local_with(roots, config).expect("replay discovery");
         if !self.fd_paths_by_pid.is_empty() {
-            cross_link::infer_with_fd_paths(&mut snapshot, &self.fd_paths_by_pid);
+            cross_link::infer_with_fd_paths(
+                &mut snapshot,
+                &self.fd_paths_by_pid,
+                &harness_state_roots,
+            );
         }
         let resolved = resolve_snapshot(snapshot.clone());
         let sessions = build_sessions_tree(SessionsBuildInputs {

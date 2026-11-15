@@ -39,6 +39,7 @@ static AIDER_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignatur
     command_substrings: &["aider"],
     command_token_basenames: &[],
     fd_path_patterns: &[],
+    fd_state_dirs: &[],
     extract_session_keys: super::generic_uuid_like_session_keys,
     is_background_process: super::no_match,
     is_subagent_process: super::no_match,

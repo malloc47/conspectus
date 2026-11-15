@@ -80,6 +80,7 @@ static PI_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
     command_substrings: &[],
     command_token_basenames: PI_BASENAMES,
     fd_path_patterns: &[],
+    fd_state_dirs: &[],
     extract_session_keys: super::generic_uuid_like_session_keys,
     is_background_process: pi_is_background_process,
     is_subagent_process: super::no_match,

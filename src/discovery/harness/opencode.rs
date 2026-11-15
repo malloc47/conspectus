@@ -76,6 +76,7 @@ static OPENCODE_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSigna
         "/.config/opencode/",
         "/.opencode/",
     ],
+    fd_state_dirs: &[],
     extract_session_keys: opencode_extract_session_keys,
     is_background_process: opencode_is_background_process,
     is_subagent_process: opencode_is_subagent_process,

@@ -1163,7 +1163,7 @@ fn mux_at(native: &str, cwd: &str) -> GraphNode {
 /// Run the cross-link pass and the resolver, as discovery does, so the
 /// builder sees real `rooted_in` slots.
 fn linked_and_resolved(mut snapshot: GraphSnapshot) -> GraphSnapshot {
-    crate::discovery::cross_link::infer_without_process_tree(&mut snapshot);
+    crate::discovery::cross_link::infer_without_process_tree(&mut snapshot, &Default::default());
     resolve_snapshot(snapshot)
 }
 

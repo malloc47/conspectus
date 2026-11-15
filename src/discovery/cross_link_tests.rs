@@ -281,7 +281,7 @@ fn orphan_sessions_get_no_links() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     assert!(snapshot.candidate_links.is_empty());
 }
@@ -293,7 +293,7 @@ fn mux_only_snapshot_gets_no_links() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     assert!(snapshot.candidate_links.is_empty());
 }
@@ -308,7 +308,7 @@ fn exact_cwd_match_yields_strong_linked_to_mux() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     assert_eq!(snapshot.candidate_links.len(), 1);
     let link = &snapshot.candidate_links[0];
@@ -327,7 +327,7 @@ fn plain_shell_active_pane_suppresses_cwd_only_mux_links() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     assert!(
         snapshot
@@ -362,7 +362,7 @@ fn cwd_match_generated_across_harnesses_when_no_pid_match() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     assert_eq!(
         snapshot
@@ -389,7 +389,7 @@ fn session_matches_multiple_mux_sessions_with_preserved_candidates() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let mux_links: Vec<_> = snapshot
         .candidate_links
@@ -423,7 +423,7 @@ fn active_pane_command_session_match_suppresses_cwd_only_mux_links() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let mux_links: Vec<_> = snapshot
         .candidate_links
@@ -478,7 +478,7 @@ fn opencode_file_activity_supersedes_stale_command_session_id() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let mux_links: Vec<_> = snapshot
         .candidate_links
@@ -962,7 +962,11 @@ fn active_pane_fd_session_suppresses_conflicting_process_resume_key() {
 
     infer_with_readers(
         &mut snapshot,
-        |pid| (pid == 100).then(|| session_key_evidence_from_fd_paths([fd_path.as_str()])),
+        |pid| {
+            (pid == 100).then(|| {
+                session_key_evidence_from_fd_paths([fd_path.as_str()], &HarnessFdDirs::default())
+            })
+        },
         Some(&processes),
     );
 
@@ -998,7 +1002,7 @@ fn active_pane_fd_session_emits_runtime_process_without_process_tree() {
     let fd_path = format!("/home/me/.codex/sessions/rollout-{target}.jsonl");
     let fd_paths = BTreeMap::from([(100, vec![fd_path])]);
 
-    infer_with_fd_paths(&mut snapshot, &fd_paths);
+    infer_with_fd_paths(&mut snapshot, &fd_paths, &BTreeMap::new());
 
     let process_node = snapshot
         .nodes
@@ -1028,6 +1032,167 @@ fn active_pane_fd_session_emits_runtime_process_without_process_tree() {
                 )))
             && link.source_metadata.evidence.as_deref() == Some("active_pane_fd_session_match")
     }));
+}
+
+const SCRATCH_HOME: (&str, &str) = ("HOME", "/scratch/home");
+const FD_SESSION: &str = "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f";
+
+/// Whether an agent pane (pid 100, running `node`, so the pane command
+/// names no harness) holding `fd_path` open identifies `session` by fd
+/// evidence, with discovery's harness state roots resolved from `env`.
+fn fd_identifies(session: GraphNode, fd_path: &str, env: &[(&str, &str)]) -> bool {
+    let roots =
+        crate::discovery::harness_state_roots_in(&crate::discovery::harness::dirs::env_of(env));
+    let GraphNode::AgentSession(agent) = &session else {
+        panic!("an agent session");
+    };
+    let target = NodeId::AgentSession(agent.id.clone());
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            session,
+            mux_with_active_process("editor", Some("/work/repo"), "node", 100),
+        ],
+        ..GraphSnapshot::empty()
+    };
+    let fd_paths = BTreeMap::from([(100, vec![fd_path.to_string()])]);
+
+    infer_with_fd_paths(&mut snapshot, &fd_paths, &roots);
+
+    snapshot.candidate_links.iter().any(|link| {
+        link.relation == RelationKind::ProcessIdentifiesSession
+            && link.target_node_id() == Some(&target)
+            && link.source_metadata.evidence.as_deref() == Some("active_pane_fd_session_match")
+    })
+}
+
+#[test]
+fn a_moved_claude_code_directory_gives_fd_session_evidence() {
+    let claude = || claude_session(FD_SESSION, Some("/work/repo"));
+    let transcript = format!("/scratch/claude-config/projects/-work-repo/{FD_SESSION}.jsonl");
+    let task = format!("/scratch/claude-config/tasks/{FD_SESSION}/1.json");
+    let moved = [
+        SCRATCH_HOME,
+        ("CLAUDE_CONFIG_DIR", "/scratch/claude-config"),
+    ];
+    let overridden = [
+        SCRATCH_HOME,
+        ("CONSPECTUS_CLAUDE_CODE_STATE", "/scratch/claude-config"),
+    ];
+
+    for env in [&moved[..], &overridden[..]] {
+        assert!(fd_identifies(claude(), &transcript, env), "{env:?}");
+        assert!(fd_identifies(claude(), &task, env), "{env:?}");
+    }
+    // Without the variable discovery reads `$HOME/.claude`, and so does
+    // the match.
+    assert!(!fd_identifies(claude(), &transcript, &[SCRATCH_HOME]));
+    // A Codex session with the same key is not the one the file names.
+    assert!(!fd_identifies(
+        session(FD_SESSION, Some("/work/repo")),
+        &transcript,
+        &moved
+    ));
+}
+
+#[test]
+fn a_moved_codex_home_gives_fd_session_evidence() {
+    let codex = || session(FD_SESSION, Some("/work/repo"));
+    let rollout = format!("/scratch/codex-home/sessions/2026/11/14/rollout-{FD_SESSION}.jsonl");
+    let scratch = format!("/scratch/codex-home/tmp/{FD_SESSION}.json");
+    let moved = [SCRATCH_HOME, ("CODEX_HOME", "/scratch/codex-home")];
+    let overridden = [
+        SCRATCH_HOME,
+        ("CONSPECTUS_CODEX_STATE", "/scratch/codex-home"),
+    ];
+
+    for env in [&moved[..], &overridden[..]] {
+        assert!(fd_identifies(codex(), &rollout, env), "{env:?}");
+        assert!(fd_identifies(codex(), &scratch, env), "{env:?}");
+    }
+    assert!(!fd_identifies(codex(), &rollout, &[SCRATCH_HOME]));
+    assert!(!fd_identifies(
+        claude_session(FD_SESSION, Some("/work/repo")),
+        &rollout,
+        &moved
+    ));
+}
+
+#[test]
+fn the_home_default_directories_still_give_fd_session_evidence() {
+    let transcript = format!("/scratch/home/.claude/projects/-work-repo/{FD_SESSION}.jsonl");
+    let rollout = format!("/scratch/home/.codex/sessions/2026/11/14/rollout-{FD_SESSION}.jsonl");
+    let moved = [
+        SCRATCH_HOME,
+        ("CLAUDE_CONFIG_DIR", "/scratch/claude-config"),
+        ("CODEX_HOME", "/scratch/codex-home"),
+    ];
+
+    // The fixed fragments match whatever the roots are, as before, and
+    // with no roots at all.
+    for env in [&[SCRATCH_HOME][..], &moved[..], &[][..]] {
+        assert!(
+            fd_identifies(
+                claude_session(FD_SESSION, Some("/work/repo")),
+                &transcript,
+                env
+            ),
+            "{env:?}"
+        );
+        assert!(
+            fd_identifies(session(FD_SESSION, Some("/work/repo")), &rollout, env),
+            "{env:?}"
+        );
+    }
+}
+
+#[test]
+fn only_the_harness_directories_under_a_moved_root_give_fd_session_evidence() {
+    let moved = [
+        SCRATCH_HOME,
+        ("CLAUDE_CONFIG_DIR", "/scratch/claude-config"),
+    ];
+    for path in [
+        // A sibling that shares the directory's name as a prefix.
+        format!("/scratch/claude-config/projects-old/-work-repo/{FD_SESSION}.jsonl"),
+        format!("/scratch/claude-config-2/projects/-work-repo/{FD_SESSION}.jsonl"),
+        // The root's other files.
+        format!("/scratch/claude-config/file-history/{FD_SESSION}/1.txt"),
+        format!("/scratch/claude-config/{FD_SESSION}.json"),
+    ] {
+        assert!(
+            !fd_identifies(
+                claude_session(FD_SESSION, Some("/work/repo")),
+                &path,
+                &moved
+            ),
+            "{path}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_moved_directory_matches_through_its_target() {
+    let scratch = tempfile::tempdir().expect("scratch dir");
+    let real = scratch.path().join("real-config");
+    fs::create_dir_all(real.join("projects/-work-repo")).expect("projects dir");
+    let link = scratch.path().join("claude-config");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    // `/proc/<pid>/fd` names the open file with its symlinks resolved.
+    let transcript = fs::canonicalize(&real)
+        .expect("canonical target")
+        .join(format!("projects/-work-repo/{FD_SESSION}.jsonl"));
+    let home = scratch.path().join("home");
+    let env = [
+        ("HOME", home.to_str().expect("utf-8 path")),
+        ("CLAUDE_CONFIG_DIR", link.to_str().expect("utf-8 path")),
+    ];
+
+    assert!(fd_identifies(
+        claude_session(FD_SESSION, Some("/work/repo")),
+        transcript.to_str().expect("utf-8 path"),
+        &env
+    ));
 }
 
 #[test]
@@ -1197,7 +1362,7 @@ fn session_file_activity_match_links_recent_same_harness_session() {
         mux.created_epoch = Some(1_700_000_000);
     }
 
-    infer_without_process_tree(&mut snapshot);
+    infer_without_process_tree(&mut snapshot, &BTreeMap::new());
 
     let mux_links: Vec<_> = snapshot
         .candidate_links
@@ -1228,7 +1393,7 @@ fn stale_session_file_activity_does_not_emit_activity_match() {
         mux.created_epoch = Some(1_700_000_000);
     }
 
-    infer_without_process_tree(&mut snapshot);
+    infer_without_process_tree(&mut snapshot, &BTreeMap::new());
 
     assert!(
         snapshot.candidate_links.iter().all(|link| {
@@ -1253,7 +1418,7 @@ fn ambiguous_same_cwd_activity_matches_remain_candidates() {
         mux.created_epoch = Some(1_700_000_000);
     }
 
-    infer_without_process_tree(&mut snapshot);
+    infer_without_process_tree(&mut snapshot, &BTreeMap::new());
 
     assert_eq!(
         snapshot
@@ -1297,7 +1462,7 @@ fn active_pane_resume_target_prefers_lineage_child_when_more_recent() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let mux_links: Vec<_> = snapshot
         .candidate_links
@@ -1339,7 +1504,7 @@ fn active_pane_argv_match_prefers_parent_when_more_recent_than_child() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let mux_links: Vec<_> = snapshot
         .candidate_links
@@ -1378,12 +1543,15 @@ fn command_session_evidence_ignores_ordinary_command_tokens() {
 
 #[test]
 fn fd_paths_extract_codex_and_claude_session_keys() {
-    let evidence = session_key_evidence_from_fd_paths([
-        "/home/me/.codex/sessions/2026/05/19/rollout-2026-05-19T23-00-48-019e4354-26b9-7ad2-9521-4ad921cc312b.jsonl",
-        "/home/me/.claude/tasks/e7a0ba3e-68a9-4ae1-bebc-c174e78de1e6/.lock",
-        "/home/me/.local/share/opencode/session/ses_16d204c1dffeIkBjxxbpD9uujI/state.json",
-        "/home/me/.config/other/11111111-2222-3333-4444-555555555555",
-    ]);
+    let evidence = session_key_evidence_from_fd_paths(
+        [
+            "/home/me/.codex/sessions/2026/05/19/rollout-2026-05-19T23-00-48-019e4354-26b9-7ad2-9521-4ad921cc312b.jsonl",
+            "/home/me/.claude/tasks/e7a0ba3e-68a9-4ae1-bebc-c174e78de1e6/.lock",
+            "/home/me/.local/share/opencode/session/ses_16d204c1dffeIkBjxxbpD9uujI/state.json",
+            "/home/me/.config/other/11111111-2222-3333-4444-555555555555",
+        ],
+        &HarnessFdDirs::default(),
+    );
 
     assert_eq!(
         evidence.session_keys,
@@ -1467,7 +1635,7 @@ fn fork_root_match_emits_associated_with_candidate() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let associated: Vec<_> = snapshot
         .candidate_links
@@ -1503,7 +1671,7 @@ fn session_inside_worktree_emits_checkout_association_candidate() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let associated: Vec<_> = snapshot
         .candidate_links
@@ -1549,7 +1717,7 @@ fn session_inside_workspace_member_emits_workspace_and_checkout_candidates() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let associated: Vec<_> = snapshot
         .candidate_links
@@ -1600,7 +1768,7 @@ fn symlinked_workspace_member_does_not_associate_session_at_canonical_path() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let associated_to_workspace: Vec<_> = snapshot
         .candidate_links
@@ -1650,7 +1818,7 @@ fn session_at_workspace_root_associates_with_workspace() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let associated_to_workspace: Vec<_> = snapshot
         .candidate_links
@@ -1689,7 +1857,7 @@ fn session_in_member_subdir_still_picks_deepest_member_path() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let associated_to_workspace: Vec<_> = snapshot
         .candidate_links
@@ -1721,7 +1889,7 @@ fn nested_worktree_association_chooses_deepest_checkout() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let associated: Vec<_> = snapshot
         .candidate_links
@@ -1746,7 +1914,7 @@ fn session_cwd_outside_fork_root_does_not_associate() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     assert!(
         snapshot
@@ -1789,7 +1957,7 @@ fn unresolved_lineage_links_are_preserved() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     // `infer` now stamps any link missing `source_metadata.freshness_epoch`,
     // so equality on the raw `lineage` fixture is no longer the
@@ -1861,7 +2029,7 @@ fn subagent_mux_link_overridden_when_parent_matches_same_mux() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let child_mux_links: Vec<_> = snapshot
         .candidate_links
@@ -1894,7 +2062,7 @@ fn subagent_mux_link_stays_active_when_parent_does_not_match_mux() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let child_mux_links: Vec<_> = snapshot
         .candidate_links
@@ -1925,7 +2093,7 @@ fn orphan_subagent_mux_link_stays_active() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     let orphan_mux_links: Vec<_> = snapshot
         .candidate_links
@@ -2078,7 +2246,7 @@ fn mux_at_workspace_root_or_member_is_rooted_in_the_workspace() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     assert_eq!(
         rooted_in_targets(&snapshot, "root"),
@@ -2112,7 +2280,7 @@ fn mux_in_nested_workspaces_is_rooted_in_the_innermost() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     assert_eq!(
         rooted_in_targets(&snapshot, "deep"),
@@ -2154,7 +2322,7 @@ fn mux_rooting_ignores_canonical_checkouts_and_the_active_pane_path() {
         ..GraphSnapshot::empty()
     };
 
-    infer(&mut snapshot);
+    infer(&mut snapshot, &BTreeMap::new());
 
     assert!(rooted_in_targets(&snapshot, "canonical").is_empty());
     assert!(rooted_in_targets(&snapshot, "wandering").is_empty());

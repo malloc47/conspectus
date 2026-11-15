@@ -932,10 +932,10 @@ fn apply_mutators(
     // here keeps agent↔pane links visible without a fresh walk.
     if run_process_tree {
         let harness_pids_per_mux = if config.process_tree_enabled {
-            cross_link::infer(snapshot);
+            cross_link::infer(snapshot, &config.harness_state_roots);
             cross_link::active_harness_pids_per_mux(snapshot, &cross_link::LinuxProcSnapshot)
         } else {
-            cross_link::infer_without_process_tree(snapshot);
+            cross_link::infer_without_process_tree(snapshot, &config.harness_state_roots);
             std::collections::BTreeMap::new()
         };
         // Iterate registered adapters and let each one
