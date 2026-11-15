@@ -600,6 +600,52 @@ mod help_text {
         );
     }
 
+    /// Each shown command's long help, by command path, its words
+    /// joined by single spaces so a phrase matches across a wrap.
+    fn long_helps(cmd: &clap::Command, path: &str, pages: &mut Vec<(String, String)>) {
+        if cmd.is_hide_set() {
+            return;
+        }
+        let help = cmd.clone().render_long_help().to_string();
+        pages.push((
+            path.to_string(),
+            help.split_whitespace().collect::<Vec<_>>().join(" "),
+        ));
+        for sub in cmd.get_subcommands() {
+            long_helps(sub, &format!("{path} {}", sub.get_name()), pages);
+        }
+    }
+
+    /// The snapshot flags exist only in a build with the `snapshot`
+    /// feature, so only that build's help may name them. The test steps
+    /// of `just check` and CI build with every feature; CI also runs this
+    /// module without them.
+    #[test]
+    fn only_a_build_with_the_snapshot_feature_names_its_flags() {
+        let mut pages = Vec::new();
+        long_helps(&Cli::command(), "conspectus", &mut pages);
+        let tui = &pages
+            .iter()
+            .find(|(path, _)| path == "conspectus tui")
+            .expect("tui help")
+            .1;
+        if cfg!(feature = "snapshot") {
+            assert!(tui.contains("--snapshot-keys"), "{tui}");
+            assert!(
+                tui.contains("still apply. `--snapshot` implies this automatically"),
+                "{tui}"
+            );
+        } else {
+            let naming: Vec<&str> = pages
+                .iter()
+                .filter(|(_, help)| help.contains("--snapshot"))
+                .map(|(path, _)| path.as_str())
+                .collect();
+            assert!(naming.is_empty(), "help names --snapshot: {naming:?}");
+            assert!(tui.contains("--no-resume-view"), "{tui}");
+        }
+    }
+
     #[test]
     fn backlog_id_detector_matches_real_ids_only() {
         assert_eq!(

@@ -31,8 +31,9 @@ pub(super) struct TuiArgs {
     /// state back: the run leaves it as it found it. The starting view
     /// follows `--view`, then the config default, then `sessions`, and
     /// each view opens on its default folds; the saved sort, filters,
-    /// and groupings still apply. `--snapshot` implies this
-    /// automatically.
+    /// and groupings still apply.
+    // Only a build with the feature has `--snapshot` to mention.
+    #[cfg_attr(feature = "snapshot", doc = "`--snapshot` implies this automatically.")]
     #[arg(long = "no-resume-view")]
     no_resume_view: bool,
     /// Deprecated alias for `--grouping` when `--view sessions` is

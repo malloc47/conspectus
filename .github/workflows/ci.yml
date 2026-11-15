@@ -56,6 +56,14 @@ jobs:
       - name: Run nextest
         run: cargo nextest run --workspace --all-targets --all-features
 
+      # The test steps above turn the snapshot feature on, so only a build
+      # without it shows the help packagers ship, which must name no
+      # snapshot flag (ADR 0067). The framework gets the same features
+      # from the dev-dependency, so this recompiles only the conspectus
+      # crate.
+      - name: Test the CLI help without the snapshot feature
+        run: cargo test -p conspectus --lib cli::tests::help_text
+
       # The workspace steps above turn `richtext` on through the host, so
       # only a build of the framework alone catches code outside
       # `tuikit::richtext` that comes to need it. Same as `just
