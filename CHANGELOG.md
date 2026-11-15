@@ -913,6 +913,20 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **Hook commands outlive an upgrade.** `hook init claude-code|codex`
+  wrote the running binary's own path into every entry, so a Nix store
+  path (or a cargo build directory) left the hooks failing on every event
+  after the next upgrade or garbage collection. When the running binary
+  is in the Nix store or a build directory, `hook init` now installs the
+  `conspectus` on `PATH`, else in a Nix profile, that is the same build,
+  by its link's path, and otherwise warns that the path it installs can
+  go away. It prints which program the hooks run and why. Running it
+  again moves entries whose program is gone, or that run a store or build
+  path once a stable one runs this build; other entries keep their
+  command, and `--command` still sets it outright. `hook status` says on
+  stderr when a program the hooks run no longer exists (or when this
+  shell cannot find the `conspectus` the Pi extension or opencode plugin
+  runs), and how to fix it.
 - **Claude Code's `CLAUDE_CONFIG_DIR` is honored.** Claude Code keeps
   its settings and transcripts there instead of `~/.claude` when it is
   set, but `hook init|status|remove claude-code` edited

@@ -122,7 +122,9 @@ conspectus hook init pi            # <agent-dir>/extensions/conspectus-hook.ts
 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `PI_CODING_AGENT_DIR` move the
 user-scope files, as they move each harness's own directory.
 `--scope project` installs into the current project instead
-(`.claude/`, `.codex/`, `.pi/extensions/`). The commands are idempotent.
+(`.claude/`, `.codex/`, `.pi/extensions/`). The commands are idempotent,
+and print which `conspectus` the entries run when they pick it (see
+[Which program the hooks run](#which-program-the-hooks-run)).
 A settings file that is a symlink, as a dotfile manager leaves it, is
 written through to its target and keeps its mode; a read-only one is
 refused.
@@ -214,6 +216,36 @@ print, JSON, and RPC modes. Besides `installed` and `not-installed`,
 `hook status pi` reports `outdated` (an older copy) and `foreign` (a
 file at that path Conspectus didn't write, which `init` and `remove`
 leave alone). See [`plugins/pi-hook/README.md`](../plugins/pi-hook/README.md).
+
+#### Which program the hooks run
+
+The Claude Code and Codex entries run `conspectus hook write <harness>`
+by an absolute path, since each harness runs them with the `PATH` it
+started with. `hook init` installs the running binary's path, unless that
+path is in the Nix store (`/nix/store`, or `$NIX_STORE_DIR`) or a cargo
+build directory (`target/debug`, `target/release`, or anything under a
+`CACHEDIR.TAG`), which the next upgrade, garbage collection, or `cargo
+clean` can remove. Then it installs the first `conspectus` on `PATH`, else
+in a Nix profile (`~/.nix-profile/bin`,
+`~/.local/state/nix/profiles/profile/bin`,
+`/etc/profiles/per-user/$USER/bin`, `/run/current-system/sw/bin`), that is
+this same build and not itself in one of those places, by the link's own
+path, so the hooks follow the profile through upgrades. With none, it
+installs the running binary's path and warns. It prints its choice:
+
+```text
+installed Claude Code hooks in /home/user/.claude/settings.json (14 added, 0 updated)
+hooks run /home/user/.nix-profile/bin/conspectus (the conspectus in your Nix profile, which is this build)
+```
+
+Running `hook init` again keeps the command the installed entries run,
+unless its program is gone, or it is a store or build path and a path
+that stays now runs this build: then every Conspectus entry moves to the
+new choice, and the line names the program it replaces. `--command` sets
+the command outright, as before; a bare `conspectus` is looked up on the
+harness's own `PATH` and never moved. `hook status <harness>` says on
+stderr when a program the hooks run no longer exists, or when this
+shell's `PATH` lacks a bare one.
 
 ## Live agent state
 
@@ -1031,12 +1063,14 @@ Start from the health label:
     instead, once you turn on `live_poll_without_hooks` (see
     [Claude Code's agent list](#claude-codes-agent-list)); the message
     names the setting while it is off.
-  - Claude Code and Codex: the command the entries run no longer
-    exists, as when the install recorded a path a package upgrade
-    removed. Run `conspectus hook init <harness> --command "conspectus
-    hook write <harness>"` so they run `conspectus` from your `PATH`. The
-    opencode plugin and the Pi extension run `$CONSPECTUS_HOOK_BIN`, else
-    `conspectus` from the `PATH` the harness started with.
+  - The program the hooks run no longer exists, as when an install
+    recorded a path a package upgrade removed: `hook status` says so on
+    stderr. For Claude Code and Codex, run `conspectus hook init
+    <harness>` again, which moves the entries to a `conspectus` that
+    exists (see [which program the hooks run](#which-program-the-hooks-run)).
+    The opencode plugin and the Pi extension run `$CONSPECTUS_HOOK_BIN`,
+    else `conspectus` from the `PATH` the harness started with; `hook
+    status` says when this shell finds neither.
   - To test the writer itself, pipe it a payload with `--state-root`, as
     [Hook sidecar state](#hook-sidecar-state) shows.
 - **`receiving`, but `1 running agent has no live state`**: one agent's
