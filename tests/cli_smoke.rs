@@ -4,6 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
+#[path = "support/program.rs"]
+mod program;
+
 /// Builds a `conspectus` binary command isolated from the host environment:
 /// HOME is pinned to an empty directory (so the harness adapters see no real
 /// `~/.codex` etc.), tmux discovery is disabled, and `XDG_RUNTIME_DIR` is
@@ -74,14 +77,14 @@ fn hermetic_path() -> std::ffi::OsString {
 fn stub_conspectus_dir() -> PathBuf {
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
-        use std::os::unix::fs::PermissionsExt;
         let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("cli-smoke-path");
         fs::create_dir_all(&dir).expect("stub PATH dir");
         // Test processes run side by side: each writes its own copy aside
         // and renames it into place, so none sees a half-written stub.
-        let staged = dir.join(format!(".conspectus.{}", std::process::id()));
-        fs::write(&staged, "#!/bin/sh\nexit 0\n").expect("stub conspectus");
-        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).expect("chmod");
+        let staged = program::write_program(
+            dir.join(format!(".conspectus.{}", std::process::id())),
+            "#!/bin/sh\nexit 0\n",
+        );
         fs::rename(&staged, dir.join("conspectus")).expect("stub in place");
         dir
     })
@@ -764,12 +767,10 @@ fn hook_init_status_remove_claude_code_preserves_existing_settings() {
 /// A stand-in for the `conspectus` an older install recorded, under
 /// `home`, as an absolute path that exists.
 fn old_conspectus(home: &Path) -> String {
-    use std::os::unix::fs::PermissionsExt;
-    let program = home.join("old/bin/conspectus");
-    fs::create_dir_all(program.parent().expect("parent")).expect("old bin");
-    fs::write(&program, "#!/bin/sh\nexit 0\n").expect("old program");
-    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("chmod");
-    program.to_str().expect("utf8").to_string()
+    let path = home.join("old/bin/conspectus");
+    fs::create_dir_all(path.parent().expect("parent")).expect("old bin");
+    program::write_program(&path, "#!/bin/sh\nexit 0\n");
+    path.to_str().expect("utf8").to_string()
 }
 
 #[test]
@@ -1690,19 +1691,16 @@ fn binary_in_a_store() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let program = bin.join("conspectus");
     let built = assert_cmd::cargo::cargo_bin("conspectus");
     if fs::hard_link(&built, &program).is_err() {
-        fs::copy(&built, &program).expect("copy the binary");
+        program::copy_program(&built, &program);
     }
     (scratch, store, program)
 }
 
 /// A `conspectus` from another build: a script under `home`.
 fn another_conspectus(home: &Path) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-    let program = home.join("other/bin/conspectus");
-    fs::create_dir_all(program.parent().expect("parent")).expect("other bin");
-    fs::write(&program, "#!/bin/sh\nexit 0\n").expect("other program");
-    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("chmod");
-    program
+    let path = home.join("other/bin/conspectus");
+    fs::create_dir_all(path.parent().expect("parent")).expect("other bin");
+    program::write_program(path, "#!/bin/sh\nexit 0\n")
 }
 
 #[test]

@@ -19,6 +19,9 @@ use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+#[path = "support/program.rs"]
+mod program;
+
 /// How long a screen may take to converge before the test fails. Generous
 /// because the suite runs many processes at once; a stale screen that
 /// needs a manual refresh never converges, so the bound doesn't hide the
@@ -55,13 +58,16 @@ impl World {
         for dir in [&repo, &inner, &outer, &bin_dir, &run] {
             fs::create_dir_all(dir).expect("mkdir");
         }
-        fs::set_permissions(&run, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        // The runtime directory is the user's alone: keep only the owner's bits.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut private = fs::metadata(&run).unwrap().permissions();
+            private.set_mode(private.mode() & 0o700);
+            fs::set_permissions(&run, private).unwrap();
+        }
         // Stub harnesses: alive in a pane, never real agents.
         for harness in ["aider", "claude", "codex"] {
-            let path = bin_dir.join(harness);
-            fs::write(&path, "#!/bin/sh\nexec sleep 600\n").unwrap();
-            fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-                .unwrap();
+            program::write_program(bin_dir.join(harness), "#!/bin/sh\nexec sleep 600\n");
         }
         for args in [
             &["init", "--quiet", "--initial-branch", "main"][..],

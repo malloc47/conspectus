@@ -7,6 +7,9 @@ use std::process::Command as StdCommand;
 
 use assert_cmd::Command;
 
+#[path = "support/program.rs"]
+mod program;
+
 struct World {
     _temp: tempfile::TempDir,
     home: PathBuf,
@@ -466,7 +469,6 @@ fn renaming_a_live_mux_slot_renames_the_tmux_session_with_it() {
 /// every call's arguments to the returned log, one call per line.
 /// Returns the `PATH` that puts it first, and the log.
 fn fake_tmux(world: &World, name: &str) -> (std::ffi::OsString, PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
     let dir = world.home.join("fake-tmux");
     std::fs::create_dir_all(&dir).unwrap();
     let now = std::time::SystemTime::now()
@@ -482,17 +484,14 @@ fn fake_tmux(world: &World, name: &str) -> (std::ffi::OsString, PathBuf) {
     )
     .unwrap();
     let log = dir.join("calls");
-    let script = dir.join("tmux");
-    std::fs::write(
-        &script,
-        format!(
+    program::write_program(
+        dir.join("tmux"),
+        &format!(
             "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\ncase \"$1\" in\nlist-sessions) cat '{rows}' ;;\nesac\n",
             log = log.display(),
             rows = rows.display(),
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let path = std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
@@ -881,16 +880,10 @@ fn worktree_close_forgets_unpinned_records_and_keeps_pinned_ones() {
     // A stand-in for worktrunk that removes the worktree with git.
     let bin = world.home.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    let stub = bin.join("wt");
-    std::fs::write(
-        &stub,
+    program::write_program(
+        bin.join("wt"),
         "#!/bin/sh\nrepo=$2\nfor a; do branch=$a; done\npath=$(git -C \"$repo\" worktree list --porcelain | awk -v b=\"refs/heads/$branch\" '/^worktree /{p=$2} $0==\"branch \" b {print p}')\nexec git -C \"$repo\" worktree remove --force \"$path\"\n",
-    )
-    .unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    );
     let path = format!(
         "{}:{}",
         bin.display(),
@@ -939,17 +932,13 @@ fn worktree_close_forgets_unpinned_records_and_keeps_pinned_ones() {
 
 /// A stub harness that records the arguments it was started with.
 fn recording_stub(dir: &std::path::Path, name: &str, out: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let path = dir.join(name);
-    std::fs::write(
-        &path,
-        format!(
+    program::write_program(
+        dir.join(name),
+        &format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexec sleep 600\n",
             out.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
 }
 
 #[test]

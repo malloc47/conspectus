@@ -55,3 +55,9 @@ pub(crate) mod tui_state;
 pub(crate) mod viewer;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Writes the stand-in programs unit tests run, shared with the
+/// integration tests; the module says why every such test uses it.
+#[cfg(test)]
+#[path = "../tests/support/program.rs"]
+pub(crate) mod test_program;

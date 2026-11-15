@@ -6,8 +6,10 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::fs;
 use std::path::Path;
+
+#[path = "support/program.rs"]
+mod program;
 
 /// `conspectus <args>` isolated from the host like the other CLI tests,
 /// started from a directory that no longer exists.
@@ -113,8 +115,6 @@ fn slots_stay_visible_from_a_deleted_directory() {
 
 #[test]
 fn rebuild_succeeds_from_a_deleted_directory() {
-    use std::os::unix::fs::PermissionsExt;
-
     let tmux_available = std::process::Command::new("tmux")
         .arg("-V")
         .output()
@@ -125,9 +125,7 @@ fn rebuild_succeeds_from_a_deleted_directory() {
     let home = tempfile::TempDir::new().expect("home");
     let project = tempfile::TempDir::new().expect("project");
     let bin = tempfile::TempDir::new().expect("stub bin");
-    let stub = bin.path().join("codex");
-    fs::write(&stub, "#!/bin/sh\nexec sleep 600\n").expect("write stub codex");
-    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).expect("chmod stub codex");
+    program::write_program(bin.path().join("codex"), "#!/bin/sh\nexec sleep 600\n");
     let path = std::env::join_paths(std::iter::once(bin.path().to_path_buf()).chain(
         std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
     ))

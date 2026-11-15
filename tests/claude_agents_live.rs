@@ -15,6 +15,9 @@ use conspectus::live_store::{LiveContext, LiveEvent, LiveEventKind, LiveStore, W
 use conspectus::model::live::{LiveSource, LiveState};
 use serde_json::{Value, json};
 
+#[path = "support/program.rs"]
+mod program;
+
 /// Planted in every text field of the listing: it must reach no output.
 const SENTINEL: &str = "sentinel-agents-58e0c4";
 
@@ -57,7 +60,6 @@ impl World {
     /// A stand-in `claude` that appends its arguments and whether
     /// nonessential traffic is off to the log, then prints `listing`.
     fn fake_claude(&self, listing: &Value) {
-        use std::os::unix::fs::PermissionsExt;
         let listing_path = self.log.join("listing.json");
         std::fs::write(&listing_path, serde_json::to_vec(listing).unwrap()).unwrap();
         let script = format!(
@@ -70,9 +72,7 @@ impl World {
             env = self.log.join("env").display(),
             listing = listing_path.display(),
         );
-        let path = self.bin.join("claude");
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        program::write_program(self.bin.join("claude"), &script);
     }
 
     /// How the stand-in was run, one line per run.

@@ -7,6 +7,9 @@ use std::path::Path;
 use assert_cmd::Command;
 use predicates::prelude::*;
 
+#[path = "support/program.rs"]
+mod program;
+
 fn write_session(state: &Path, key: &str, text: &str) {
     let dir = state.join("projects").join("-home-user-project");
     fs::create_dir_all(&dir).unwrap();
@@ -204,7 +207,6 @@ fn contains_is_accepted_by_the_other_tables_and_leaves_them_alone() {
 /// `name`, working in the transcripts' project, and prints nothing for
 /// every other call. Returns the `PATH` that puts it first.
 fn fake_tmux(home: &Path, name: &str) -> std::ffi::OsString {
-    use std::os::unix::fs::PermissionsExt;
     let dir = home.join("fake-tmux");
     fs::create_dir_all(&dir).unwrap();
     let now = std::time::SystemTime::now()
@@ -221,16 +223,13 @@ fn fake_tmux(home: &Path, name: &str) -> std::ffi::OsString {
         ),
     )
     .unwrap();
-    let script = dir.join("tmux");
-    fs::write(
-        &script,
-        format!(
+    program::write_program(
+        dir.join("tmux"),
+        &format!(
             "#!/bin/sh\ncase \"$1\" in\nlist-sessions) cat '{rows}' ;;\nesac\n",
             rows = rows.display(),
         ),
-    )
-    .unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     )))

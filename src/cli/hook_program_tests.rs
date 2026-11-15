@@ -31,9 +31,7 @@ impl World {
     fn binary(&self, relative: &str, content: &str) -> PathBuf {
         let path = self.path(relative);
         fs::create_dir_all(path.parent().expect("parent")).expect("dir");
-        fs::write(&path, content).expect("write binary");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
-        path
+        crate::test_program::write_program(path, content)
     }
 
     /// A symlink at `relative` to `target`.

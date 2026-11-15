@@ -392,11 +392,11 @@ struct FakeClaude {
 
 impl FakeClaude {
     fn new(body: &str) -> Self {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("claude");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write the stand-in");
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        crate::test_program::write_program(
+            dir.path().join("claude"),
+            &format!("#!/bin/sh\n{body}\n"),
+        );
         Self { dir }
     }
 
@@ -404,21 +404,12 @@ impl FakeClaude {
         self.dir.path().join("claude")
     }
 
-    /// Run it with `timeout`. A freshly written script can fail to start
-    /// while another test's child still holds it open for writing, so a
-    /// start-up failure is retried when `expected` is something else.
-    fn run(&self, timeout: Duration, expected: fn(&RunOutcome) -> bool) -> (RunOutcome, Duration) {
+    /// Run it with `timeout`, and how long the run took.
+    fn run(&self, timeout: Duration) -> (RunOutcome, Duration) {
         let runner = agents::AgentList::at(self.path()).with_timeout(timeout);
-        let mut tries = 0;
-        loop {
-            let start = Instant::now();
-            let outcome = runner.run();
-            tries += 1;
-            if expected(&outcome) || tries == 5 || outcome != RunOutcome::Failed {
-                return (outcome, start.elapsed());
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        let start = Instant::now();
+        let outcome = runner.run();
+        (outcome, start.elapsed())
     }
 }
 
@@ -429,9 +420,7 @@ fn the_program_s_output_is_read_and_its_arguments_are_agents_json() {
 [ "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" = 1 ] || exit 8
 echo '[{"pid": 4242, "status": "idle"}]'"#,
     );
-    let (outcome, _) = fake.run(Duration::from_secs(10), |outcome| {
-        matches!(outcome, RunOutcome::Output(_))
-    });
+    let (outcome, _) = fake.run(Duration::from_secs(10));
     let RunOutcome::Output(bytes) = outcome else {
         panic!("ran: {outcome:?}");
     };
@@ -445,9 +434,7 @@ echo '[{"pid": 4242, "status": "idle"}]'"#,
 #[test]
 fn a_hung_program_is_killed_at_its_timeout() {
     let fake = FakeClaude::new(r#"echo $$ > "$(dirname "$0")/pid"; exec sleep 30"#);
-    let (outcome, took) = fake.run(Duration::from_millis(300), |outcome| {
-        *outcome == RunOutcome::TimedOut
-    });
+    let (outcome, took) = fake.run(Duration::from_millis(300));
     assert_eq!(outcome, RunOutcome::TimedOut);
     assert!(took < Duration::from_secs(5), "took {took:?}");
     let pid: i64 = std::fs::read_to_string(fake.dir.path().join("pid"))
@@ -465,7 +452,7 @@ fn a_hung_program_is_killed_at_its_timeout() {
 #[test]
 fn a_failing_program_says_nothing_of_what_it_printed() {
     let fake = FakeClaude::new("echo 'sentinel-fail-91b2 on stderr' >&2; echo '[]'; exit 3");
-    let (outcome, _) = fake.run(Duration::from_secs(10), |_| false);
+    let (outcome, _) = fake.run(Duration::from_secs(10));
     assert_eq!(outcome, RunOutcome::Failed);
     assert!(!format!("{outcome:?}").contains("sentinel-fail-91b2"));
 }
@@ -492,9 +479,7 @@ fn a_missing_program_is_unavailable() {
 #[test]
 fn a_program_that_leaves_its_output_open_fails_at_the_timeout() {
     let fake = FakeClaude::new("sleep 2 & echo '[]'");
-    let (outcome, took) = fake.run(Duration::from_millis(300), |outcome| {
-        *outcome == RunOutcome::Failed
-    });
+    let (outcome, took) = fake.run(Duration::from_millis(300));
     assert_eq!(outcome, RunOutcome::Failed);
     assert!(took < Duration::from_secs(5), "took {took:?}");
 }

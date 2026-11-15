@@ -21,10 +21,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
+
+#[path = "support/program.rs"]
+mod program;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_conspectus");
 
@@ -760,9 +762,7 @@ impl World {
         let bin = root.join("bin");
         fs::create_dir_all(&bin).expect("bin dir");
         for (name, body) in SHIMS {
-            let path = bin.join(name);
-            fs::write(&path, format!("#!/bin/sh\n{body}")).expect("write shim");
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod shim");
+            program::write_program(bin.join(name), &format!("#!/bin/sh\n{body}"));
         }
         let git_dir = which("git").parent().expect("git dir").to_path_buf();
         let path = std::env::join_paths([bin, git_dir]).expect("PATH");

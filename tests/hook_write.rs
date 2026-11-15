@@ -10,12 +10,14 @@
 //! synthetic.
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use assert_cmd::Command;
+
+#[path = "support/program.rs"]
+mod program;
 
 const SESSION: &str = "8f3c2a10-5b7e-4c1d-9a2f-0e6d4b8c7a15";
 
@@ -41,16 +43,13 @@ impl World {
         let tmux_log = root.join("tmux.log");
         // Answers like a tmux pane in session `work`, and logs every
         // call so a test can count them. It never reaches a server.
-        let tmux = bin.join("tmux");
-        fs::write(
-            &tmux,
-            format!(
+        program::write_program(
+            bin.join("tmux"),
+            &format!(
                 "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$*\" in\n  *session_name*) echo work ;;\n  *pane_id*) echo %7 ;;\nesac\n",
                 tmux_log.display()
             ),
-        )
-        .expect("tmux stand-in");
-        fs::set_permissions(&tmux, fs::Permissions::from_mode(0o755)).expect("chmod tmux");
+        );
         Self {
             state: root.join("xdg/state"),
             runtime: root.join("xdg/run"),
@@ -418,11 +417,14 @@ fn an_unwritable_state_directory_is_no_error() {
     let world = World::new();
     let dir = world.state.join("conspectus");
     fs::create_dir_all(&dir).expect("state dir");
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).expect("read-only");
+    let writable = fs::metadata(&dir).expect("state dir").permissions();
+    let mut read_only = writable.clone();
+    read_only.set_readonly(true);
+    fs::set_permissions(&dir, read_only).expect("read-only");
 
     run_silently(world.hook("claude-code"), session_start());
     run_silently(world.hook("claude-code"), stop());
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).expect("writable again");
+    fs::set_permissions(&dir, writable).expect("writable again");
 }
 
 #[test]

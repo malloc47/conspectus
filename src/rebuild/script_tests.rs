@@ -365,18 +365,13 @@ fn a_running_repo_is_planned_as_if_it_were_gone() {
 
 /// A `tmux` that records its arguments, one per line, and succeeds.
 fn recording_binary(dir: &Path, log: &Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-    let path = dir.join("tmux");
-    std::fs::write(
-        &path,
-        format!(
+    crate::test_program::write_program(
+        dir.join("tmux"),
+        &format!(
             "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{}'\n",
             log.display()
         ),
     )
-    .unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    path
 }
 
 fn recorded(log: &Path) -> Vec<String> {

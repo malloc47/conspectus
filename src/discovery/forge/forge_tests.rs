@@ -410,12 +410,10 @@ fn signed_in_hosts_are_reused_unless_expired_and_empty_ones_retry_sooner() {
     assert_eq!(listings.fresh_hosts(Duration::ZERO), None);
 }
 
-/// A stand-in `gh` that runs `body` as a shell script.
-fn shim_gh(dir: &Path, body: &str) -> SystemGh {
-    use std::os::unix::fs::PermissionsExt;
-    let path = dir.join("gh");
-    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write shim");
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+/// A stand-in `gh` named `name` in `dir` that runs `body` as a shell
+/// script.
+fn shim_gh(dir: &Path, name: &str, body: &str) -> SystemGh {
+    let path = crate::test_program::write_program(dir.join(name), &format!("#!/bin/sh\n{body}\n"));
     SystemGh::with_binary(path)
 }
 
@@ -423,7 +421,7 @@ fn shim_gh(dir: &Path, body: &str) -> SystemGh {
 fn a_cancelled_gh_call_kills_its_child_promptly() {
     // ADR 0137: a shutdown abandons the call instead of waiting it out.
     let temp = tempfile::tempdir().expect("temp dir");
-    let runner = shim_gh(temp.path(), "sleep 30");
+    let runner = shim_gh(temp.path(), "gh", "sleep 30");
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
     let setter = std::sync::Arc::clone(&cancel);
     std::thread::spawn(move || {
@@ -455,7 +453,7 @@ fn a_cancelled_gh_call_kills_its_child_promptly() {
 #[test]
 fn a_cancellable_gh_call_reads_a_listing_larger_than_a_pipe_buffer() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let runner = shim_gh(temp.path(), "head -c 300000 /dev/zero | tr '\\0' a");
+    let runner = shim_gh(temp.path(), "gh", "head -c 300000 /dev/zero | tr '\\0' a");
     let outcome = runner
         .list_pull_requests_until(
             "github.com/o/r",
@@ -475,6 +473,7 @@ fn a_cancellable_gh_call_classifies_failures_like_a_plain_one() {
     let temp = tempfile::tempdir().expect("temp dir");
     let runner = shim_gh(
         temp.path(),
+        "gh",
         "echo 'error connecting to api.github.com' >&2; exit 1",
     );
     assert_eq!(
@@ -505,7 +504,7 @@ fn a_cancellable_gh_call_classifies_failures_like_a_plain_one() {
 #[test]
 fn a_cancelled_hosts_lookup_returns_promptly_with_no_answer() {
     let temp = tempfile::tempdir().expect("temp dir");
-    let runner = shim_gh(temp.path(), "sleep 30");
+    let runner = shim_gh(temp.path(), "gh", "sleep 30");
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
     let setter = std::sync::Arc::clone(&cancel);
     std::thread::spawn(move || {
@@ -522,6 +521,7 @@ fn a_cancelled_hosts_lookup_returns_promptly_with_no_answer() {
 
     let answering = shim_gh(
         temp.path(),
+        "answering-gh",
         r#"echo '{"hosts":{"git.example.com":[{"state":"success"}]}}'"#,
     );
     assert_eq!(
