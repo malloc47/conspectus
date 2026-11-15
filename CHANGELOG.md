@@ -921,6 +921,11 @@ forms, lists, readers, and keys look and behave alike.
   or `CONSPECTUS_CODEX_STATE` override that signal was lost and the
   binding fell back to the pane's command and working directory. Open
   files under the directory discovery reads now count the same way.
+- **`tui --help` names no snapshot flag in a build without the
+  feature.** The `--no-resume-view` help said "`--snapshot` implies this
+  automatically" in every build, including the ones packagers ship,
+  which have no `--snapshot` flag. Only a build with the `snapshot`
+  feature says it now, and CI tests the help of a build without it.
 - **A release build with the `snapshot` feature compiles.** `cargo build
   --release --features snapshot` failed because snapshot mode reads the
   dev scenarios' recorded worlds, which were compiled into debug builds

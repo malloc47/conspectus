@@ -9,8 +9,9 @@ hidden, and crossed-out modifiers, and every key an open overlay takes reaches
 the reducer, with the effects that would reach outside the snapshot (a copy, an
 attach, a resume, a launch, a rebuild, a mux command, a store write) skipped
 with a stderr note naming them. Amended 2026-11-14: the feature builds in
-release too, and CI checks the release build with and without it (the
-amendment at the end).
+release too, and CI checks the release build with and without it; help
+without the feature names no snapshot flag, and CI tests that build's
+help (the amendments at the end).
 
 ## Context
 
@@ -194,3 +195,25 @@ needed an optimized binary had to build one without the feature.
 2. **CI checks both release builds.** Every other check runs with
    `debug_assertions` on, so the Rust job also runs `cargo check
    --release -p conspectus` with and without `--features snapshot`.
+
+## Amendment: help without the feature names no snapshot flag (2026-11-14)
+
+Every snapshot flag is compiled out without the feature, as decided, but
+the `--no-resume-view` help, which every build shows, ended "`--snapshot`
+implies this automatically", so a packaged binary's `tui --help` named a
+flag it does not have, against the build-time isolation consequence.
+
+1. **Help text that names a snapshot flag is feature-gated too.** That
+   sentence is a `cfg_attr(feature = "snapshot", doc = ...)` line, so
+   clap appends it only in a build with the feature; the help of a build
+   with it reads as before.
+2. **CI tests the help of a build without the feature.** `just check` and
+   CI's test steps build with every feature, so CI also runs the CLI's
+   help tests (`cargo test -p conspectus --lib cli::tests::help_text`)
+   without it; one asserts that no shown help page names `--snapshot`
+   there, and that the feature build still says `--snapshot` implies
+   `--no-resume-view`. The framework gets the same features through its
+   dev-dependency, so the step recompiles only the `conspectus` crate.
+   A local `just check` does not run it, to keep the local gate at one
+   build; `cargo test -p conspectus --lib cli::tests::help_text` runs it
+   by hand.
