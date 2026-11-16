@@ -762,6 +762,68 @@ Other:
    when Codex has several. (Answered for a hook with no terminal: it does
    not; see §4.4.)
 
+#### Answers from the 2026-11-16 recording
+
+One live Codex 0.167.0, in a private tmux server with a scratch
+`CODEX_HOME` (traces in `tests/fixtures/hooks/recorded/codex/`, ADR 0243).
+
+1. **Install and trust.** A startup dialog, `Hooks need review: N hooks
+   are new or changed`, offers `Review hooks`, `Trust all and continue`,
+   and `Continue without trusting (hooks won't run)`. With the last, no
+   hook ran at all. `/hooks` lists, per event, the hooks installed,
+   active, and awaiting review (`t` trusts all). Trust is recorded at
+   `hooks.state."<config path>:<event>:<group>:<hook>"`, keyed to the
+   config file's path and each handler's place in its event's list:
+   removing an earlier group renumbers the rest and asks for the review
+   again, and a copied config needs its keys rewritten. The wording
+   `hook init codex` prints is accurate. Codex also clamps `SessionEnd`
+   and `Interrupt` timeouts to 3 s and warns on every start; the install
+   now writes 3 s for those two.
+2. **`SessionStart` fires with the first prompt, not at launch.** After
+   `/clear` it fires at the command; after a compaction it fires with the
+   next turn.
+3. **Approval.** `PermissionRequest` fires at once and the title reads `[
+   ! ]` and `[ . ] Action Required`, swapping about once a second. Accept:
+   nothing fires until `PostToolUse` when the tool ends, and the title
+   shows the spinner meanwhile. Decline, and Esc mid-turn: `Interrupt` at
+   once. The title returns to the idle form after each.
+4. **Subagents.** `SubagentStart`/`SubagentStop` fire once per child
+   (one at a time was tried). The child's `PostToolUse` and
+   `PermissionRequest` carry its `agent_id`. The tools are named
+   `collaborationspawn_agent` and `collaborationwait_agent` in the
+   payload. `thread_spawn_edges.status` was not read.
+5. **`request_user_input` and plan mode.** A question fires no installed
+   hook while open and `PostToolUse` when answered; the title reads `[ . ]
+   Action Required`. Plan mode (`/plan`) leaves `permission_mode` at
+   `default`; its `Stop` is a finished turn, and the "Implement this
+   plan?" choice shows in no hook and in no title. `PreToolUse` coverage
+   of `request_user_input` was not tried, since it is not installed.
+6. **Quiet hooks as rows in the TUI.** No row for a hook appeared in any
+   screen captured while hooks ran; none was looked for beyond that.
+7. **`tmux display-message` without `-t`.** Not retried (answered in §4.4).
+
+Beyond the list:
+
+- **The hooks run in a shared app server** (`codex app-server --listen
+  unix:// --managed-daemon`) that the terminal UI attaches to, unless
+  `--no-daemon` is given. It starts as a child of the first terminal UI
+  and keeps that UI's environment, so a later session's hook reports the
+  first UI's `TMUX_PANE` and the app server's pid. ADR 0243: the app
+  server counts as a background process, so such a hook records no pane.
+- The app server ends a session whose UI is gone about 60 s later
+  (`SessionEnd`, reason `other`), for a closed pane, a `kill -9`, and an
+  old session after `/clear` alike. With `--no-daemon` the hooks run in
+  the UI, a `kill -9` fires no `SessionEnd`, and the pid is the UI's.
+- **Pane titles** (recorded, project `proj-codex`): idle `proj-codex`,
+  then `<thread name> | proj-codex` once the thread has a name; working
+  `<spinner> proj-codex` or `<spinner> <thread name> | proj-codex` with the
+  ten braille frames of ADR 0217 at about 6 per second; waiting `[ ! ]
+  Action Required | <thread name> | proj-codex` and the `[ . ]` form.
+  `src/discovery/harness/codex_title_tests.rs` holds them. Titles with
+  animations off, and with the microphone dot, were not recorded.
+- A fresh scratch home defaults the service tier to `Fast`, which the
+  operator's gateway rejects; `/fast` toggles it. Nothing to do with hooks.
+
 ## 7. Open questions for the operator
 
 1. **Title signal.** Do you accept reading `#{pane_title}` as an

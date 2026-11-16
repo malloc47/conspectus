@@ -903,3 +903,10 @@ External (fetched 2026-11-11; untrusted, summarized by the fetch tool):
   and `.../groups/question.ts`, `.../groups/event.ts`
 - [S-v1tui] https://raw.githubusercontent.com/anomalyco/opencode/v1.18.32/packages/opencode/src/cli/cmd/tui.ts
 - [S-v1task] https://raw.githubusercontent.com/anomalyco/opencode/v1.18.32/packages/opencode/src/tool/task.ts
+
+## Recording status
+
+Not recorded. The operator left OpenCode out of the 2026-11-16 recording
+(backlog CSP-822), so every **UNVERIFIED** item above, and the manual
+checks of item 5 of the questions, stay open, and the event scripts in
+`tests/fixtures/hooks/opencode-live/` stay synthetic.

@@ -1,4 +1,4 @@
-# Pi live-state event scripts and payloads (synthetic)
+# Pi live-state event scripts and payloads (synthetic, checked against recordings)
 
 Every file here is **synthetic**. None was recorded from a real Pi
 session: each was built by hand from the extension event shapes the
@@ -95,3 +95,33 @@ confirm:
 - Retries fire `agent_end` after the failed attempt and `agent_start`
   again for the next one, inside one run that `agent_settled` ends; a
   threshold compaction runs before the run settles.
+
+## Checked against real sessions (2026-11-16, Pi 1.5.2)
+
+Real traces are in `../recorded/pi/`. Pi loaded the extension and ignored
+its one extra export, and the events it handled had the shapes the scripts
+assume: a turn, a tool run, an abort (`ready/interrupted`), `/new` (a
+`session_shutdown`, then a `session_start:new` with a new id), and
+`/reload` (`session_start:reload`, the same session, no shutdown). The
+attribution payload carries Pi's own pid and start time, and `ctx.isIdle()`
+is true at `session_start`, so a launch reads `ready`. Two things were
+not as written:
+
+- **The session's last report never arrived.** Pi is a Bun executable,
+  which writes a child's piped stdin on its event loop, so a quit or a
+  closed pane (where Pi exits at once) gave the writer an empty stdin
+  (`quit-lost.jsonl`, `closed-pane-lost.jsonl`). The extension now runs
+  the writer to completion for that one report (ADR 0243), and the same
+  two recordings after the fix show `exited/ended`. A `kill -9` sends
+  nothing, as `kill-no-shutdown.jsonl` says.
+- **A failed compaction of a small session reads as an error.** A manual
+  `/compact` of a session too small to compact fires
+  `session_compact_failed` ("Nothing to compact"), and the state stays
+  `error/failed` until the next event. `compaction-failed.jsonl` is
+  right about the mapping and the recording shows the mapping is wider
+  than a real failure.
+
+Not exercised: a permission gate's dialog and the `subagent` tool (no
+extension that gates or spawns was installed), `after_provider_response`
+and a 429, a threshold or overflow compaction, and whether Pi exposes its
+version to an extension (backlog CSP-851).

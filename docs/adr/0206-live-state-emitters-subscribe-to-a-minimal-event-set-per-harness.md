@@ -16,7 +16,11 @@ last sentence). Amended by ADR 0235: the dev shell has Node and CI runs
 the plugin tests and a type check (see the consequence about the
 plugin reducers). Extended by ADR 0242: with `CONSPECTUS_HOOK_TRACE`
 set, the writer also appends a redacted record of each call to a trace
-file; decisions 10 to 12 stay the rule for the store.
+file; decisions 10 to 12 stay the rule for the store. Amended by ADR
+0243: the Codex install gives `SessionEnd` and `Interrupt` a 3 s timeout
+(decision 7), the Pi extension's report that a session ended waits for
+the writer (decision 26's "never awaited"), and a recording confirmed
+decision 19's claims.
 
 ## Context
 
@@ -349,7 +353,10 @@ are in the research notes and become tests.
     the last one while the session is not ready. Both timers are unref'd,
     cleared at shutdown, and never touch a captured context. Each writer
     is spawned detached and unref'd with its payload already written to
-    its stdin, never awaited, and every error is swallowed. Beside
+    its stdin, never awaited, and every error is swallowed, except the
+    one that reports the session ended, which runs to completion because
+    Pi, a Bun executable, would otherwise exit before the write
+    (ADR 0243). Beside
     decision 4's events the extension reads `after_provider_response`,
     for its status alone; a Pi that never fires it loses only the 429
     detail. Nothing is subscribed that streams or that can change what Pi

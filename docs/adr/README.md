@@ -53,7 +53,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0011](0011-forge-discovery-via-gh.md) | Forge Discovery Via The `gh` CLI | Accepted |
 | [0013](0013-opencode-sqlite-session-store.md) | Read opencode Sessions From SQLite | Accepted |
 | [0027](0027-workspace-detection-precedence.md) | Workspace Detection And Provider Precedence | Accepted |
-| [0028](0028-hook-sidecar-mux-attribution.md) | Hook Sidecar Mux Attribution | Accepted (amended twice, and by 0220; refined by 0146; live state added by 0204, 0206; status surface used by 0217; control channel used by 0218) |
+| [0028](0028-hook-sidecar-mux-attribution.md) | Hook Sidecar Mux Attribution | Accepted (amended twice, and by 0220; refined by 0146; live state added by 0204, 0206; status surface used by 0217; control channel used by 0218; amended by 0243) |
 | [0046](0046-process-tree-pane-linker.md) | Process-Tree Pane Linker | Accepted |
 | [0048](0048-codex-state-and-log-readers.md) | Codex State and Log Readers for Mux Attribution | Accepted (amended) |
 | [0049](0049-opencode-hook-plugin-distribution.md) | OpenCode Hook Plugin Distribution | Accepted (amended by 0126, 0206, 0235) |
@@ -65,7 +65,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0111](0111-launch-directory-is-optional.md) | The Launch Directory Is An Optional Input | Accepted |
 | [0138](0138-provider-workspaces-from-observed-cwds.md) | Provider Workspaces From Observed Cwds | Accepted |
 | [0204](0204-the-live-state-store-folds-agent-events-per-session.md) | The Live-State Store Folds Agent Events Per Session | Accepted |
-| [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208, 0227, 0228, 0229, 0235; extended by 0242) |
+| [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208, 0227, 0228, 0229, 0235, 0243; extended by 0242) |
 | [0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted (applied by 0217, 0218, 0222; excepted by 0217, 0232) |
 | [0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md) | A Codex Pane's Title Fills In Its Live State Where Hooks Cannot | Accepted (amended by 0221, 0232) |
 | [0218](0218-claude-codes-agent-list-repairs-a-live-state-its-hooks-left-stuck.md) | Claude Code's Agent List Repairs A Live State Its Hooks Left Stuck | Accepted (amended by 0222) |
@@ -76,6 +76,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0239](0239-a-harnesss-own-directory-variable-moves-discovery-and-its-hooks-together.md) | A Harness's Own Directory Variable Moves Discovery And Its Hooks Together | Accepted (amended 2026-11-14) |
 | [0240](0240-hook-commands-run-a-conspectus-path-that-outlives-an-upgrade.md) | Hook Commands Run A `conspectus` Path That Outlives An Upgrade | Accepted |
 | [0242](0242-a-hook-trace-records-what-hook-write-receives-with-every-free-text-value-redacted.md) | A Hook Trace Records What `hook write` Receives, With Every Free-Text Value Redacted | Accepted |
+| [0243](0243-real-sessions-corrected-three-assumptions-the-hook-writers-made.md) | Real Sessions Corrected Three Assumptions The Hook Writers Made | Accepted |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |

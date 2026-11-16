@@ -924,6 +924,19 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **Real sessions of Claude Code, Codex, and Pi corrected three things
+  the live-state writers assumed.** Recorded on 2026-11-16 (the traces
+  are fixtures now). Codex's terminal UI shares an app server that runs
+  the hooks in the first UI's environment, so a hook named another
+  session's pane and the app server's pid; the app server now counts as a
+  background process and its hooks record no pane. `hook init codex` gave
+  `SessionEnd` and `Interrupt` a 5 s timeout, which Codex clamps to 3 s
+  with a warning at every start; they get 3 s now, so run `conspectus hook
+  init codex` again and review `/hooks` once. The Pi extension's report
+  that a session ended never reached the writer when Pi quit or its pane
+  closed (Pi, built on Bun, wrote the writer's input too late), so such a
+  session read as its last state until its process was found gone; that
+  one report now waits for the writer.
 - **An agent in a moved Claude Code or Codex directory is tied to its
   pane by the transcript it holds open.** Conspectus ties a running
   agent to its tmux pane partly by the session files the process holds

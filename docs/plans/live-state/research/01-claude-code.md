@@ -274,7 +274,7 @@ Certainty legend:
 | process in pane, no hook record | STARTING / unknown | A | Workspace-trust dialog, "Resume this conversation?" dialog, settings-error dialog, and login all precede hooks [H], [SES], [SET]. The operator is actually needed, but hooks can't see it (U) |
 | `SessionStart` `startup`/`resume`/`fork` | READY | C | "First response waits for" SessionStart hooks [H]. A new session with no prompt is READY |
 | `SessionStart` `clear` | READY (new `session_id`, same process) | C | Preceded by `SessionEnd` `clear` for the old id |
-| `SessionStart` `compact` | resume pre-compaction state | L | Order relative to `PostCompact` is **UNVERIFIED** |
+| `SessionStart` `compact` | resume pre-compaction state | L | Recorded order: `PreCompact`, `SessionStart` (`compact`), `PostCompact` |
 | `UserPromptSubmit` (no `agent_id`) | WORKING | C | Also fires for self-started turns (loop, background report-back, peer message) [H]. Any submit means a turn started |
 | `PreToolUse` `AskUserQuestion` | WAITING(question) | C | Removed from subagents [SA], so always main-agent |
 | `PreToolUse` `ExitPlanMode` | WAITING(plan) | C | Plan approval dialog [H] |
@@ -283,7 +283,7 @@ Certainty legend:
 | `Notification` `permission_prompt` | WAITING(permission), away | L | about 6 s gate [H]. Also the only signal for sandbox network prompts |
 | `Elicitation` / `Notification` `elicitation_*dialog` | WAITING(elicitation) | C / L | |
 | approval granted in dialog | WORKING | **U** | No event. The next signal is `PostToolUse` when the tool **finishes**, so WAITING can outlive approval for the tool's duration. OTel `claude_code.tool_decision` (source `user_temporary`/`user_permanent`) is the only push signal [MON]; `claude agents --json` `status` flips too [AV] |
-| permission denied in dialog | WORKING or READY | **A/U** | Whether `PostToolUse`/`PostToolUseFailure` fire on a user rejection is **UNVERIFIED**. "No, and tell Claude..." / Esc interrupts the turn, so no `Stop` (see interrupt) |
+| permission denied in dialog | WORKING or READY | **A/U** | Recorded: neither fires on a user rejection, and no hook does. "No, and tell Claude..." / Esc interrupts the turn, so no `Stop` (see interrupt) |
 | `PostToolUse` / `PostToolUseFailure` | WORKING; clears WAITING for that agent | C | Pair by `tool_use_id` with `PreToolUse`. Pair `PermissionRequest` by (`agent_id`, `tool_name`), since it has no `tool_use_id` |
 | `PermissionDenied` (auto mode) | WORKING | C | |
 | `PreCompact` | COMPACTING | C | `auto` can fire mid-turn or idle ("idle compaction") [H] |
@@ -293,14 +293,14 @@ Certainty legend:
 | `StopFailure` `rate_limit` | RATE_LIMITED | C | A usage-limit wait then ends with `quota_auto_resume_*` |
 | `StopFailure` other | ERROR(error) | C | `authentication_failed` means the operator must act |
 | API retry in progress (529/overloaded, transient) | still WORKING | **U** | No hook. stream-json `system/api_retry` [HL], OTel `claude_code.api_error` with `attempt` [MON] |
-| Esc / Ctrl+C interrupt | READY | **U** | "Does not run if the stoppage occurred due to a user interrupt" [H]. Cancelling a tool fires no `PostToolUseFailure` [H]. The next `UserPromptSubmit` recovers. `idle_prompt` about 60 s later after an interrupt is **UNVERIFIED** |
-| `Notification` `idle_prompt` | READY (confirmed, away) | L | Repairs a WORKING stuck after an interrupt, if it fires then (**UNVERIFIED**) |
+| Esc / Ctrl+C interrupt | READY | **U** | "Does not run if the stoppage occurred due to a user interrupt" [H]. Cancelling a tool fires no `PostToolUseFailure` [H]. The next `UserPromptSubmit` recovers. Recorded: no `idle_prompt` follows an interrupt (77 s watched) |
+| `Notification` `idle_prompt` | READY (confirmed, away) | L | Does not repair a WORKING stuck after an interrupt: none fires then (recorded) |
 | `SubagentStart` | SUBAGENTS +1 (`agent_id`) | C | Also on subagent resume and per in-process teammate message [H], so dedupe by `agent_id` |
 | `SubagentStop` | SUBAGENTS -1 | C on ≥2.1.311; A before (fired ~2x/min) | Ignore unknown `agent_id`s: internal agents fire it with empty/session `agent_type` [H] |
 | `TeammateIdle` | teammate idle | C | Experimental agent teams only [AT] |
 | `SessionEnd` `prompt_input_exit`/`other`/`logout` | ENDED → EXITED when pid dies | C | 1.5 s budget. Fixed in 2.1.300 for exits during background commands [CL 2.1.300] |
 | `SessionEnd` `clear`/`resume` | old session ENDED; process continues | C | A `SessionStart` with a new id follows. `/resume` fix 2.1.79 |
-| SIGKILL, crash, OOM, pane killed | EXITED | **U via hooks** | pid liveness (`CLAUDE_PID` + process start time) is definitive on Linux. SessionEnd on SIGHUP (terminal or pane closed) is **UNVERIFIED**; SIGTERM is documented for `-p` [HL] |
+| SIGKILL, crash, OOM, pane killed | EXITED | **U via hooks** | pid liveness (`CLAUDE_PID` + process start time) is definitive on Linux. SessionEnd on SIGHUP (terminal or pane closed) fires with reason `other` (recorded); SIGTERM is documented for `-p` [HL] |
 
 ### 2.3 Undetectable or ambiguous via hooks
 
@@ -526,7 +526,7 @@ to READY.
 
 | Surface | Finding | Status |
 | :- | :- | :- |
-| `#{pane_title}` | Claude Code sets the terminal title, prefixed with a status glyph in terminals without OSC 7501 support [TC]. Busy-spinner glyphs: fixed-width braille, 2.1.7, updated 2.1.228. In tmux, written only when the text changes (2.1.236) [CL]. tmux takes OSC 0/2 into `pane_title` unless `allow-set-title off` [TMUX]. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` disables it [ENV] | Glyph vocabulary per state **UNVERIFIED**; record it |
+| `#{pane_title}` | Claude Code sets the terminal title, prefixed with a status glyph in terminals without OSC 7501 support [TC]. Busy-spinner glyphs: fixed-width braille, 2.1.7, updated 2.1.228. In tmux, written only when the text changes (2.1.236) [CL]. tmux takes OSC 0/2 into `pane_title` unless `allow-set-title off` [TMUX]. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` disables it [ENV] | Recorded (tmux 3.7c, Claude Code 2.1.322): no state glyph. The title is `✳ Claude Code`, then `✳ <session name>`, unchanged while busy, waiting, or idle. Backlog CSP-869 has its answer |
 | OSC 7501 Program Status Protocol | 2.1.295+: "Inside tmux, Claude Code checks tmux for support instead of your terminal." If supported, the glyph prefix is omitted [TC] | Whether any tmux implements OSC 7501 is **UNVERIFIED**; not in the tmux CHANGES text fetched |
 | `#{pane_pb_state}` / `#{pane_pb_progress}` | tmux 3.7+ stores OSC 9;4 progress as `hidden`/`normal`/`error`/`indeterminate`/`paused` [TMUX]. Claude Code emits OSC 9;4 (setting since 2.0.56; stays on across the full turn since 2.1.128; inside tmux forwarded via passthrough since 2.1.78) [CL] | Whether tmux's own parser sees it, rather than passthrough-wrapped, is **UNVERIFIED**. The local tmux is 3.7c |
 | `#{pane_current_command}` | Already in `TMUX_LIST_FORMAT`. Shows `claude` vs a shell, which means alive or exited, not busy | C for EXITED-to-shell |
@@ -764,26 +764,70 @@ Fallback fixtures:
 
 ## Appendix: UNVERIFIED items
 
+Recorded 2026-11-16 from real sessions of Claude Code 2.1.322 (traces in
+`tests/fixtures/hooks/recorded/claude-code/`, ADR 0243). An item is
+**answered** with what the recording showed, or still **UNVERIFIED** when
+the run did not exercise it.
+
 - Transcript fields `message.stop_reason`, `isSidechain`, `toolUseResult`;
   interrupt-marker wording; `system` subtypes other than
   `compact_boundary`; whether sidechain records still appear in the main
-  JSONL.
-- The pane-title glyph per state; whether tmux implements OSC 7501;
-  whether tmux's `pane_pb_state` sees Claude's OSC 9;4 inside tmux.
+  JSONL. **UNVERIFIED**: no transcript was read.
+- The pane-title glyph per state. **Answered: there is none.** The title
+  reads `✳ Claude Code` in every state, and after the first prompt the
+  session's own name (`✳ <name>`). Whether tmux implements OSC 7501 and
+  whether `pane_pb_state` sees Claude's OSC 9;4 inside tmux are
+  **UNVERIFIED**, and moot while the title carries no state.
 - The `~/.claude/sessions/` file format and whether it carries status.
+  **UNVERIFIED**.
 - Whether `claude agents --json` starts the supervisor; its cost per run.
+  **Answered.** For interactive sessions it started no supervisor (a
+  dispatched background session does, `daemon run`); a run takes 0.2 to
+  0.3 s and about 125 MB; it opened no connection with
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`; and it writes only to an
+  incomplete configuration, which it completes (`.claude.json` and one
+  backup), never on a repeat. Its fields and values are as §5.1 says
+  (`tests/fixtures/claude-agents/README.md`).
 - Whether `PermissionRequest` fires for `AskUserQuestion`/`ExitPlanMode`.
+  **Answered: yes,** each after its own `PreToolUse`, and
+  `PostToolUse` ends the wait.
 - Whether `PostToolUse`/`PostToolUseFailure` fire on a user rejection in
   the dialog; whether `idle_prompt` fires after an Esc interrupt.
+  **Answered: neither.** A denied permission prompt, a rejected plan, and
+  an Esc interrupt fire no hook at all, and no `idle_prompt` came in the
+  77 s after an interrupt. `claude agents --json` lists the session
+  `idle` in all three, which the repair of ADR 0218 reads.
 - `transcript_path` and `session_id` inside subagent tool events (implied
-  to be the parent's).
+  to be the parent's). **Answered:** `session_id` is the parent's; every
+  subagent event also carries `agent_id` and `agent_type`.
 - The order of `PreCompact` → `PostCompact` → `SessionStart(compact)`.
+  **Answered:** `PreCompact`, `SessionStart` (`compact`), `PostCompact`.
 - `SessionEnd` on SIGHUP (closed terminal or killed pane) in interactive
-  mode.
+  mode. **Answered: yes,** reason `other`, within seconds. A `kill -9`
+  fires none.
 - Whether `CLAUDE_CODE_VERSION` exists in the hook environment.
+  **UNVERIFIED**: the trace records which of `TMUX_PANE`, `TMUX`, and
+  `CLAUDE_PID` are set, and all three were.
 - Whether split-pane teammates each have their own `session_id` and fire
-  `SessionStart`.
+  `SessionStart`. **UNVERIFIED.**
 - What an older `claude` (<2.1.139) does with an `args`-bearing (exec
-  form) entry.
-- `UserPromptSubmit` plain stdout becoming context (documented here only
-  for `SessionStart`).
+  form) entry. **UNVERIFIED**: only 2.1.322 was run.
+- `UserPromptSubmit` plain stdout becoming context. **UNVERIFIED.**
+
+What the recording added to the tables above:
+
+- `SessionStart` (`startup`) fires at launch, before the first prompt.
+- `Notification permission_prompt` fires once, 6 s after a wait begins,
+  for a question and a plan as for a prompt; `idle_prompt` 60 s after a
+  `Stop`.
+- The `Agent` tool returns at once (`async_launched`); `Stop` can fire
+  while a subagent still runs, with `background_tasks` naming it; the
+  subagent's report starts a turn of Claude Code's own
+  (`UserPromptSubmit`); a finished background shell wakes its subagent
+  again under the same `agent_id`.
+- `StopFailure` `error`: `authentication_failed` (401), `rate_limit`
+  (429), `server_error` (500 and 529, retries off), `unknown` (400).
+  `overloaded` was not seen.
+- Two background sessions dispatched with `claude --bg`, one asked to run a
+  command that needs permission, listed `working` and then `done`, never
+  `blocked`.

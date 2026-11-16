@@ -561,7 +561,7 @@ Hooks report what the harness tells them, and every harness leaves gaps:
 
 | Gap | Where | What you see | What repairs it |
 | --- | --- | --- | --- |
-| An Esc interrupt fires no stop event | Claude Code | `working`, then quiet after ten minutes | The next turn event: your next prompt, or Claude Code's idle notification; with `conspectus serve` or a TUI running, [Claude Code's agent list](#claude-codes-agent-list) within about a minute |
+| An Esc interrupt fires no stop event | Claude Code | `working`, then quiet after ten minutes | The next turn event, your next prompt (Claude Code sends no idle notification after an interrupt); with `conspectus serve` or a TUI running, [Claude Code's agent list](#claude-codes-agent-list) within about a minute |
 | Approving a prompt fires nothing until the approved tool ends | Claude Code, Codex | `waiting` through the whole of a long approved tool | The next tool event, when that tool ends; for Claude Code, its agent list within about a minute; for Codex, its pane title within two probes |
 | A killed process says nothing | Every harness | The last state, until the next process check | The process check: `exited:killed` at the next discovery (every few seconds with `conspectus serve`) |
 | Hooks do nothing until trusted | Claude Code (the workspace trust dialog; also `disableAllHooks`, `--bare`, managed hooks only), Codex (`/hooks`) | No live state; `hook status` says `silent` while the agent runs (Codex still shows waiting and working from its pane title) | Trust the hooks (or turn them back on), then restart the agent |
@@ -603,7 +603,7 @@ Each event updates the session's entry in the
 [store](#the-live-state-store), and a subagent's events count on its
 parent's session. Beyond the [known gaps](#known-gaps):
 
-- Denying a permission prompt reads `waiting` until the next prompt.
+- Denying a permission prompt, or rejecting a plan, reads `waiting` until the next prompt, as an interrupt does; the agent list reads both as `ready` once the hooks have been quiet for ten seconds.
 - A `Stop` that another hook blocks reads `ready` while the continuation
   that hook forces runs.
 - An interrupted turn and an answered approval, which fire no hook, are
@@ -712,7 +712,8 @@ whether a session is working, waiting for you, or ready:
 `SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `PostToolUse`,
 `Stop`, `Interrupt`, `SessionEnd`, `SubagentStart`, `SubagentStop`,
 `PreCompact`, and `PostCompact`, each its own group with no matcher and a
-5 s timeout:
+5 s timeout, 3 s for `SessionEnd` and `Interrupt`, which is the most Codex
+keeps for them (a longer one is clamped, with a warning at every start):
 
 ```toml
 [[hooks.Stop]]
@@ -748,14 +749,21 @@ Events update the session's entry as for Claude Code, and a subagent's
 events count on its parent's session. Beyond the
 [known gaps](#known-gaps):
 
-- Declining a prompt reads `waiting` until a later tool, the end of the
-  turn, or an interrupt.
-- MCP elicitations and sign-in prompts fire no hook, so a session waiting
-  on one reads `working` until its [pane title](#codexs-pane-title) has
+- Declining a prompt interrupts the turn, so the session reads
+  `ready:interrupted` at once.
+- Codex's terminal UI shares one app server that runs the hooks, in the
+  environment of the first terminal UI. A hook it runs names no pane, so a
+  session is shown on the pane it is found in, not the one a hook names,
+  and a session whose terminal UI is gone (closed, killed) reads as ended
+  about a minute later, when the app server lets go of it. A UI started
+  with `--no-daemon` runs its own hooks, and a kill is noticed by its pid.
+- MCP elicitations, a question the agent asks (`request_user_input`), and
+  sign-in prompts fire no hook, so a session waiting on one reads `working` until its [pane title](#codexs-pane-title) has
   said `waiting` on two probes in a row (about ten seconds with `conspectus
   serve`), when it reads `waiting` too.
 - A turn that ends in plan mode reads `ready`, whether or not it proposed
-  a plan you still have to accept.
+  a plan you still have to accept; Codex tells hooks the mode is `default`
+  there, and its pane title says nothing of the plan prompt either.
 - With hooks turned off or managed hooks only, the hooks report nothing,
   as before you trust them.
 - A wait the hooks reported clears within two of the mux probe's rounds
