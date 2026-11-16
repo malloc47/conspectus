@@ -1,0 +1,13 @@
+[
+  {
+    "pid": 52003,
+    "id": "bg-recorded-3",
+    "cwd": "/home/user/projects/my-project",
+    "kind": "background",
+    "startedAt": 1794546003000,
+    "sessionId": "1f4e7a2b-9c3d-4b6e-8f10-2d5c7e9a0b03",
+    "name": "placeholder background task",
+    "status": "idle",
+    "state": "done"
+  }
+]

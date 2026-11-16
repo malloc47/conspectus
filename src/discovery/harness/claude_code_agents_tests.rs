@@ -430,3 +430,29 @@ fn the_claude_code_adapter_offers_the_poller() {
         .collect();
     assert_eq!(others, [HARNESS_KEY], "no other harness polls");
 }
+
+#[test]
+fn background_listings_recorded_from_claude_code_read_as_the_table_says() {
+    // Recorded with 2.1.322 (`claude --bg`, then `claude agents --json`):
+    // a session just dispatched lists a `state` and no `pid` or `status`;
+    // a running one adds both, and `status` decides when it holds a value
+    // the table knows, so a finished one reads `idle` with no detail
+    // although its `state` says `done`.
+    let session = |n: u32| Some(format!("1f4e7a2b-9c3d-4b6e-8f10-2d5c7e9a0b{n:02}"));
+    for (name, expected) in [
+        (
+            "recorded-background-starting.json",
+            (None, session(1), S::Working, Some(D::Generating)),
+        ),
+        (
+            "recorded-background-working.json",
+            (Some(52002), session(2), S::Working, Some(D::Generating)),
+        ),
+        (
+            "recorded-background-done.json",
+            (Some(52003), session(3), S::Ready, None),
+        ),
+    ] {
+        assert_eq!(only(name), expected, "{name}");
+    }
+}

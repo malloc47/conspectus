@@ -1,8 +1,28 @@
 use super::*;
 
-/// Every title is synthetic, built from the forms in Codex's source; none
-/// was recorded from a running Codex.
+/// The first group was recorded from Codex 0.167.0 in a tmux pane (the
+/// project is `proj-codex`, the thread's name `Reply with ok`): idle, each
+/// spinner frame while working, and both phases of the wait, which swap
+/// about once a second. The rest are built from the forms in Codex's
+/// source.
 const GOLDEN: &[(&str, TitleMark)] = &[
+    // Recorded.
+    ("proj-codex", TitleMark::Neither),
+    ("⠧ proj-codex", TitleMark::Working),
+    ("⠹ Reply with ok | proj-codex", TitleMark::Working),
+    ("Reply with ok | proj-codex", TitleMark::Neither),
+    (
+        "[ ! ] Action Required | Reply with ok | proj-codex",
+        TitleMark::Waiting,
+    ),
+    (
+        "[ . ] Action Required | Reply with ok | proj-codex",
+        TitleMark::Waiting,
+    ),
+    (
+        "[ . ] Action Required | Spawn subagent and wait | proj-codex",
+        TitleMark::Waiting,
+    ),
     // The research's table.
     ("⠋ fix-auth | conspectus", TitleMark::Working),
     (
