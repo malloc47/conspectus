@@ -1115,6 +1115,94 @@ Start from the health label:
 - **`unsupported`**: the harness's hook reports no live state. No harness
   says this today.
 
+To see what a harness really sends, and what Conspectus made of each event,
+record a trace (see [Recording what a harness sends](#recording-what-a-harness-sends)).
+
+### Recording what a harness sends
+
+To see what a harness really sends its hook, set `CONSPECTUS_HOOK_TRACE` to
+a name in the environment the harness starts with, and every
+`conspectus hook write` it runs adds one line to a file of that name. It
+needs no change to any harness's configuration, covers Claude Code, Codex,
+opencode, and Pi alike, and keeps no free text: the payload is redacted in
+memory, before anything is written.
+
+```sh
+CONSPECTUS_HOOK_TRACE=claude-1 claude
+```
+
+The name is 1 to 64 characters of letters, digits, `.`, `_`, and `-`, and
+starts with a letter or a digit. With the variable unset, or set to
+anything else, nothing is written and a hook costs what it did before.
+With it set, a hook does one more parse of its payload and one append, and
+changes nothing else: it still prints nothing, exits 0, writes the same
+live state, and starts no process and opens no socket. A trace that cannot
+be written is silently not written.
+
+The file is `$XDG_STATE_HOME/conspectus/hook-trace/<name>.jsonl` (else under
+`$HOME/.local/state`), in the directory that holds `live-state.json`. The
+directory is private (mode 0700), the file too (0600), and each call
+appends one line. Nothing reads it, and nothing rotates or removes it.
+
+A line, here for a Claude Code `PostToolUse` of a shell command:
+
+```json
+{"v":1,"t_ms":1794853556213,"harness":"claude-code","payload":{"cwd":"<path>","duration_ms":8123,"hook_event_name":"PostToolUse","permission_mode":"default","session_id":"id:b1bebbf2","tool_input":"<object:2 keys>","tool_name":"Bash","tool_response":"<object:4 keys>","tool_use_id":"id:1501ef30","transcript_path":"<path>"},"env":{"TMUX_PANE":false,"TMUX":false,"CLAUDE_PID":false},"events":["tool_finished"],"applied":"written","after":{"state":"working","detail":"generating","subagents":0,"via_subagent":false,"since_ms":1794853556196,"rev":4}}
+```
+
+- `t_ms` is when the writer started, `harness` the name on its command
+  line, and `env` whether `TMUX_PANE`, `TMUX`, and `CLAUDE_PID` were set.
+- `events` is what Conspectus made of the payload, in order: the neutral
+  event names, with a closed qualifier where one exists
+  (`wait_started:permission`, `turn_ended:interrupted`, `turn_failed:auth`,
+  `background_work:2`) and `@child` for a child agent's. A plugin's state
+  is `snapshot`, and a payload that means nothing here is `[]`.
+- `applied` is what the store did: `written`, `unchanged`, `dropped` (the
+  lock stayed busy), `rejected` (an id did not look like one),
+  `newer_schema`, `none` (nothing to store), or `error`.
+- `after` is the session's stored state read back right after the write:
+  `state`, `detail` (left out when there is none), `subagents`,
+  `via_subagent`, `since_ms`, and the entry's `rev`. It ties each real
+  event to the state the reducers computed, and is left out when nothing
+  is stored for the session. Another event may have changed the entry in
+  between; `rev` says which write it is.
+
+What the payload keeps is numbers, flags, and nulls; the names of objects
+and their fields, up to three levels deep and when they look like
+identifiers; the length of lists (the first 8 elements, then `<+N more>`);
+words from the harness's own vocabulary under keys such as
+`hook_event_name`, `source`, `notification_type`, `permission_mode`,
+`status`, `state`, `detail`, `type`, and `reason` (and `error` of a
+`StopFailure`); the name of a built-in tool, where an MCP tool's is
+`mcp__<redacted>`; and ids as pseudonyms. Everything else is a placeholder
+that says how big it was: a string is `<str:N>` with N its characters, an
+object `<object:K keys>`, a list `<array:K>`, a path `<path>`. That
+includes every prompt, tool input and response, message, title,
+description, command, and error text, and any field a later harness
+version adds. A key that does not look like an identifier reads `<key>`.
+The one channel left is a key that does look like one: a payload that
+named an object's fields after text would show those names, up to 40
+characters.
+
+A pseudonym is `id:` and 8 hex digits of a SHA-256 over the trace name, a
+NUL byte, and the id, so one session keeps one pseudonym through a trace,
+and the same session has another in the next trace. To find a session's
+pseudonym from its id in `live-state.json`:
+
+```sh
+printf '%s\0%s' claude-1 "$SESSION_ID" | sha256sum | cut -c1-8
+```
+
+An id with little entropy (a small integer) can be guessed back from its
+pseudonym, since the trace name is the salt and the file's own name; a
+UUID or a tool-use id cannot.
+
+To read a trace: `jq -c '[.t_ms, .payload.hook_event_name, .events, .applied,
+.after.state, .after.detail]' <file>`. To delete one, remove the file; to
+delete them all, remove the `hook-trace` directory. A trace grows by about a
+kilobyte per hook call, so leave the variable unset when you are not
+recording.
+
 ## Configuration File
 
 See ADR 0012 for the layout and precedence rules. Briefly:

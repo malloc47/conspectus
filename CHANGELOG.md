@@ -14,6 +14,17 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **`CONSPECTUS_HOOK_TRACE` records what a harness sends.** Set it to a
+  name (letters, digits, `.`, `_`, `-`) in the environment a harness
+  starts with, and each `conspectus hook write` adds one JSON line to
+  `$XDG_STATE_HOME/conspectus/hook-trace/<name>.jsonl`: the payload with
+  every free-text value replaced by its size (a string is `<str:N>`, a
+  path `<path>`, an id a pseudonym salted by the trace name, an MCP tool
+  `mcp__<redacted>`), the neutral events Conspectus made of it, what the
+  store did, and the state the session reads right after. It covers
+  Claude Code, Codex, opencode, and Pi without editing any harness's
+  configuration, never writes a raw payload, and changes nothing the hook
+  does. See "Recording what a harness sends" in the operations guide.
 - **`conspectus hook status opencode`.** It reads where opencode's
   config files (`opencode.json`, `opencode.jsonc`, `config.json`, and
   `cli.json`, or a project's) list the plugin, prints one line per file

@@ -670,7 +670,11 @@ and a sequence number: the OpenCode plugin from each 1.x TUI and, for 2.x,
 from a server entrypoint in the shared service, which sees every session
 (ADR 0206; its records never take the attribution path), and the Pi
 extension from inside each Pi process, whose session starts still name the
-session for attribution.
+session for attribution. With `CONSPECTUS_HOOK_TRACE` set, the writer also
+appends a redacted record of each call (structure, vocabulary words,
+pseudonymous ids, and sizes, never text) under
+`$XDG_STATE_HOME/conspectus/hook-trace/`, so real harness sequences can be
+compared with the reducers (ADR 0242).
 
 A discovery mutator binds entries to `AgentSession` nodes (by harness and
 native session id) into a sparse `node_live` snapshot table beside

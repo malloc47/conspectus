@@ -71,8 +71,10 @@ silent and to exit 0 whatever happens (ADR 0204 decision 6).
    - `v` is the format version (1) and `t_ms` the writer's start time.
    - `harness` is the command-line argument when it has the shape of a
      name, else `"<invalid>"`.
-   - `payload` is the redacted payload (decision 4), or a placeholder
-     when stdin was not one JSON value.
+   - `payload` is the redacted payload (decision 4), or
+     `"<unparsed:N bytes>"` when stdin was not one JSON value. A call for
+     a harness Conspectus does not know, or whose payload no adapter can
+     read, is traced too, with no events and `applied` `none`.
    - `env` holds booleans for whether `TMUX_PANE`, `TMUX`, and
      `CLAUDE_PID` were set, and nothing from their values.
    - `events` lists what the adapter produced, in order: the neutral
@@ -84,8 +86,8 @@ silent and to exit 0 whatever happens (ADR 0204 decision 6).
      `["snapshot"]`. A payload that maps to nothing gives `[]`.
    - `applied` is the store's answer as a word: `written`, `unchanged`,
      `dropped`, `rejected`, or `newer_schema`; or the writer's own:
-     `none` when nothing mapped, `no_store` without a state home, `error`
-     when the write failed.
+     `none` when nothing mapped, `error` when the write failed. A run
+     with no state home has nowhere to put a trace, so it writes none.
    - `after` is the session's observation read back from the store right
      after the apply, without the lock: `state`, `detail` (absent when the
      state has none), `subagents`, `via_subagent`, `since_ms`, and the
@@ -101,9 +103,9 @@ silent and to exit 0 whatever happens (ADR 0204 decision 6).
    | --- | --- |
    | number, boolean, null | itself |
    | object key | itself when it matches `^[A-Za-z_][A-Za-z0-9_]{0,39}$` and sits at depth 3 or less (the top-level keys are depth 1, and arrays add none); else `"<key>"` (a second one in the same object `"<key:2>"`, since an object cannot repeat a key) |
-   | array | its length, with the first 8 elements redacted and then `"<+N more>"`; an object keeps its first 64 entries and `"<+N more>": N` |
+   | array | its length, with the first 8 elements redacted and then `"<+N more>"`; an object keeps its first 64 entries and then `"<more>": N` |
    | string under an enum key | itself, when it matches `^[A-Za-z0-9_.:-]{1,48}$` |
-   | `tool_name` | itself when it has that shape and does not start with `mcp__`; else `"mcp__<redacted>"` for an MCP tool, `"<str:N>"` for any other |
+   | `tool_name` | itself when it has that shape and does not start with `mcp__`; else `"mcp__<redacted>"` for an MCP tool, `"<str:N>"` for any other. Only the exact key `tool_name`: another harness's `toolName` is any other string |
    | string under an identifier key | `"id:"` and 8 hex digits of SHA-256 of the trace name, a NUL byte, and the value |
    | string under a path key | `"<path>"` |
    | any other string | `"<str:N>"`, N its length in characters |
@@ -111,26 +113,33 @@ silent and to exit 0 whatever happens (ADR 0204 decision 6).
 
    - *Enum keys* are the vocabulary every documented payload uses:
      `hook_event_name`, `source`, `trigger`, `reason`, `notification_type`,
-     `permission_mode`, `error` (the Claude Code failure type), `status`,
-     `state`, `detail`, `kind`, `type`, `stop_reason`, `error_class`,
-     `mode`, `level`, `behavior`, and any key ending `_version`.
+     `permission_mode`, `error`, `status`, `state`, `detail`, `kind`,
+     `type`, `stop_reason`, `error_class`, `mode`, `level`, `behavior`,
+     and `version` or any key ending `_version` or `Version`. They match
+     with case and underscores ignored (`hookEventName`). `error` is
+     vocabulary only beside `"hook_event_name": "StopFailure"`, where it
+     is the failure's type; in a failed tool or a failed model request it
+     is the failure's text, and a one-word message would otherwise pass.
    - *Identifier keys* are `id`, `instance`, `uuid`, and any key ending
-     `_id`, `_ids`, `Id`, `ID`, `Ids`, or `IDs` (`session_id`, `agent_id`,
+     `_id`, `_ids`, `_uuid`, `Id`, `ID`, `Ids`, `IDs`, `Uuid`, or `UUID`
+     (`session_id`, `agent_id`,
      `tool_use_id`, `prompt_id`, `turn_id`, `request_id`, `agentId`,
      `sessionID`). The trace name salts the hash, so one id keeps one
      pseudonym within a trace and has another in the next trace.
-   - *Path keys* are `cwd`, `path`, `dir`, `directory`, and any key ending
-     `_path`, `_dir`, `Path`, or `Dir`.
+   - *Path keys* are `cwd`, `pwd`, `path`, `dir`, `directory`, `workdir`,
+     and any key ending `_path`, `_dir`, `_directory`, `Path`, `Dir`, or
+     `Directory`, each also in the plural.
    - *Payload-bearing keys* are `prompt`, `tool_input`, `tool_response`,
      `message`, `messages`, `last_assistant_message`, `error_details`,
-     `compact_summary`, `custom_instructions`, `title`, `session_title`,
-     `permission_suggestions`, `session_crons`, `description`, `command`,
-     `content`, `text`, `body`, `summary`, `query`, `question`,
-     `questions`, `options`, `answer`, `answers`, `input`, `args`,
-     `output`, `stdout`, `stderr`, `result`, `plan`, `instructions`, and
-     `system_prompt`, however a key spells its case or underscores. The
-     fixtures' text-bearing keys are all on it, and any other key's
-     strings are placeholders anyway.
+     `error_message`, `compact_summary`, `custom_instructions`, `title`,
+     `session_title`, `permission_suggestions`, `session_crons`,
+     `description`, `command`, `content`, `text`, `body`, `summary`,
+     `query`, `question`, `questions`, `options`, `answer`, `answers`,
+     `input`, `args`, `output`, `stdout`, `stderr`, `result`, `plan`,
+     `instructions`, and `system_prompt`, with case and underscores
+     ignored. The fixtures' text-bearing keys are all on it, and any other
+     key's strings are placeholders anyway; the list decides only which
+     objects hide their keys as well.
    - The one exception is the Claude Code Agent tool's result: when the
      payload's `tool_name` is `Agent` or `Task`, `tool_response` keeps
      `status` (an enum) and `agentId` (an id), the two fields the mapping
@@ -144,6 +153,10 @@ silent and to exit 0 whatever happens (ADR 0204 decision 6).
      is hidden, but its value is still redacted by the key's real name.
    - A line over 64 KiB keeps its other fields and replaces `payload` by
      its size placeholder.
+   - A background task's `id` is an identifier and its `type` and
+     `status` are vocabulary; its `description` and `command` are
+     payload-bearing, so a `Stop` shows the list of tasks and nothing of
+     what they run.
 
    A field no one has seen cannot leak text: an unknown string is a
    placeholder, and an unknown object keeps only its shape.
@@ -163,7 +176,7 @@ silent and to exit 0 whatever happens (ADR 0204 decision 6).
 
 ## Consequences
 
-- The coordinator can run real sessions of all four harnesses with one
+- An operator can record real sessions of all four harnesses with one
   variable set and no edit to any harness's configuration, and read what
   each sent, the events it became, and the state it produced. The first
   use is CSP-822: its recordings come from traces, and a trace line,
@@ -172,11 +185,14 @@ silent and to exit 0 whatever happens (ADR 0204 decision 6).
   writer's memory for the length of the call.
 - Tracing costs one more parse of the payload (whole, not whitelisted),
   the walk, a read of the store, and one `write`, only when it is on.
-  With it off the writer is as before. The task's final summary records
-  the medians.
+  With it off the writer is as before. Measured on a release build, as the
+  median of 200 interleaved runs each: a state event 4.44 ms without and
+  4.45 ms with the trace, a session start 4.27 and 4.61 ms, and a state
+  event whose tool response is 1 MB 6.57 and 7.96 ms.
 - Several residual channels remain, each bounded. A key of up to 40
   identifier characters at depth 3 or less is kept, so a payload that
-  keyed an unknown object by text would show it, cut to that shape; the
+  keyed an unknown object by text, or by a hex id, would show it, cut to
+  that shape; the
   known text-keyed objects (`tool_input`, `tool_response`, `answers`) sit
   under payload-bearing keys and show no keys. A value under an enum key
   that happens to look like an identifier is kept, and the enum keys are
@@ -233,14 +249,26 @@ silent and to exit 0 whatever happens (ADR 0204 decision 6).
 
 ## Open Questions Answered
 
-- *Where are the deviations from the first design?* Four, each tighter or
-  clearer than it was. The salt is joined to the value by a NUL byte, so
-  `ab` and `c` do not hash as `a` and `bc`. A tool name that is not
-  name-shaped is a placeholder, like any other string. An object keeps
-  its first 64 entries, as an array its first 8, and hidden keys within
-  one object are numbered, since one cannot repeat a key. An event name
-  carries the closed-enum qualifier so a trace shows a permission wait
-  and a question wait as different events.
+- *Why are some rules finer than a list of keys?* Each closes a case the
+  plain rule would leak or lose.
+  - The salt and the value are joined by a NUL byte, so `ab` with `c` and
+    `a` with `bc` do not hash alike.
+  - `tool_name` must also be word-shaped, so a name with spaces or a
+    command line in it is a placeholder like any other string.
+  - `error` is vocabulary only in a `StopFailure`. Elsewhere it is text,
+    and a one-word message would pass the shape rule.
+  - `tool_response` keeps `status` and `agentId` only beside an `Agent` or
+    `Task` tool name, the one result the mapping reads; every other
+    tool's response is a size.
+  - An object keeps its first 64 entries, as an array its first 8, and
+    keys hidden in one object are numbered, since an object cannot repeat
+    a key.
+  - An event's label carries its closed qualifier, so a trace tells a
+    permission wait from a question wait, and a child's tool from the
+    main agent's.
+  - `after` carries `since_ms` and `rev` as well as the state, so a later
+    reader can check that a wait shows its own start and can order lines
+    by the write that made them.
 - *How do I tie a pseudonym back to a session in `live-state.json`?*
   Compute it: `printf '%s\0%s' NAME SESSION_ID | sha256sum | cut -c1-8`
   gives the digits after `id:`.
