@@ -96,9 +96,9 @@ impl HookWriteArgs {
     }
 
     /// Record `input`, the payload the harness sent, as the module
-    /// documentation says. What the live-state step did, when it ran;
-    /// `read_back` has it read the session's observation after its write
-    /// for a trace.
+    /// documentation says, and return what the live-state step did, when
+    /// it ran. `read_back` has that step read the session's observation
+    /// back after its write, for a trace.
     fn handle(
         &self,
         input: &[u8],

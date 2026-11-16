@@ -26,7 +26,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -84,12 +84,8 @@ impl Trace {
         })
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     /// The file this trace appends to, in the state directory `state`.
-    pub fn path(&self, state: &Path) -> std::path::PathBuf {
+    pub fn path(&self, state: &Path) -> PathBuf {
         state.join(TRACE_DIR).join(format!("{}.jsonl", self.name))
     }
 
