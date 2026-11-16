@@ -4,7 +4,7 @@
   "cwd": "/home/user/projects/my-project",
   "hook_event_name": "Stop",
   "model": "gpt-5.4",
-  "permission_mode": "plan",
+  "permission_mode": "default",
   "turn_id": "019a7c3f-1a2b-7c3d-8e4f-5a6b7c8d9e0f",
   "stop_hook_active": false,
   "last_assistant_message": "SENTINEL-codex-last-message: the parser is fixed and the tests pass"

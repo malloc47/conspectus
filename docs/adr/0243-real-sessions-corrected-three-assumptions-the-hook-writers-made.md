@@ -69,9 +69,10 @@ real ones to the event. Three assumptions did not hold.
    it is positive, so an install made before this change reads
    `outdated` for those two and `hook init codex` rewrites them. A
    timeout the operator chose within the limit is kept (ADR 0206
-   decision 7 stands for every other event). The hook's definition
-   changed, so Codex asks for the `/hooks` review again, as `hook init
-   codex` already says it will.
+   decision 7 stands for every other event). Codex hashes the entry it
+   has clamped, so the trust recorded for a 5 s entry holds for the 3 s
+   one: with the installer's rewrite of a scratch config, Codex showed
+   every hook active and asked for no review.
 3. **The Pi extension's report that a session ended runs the writer to
    completion** (`spawnSync`, input on stdin, at most 2 s) and every
    other report is still started and left. The cost is the writer's few
@@ -110,8 +111,9 @@ real ones to the event. Three assumptions did not hold.
   first prompt creates one, which is when Codex sends `SessionStart`
   anyway.
 - Operators with Codex installed run `conspectus hook init codex` again
-  and review `/hooks` once; until then the two closing entries warn at
-  every start, as they do today.
+  (no new review is needed); until then the two closing entries warn at
+  every start, as they do today. The recording saw the warnings gone
+  after the rewrite.
 - The Pi extension blocks for one writer run as Pi exits, bounded by 2 s.
 - The recordings become fixtures. Replaying them through the adapters as
   a regression test is its own task.

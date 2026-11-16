@@ -56,9 +56,9 @@ else the recordings settled:
   moment: confirmed,** but the old session's `SessionEnd` (reason `other`)
   arrives about 56 s later, when the app server unloads its thread.
 - A plan-mode `Stop` carries `permission_mode` `default`, not `plan`
-  (`stop-plan-mode.json` and `seq-plan-mode-stop.jsonl` keep the `plan`
-  form, which the mapping ignores either way). The plan-approval choice
-  shows in no hook and in no title.
+  (`stop-plan-mode.json` and `seq-plan-mode-stop.jsonl` now say so; the
+  mapping never read it). The plan-approval choice shows in no hook and
+  in no title.
 - `SessionStart` comes with the first prompt, not at launch; a compaction's
   `SessionStart` (`compact`) comes with the next turn, after `PreCompact`
   and `PostCompact`.
@@ -75,4 +75,6 @@ else the recordings settled:
   config file's path and to each handler's place in its event's list, so
   removing an earlier group asks for the review again.
 - `SessionEnd` and `Interrupt` hooks are clamped to 3 s, with a warning on
-  every start.
+  every start. Codex hashes the clamped entry, so rewriting 5 s to 3 s
+  (what `hook init codex` now does) asks for no new review and clears the
+  warnings.

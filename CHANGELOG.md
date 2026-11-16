@@ -932,7 +932,7 @@ forms, lists, readers, and keys look and behave alike.
   background process and its hooks record no pane. `hook init codex` gave
   `SessionEnd` and `Interrupt` a 5 s timeout, which Codex clamps to 3 s
   with a warning at every start; they get 3 s now, so run `conspectus hook
-  init codex` again and review `/hooks` once. The Pi extension's report
+  init codex` again (Codex asks for no new review). The Pi extension's report
   that a session ended never reached the writer when Pi quit or its pane
   closed (Pi, built on Bun, wrote the writer's input too late), so such a
   session read as its last state until its process was found gone; that

@@ -778,7 +778,8 @@ One live Codex 0.167.0, in a private tmux server with a scratch
    again, and a copied config needs its keys rewritten. The wording
    `hook init codex` prints is accurate. Codex also clamps `SessionEnd`
    and `Interrupt` timeouts to 3 s and warns on every start; the install
-   now writes 3 s for those two.
+   now writes 3 s for those two, and Codex asks for no new review for that
+   change (it hashes the clamped entry).
 2. **`SessionStart` fires with the first prompt, not at launch.** After
    `/clear` it fires at the command; after a compaction it fires with the
    next turn.
