@@ -47,6 +47,7 @@ const {
   classifyError,
   createMachine,
   newInstanceId,
+  nothingToCompact,
   parseProcStartTime,
   subagentTools,
 } = testOnly;
@@ -324,6 +325,16 @@ test("error messages are classified and never copied", () => {
   assert.equal(classifyError("x".repeat(10_000) + " 429"), "unknown", "only the start of a long message is read");
 });
 
+test("a compaction message that says there was nothing to compact is no failure", () => {
+  for (const message of ["Nothing to compact (session too small)", "nothing to compact", "Compaction failed: Nothing to compact"]) {
+    assert.equal(nothingToCompact(message), true, message);
+  }
+  for (const message of ["summarization request failed", "429 Too Many Requests", "", undefined, { message: "nothing to compact" }]) {
+    assert.equal(nothingToCompact(message), false, String(message));
+  }
+  assert.equal(nothingToCompact("x".repeat(10_000) + " nothing to compact"), false, "only the start of a long message is read");
+});
+
 test("the subagent tools are the reference tool and the names the variable lists", () => {
   const names = (value: unknown) => [...subagentTools(value)];
   assert.deepEqual(names(undefined), ["subagent"]);
@@ -363,7 +374,7 @@ test("instance ids look like ids and differ", () => {
 });
 
 test("the constants the documentation states", () => {
-  assert.equal(EXTENSION_VERSION, "3");
+  assert.equal(EXTENSION_VERSION, "4");
   assert.equal(HEARTBEAT_S, 60);
   assert.equal(COALESCE_MS, 500);
   assert.deepEqual([...SUBAGENT_TOOLS], ["subagent"]);

@@ -21,9 +21,10 @@ use crate::model::live::{LiveDetail, LiveState};
 /// The scenarios the research's fixture plan and the story list, the two
 /// the extension's own choices add (`custom-dialog`, `no-pane`), and the
 /// tools an operator names as subagents (`subagent-configured`).
-const SCRIPTS: [&str; 19] = [
+const SCRIPTS: [&str; 20] = [
     "abort",
     "compaction-failed",
+    "compaction-nothing-to-compact",
     "custom-dialog",
     "kill-no-shutdown",
     "new-session-switch",
@@ -273,6 +274,11 @@ fn compaction_for_a_context_overflow_and_its_retry() {
 #[test]
 fn compactions_cancelled_and_failed() {
     replay("compaction-failed");
+}
+
+#[test]
+fn a_compaction_with_nothing_to_compact_is_no_failure() {
+    replay("compaction-nothing-to-compact");
 }
 
 #[test]

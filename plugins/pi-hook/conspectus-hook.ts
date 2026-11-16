@@ -35,7 +35,7 @@
 // | `agent_settled` | ready (finished), ready (interrupted), or error (its class) |
 // | `ui_prompt_start` / `_end` | waiting: `confirm` is a permission; `select`, `input`, `editor` a question |
 // | `session_before_compact` | compacting, until `session_compact` or `session_compact_failed` |
-// | `session_compact_failed` | not cancelled and not retried: error (failed) |
+// | `session_compact_failed` | not cancelled and not retried: error (failed); a message that says there was nothing to compact is no failure, and the state returns to what it was |
 //
 // What the session shows, first match wins (Pi's own status reporter has
 // the same order): waiting while a dialog is open; compacting; working
@@ -68,7 +68,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // Recorded on each hook record so it's clear which extension wrote it;
 // `conspectus hook status pi` reads it from an installed copy.
-const EXTENSION_VERSION = "3";
+const EXTENSION_VERSION = "4";
 
 /** Seconds between heartbeats while the session is not ready. */
 const HEARTBEAT_S = 60;
@@ -293,6 +293,14 @@ function classOfStatus(status: number | undefined): ErrorClass | undefined {
   if (status === 503 || status === 529) return "overloaded";
   if (status >= 500 && status <= 599) return "provider";
   return undefined;
+}
+
+/** Whether a failed compaction's message says there was nothing to compact,
+ * which Pi says of a session too small to compact: nothing went wrong, and
+ * the session is as it was. The message is read here and dropped, as
+ * `classifyError`'s is. */
+function nothingToCompact(message: unknown): boolean {
+  return typeof message === "string" && message.slice(0, MAX_CLASSIFIED).toLowerCase().includes("nothing to compact");
 }
 
 /** What an error message says went wrong, from the words providers and
@@ -610,7 +618,7 @@ function createMachine(options: MachineOptions): Machine {
         s.compacting = undefined;
         if (event.willRetry === true) {
           runs(s, now);
-        } else if (name === "session_compact_failed" && event.aborted !== true) {
+        } else if (name === "session_compact_failed" && event.aborted !== true && !nothingToCompact(event.errorMessage)) {
           if (s.run) s.compactionFailed = true;
           else s.rest = { state: "error", detail: "failed", since: now };
         }
@@ -666,6 +674,7 @@ export const testOnly = {
   classifyError,
   createMachine,
   newInstanceId,
+  nothingToCompact,
   parseProcStartTime,
   subagentTools,
 };

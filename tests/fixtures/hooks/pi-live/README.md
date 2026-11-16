@@ -114,12 +114,13 @@ not as written:
   the writer to completion for that one report (ADR 0243), and the same
   two recordings after the fix show `exited/ended`. A `kill -9` sends
   nothing, as `kill-no-shutdown.jsonl` says.
-- **A failed compaction of a small session reads as an error.** A manual
+- **A failed compaction of a small session read as an error.** A manual
   `/compact` of a session too small to compact fires
-  `session_compact_failed` ("Nothing to compact"), and the state stays
-  `error/failed` until the next event. `compaction-failed.jsonl` is
-  right about the mapping and the recording shows the mapping is wider
-  than a real failure.
+  `session_compact_failed` ("Nothing to compact (session too small)"),
+  and the state stayed `error/failed` until the next event, although
+  nothing had gone wrong. The extension now reads that wording and leaves
+  the state as it was (`compaction-nothing-to-compact.jsonl`); any other
+  failure still reads `error`, as `compaction-failed.jsonl` says.
 
 Not exercised: a permission gate's dialog and the `subagent` tool (no
 extension that gates or spawns was installed), `after_provider_response`
