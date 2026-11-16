@@ -214,7 +214,7 @@ fn fixture(corpus: &str, name: &str) -> Value {
     read_json(&fixture_dir(corpus).join(name))
 }
 
-/// A harness whose hook payloads are fixture files.
+/// The session id of the Claude Code fixtures.
 const SESSION: &str = "3f2a9c1e-7b4d-4e8a-9c6f-1a2b3c4d5e6f";
 
 // ---------------------------------------------------------------------
