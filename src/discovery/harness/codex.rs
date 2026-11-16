@@ -72,8 +72,9 @@ impl CodexAdapter {
 }
 
 /// Runtime attribution surface for codex. Codex ships
-/// as `codex` on `PATH`, session ids are UUID-shaped, and there
-/// are no daemon / subagent helper processes to distinguish.
+/// as `codex` on `PATH` and session ids are UUID-shaped. Its one helper
+/// to tell apart is the app server (see [`codex_is_background_process`]);
+/// it has no subagent processes.
 static CODEX_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
     harness_key: HARNESS_KEY,
     // The CLI hook-writer pid-resolver
@@ -86,9 +87,26 @@ static CODEX_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignatur
     fd_path_patterns: &["/.codex/sessions/", "/.codex/tmp/"],
     fd_state_dirs: &["sessions", "tmp"],
     extract_session_keys: super::generic_uuid_like_session_keys,
-    is_background_process: super::no_match,
+    is_background_process: codex_is_background_process,
     is_subagent_process: super::no_match,
 };
+
+/// Codex's app server is no one's interactive pane. The terminal UI of
+/// Codex 0.167 attaches to a shared `codex app-server --managed-daemon`,
+/// which starts as a child of the first UI, keeps that UI's environment,
+/// and runs every session's hooks, so a hook's process and tmux context
+/// belong to the first client and not to the session. An IDE's `codex
+/// app-server` over stdio is another program's helper in the same way.
+/// The subcommand is the first argument that isn't a flag; Codex starts
+/// its own daemon with the subcommand first, so an option that takes a
+/// value ahead of it, which this does not know, is not a case.
+fn codex_is_background_process(command: &str) -> bool {
+    command
+        .split_whitespace()
+        .skip(1)
+        .find(|arg| !arg.starts_with('-'))
+        .is_some_and(|subcommand| subcommand == "app-server")
+}
 
 impl HarnessAdapter for CodexAdapter {
     fn harness_key(&self) -> &'static str {

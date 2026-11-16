@@ -1037,3 +1037,25 @@ fn a_rollouts_state_scope_is_the_home_above_its_sessions_directory() {
     );
     assert_eq!(scope("/elsewhere/rollout-a.jsonl"), None);
 }
+
+#[test]
+fn the_app_server_is_a_background_process_and_the_terminal_ui_is_not() {
+    for command in [
+        // The managed daemon of Codex 0.167, as its command line reads.
+        "/nix/store/cj2l4iy3gl3pabl2z9b1126wxwi91jfr-codex-0.167.0/libexec/codex/bin/codex app-server --listen unix:// --analytics-default-enabled --managed-daemon",
+        "codex app-server",
+        "codex app-server --listen stdio://",
+    ] {
+        assert!(codex_is_background_process(command), "{command}");
+    }
+    for command in [
+        "codex",
+        "/nix/store/cj2l4iy3gl3pabl2z9b1126wxwi91jfr-codex-0.167.0/libexec/codex/bin/codex --no-alt-screen -C /work/repo -s read-only -a on-request",
+        "codex --no-daemon",
+        "codex resume --last",
+        "codex exec fix the app-server",
+        "codex mcp list",
+    ] {
+        assert!(!codex_is_background_process(command), "{command}");
+    }
+}

@@ -524,3 +524,21 @@ fn a_payload_that_maps_to_nothing_or_has_no_store_has_no_outcome() {
         .is_none()
     );
 }
+
+#[test]
+fn a_codex_app_server_is_a_background_harness_and_the_terminal_ui_is_not() {
+    // Codex 0.167's terminal UI attaches to a shared app server that runs
+    // every session's hooks in the first client's environment.
+    assert!(is_background_harness_command(
+        "codex",
+        "/nix/store/x-codex-0.167.0/libexec/codex/bin/codex app-server --listen unix:// --managed-daemon"
+    ));
+    assert!(!is_background_harness_command(
+        "codex",
+        "/nix/store/x-codex-0.167.0/libexec/codex/bin/codex --no-alt-screen -C /work/repo"
+    ));
+    assert!(!is_background_harness_command(
+        "claude-code",
+        "claude app-server"
+    ));
+}
