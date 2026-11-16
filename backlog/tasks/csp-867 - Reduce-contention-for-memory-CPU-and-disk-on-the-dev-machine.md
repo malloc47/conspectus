@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-13 03:55'
-updated_date: '2026-11-13 23:45'
+updated_date: '2026-11-16 13:58'
 labels:
   - h-devloop
 milestone: m-11
@@ -86,4 +86,9 @@ AC #3 (removal done, accumulation waits on the operator): removed `/tmp/tuifw-ba
 Accumulation, smallest changes: (1) in the repository, CSP-866's `scripts/dev-env.sh` ends the largest source, one `nix-develop-*` and one `nix-shell.*` per `nix develop --command` (about 17,000 in three weeks), once agents use it (the AGENTS.md patch); the repository's own tools already clean up (tests use self-deleting temp dirs, `just scratch` removes its home, the separation rehearsal works under `target/`), so no repository convention or ADR is needed. (2) Operator steps, outside the repository: apply the AGENTS.md patch; make the helper scripts that create a private `TMUX_TMPDIR` with mktemp (`/tmp/csp-fu/run-tests.sh`, `run-some.sh`, and the live-state ones that made `ls-tmux.*`) remove it on exit, e.g. `trap 'rm -rf "$TMUX_TMPDIR"' EXIT` after the mktemp line; remove the old `nix-shell.*` directories, e.g. `find /tmp -maxdepth 1 -name 'nix-shell.*' -user "$USER" -mtime +1 -empty -delete`, then review the non-empty ones; review the other sessions' directories above; optionally ask agents (in the global instructions) to keep large scratch on disk, for example under the worktree's `target/`, and delete it at the end.
 
 AC #5 (waits on the operator): a whole `just check` after the one-line edit, with the usual sessions open (load 4.5 to 7.9), passed in 186 s; no OOM line in the kernel log for the window (`journalctl -k`; `dmesg` itself fails with "dmesg: read kernel buffer failed: Operation not permitted"); available memory stayed at or above 7.7 GB; memory pressure (/proc/pressure/memory) near zero. But swap stayed full: 33 MB free at the start, 0 MB at the low point. The swap holds idle processes' pages (4 GB swap file, many idle agent sessions, the security agent at 0.9 GB RSS), not this build's. Headroom needs an operator or administrator step: close idle sessions, enlarge `/swap.img`, or cycle swap (`sudo swapoff -a && sudo swapon -a` while enough RAM is free). The last OOM kill in the kernel log is 2026-11-11 18:16 (emacs). An earlier attempt of the same run failed on a timing-dependent forge test (passed alone three times; filed as CSP-878).
+
+Cleanup 2026-11-16 (operator asked for steps 8-10 of the wrap-up):
+- Removed 9,700 directories from RAM-backed /tmp: `nix-shell.*` (8,790) and `nix-develop-*` (910) folders older than two days, owned by the operator, and not used by any running process (checked against every process's TMPDIR/NIX_BUILD_TOP environment, working directory, and open files). They held 0.46 GB of files; /tmp went from 65% to 59% used. 310 recent or in-use ones were left. Agents no longer create these: scripts/dev-env.sh drops the per-call temporary directory (ADR 0226).
+- The merged worktrees' target/ directories (followups, live-state) are removed with those worktrees; the main checkout's target/ (47 GB) and the operator's launch-spinner and pin-resume-preserve-argv worktrees were left alone.
+- Still with the operator: AC #1 (send the scanner-exclusion request drafted above), AC #2 (follows from #1), AC #5 (swap: 4 GB /swap.img stays 100% used; more swap or fewer idle sessions).
 <!-- SECTION:NOTES:END -->
