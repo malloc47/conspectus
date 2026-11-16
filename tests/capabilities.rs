@@ -883,15 +883,24 @@ impl World {
         payload: &str,
         cwd: &Path,
     ) -> PathBuf {
+        self.hook_write_with(strace, label, harness, payload, cwd, &[])
+    }
+
+    /// [`Self::hook_write`] with `env` added to the world's environment.
+    fn hook_write_with(
+        &self,
+        strace: &Path,
+        label: &str,
+        harness: &str,
+        payload: &str,
+        cwd: &Path,
+        env: &[(&str, &str)],
+    ) -> PathBuf {
         let tmux = format!("{},1,0", self.root.join("tmux-sock").display());
-        let (mut child, dir) = self.spawn_with(
-            strace,
-            label,
-            &["hook", "write", harness],
-            cwd,
-            &[("TMUX", &tmux), ("TMUX_PANE", "%1")],
-            true,
-        );
+        let mut vars = vec![("TMUX", tmux.as_str()), ("TMUX_PANE", "%1")];
+        vars.extend_from_slice(env);
+        let (mut child, dir) =
+            self.spawn_with(strace, label, &["hook", "write", harness], cwd, &vars, true);
         child
             .stdin
             .take()
@@ -1499,19 +1508,38 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         &hook_payload("Stop"),
         project,
     );
-    let quiet: Vec<Event> = conspectus_events(&state, project)
-        .into_iter()
-        .filter(|event| {
-            matches!(
-                event,
-                Event::Exec { .. } | Event::Socket { .. } | Event::Connect { .. }
-            )
-        })
-        .collect();
-    assert!(
-        quiet.is_empty(),
-        "a state event after the session's first started a process or opened a socket: {quiet:?}"
+    // The same state event with a trace asked for appends one line under
+    // `$STATE` and starts no process and opens no socket either (ADR 0242).
+    let traced = world.hook_write_with(
+        &strace,
+        "hook-write-trace",
+        "claude-code",
+        &hook_payload("Stop"),
+        project,
+        &[("CONSPECTUS_HOOK_TRACE", "capabilities")],
     );
+    assert!(
+        world
+            .root
+            .join("xdg/state/conspectus/hook-trace/capabilities.jsonl")
+            .is_file(),
+        "the trace was written"
+    );
+    for (what, dir) in [("a state event", &state), ("a traced state event", &traced)] {
+        let quiet: Vec<Event> = conspectus_events(dir, project)
+            .into_iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    Event::Exec { .. } | Event::Socket { .. } | Event::Connect { .. }
+                )
+            })
+            .collect();
+        assert!(
+            quiet.is_empty(),
+            "{what} after the session's first started a process or opened a socket: {quiet:?}"
+        );
+    }
     record(
         &Scenario {
             name: "hook write",
@@ -1519,7 +1547,7 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             vars: &vars,
             pager: None,
         },
-        &[start, state],
+        &[start, state, traced],
         project,
     );
 

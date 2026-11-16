@@ -115,6 +115,7 @@ fn in_tmux() -> WriterEnv {
             pane: Some("%3".to_string()),
         }),
         harness_version: None,
+        read_back: false,
     }
 }
 
@@ -426,5 +427,100 @@ fn a_claude_code_record_takes_no_version_whatever_the_environment_says() {
     assert_eq!(
         harness_version_from("pi", everything).as_deref(),
         Some("CONSPECTUS_PI_HOOK_VERSION=9.9.9")
+    );
+}
+
+#[test]
+fn the_outcome_names_the_events_the_store_answer_and_the_session() {
+    let dir = tempfile::tempdir().expect("state dir");
+    let store = LiveStore::at(dir.path());
+    let mut recorder = Recorder::new(&store);
+
+    let outcome = write_payload(
+        &FakeHarness::state_event(),
+        &payload("s-1"),
+        &in_tmux(),
+        Some(&store),
+        &mut recorder,
+    )
+    .expect("the payload mapped to an event");
+    assert_eq!(outcome.session(), Some(("fake", "s-1")));
+    let labels: Vec<String> = outcome.events.iter().map(|e| e.kind.label()).collect();
+    assert_eq!(labels, ["tool_finished"]);
+    assert!(outcome.snapshot.is_none());
+    assert_eq!(outcome.applied, "written");
+
+    // The same event again changes nothing, and the outcome says so.
+    let again = write_payload(
+        &FakeHarness::state_event(),
+        &payload("s-1"),
+        &in_tmux(),
+        Some(&store),
+        &mut recorder,
+    )
+    .expect("the payload mapped to an event");
+    assert_eq!(again.applied, "unchanged");
+}
+
+#[test]
+fn an_outcome_reads_the_observation_back_only_when_asked() {
+    let dir = tempfile::tempdir().expect("state dir");
+    let store = LiveStore::at(dir.path());
+    let mut recorder = Recorder::new(&store);
+    let harness = FakeHarness::state_event();
+
+    let quiet = write_payload(
+        &harness,
+        &payload("s-1"),
+        &in_tmux(),
+        Some(&store),
+        &mut recorder,
+    )
+    .expect("an outcome");
+    assert_eq!(quiet.after, None, "no trace, no read-back");
+
+    let env = WriterEnv {
+        read_back: true,
+        ..in_tmux()
+    };
+    let traced = write_payload(&harness, &payload("s-2"), &env, Some(&store), &mut recorder)
+        .expect("an outcome");
+    let stored = entry(&store, "s-2");
+    let after = traced.after.expect("the stored observation");
+    assert_eq!(after.state, stored.observation.state.name());
+    assert_eq!(after.rev, stored.rev);
+    assert_eq!(after.since_ms, stored.observation.since_ms);
+    assert_eq!(after.subagents, 0);
+    assert!(!after.via_subagent);
+}
+
+#[test]
+fn a_payload_that_maps_to_nothing_or_has_no_store_has_no_outcome() {
+    let dir = tempfile::tempdir().expect("state dir");
+    let store = LiveStore::at(dir.path());
+    let mut recorder = Recorder::new(&store);
+    let nothing = FakeHarness {
+        attribution: false,
+        kind: None,
+    };
+    assert!(
+        write_payload(
+            &nothing,
+            &payload("s-1"),
+            &in_tmux(),
+            Some(&store),
+            &mut recorder
+        )
+        .is_none()
+    );
+    assert!(
+        write_payload(
+            &FakeHarness::state_event(),
+            &payload("s-1"),
+            &in_tmux(),
+            None,
+            &mut recorder
+        )
+        .is_none()
     );
 }

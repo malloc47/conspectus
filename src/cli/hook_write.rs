@@ -27,6 +27,12 @@
 //! the model and treats exit 2 as a block. A malformed command line is
 //! the one exception: clap rejects it before the command runs, with a
 //! usage message and exit status 2, and `hook init` never writes one.
+//!
+//! With `CONSPECTUS_HOOK_TRACE` set to a name, the command also appends
+//! one redacted line about the call to a trace file in the state
+//! directory (ADR 0242, [`crate::hook::trace`]), after everything above.
+//! Without it the only cost is looking the variable up, and with it
+//! nothing the command does, prints, or returns changes.
 
 use std::fs;
 use std::io::{self, Read};
@@ -37,8 +43,10 @@ use anyhow::{Result, anyhow};
 use clap::Args;
 
 use crate::discovery::harness::HarnessAdapter;
+use crate::hook::trace::{After, Entry, EnvFlags, Trace};
 use crate::hook::{HookRecord, HookStore, HookTmuxRecord};
-use crate::live_store::{LiveContext, LiveStore, LiveTmux};
+use crate::live_store::{Applied, LiveContext, LiveEvent, LiveSnapshot, LiveStore, LiveTmux};
+use crate::model::live::LiveDetail;
 
 #[derive(Debug, Args)]
 pub(super) struct HookWriteArgs {
@@ -63,32 +71,54 @@ impl HookWriteArgs {
 
     fn write(&self) {
         let observed_ms = crate::live_store::now_ms();
+        let trace = Trace::from_env();
         // Read the whole payload before anything else, so the harness
         // never meets a closed pipe.
         let mut input = Vec::new();
         if io::stdin().read_to_end(&mut input).is_err() {
             return;
         }
-        let Some(adapter) = crate::discovery::harness::registered_adapters()
-            .find(|adapter| adapter.harness_key() == self.harness)
-        else {
-            return;
-        };
-        // Only the fields the adapter reads are built; the rest of the
-        // payload, a large tool response included, is skipped unread.
-        let Some(payload) = crate::hook::payload::parse(&input, adapter.hook_payload_fields())
-        else {
-            return;
-        };
-        let env = WriterEnv::from_env(&self.harness, observed_ms);
         let store = match &self.state_root {
             Some(root) => Some(LiveStore::at(root)),
             None => LiveStore::from_env(),
         };
+        let outcome = self.handle(&input, observed_ms, store.as_ref(), trace.is_some());
+        if let Some(trace) = trace {
+            trace_call(
+                &trace,
+                store.as_ref(),
+                &self.harness,
+                &input,
+                observed_ms,
+                outcome,
+            );
+        }
+    }
+
+    /// Record `input`, the payload the harness sent, as the module
+    /// documentation says. What the live-state step did, when it ran;
+    /// `read_back` has it read the session's observation after its write
+    /// for a trace.
+    fn handle(
+        &self,
+        input: &[u8],
+        observed_ms: i64,
+        store: Option<&LiveStore>,
+        read_back: bool,
+    ) -> Option<LiveOutcome> {
+        let adapter = crate::discovery::harness::registered_adapters()
+            .find(|adapter| adapter.harness_key() == self.harness)?;
+        // Only the fields the adapter reads are built; the rest of the
+        // payload, a large tool response included, is skipped unread.
+        let payload = crate::hook::payload::parse(input, adapter.hook_payload_fields())?;
+        let env = WriterEnv {
+            read_back,
+            ..WriterEnv::from_env(&self.harness, observed_ms)
+        };
         let mut effects = SystemEffects {
             state_root: self.state_root.clone(),
         };
-        write_payload(adapter, &payload, &env, store.as_ref(), &mut effects);
+        write_payload(adapter, &payload, &env, store, &mut effects)
     }
 }
 
@@ -105,6 +135,9 @@ pub(super) struct WriterEnv {
     /// The version of the Conspectus plugin that ran the hook, for a
     /// harness whose plugin exports one.
     pub(super) harness_version: Option<String>,
+    /// Read the session's observation back from the store right after the
+    /// live-state write, for a trace that records it (ADR 0242).
+    pub(super) read_back: bool,
 }
 
 impl WriterEnv {
@@ -117,6 +150,7 @@ impl WriterEnv {
                 std::env::var("TMUX_PANE").ok(),
             ),
             harness_version: harness_version_env(harness),
+            read_back: false,
         }
     }
 }
@@ -168,16 +202,46 @@ impl WriterEffects for SystemEffects {
     }
 }
 
+/// What the live-state step did with a payload, for the trace: what the
+/// adapter produced and what the store answered. It is built from values
+/// the step already holds, so it costs nothing when no trace reads it.
+#[derive(Debug)]
+pub(super) struct LiveOutcome {
+    /// The neutral events the adapter mapped the payload to.
+    events: Vec<LiveEvent>,
+    /// The plugin snapshot it mapped the payload to.
+    snapshot: Option<LiveSnapshot>,
+    /// The store's answer as a word, or `error` when the write failed.
+    applied: &'static str,
+    /// The session's observation read back right after the write, when
+    /// the writer was asked to.
+    after: Option<After>,
+}
+
+impl LiveOutcome {
+    /// The harness and session the payload is about.
+    fn session(&self) -> Option<(&str, &str)> {
+        self.events
+            .first()
+            .map(|event| (event.harness.as_str(), event.session_id.as_str()))
+            .or_else(|| {
+                self.snapshot
+                    .as_ref()
+                    .map(|snapshot| (snapshot.harness.as_str(), snapshot.session_id.as_str()))
+            })
+    }
+}
+
 /// Record one parsed payload: the live state when the adapter maps it,
 /// then the attribution record when the adapter says the event names
-/// the session.
+/// the session. `None` when the payload mapped to nothing for the store.
 pub(super) fn write_payload(
     adapter: &dyn HarnessAdapter,
     payload: &serde_json::Value,
     env: &WriterEnv,
     store: Option<&LiveStore>,
     effects: &mut dyn WriterEffects,
-) {
+) -> Option<LiveOutcome> {
     let background = env.process.is_some_and(|process| process.background);
     // A background harness's environment came from whichever client
     // started it, so its tmux context names someone else's pane.
@@ -190,17 +254,19 @@ pub(super) fn write_payload(
     } else {
         None
     };
-    if let Some(store) = store {
-        write_live_state(adapter, payload, env, tmux, mux.as_ref(), store, effects);
-    }
+    let outcome = store.and_then(|store| {
+        write_live_state(adapter, payload, env, tmux, mux.as_ref(), store, effects)
+    });
     if attribution {
         attribute(adapter, payload, env, mux, effects);
     }
+    outcome
 }
 
 /// Apply what `payload` says to the live-state store. A busy lock, an
 /// input the store refuses, or a failed write drops it; the session's
-/// next event repairs the entry.
+/// next event repairs the entry. `None` when the payload maps to neither
+/// events nor a snapshot.
 fn write_live_state(
     adapter: &dyn HarnessAdapter,
     payload: &serde_json::Value,
@@ -209,7 +275,7 @@ fn write_live_state(
     mux: Option<&HookTmuxRecord>,
     store: &LiveStore,
     effects: &mut dyn WriterEffects,
-) {
+) -> Option<LiveOutcome> {
     let context = LiveContext {
         pid: env.process.map(|process| process.pid),
         pid_start: env.process.and_then(|process| process.start),
@@ -230,9 +296,7 @@ fn write_live_state(
                 .as_ref()
                 .map(|snapshot| (&snapshot.harness, &snapshot.session_id))
         });
-    let Some((harness, session_id)) = session else {
-        return;
-    };
+    let (harness, session_id) = session?;
     if tmux.is_some() {
         // Only tmux knows the session's name. It is asked the first
         // time the store sees the session; later events keep the name
@@ -252,12 +316,87 @@ fn write_live_state(
             }
         }
     }
+    let mut applied = None;
     if !events.is_empty() {
-        let _ = store.apply_events(adapter.live_reducer(), &events);
+        applied = Some(applied_word(
+            store.apply_events(adapter.live_reducer(), &events),
+        ));
     }
     if let Some(snapshot) = &snapshot {
-        let _ = store.apply_snapshot(snapshot);
+        let word = applied_word(store.apply_snapshot(snapshot));
+        applied.get_or_insert(word);
     }
+    let mut outcome = LiveOutcome {
+        events,
+        snapshot,
+        applied: applied.unwrap_or("none"),
+        after: None,
+    };
+    if env.read_back {
+        outcome.after = outcome
+            .session()
+            .and_then(|(harness, session_id)| read_after(store, harness, session_id));
+    }
+    Some(outcome)
+}
+
+/// The observation the store holds for a session, as the trace records it.
+fn read_after(store: &LiveStore, harness: &str, session_id: &str) -> Option<After> {
+    let file = store.read();
+    let entry = file.get(harness, session_id)?;
+    let observation = &entry.observation;
+    Some(After {
+        state: observation.state.name(),
+        detail: observation.detail.map(LiveDetail::name),
+        subagents: observation.subagents,
+        via_subagent: observation.via_subagent,
+        since_ms: observation.since_ms,
+        rev: entry.rev,
+    })
+}
+
+/// What a store write did, as the trace says it.
+fn applied_word(result: io::Result<Applied>) -> &'static str {
+    result.map_or("error", Applied::word)
+}
+
+/// Append the trace line for one call: what the writer received, the
+/// events it mapped it to, what the store did, and the session's
+/// observation read back. Every failure is dropped: the trace is not the
+/// hook's business (ADR 0242).
+fn trace_call(
+    trace: &Trace,
+    store: Option<&LiveStore>,
+    harness: &str,
+    input: &[u8],
+    observed_ms: i64,
+    outcome: Option<LiveOutcome>,
+) {
+    // The trace lives beside the store, so a run without a state home
+    // has nowhere to put it.
+    let Some(store) = store else {
+        return;
+    };
+    let mut entry = Entry {
+        t_ms: observed_ms,
+        harness,
+        input,
+        env: EnvFlags::from_env(),
+        events: Vec::new(),
+        applied: "none",
+        after: None,
+    };
+    if let Some(outcome) = outcome {
+        entry
+            .events
+            .extend(outcome.events.iter().map(|event| event.kind.label()));
+        if outcome.snapshot.is_some() {
+            entry.events.push("snapshot".to_string());
+        }
+        entry.applied = outcome.applied;
+        entry.after = outcome.after;
+    }
+    let _ = trace.record(store.dir(), &entry);
 }
 
 /// Fill what the environment did not say about the pane from what tmux
