@@ -62,7 +62,7 @@
 // message only to classify it and never copies it. Prompts, tool
 // arguments and results, dialog titles, and message text are never read.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -111,6 +111,9 @@ const MAX_ID_LEN = 256;
 const MAX_PATH_LEN = 4096;
 /** The most of an error message the classifier looks at. */
 const MAX_CLASSIFIED = 4096;
+
+/** The `hook_event_name` of the report that says a session ended. */
+const SHUTDOWN_REPORT = "live:session_shutdown";
 
 export type LiveState = "working" | "waiting" | "ready" | "compacting" | "error" | "exited";
 
@@ -521,7 +524,7 @@ function createMachine(options: MachineOptions): Machine {
     // A reload loads the extension again, and the new load reports the
     // same session afresh.
     if (!s || word(event.reason) === "reload") return { emit: [] };
-    return { emit: [snapshot(s, { state: "exited", detail: "ended", since: now, subagents: 0 }, "live:session_shutdown", now)] };
+    return { emit: [snapshot(s, { state: "exited", detail: "ended", since: now, subagents: 0 }, SHUTDOWN_REPORT, now)] };
   }
 
   function on(name: string, raw: unknown, now: number, context?: SessionContext): Output {
@@ -703,22 +706,34 @@ function sessionContext(ctx: unknown): SessionContext {
   }
 }
 
-/** Start `conspectus hook write pi` with `payload` on its stdin and leave
- * it. The payload is written before this returns, so it lands even when
- * Pi exits right after (a quit); the writer runs in its own process
- * group, so the pane's hangup does not stop it, and it never keeps Pi
- * running. */
-function write(payload: HookPayload): void {
+/** The most a session's last report may hold Pi's exit up. */
+const FINAL_WRITE_TIMEOUT_MS = 2_000;
+
+/** Run `conspectus hook write pi` with `payload` on its stdin.
+ *
+ * A report is started and left: the writer runs in its own process group,
+ * so the pane's hangup does not stop it, and it never keeps Pi running.
+ * The session's last report, the one that says it ended, waits for the
+ * writer instead. Pi is a Bun executable, and Bun writes a child's piped
+ * stdin on its event loop, so a report started and left when Pi exits at
+ * once (a quit, a closed pane) reaches the writer as an empty stdin and
+ * the session is never marked exited. A synchronous run delivers it before
+ * Pi goes on, at the writer's cost of a few milliseconds. */
+function write(payload: HookPayload, last = false): void {
+  const program = process.env.CONSPECTUS_HOOK_BIN || "conspectus";
+  const args = ["hook", "write", "pi"];
+  const env = { ...process.env, CONSPECTUS_PI_HOOK_VERSION: EXTENSION_VERSION };
   try {
-    const child = spawn(
-      process.env.CONSPECTUS_HOOK_BIN || "conspectus",
-      ["hook", "write", "pi"],
-      {
+    if (last) {
+      spawnSync(program, args, {
+        input: JSON.stringify(payload),
         stdio: ["pipe", "ignore", "ignore"],
-        detached: true,
-        env: { ...process.env, CONSPECTUS_PI_HOOK_VERSION: EXTENSION_VERSION },
-      },
-    );
+        env,
+        timeout: FINAL_WRITE_TIMEOUT_MS,
+      });
+      return;
+    }
+    const child = spawn(program, args, { stdio: ["pipe", "ignore", "ignore"], detached: true, env });
     child.on("error", () => {});
     child.stdin.on("error", () => {});
     child.stdin.end(JSON.stringify(payload));
@@ -762,7 +777,7 @@ export default function (pi: ExtensionAPI) {
   const run = (step: () => Output) => {
     try {
       const output = step();
-      for (const payload of output.emit) write(payload);
+      for (const payload of output.emit) write(payload, payload.hook_event_name === SHUTDOWN_REPORT);
       schedule("flush", output.flush_at);
       schedule("heartbeat", output.heartbeat_at);
     } catch {

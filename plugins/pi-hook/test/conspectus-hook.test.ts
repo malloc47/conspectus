@@ -618,6 +618,32 @@ test("its timers never keep Pi running, and a quit's payload outlives Pi", async
   }
 });
 
+test("the report that a session ended reaches the writer before the handler returns", async () => {
+  // Pi is a Bun executable: Bun writes a child's piped stdin on its event
+  // loop, so a report started and left is lost when Pi exits at once (a
+  // quit, a closed pane) and the writer reads an empty stdin. Under Node
+  // that race does not show, so the property is checked directly: the
+  // report is on disk when the handler returns, without a tick.
+  const writer = standInWriter();
+  const previous = process.env.CONSPECTUS_HOOK_BIN;
+  process.env.CONSPECTUS_HOOK_BIN = writer.bin;
+  try {
+    const pi = standInPi();
+    extension(pi.api as never);
+    pi.handlers.get("session_start")?.({ reason: "startup" }, piContext());
+    await eventually(writer.payloads, (all) => all.length === 1, "the session start");
+    pi.handlers.get("session_shutdown")?.({ reason: "quit" }, {});
+    const written = writer.payloads();
+    assert.equal(written.length, 2, "the exit is written before the handler returns");
+    assert.equal(written[1].payload.hook_event_name, "live:session_shutdown");
+    assert.equal(written[1].payload.live.state, "exited");
+  } finally {
+    if (previous === undefined) delete process.env.CONSPECTUS_HOOK_BIN;
+    else process.env.CONSPECTUS_HOOK_BIN = previous;
+    rmSync(writer.dir, { recursive: true, force: true });
+  }
+});
+
 test("a missing writer is ignored without a word", () => {
   const missing = inChild(
     `on("session_start", { reason: "startup" }, ctx);
