@@ -100,7 +100,10 @@ real ones to the event. Three assumptions did not hold.
      covers the wait (ADR 0217). `SessionStart` comes with the first
      prompt, not at launch.
    - Pi: a manual compaction of a session too small to compact reports
-     `session_compact_failed` and reads `error` until the next event.
+     `session_compact_failed` ("Nothing to compact") and read `error`
+     until the next event; the extension now reads that wording and
+     leaves the state as it was (ADR 0206 decision 25's reading of error
+     messages, which are dropped after the read).
    - The recorded fixtures and the notes' appendices carry the full list.
 
 ## Consequences

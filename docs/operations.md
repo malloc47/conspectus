@@ -907,7 +907,7 @@ running subagent. Beyond the [known gaps](#known-gaps):
 
 ### Pi live state
 
-The Pi extension (version 3, which `conspectus hook init pi` installs)
+The Pi extension (version 4, which `conspectus hook init pi` installs)
 reports what its session is doing: working (generating, running a tool,
 retrying, rate limited), waiting for you, ready (finished or
 interrupted), compacting, failed (rate limited, auth, overloaded, or

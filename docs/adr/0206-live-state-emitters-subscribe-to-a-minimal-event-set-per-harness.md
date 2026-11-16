@@ -382,7 +382,9 @@ are in the research notes and become tests.
       the message's words. Rate limits, auth, and overload keep their
       detail; a context overflow, a network or provider error, and an
       unknown one read `failed`. Neither the words nor the class leave the
-      extension.
+      extension. A failed compaction whose message says there was nothing
+      to compact (Pi refuses a session too small to compact) is no error:
+      the state returns to what it was (ADR 0243).
     - Quitting, `/new`, `/resume`, and `/fork` end the session left,
       `exited/ended`: the vocabulary has no detached state, and a snapshot
       source ends its own sessions (ADR 0204 decision 5). A session start

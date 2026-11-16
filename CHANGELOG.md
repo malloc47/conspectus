@@ -924,6 +924,15 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A Pi `/compact` with nothing to compact no longer reads as an
+  error.** Pi refuses a session too small to compact with a failure
+  message, and the extension read it as a failed compaction, so the
+  session showed `error/failed` until its next run. The extension now
+  recognizes that wording and leaves the state as it was; any other
+  compaction failure still reads `error`. The extension is version 4:
+  `conspectus hook status pi` reports an older copy as outdated, and
+  `conspectus hook init pi` replaces it (the version also carries the
+  quit and closed-pane fix above).
 - **Real sessions of Claude Code, Codex, and Pi corrected three things
   the live-state writers assumed.** Recorded on 2026-11-16 (the traces
   are fixtures now). Codex's terminal UI shares an app server that runs

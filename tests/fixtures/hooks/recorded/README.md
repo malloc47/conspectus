@@ -49,7 +49,7 @@ that matter for a claim are named for it.
 
 | File | What it holds |
 | :- | :- |
-| `tool-abort-compact-failed-new-reload.jsonl` | A turn; a tool run (`working/generating`, `working/tool`, `working/generating`, `ready/finished`); an Esc abort (`ready/interrupted`); a manual compaction of a session too small to compact (`session_compact_failed`, `error/failed`); `/new` (`session_shutdown`, then `session_start:new` for a new id); `/reload` (`session_start:reload`, no shutdown) |
+| `tool-abort-compact-failed-new-reload.jsonl` | A turn; a tool run (`working/generating`, `working/tool`, `working/generating`, `ready/finished`); an Esc abort (`ready/interrupted`); a manual compaction of a session too small to compact (`session_compact_failed`, which read `error/failed` then and reads as before the compaction now); `/new` (`session_shutdown`, then `session_start:new` for a new id); `/reload` (`session_start:reload`, no shutdown) |
 | `quit-lost.jsonl`, `closed-pane-lost.jsonl` | A quit and a closed pane before the fix of ADR 0243: a second writer call whose stdin was empty (`<unparsed:0 bytes>`), so no `session_shutdown` landed |
 | `kill9.jsonl` | `kill -9`: no writer call at all |
 | `quit-after-fix.jsonl`, `closed-pane-after-fix.jsonl` | The same two after the fix: `live:session_shutdown`, `exited/ended` |
