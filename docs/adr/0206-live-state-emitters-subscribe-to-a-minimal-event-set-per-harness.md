@@ -14,7 +14,9 @@ entrypoint reads the permission asks pending when it starts (decisions
 TUI entrypoint reports the sessions its client shows (decision 23's
 last sentence). Amended by ADR 0235: the dev shell has Node and CI runs
 the plugin tests and a type check (see the consequence about the
-plugin reducers).
+plugin reducers). Extended by ADR 0242: with `CONSPECTUS_HOOK_TRACE`
+set, the writer also appends a redacted record of each call to a trace
+file; decisions 10 to 12 stay the rule for the store.
 
 ## Context
 

@@ -65,7 +65,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0111](0111-launch-directory-is-optional.md) | The Launch Directory Is An Optional Input | Accepted |
 | [0138](0138-provider-workspaces-from-observed-cwds.md) | Provider Workspaces From Observed Cwds | Accepted |
 | [0204](0204-the-live-state-store-folds-agent-events-per-session.md) | The Live-State Store Folds Agent Events Per Session | Accepted |
-| [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208, 0227, 0228, 0229, 0235) |
+| [0206](0206-live-state-emitters-subscribe-to-a-minimal-event-set-per-harness.md) | Live-State Emitters Subscribe To A Minimal Event Set Per Harness | Accepted (amended by 0208, 0227, 0228, 0229, 0235; extended by 0242) |
 | [0207](0207-live-state-sources-beyond-hooks-need-their-own-decision.md) | Live-State Sources Beyond Hooks Need Their Own Decision | Accepted (applied by 0217, 0218, 0222; excepted by 0217, 0232) |
 | [0217](0217-a-codex-panes-title-fills-in-its-live-state-where-hooks-cannot.md) | A Codex Pane's Title Fills In Its Live State Where Hooks Cannot | Accepted (amended by 0221, 0232) |
 | [0218](0218-claude-codes-agent-list-repairs-a-live-state-its-hooks-left-stuck.md) | Claude Code's Agent List Repairs A Live State Its Hooks Left Stuck | Accepted (amended by 0222) |
@@ -75,6 +75,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0232](0232-a-held-action-required-marker-raises-a-fresh-hook-working-to-waiting.md) | A Held Action Required Marker Raises A Fresh Hook `working` To `waiting` | Accepted |
 | [0239](0239-a-harnesss-own-directory-variable-moves-discovery-and-its-hooks-together.md) | A Harness's Own Directory Variable Moves Discovery And Its Hooks Together | Accepted (amended 2026-11-14) |
 | [0240](0240-hook-commands-run-a-conspectus-path-that-outlives-an-upgrade.md) | Hook Commands Run A `conspectus` Path That Outlives An Upgrade | Accepted |
+| [0242](0242-a-hook-trace-records-what-hook-write-receives-with-every-free-text-value-redacted.md) | A Hook Trace Records What `hook write` Receives, With Every Free-Text Value Redacted | Accepted |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |
@@ -92,7 +93,7 @@ Where user-authored intent lives, what Conspectus may write, and what it must ne
 | [0086](0086-payload-privacy-tenet.md) | Payload Privacy Tenet | Accepted (amended by 0140, 0147, 0148, 0149, 0217) |
 | [0087](0087-mutation-envelope.md) | Mutation Envelope | Superseded by 0143 |
 | [0090](0090-pin-store-registry-sidecar.md) | Pin-Store Registry Sidecar | Superseded by 0141 |
-| [0143](0143-mutation-envelope-with-history-pins-and-clone.md) | Mutation Envelope With History, Pin Slots, And Clone | Accepted (amended by 0148) |
+| [0143](0143-mutation-envelope-with-history-pins-and-clone.md) | Mutation Envelope With History, Pin Slots, And Clone | Accepted (amended by 0148; extended by 0242) |
 | [0208](0208-the-claude-code-hook-install-edits-settings-json-in-place.md) | The Claude Code Hook Install Edits settings.json In Place | Accepted |
 
 ## History, pins, mux lifecycle, and worktrees

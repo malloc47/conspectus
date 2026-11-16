@@ -6,7 +6,9 @@ Accepted. Supersedes ADR 0087 and its 2026-10-12 amendment. Keeps every
 category and prohibition ADR 0087 numbered, under the same numbers, so
 "ADR 0087 category 3" in an older ADR reads the same against this one.
 Amended by [ADR 0148](0148-opt-in-transcript-search-index.md): prohibition 3
-gains one carve-out for the opt-in transcript search index.
+gains one carve-out for the opt-in transcript search index. Extended by
+[ADR 0242](0242-a-hook-trace-records-what-hook-write-receives-with-every-free-text-value-redacted.md):
+the operator-initiated hook trace is one more category 2 observation.
 
 ## Context
 

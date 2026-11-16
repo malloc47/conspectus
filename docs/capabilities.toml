@@ -19,7 +19,9 @@
 # - `read`: any command, including discovery, tables, exports, the TUI,
 #   the daemon, and `hook write`. Read-only, apart from rebuildable caches
 #   and observations: `hook write` records the hook spool and the
-#   live-state store under `$STATE` (ADR 0146, ADR 0204).
+#   live-state store under `$STATE` (ADR 0146, ADR 0204), and, with
+#   `CONSPECTUS_HOOK_TRACE` set, a redacted trace of each call under
+#   `$STATE/conspectus/hook-trace/` (ADR 0242).
 # - `act`: commands the operator runs to change something (pin, mux,
 #   rename, declared, worktree, launch and attach from the TUI).
 # - `hook`: `conspectus hook init` and `hook remove`.
@@ -166,7 +168,7 @@ act = ["SIGTERM", "SIGKILL", "0"]
 # when they are set (ADR 0239).
 # Creating the missing parents of an allowed path is allowed too.
 [writes]
-adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0143", "0121", "0146", "0204", "0239"]
+adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0143", "0121", "0146", "0204", "0239", "0242"]
 # Terminals and the null device, in every context.
 always = ["/dev/null", "/dev/tty", "/dev/pts/*"]
 # Rebuildable caches and observations.
