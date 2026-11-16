@@ -3,10 +3,10 @@ id: CSP-268
 title: >-
   Detect session live status (running / waiting / idle / error) and surface it
   as a row glyph and per-status header chip
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-25 02:00'
-updated_date: '2026-11-12 02:24'
+updated_date: '2026-11-16 16:27'
 labels:
   - t8
 milestone: m-13
@@ -50,4 +50,12 @@ Legacy ID: `T8-022`
 TUI framework update (2026-10-31, CSP-766): no `status_running`, `status_waiting`, `status_idle`, or `status_error` colors exist or are reserved. New colors are host roles registered with the framework theme (`ROLES` in `src/tui/theme.rs`, ADR 0153), set under `[tui.theme]`; a header chip is a `tuikit::chip::StatusChip` (ADR 0157); a row glyph is a cell of the view's column schema built in `src/tui/rows/` (ADR 0183), and a new glyph needs a vetted entry in the glyph table (`tuikit::glyphs` or the host's `src/tui/icons.rs`, ADR 0154).
 
 Superseded by milestone m-26 (Live Agent State, ADRs 0203 to 0207). The plan replaces this story's pane-delta detection with hook and plugin events (pane scraping conflicts with ADR 0028 and ADR 0086), keeps state in a `node_live` snapshot side table rather than a node property, and moves the glyph, header chip, and column decisions to the TUI stories CSP-823 to CSP-830. Close this task when CSP-823 lands.
+
+Closed 2026-11-16 during the live-state wrap-up; CSP-823 is Done.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Superseded by milestone m-26 (Live Agent State) and closed as its notes said, once CSP-823 landed. Live status is detected from harness hooks and plugins rather than pane deltas (ADRs 0203 to 0206), kept in the `node_live` and `pane_live` snapshot tables rather than a node property, and shown in the TUI as a one-cell mark after the age with mux rollups, header and group-header counts, and a jump key (ADRs 0209 to 0216). Nothing of this story's original approach was built.
+<!-- SECTION:FINAL_SUMMARY:END -->
