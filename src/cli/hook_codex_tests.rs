@@ -86,10 +86,21 @@ fn groups(text: &str, event: &str) -> Vec<toml::Value> {
         .clone()
 }
 
-/// Conspectus's group as an install writes it.
-fn own_group(command: &str) -> toml::Value {
+/// The timeout an install gives `event`: Codex keeps 3 s at most for the
+/// events that run as a session closes.
+fn timeout_of(event: &str) -> u32 {
+    if matches!(event, "SessionEnd" | "Interrupt") {
+        3
+    } else {
+        5
+    }
+}
+
+/// Conspectus's group for `event` as an install writes it.
+fn own_group(command: &str, event: &str) -> toml::Value {
+    let timeout = timeout_of(event);
     toml::Value::Table(meaning(&format!(
-        "hooks = [{{ type = \"command\", command = \"{command}\", timeout = 5 }}]"
+        "hooks = [{{ type = \"command\", command = \"{command}\", timeout = {timeout} }}]"
     )))
 }
 
@@ -108,7 +119,8 @@ fn a_fresh_install_writes_one_array_of_tables_group_per_event() {
         .map(|event| {
             format!(
                 "[[hooks.{event}]]\nhooks = [{{ type = \"command\", command = \"{DEFAULT}\", \
-                 timeout = 5 }}]\n"
+                 timeout = {} }}]\n",
+                timeout_of(event)
             )
         })
         .collect();
@@ -199,7 +211,7 @@ fn every_case_keeps_the_operators_values_and_puts_conspectuss_group_after_theirs
                 let operator_groups = value.as_array().expect("groups");
                 let groups = after_hooks[key].as_array().expect("groups");
                 assert_eq!(&groups[..operator_groups.len()], &operator_groups[..]);
-                assert_eq!(groups[operator_groups.len()..], [own_group(COMMAND)]);
+                assert_eq!(groups[operator_groups.len()..], [own_group(COMMAND, key)]);
             } else {
                 assert_eq!(&after_hooks[key], value, "{name}: hooks.{key}");
             }
@@ -208,7 +220,7 @@ fn every_case_keeps_the_operators_values_and_puts_conspectuss_group_after_theirs
             if !before_hooks.contains_key(event) {
                 assert_eq!(
                     after_hooks[event].as_array().expect("groups"),
-                    &vec![own_group(COMMAND)]
+                    &vec![own_group(COMMAND, event)]
                 );
             }
         }
@@ -263,7 +275,7 @@ fn an_inline_hooks_table_stays_inline() {
             toml::Value::Table(meaning(
                 "matcher = \"startup\"\nhooks = [{ type = \"command\", command = \"echo started\" }]"
             )),
-            own_group(COMMAND),
+            own_group(COMMAND, "SessionStart"),
         ]
     );
 }
@@ -332,7 +344,7 @@ fn an_older_install_is_upgraded_in_place_and_new_entries_run_its_command() {
     for event in &HOOK_EVENTS[1..] {
         assert_eq!(
             groups(&text, event),
-            vec![own_group("/old/bin/conspectus hook write codex")]
+            vec![own_group("/old/bin/conspectus hook write codex", event)]
         );
     }
     assert!(!text.contains("[[hooks"), "{text}");
@@ -484,7 +496,11 @@ fn a_matcher_or_a_missing_timeout_makes_a_group_outdated_until_install_fixes_it(
         let session_start = groups(&fixed, "SessionStart");
         assert_eq!(session_start.len(), 1, "{group}");
         if !current {
-            assert_eq!(session_start[0], own_group(COMMAND), "{group}");
+            assert_eq!(
+                session_start[0],
+                own_group(COMMAND, "SessionStart"),
+                "{group}"
+            );
         }
     }
     // A timeout the operator chose is theirs to keep.
@@ -643,5 +659,63 @@ fn the_review_hint_names_the_hooks_command_and_cites_nothing() {
     assert!(MOVED_NOTE.contains("/hooks"));
     for text in [REVIEW_HINT, MOVED_NOTE] {
         assert!(!text.contains("ADR") && !text.contains("docs/"), "{text}");
+    }
+}
+
+#[test]
+fn the_events_that_run_as_a_session_closes_keep_a_timeout_codex_accepts() {
+    // `hook init` once wrote 5 s for every event. Codex keeps 3 s at most
+    // for these two, clamps a longer one, and warns on every start.
+    for (event, written, current, kept) in [
+        ("SessionEnd", "5", false, 3),
+        ("Interrupt", "5", false, 3),
+        ("SessionEnd", "3", true, 3),
+        ("Interrupt", "2.5", true, 0),
+        ("SessionStart", "5", true, 5),
+        ("SessionStart", "30", true, 30),
+    ] {
+        let text = format!(
+            "[[hooks.{event}]]\nhooks = [{{ type = \"command\", command = \"/old/bin/conspectus hook write codex\", timeout = {written} }}]\n"
+        );
+        let index = HOOK_EVENTS
+            .iter()
+            .position(|name| *name == event)
+            .expect("a subscribed event");
+        let coverage = coverage_of(&parse(&text))[index];
+        assert_eq!(
+            coverage,
+            if current {
+                EventCoverage::Installed
+            } else {
+                EventCoverage::Outdated
+            },
+            "{event} {written}"
+        );
+        let (fixed, report) = installed(&text, None);
+        assert_eq!(
+            report.updated,
+            usize::from(!current),
+            "{event} {written}: {fixed}"
+        );
+        let timeout = &groups(&fixed, event)[0]["hooks"][0]["timeout"];
+        if kept > 0 {
+            assert_eq!(timeout.as_integer(), Some(kept), "{event} {written}");
+        } else {
+            // An operator's own shorter timeout is theirs to keep.
+            assert_eq!(timeout.as_float(), Some(2.5), "{event} {written}");
+        }
+        assert_eq!(coverage_of(&parse(&fixed))[index], EventCoverage::Installed);
+    }
+}
+
+#[test]
+fn a_fresh_install_gives_the_closing_events_three_seconds_and_the_rest_five() {
+    let (text, _) = installed("", None);
+    for event in HOOK_EVENTS {
+        assert_eq!(
+            groups(&text, event)[0]["hooks"][0]["timeout"].as_integer(),
+            Some(i64::from(timeout_of(event))),
+            "{event}"
+        );
     }
 }

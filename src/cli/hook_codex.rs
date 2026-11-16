@@ -5,7 +5,8 @@
 //! event a list of matcher groups, each with a list of handlers.
 //! Conspectus owns one group per subscribed event ([`HOOK_EVENTS`]), with
 //! no matcher and one command handler that runs `conspectus hook write
-//! codex` with a 5 s timeout. A handler is Conspectus's when it is a
+//! codex` with a 5 s timeout (3 s for the events that run as a session
+//! closes, the longest Codex keeps). A handler is Conspectus's when it is a
 //! command hook whose command contains `hook write codex`, and a group
 //! is Conspectus's when every handler in it is. Groups of the operator's
 //! are never edited, even one holding a Conspectus handler beside their
@@ -53,6 +54,21 @@ use crate::discovery::harness::codex::HOOK_EVENTS;
 
 /// The handler timeout, as the TOML integer Codex reads in seconds.
 const TIMEOUT_S: i64 = HOOK_TIMEOUT_S as i64;
+
+/// The longest timeout Codex keeps for a hook of these events, which run
+/// while the session is closing: it clamps a longer one to 3 s and warns
+/// on every start (Codex 0.167 recorded).
+const CLOSING_TIMEOUT_S: i64 = 3;
+const CLOSING_EVENTS: [&str; 2] = ["SessionEnd", "Interrupt"];
+
+/// The timeout an install gives `event`'s handler.
+fn timeout_for(event: &str) -> i64 {
+    if CLOSING_EVENTS.contains(&event) {
+        CLOSING_TIMEOUT_S
+    } else {
+        TIMEOUT_S
+    }
+}
 
 /// What `hook init codex` says after every run: current Codex runs a hook
 /// it does not manage only once the operator has trusted it, and every
@@ -132,7 +148,7 @@ pub(super) fn ensure_codex_hook(
     let mut install = CodexInstall::default();
     for event in HOOK_EVENTS {
         let Some(list) = hooks.get_mut(event) else {
-            hooks.insert(event, new_list(inline, &template));
+            hooks.insert(event, new_list(inline, &template, event));
             install.added += 1;
             continue;
         };
@@ -146,11 +162,11 @@ pub(super) fn ensure_codex_hook(
                 .into_iter()
                 .nth(index)
                 .expect("the group found above");
-            if update_group(group, command) {
+            if update_group(group, command, event) {
                 install.updated += 1;
             }
         } else {
-            push_group(list, &template);
+            push_group(list, &template, event);
             install.added += 1;
         }
     }
@@ -179,7 +195,7 @@ pub(super) fn codex_hook_coverage(document: &DocumentMut) -> Vec<(&'static str, 
                 .unwrap_or_default();
             let coverage = if groups
                 .iter()
-                .any(|group| is_own_group(*group) && is_current(*group))
+                .any(|group| is_own_group(*group) && is_current(*group, event))
             {
                 EventCoverage::Installed
             } else if groups
@@ -422,16 +438,30 @@ fn matcher_covers(group: &dyn TableLike) -> bool {
         .is_none_or(|matcher| matcher.as_str() == Some(""))
 }
 
-fn has_timeout(handler: &dyn TableLike) -> bool {
+/// Whether `handler` has a timeout `event` keeps: a positive one, and for
+/// the events that run as a session closes, none past the longest Codex
+/// accepts.
+fn timeout_fits(handler: &dyn TableLike, event: &str) -> bool {
+    let cap = if CLOSING_EVENTS.contains(&event) {
+        CLOSING_TIMEOUT_S as f64
+    } else {
+        f64::INFINITY
+    };
     handler.get("timeout").is_some_and(|timeout| {
-        timeout.as_integer().is_some_and(|seconds| seconds > 0)
-            || timeout.as_float().is_some_and(|seconds| seconds > 0.0)
+        timeout
+            .as_integer()
+            .map(|seconds| seconds as f64)
+            .or_else(|| timeout.as_float())
+            .is_some_and(|seconds| seconds > 0.0 && seconds <= cap)
     })
 }
 
-/// Whether `group` is as an install leaves it.
-fn is_current(group: &dyn TableLike) -> bool {
-    matcher_covers(group) && handlers_of(group).into_iter().all(has_timeout)
+/// Whether `group` of `event` is as an install leaves it.
+fn is_current(group: &dyn TableLike, event: &str) -> bool {
+    matcher_covers(group)
+        && handlers_of(group)
+            .into_iter()
+            .all(|handler| timeout_fits(handler, event))
 }
 
 /// The command of the first Conspectus handler in install order, which
@@ -490,58 +520,58 @@ fn new_lists_inline(hooks: Option<&Item>) -> bool {
 /// Conspectus's handler. It runs synchronously, Codex's default: an
 /// asynchronous hook may finish after the next event's, and the store
 /// relies on a session's events arriving in order.
-fn handler(command: &str) -> Value {
+fn handler(command: &str, event: &str) -> Value {
     let mut handler = InlineTable::new();
     handler.insert("type", Value::from("command"));
     handler.insert("command", Value::from(command));
-    handler.insert("timeout", Value::from(TIMEOUT_S));
+    handler.insert("timeout", Value::from(timeout_for(event)));
     Value::InlineTable(handler)
 }
 
-fn handlers(command: &str) -> Value {
+fn handlers(command: &str, event: &str) -> Value {
     let mut handlers = Array::new();
-    handlers.push(handler(command));
+    handlers.push(handler(command, event));
     Value::Array(handlers)
 }
 
 /// Conspectus's group as an element of an array of tables.
-fn group_table(command: &str) -> Table {
+fn group_table(command: &str, event: &str) -> Table {
     let mut group = Table::new();
-    group.insert("hooks", Item::Value(handlers(command)));
+    group.insert("hooks", Item::Value(handlers(command, event)));
     group
 }
 
 /// Conspectus's group as an element of an inline array.
-fn group_inline(command: &str) -> Value {
+fn group_inline(command: &str, event: &str) -> Value {
     let mut group = InlineTable::new();
-    group.insert("hooks", handlers(command));
+    group.insert("hooks", handlers(command, event));
     Value::InlineTable(group)
 }
 
-fn new_list(inline: bool, command: &str) -> Item {
+fn new_list(inline: bool, command: &str, event: &str) -> Item {
     if inline {
         let mut list = Array::new();
-        list.push(group_inline(command));
+        list.push(group_inline(command, event));
         Item::Value(Value::Array(list))
     } else {
         let mut list = ArrayOfTables::new();
-        list.push(group_table(command));
+        list.push(group_table(command, event));
         Item::ArrayOfTables(list)
     }
 }
 
-fn push_group(list: &mut Item, command: &str) {
+fn push_group(list: &mut Item, command: &str, event: &str) {
     match list {
-        Item::ArrayOfTables(array) => array.push(group_table(command)),
-        Item::Value(Value::Array(array)) => array.push(group_inline(command)),
+        Item::ArrayOfTables(array) => array.push(group_table(command, event)),
+        Item::Value(Value::Array(array)) => array.push(group_inline(command, event)),
         _ => {}
     }
 }
 
-/// Bring Conspectus's `group` up to date: no matcher, a timeout on each
-/// handler, and, when `rewrite` is given, the command it names. Returns
-/// whether anything changed.
-fn update_group(group: &mut dyn TableLike, rewrite: Option<&str>) -> bool {
+/// Bring Conspectus's `group` of `event` up to date: no matcher, a timeout
+/// on each handler that `event` keeps, and, when `rewrite` is given, the
+/// command it names. Returns whether anything changed.
+fn update_group(group: &mut dyn TableLike, rewrite: Option<&str>, event: &str) -> bool {
     let mut changed = false;
     if !matcher_covers(group) {
         group.remove("matcher");
@@ -556,8 +586,8 @@ fn update_group(group: &mut dyn TableLike, rewrite: Option<&str>) -> bool {
                 handler.insert("command", toml_edit::value(command));
                 handler_changed = true;
             }
-            if !has_timeout(&*handler) {
-                handler.insert("timeout", toml_edit::value(TIMEOUT_S));
+            if !timeout_fits(&*handler, event) {
+                handler.insert("timeout", toml_edit::value(timeout_for(event)));
                 handler_changed = true;
             }
             if handler_changed {
