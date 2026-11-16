@@ -304,3 +304,25 @@ fn snapshots_are_written_through_the_same_lock() {
     assert_eq!(entry.observation.detail, Some(D::Question));
     assert_eq!(entry.observation.since_ms, 900);
 }
+
+#[test]
+fn every_outcome_has_its_own_word() {
+    let words = [
+        Applied::Written { rev: 7 },
+        Applied::Unchanged,
+        Applied::Dropped,
+        Applied::Rejected,
+        Applied::NewerSchema,
+    ]
+    .map(Applied::word);
+    assert_eq!(
+        words,
+        [
+            "written",
+            "unchanged",
+            "dropped",
+            "rejected",
+            "newer_schema"
+        ]
+    );
+}

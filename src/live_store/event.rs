@@ -282,6 +282,58 @@ impl LiveContext {
 }
 
 impl LiveEventKind {
+    /// The kind's name for a person reading a trace: the variant in snake
+    /// case, then a qualifier from a closed set where the variant has one
+    /// (`wait_started:permission`, `turn_ended:interrupted`,
+    /// `turn_failed:auth`, `background_work:2`), then `@child` when it
+    /// names a child agent. Never an id or any text.
+    pub fn label(&self) -> String {
+        let child = |agent: &Option<String>| if agent.is_some() { "@child" } else { "" };
+        match self {
+            LiveEventKind::SessionStarted { after_compaction } => {
+                let qualifier = if *after_compaction {
+                    ":after_compaction"
+                } else {
+                    ""
+                };
+                format!("session_started{qualifier}")
+            }
+            LiveEventKind::TurnStarted => "turn_started".to_string(),
+            LiveEventKind::Retrying { rate_limited } => {
+                let qualifier = if *rate_limited { ":rate_limited" } else { "" };
+                format!("retrying{qualifier}")
+            }
+            LiveEventKind::WaitStarted { agent, kind } => {
+                format!("wait_started:{}{}", kind.detail().name(), child(agent))
+            }
+            LiveEventKind::WaitEnded { agent } => format!("wait_ended{}", child(agent)),
+            LiveEventKind::WaitConfirmed { kind } => {
+                format!("wait_confirmed:{}", kind.detail().name())
+            }
+            LiveEventKind::ToolFinished { agent } => format!("tool_finished{}", child(agent)),
+            LiveEventKind::SubagentStarted { .. } => "subagent_started".to_string(),
+            LiveEventKind::SubagentStopped { .. } => "subagent_stopped".to_string(),
+            LiveEventKind::BackgroundWork { subagents } => {
+                format!("background_work:{}", subagents.len())
+            }
+            LiveEventKind::CompactionStarted => "compaction_started".to_string(),
+            LiveEventKind::CompactionEnded => "compaction_ended".to_string(),
+            LiveEventKind::TurnEnded { interrupted } => {
+                let how = if *interrupted {
+                    "interrupted"
+                } else {
+                    "finished"
+                };
+                format!("turn_ended:{how}")
+            }
+            LiveEventKind::TurnFailed { class } => {
+                format!("turn_failed:{}", class.detail().name())
+            }
+            LiveEventKind::IdleConfirmed => "idle_confirmed".to_string(),
+            LiveEventKind::SessionEnded => "session_ended".to_string(),
+        }
+    }
+
     /// Whether every id the kind carries looks like one.
     fn plausible(&self) -> bool {
         let agent = |agent: &Option<String>| agent.as_deref().is_none_or(plausible_id);
@@ -334,3 +386,7 @@ impl LiveSnapshot {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "event_tests.rs"]
+mod tests;

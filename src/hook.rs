@@ -1,7 +1,10 @@
 //! Hook observation storage and payload conversion.
 //!
 //! Harness hooks call `conspectus hook write ...`; this module owns the
-//! provider-neutral observation schema and daemonless spool.
+//! provider-neutral observation schema and daemonless spool, the parser
+//! that reads a payload against an adapter's fields ([`payload`]), and the
+//! operator's trace of what the writer received ([`trace`], with its
+//! redaction in [`redact`]).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,6 +14,8 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 pub mod payload;
+pub mod redact;
+pub mod trace;
 
 pub const SCHEMA_VERSION: u16 = 1;
 pub const LATEST_FILENAME: &str = "hooks-latest.json";

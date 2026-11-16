@@ -44,6 +44,20 @@ pub enum Applied {
     NewerSchema,
 }
 
+impl Applied {
+    /// The outcome as a word, for a trace: `written`, `unchanged`,
+    /// `dropped`, `rejected`, or `newer_schema`.
+    pub fn word(self) -> &'static str {
+        match self {
+            Applied::Written { .. } => "written",
+            Applied::Unchanged => "unchanged",
+            Applied::Dropped => "dropped",
+            Applied::Rejected => "rejected",
+            Applied::NewerSchema => "newer_schema",
+        }
+    }
+}
+
 /// The live-state store in a state directory. Construct one only where
 /// live state may be read or written; runs without a state home have
 /// none.
