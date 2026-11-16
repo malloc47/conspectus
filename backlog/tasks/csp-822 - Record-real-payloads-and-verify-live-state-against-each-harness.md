@@ -1,10 +1,11 @@
 ---
 id: CSP-822
 title: Record real payloads and verify live state against each harness
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-13 06:06'
+updated_date: '2026-11-16 20:02'
 labels:
   - live-state
   - ls-docs
@@ -51,6 +52,16 @@ Blockers: The four harness stories, and the operator running real sessions.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Record real sessions of Claude Code 2.1.322, Codex 0.167.0, and Pi 1.5.2 in a private tmux server with scratch configuration, a scratch state directory, and the hook trace of ADR 0242 on (OpenCode skipped by the operator).
+2. Read each recording against the screen, the pane title, and `claude agents --json`, and against the reducers and the notes' manual checks.
+3. Fix what a recording contradicts (ADR 0243): the Codex app server as a background process, the Codex closing-event timeouts, the Pi extension's last report.
+4. Keep the redacted traces as fixtures, add the real titles and background listings to their tests, and update each note's appendix, the fixture READMEs, and the operations guide.
+5. Run the pre-main gate, land on main by fast-forward, and answer every manual check in the final summary.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

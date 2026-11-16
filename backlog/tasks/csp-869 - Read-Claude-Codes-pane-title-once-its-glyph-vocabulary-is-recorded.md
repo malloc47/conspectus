@@ -4,6 +4,7 @@ title: Read Claude Code's pane title once its glyph vocabulary is recorded
 status: To Do
 assignee: []
 created_date: '2026-11-13 04:56'
+updated_date: '2026-11-16 20:02'
 labels:
   - live-state
   - ls-policy
@@ -33,3 +34,9 @@ Claude Code prefixes its terminal title with a status glyph in terminals without
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-11-16 (CSP-822 recording, Claude Code 2.1.322 in tmux 3.7c): the pane title carries no state. It reads `✳ Claude Code` and then `✳ <session name>`, and does not change while the session is busy, waiting, or idle. There is no glyph vocabulary to read, so this task has no work left unless a later version adds one.
+<!-- SECTION:NOTES:END -->

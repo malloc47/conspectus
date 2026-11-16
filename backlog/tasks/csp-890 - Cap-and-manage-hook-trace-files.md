@@ -4,11 +4,13 @@ title: Cap and manage hook trace files
 status: To Do
 assignee: []
 created_date: '2026-11-16 18:02'
+updated_date: '2026-11-16 20:02'
 labels:
   - live-state
   - ls-emit
 milestone: m-26
-dependencies: []
+dependencies:
+  - CSP-887
 priority: low
 type: enhancement
 ordinal: 966000

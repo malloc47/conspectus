@@ -4,6 +4,7 @@ title: 'Pi: send the running Pi version with live state'
 status: To Do
 assignee: []
 created_date: '2026-11-12 12:06'
+updated_date: '2026-11-16 20:02'
 labels:
   - live-state
   - ls-emit
@@ -33,3 +34,9 @@ Pi's live state degrades on older versions: before 0.84.4 no dialog event fires,
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-11-16 (CSP-822 recording, Pi 1.5.2): not checked whether Pi exposes its version to an extension; the recording did not look. The extension loads and sends its own pid and start time.
+<!-- SECTION:NOTES:END -->

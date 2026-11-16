@@ -6,12 +6,13 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-16 18:02'
+updated_date: '2026-11-16 20:02'
 labels:
   - live-state
   - ls-emit
 milestone: m-26
 dependencies:
-  - CSP-822
+  - CSP-887
 priority: medium
 type: enhancement
 ordinal: 965000

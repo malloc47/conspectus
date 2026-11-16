@@ -4,12 +4,13 @@ title: Keep the real-session recording driver in the repository as a manual dev 
 status: To Do
 assignee: []
 created_date: '2026-11-16 18:01'
+updated_date: '2026-11-16 20:02'
 labels:
   - live-state
   - ls-emit
 milestone: m-26
 dependencies:
-  - CSP-822
+  - CSP-887
 priority: medium
 type: task
 ordinal: 964000
