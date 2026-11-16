@@ -1,11 +1,11 @@
 ---
 id: CSP-822
 title: Record real payloads and verify live state against each harness
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-12 01:47'
-updated_date: '2026-11-16 20:02'
+updated_date: '2026-11-16 20:17'
 labels:
   - live-state
   - ls-docs
@@ -42,15 +42,15 @@ Blockers: The four harness stories, and the operator running real sessions.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every manual check in the four harness notes is answered or explicitly deferred
-- [ ] #2 Recorded, redacted payloads replace the synthetic fixtures where they differ
-- [ ] #3 Reducers match the recorded sequences
+- [x] #1 Every manual check in the four harness notes is answered or explicitly deferred
+- [x] #2 Recorded, redacted payloads replace the synthetic fixtures where they differ
+- [x] #3 Reducers match the recorded sequences
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -92,3 +92,17 @@ created: 2026-11-13 04:56
 When recording Codex, also record its pane titles (`tmux display-message -p '#{pane_title}'` in the private server): idle, working (spinner frames), waiting (both `[ ! ]` and `[ . ] Action Required` phases), with animations off, and with the microphone dot. Compare them with the golden table in `src/discovery/harness/codex_title_tests.rs` (ADR 0217); the strings there come from Codex's source, not a recording.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Recorded real sessions of Claude Code 2.1.322, Codex 0.167.0, and Pi 1.5.2 on 2026-11-16, in a private tmux server with scratch configuration and state directories and the hook trace of ADR 0242 on. The operator left OpenCode out: its checks (the notes' item 5, CSP-816's list, the 1.x and 2.x event shapes) are deferred by the operator, and `tests/fixtures/hooks/opencode-live/` stays synthetic.
+
+Changed (ADR 0243): `codex app-server` is a background process, so the hooks it runs record no pane (a second session's hook had named the first session's pane, with the app server's pid); `hook init codex` writes 3 s for `SessionEnd` and `Interrupt`, which Codex clamps to 3 s and warns about at every start (a real run against a rewritten config showed the warnings gone and no new review asked); the Pi extension's report that a session ended waits for the writer, since Pi is a Bun executable and a quit or closed pane gave the writer an empty stdin (a real Pi now reports `exited` for both). The Claude Code reducers needed no change; the synthetic sequences were the real ones. Fixtures: 21 redacted traces in `tests/fixtures/hooks/recorded/`, the real Codex titles in `codex_title_tests.rs`, three real background listings of `claude agents --json` with a parser test, and the synthetic Codex plan-mode Stop fixtures now carry `permission_mode` `default` as recorded.
+
+Answers. Claude Code: `PermissionRequest` fires for `AskUserQuestion` and `ExitPlanMode`, each after its `PreToolUse`; a denied prompt, a rejected plan, and an Esc interrupt fire no hook, and no `idle_prompt` follows an interrupt (77 s watched); `claude agents --json` lists `idle` for all three and `busy` during an approved tool; compaction order is `PreCompact`, `SessionStart` (`compact`), `PostCompact`; a closed pane fires `SessionEnd` `other`, `kill -9` none; subagent events carry the parent's `session_id` and their own `agent_id`; `StopFailure` is `authentication_failed`, `rate_limit`, `server_error` (500 and 529), or `unknown` (`overloaded` not seen); the pane title carries no state (so CSP-869 has no vocabulary to read); `claude agents --json` opens no connection with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, starts no supervisor for interactive sessions, costs 0.2 to 0.3 s and about 125 MB, and writes only to an incomplete configuration; `pid` is the claude process. Codex: hooks are silent until trusted, with a startup review dialog and `/hooks`; trust is at `hooks.state."<config path>:<event>:<group>:<hook>"` and removing an earlier group renumbers and asks again; `SessionStart` comes with the first prompt; an accepted approval fires nothing until `PostToolUse` (the title shows the spinner meanwhile), a declined one fires `Interrupt`; `SubagentStop` is per child, and a child's `PostToolUse` and `PermissionRequest` carry its `agent_id`; `/clear` fires `SessionStart` (`clear`) and the old session's `SessionEnd` comes about 56 s later; plan mode sends `permission_mode` `default`, and its approval choice shows in no hook and no title; `request_user_input` fires no installed hook while open and the title reads `Action Required`; pane titles are idle `<project>`, working `<spinner> [<thread> | ]<project>`, waiting `[ ! ]`/`[ . ] Action Required | <thread> | <project>`, matching the golden table's parser. Pi: the extension loads and ignores `testOnly`; `ctx.isIdle()` is true at start; abort reads `ready/interrupted`; `/reload` keeps the session and `/new` ends it; the attribution record carries Pi's own pid; a failed compaction of a too-small session reads `error`.
+
+Not exercised, so still open: Claude Code's transcript fields, `~/.claude/sessions/`, `CLAUDE_CODE_VERSION`, split-pane teammates, exec-form entries on old versions, `UserPromptSubmit` stdout, a `blocked`, `failed`, or `stopped` background listing; Codex animations off, the microphone dot, `thread_spawn_edges.status`, and `PreToolUse` coverage of `request_user_input`; Pi permission gates, the `subagent` tool, a 429, threshold and overflow compaction, and whether Pi exposes its version (CSP-851).
+
+Verified with `just check`, `cargo test --workspace --all-targets --all-features`, the separation rehearsal, `just plugins`, nextest with no `conspectus` on PATH, and `backlog doctor` on the branch, plus the real Pi and Codex runs above.
+<!-- SECTION:FINAL_SUMMARY:END -->
