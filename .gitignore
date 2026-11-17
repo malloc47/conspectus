@@ -3,3 +3,4 @@
 /graph-snapshot.json
 /plugins/*/node_modules/
 /plugins/*/dist/
+/record-out/

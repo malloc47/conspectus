@@ -77,6 +77,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0240](0240-hook-commands-run-a-conspectus-path-that-outlives-an-upgrade.md) | Hook Commands Run A `conspectus` Path That Outlives An Upgrade | Accepted |
 | [0242](0242-a-hook-trace-records-what-hook-write-receives-with-every-free-text-value-redacted.md) | A Hook Trace Records What `hook write` Receives, With Every Free-Text Value Redacted | Accepted |
 | [0243](0243-real-sessions-corrected-three-assumptions-the-hook-writers-made.md) | Real Sessions Corrected Three Assumptions The Hook Writers Made | Accepted |
+| [0244](0244-a-manual-driver-records-real-harness-sessions.md) | A Manual Driver Records Real Harness Sessions | Accepted |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |

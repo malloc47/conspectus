@@ -154,6 +154,15 @@ check: fmt clippy nextest tuikit-features-if-changed doc diff-check
 scratch *args='shell':
     scripts/scratch-home.sh {{args}}
 
+# Record real sessions of a harness (claude-code, codex, or pi) with the hook
+# trace on, to check the live-state reducers against what the harness really
+# sends. MANUAL: it spends the model quota of the account the harness is
+# signed in to, so `check` never runs it. It prints the quota and the
+# directories first and asks you to type `record`; add `--dry-run` to see
+# that and stop (scripts/record/README.md, ADR 0244).
+record harness *args:
+    scripts/record/run.sh {{args}} {{harness}}
+
 # Re-render the example frames in docs/tui-columns.md after an intended
 # change to the left panel; edit the document's prose by hand.
 tui-columns:
