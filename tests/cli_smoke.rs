@@ -2225,6 +2225,17 @@ fn hook_init_codex_project_scope_leaves_the_user_config_alone() {
     assert_eq!(fs::read_to_string(&config).expect("read"), "");
 }
 
+/// The version the Pi extension this build installs declares: the number a
+/// bump changes, read from the source so a bump needs no test edit.
+fn pi_extension_version() -> String {
+    const SOURCE: &str = include_str!("../plugins/pi-hook/conspectus-hook.ts");
+    SOURCE
+        .split_once("const EXTENSION_VERSION = \"")
+        .and_then(|(_, rest)| rest.split_once('"'))
+        .map(|(version, _)| version.to_string())
+        .expect("the extension declares its version")
+}
+
 #[test]
 fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     let home = tempfile::TempDir::new().expect("home temp");
@@ -2249,7 +2260,10 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     let body = fs::read_to_string(&installed).expect("installed extension");
     assert!(body.starts_with("// conspectus-hook:"));
     assert!(body.contains(r#"["hook", "write", "pi"]"#));
-    assert!(body.contains(r#"const EXTENSION_VERSION = "3";"#));
+    assert!(body.contains(&format!(
+        "const EXTENSION_VERSION = \"{}\";",
+        pi_extension_version()
+    )));
     hook(&["status", "pi"])
         .stdout(predicate::str::contains("installed\tpi"))
         .stdout(predicate::str::contains("no-events\tpi"))
@@ -2277,9 +2291,10 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     hook(&["status", "pi"])
         .stdout(predicate::str::contains("outdated\tpi"))
         .stdout(predicate::str::contains("off\tpi"))
-        .stderr(predicate::str::contains(
-            "is version 1 and this build installs version 3",
-        ));
+        .stderr(predicate::str::contains(&format!(
+            "is version 1 and this build installs version {}",
+            pi_extension_version()
+        )));
     hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
     assert_eq!(fs::read_to_string(&installed).expect("reinstalled"), body);
     // Version 2 reports live state but reads no subagent tool names.
@@ -2291,9 +2306,10 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     hook(&["status", "pi"])
         .stdout(predicate::str::contains("outdated\tpi"))
         .stdout(predicate::str::contains("no-events\tpi"))
-        .stderr(predicate::str::contains(
-            "is version 2 and this build installs version 3",
-        ))
+        .stderr(predicate::str::contains(&format!(
+            "is version 2 and this build installs version {}",
+            pi_extension_version()
+        )))
         .stderr(predicate::str::contains("no live state").not());
     hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
     // A newer version than this build's still reports live state.
