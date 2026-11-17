@@ -377,25 +377,28 @@ state has its own shape, so it reads without color:
   dimmed. A mux's mark dims when every agent in the state it shows is
   quiet, and stays bright while any of them is fresh, so a running mux
   whose agents have all gone silent recedes like they do.
-- **Unseen** finished turns draw the same `›` bold, until you have looked
-  at them; then it is plain. For an agent in a mux, looking is attaching
-  a tmux client to that mux after the turn ended, through Conspectus or
-  not (the mark turns plain at the refresh that lists the attach), or,
-  when the TUI runs inside tmux, watching the mux in a client that
-  stayed on it and switching back to the TUI's session: the mark turns
-  plain as you arrive, whether the turn ended before you attached or
-  while you watched, and a turn that ended after you left the mux stays
-  bold. With two tmux clients on the TUI's own session, tmux may report
-  the other client's last session, so the mark may stay bold until the
-  next attach. For a
-  session with no mux, it is resting the cursor on one of its rows, in
-  any view, for a second; scrolling past does not count. A turn you have
-  seen stays seen until the agent finishes another, but only in this
-  TUI: nothing is written, so after a restart the finished turns of
-  sessions with no mux read unseen again. A mux's `›` is bold while any
-  of its ready agents' turns is unseen, and the detail pane's `state`
-  says `unseen` or `seen`. On the cursor row, which is bold anyway, only
-  the detail pane tells them apart.
+- **Unread** stops draw their mark bold, until you have read them; then it
+  is plain. A stop is an agent that has stopped to wait for you (`!`),
+  finished a turn (`›`), or failed (`×`). For an agent in a mux, reading is
+  attaching a tmux client to that mux after the stop began, through
+  Conspectus or not (the mark turns plain at the refresh that lists the
+  attach), or, when the TUI runs inside tmux, watching the mux in a client
+  that stayed on it and switching back to the TUI's session: the mark turns
+  plain as you arrive, whether the stop began before you attached or while
+  you watched, and a stop that began after you left the mux stays bold. With
+  two tmux clients on the TUI's own session, tmux may report the other
+  client's last session, so the mark may stay bold until the next attach.
+  For a session with no mux, it is resting the cursor on one of its rows,
+  in any view, for a second; scrolling past does not count. You can also
+  mark what you have not looked at as read (`c` for the selected row's
+  agents, `C` for every unread mark, both in the row menu). A stop you have
+  read stays read until the agent stops again, and for an agent session
+  the TUI keeps that in its state file, so a restart does not bring the
+  marks back; the agents of panes that no session matches are remembered
+  in memory only. A mux's mark is bold while any agent counted in the
+  state it shows is unread, and the detail pane's `state` says `unread` or
+  `read`. On the cursor row, which is bold anyway, only the detail pane
+  tells them apart.
 - **A mux** shows the state of its agents that needs you first: waiting,
   then error, then ready, then working, then the rest. Under a mux with
   several agents, each agent's row shows its own mark.
@@ -425,7 +428,7 @@ state has its own shape, so it reads without color:
   says which mux a session runs in.
 - **The detail pane** spells it out. A session with live state lists,
   after `status`: `state`, its row's mark and then the state and detail
-  in words (`! waiting · permission`, `› ready · finished · unseen`, `?
+  in words (`! waiting · permission`, `› ready · finished · unread`, `?
   unknown · stale`); `since`, when that state began (`5m ago`); `source`, what
   reported it (`hook`, or `pane_title` for [Codex's pane
   title](#codexs-pane-title)); `evidence`, `fresh`, `quiet`, or `stale`, the
@@ -3043,7 +3046,8 @@ the sort and preview settings, and for each view its filter, grouping,
 expanded rows, and selected row. The file is rebuildable cache, not
 authoritative state: losing it costs nothing more than the next
 `conspectus tui` starting in the configured default view, with each
-view on its default filter, grouping, and folds.
+view on its default filter, grouping, and folds, and the stops you had
+read reading unread again.
 
 What the file holds:
 
@@ -3056,6 +3060,7 @@ What the file holds:
   "preview_wrap": "smart",
   "session_preview": "transcript",
   "row_keys": 1,
+  "read_marks": { "agent_session:claude-code:/home/me/.claude:4f1c…": 1794857849205 },
   "view_states": {
     "sessions": {
       "filter": { "harness": { "any": ["claude-code"] } },
@@ -3088,6 +3093,13 @@ What the file holds:
   it, the top-level one first). The Search view keeps neither `expanded` nor
   `selected`; nothing keeps the right pane's drill or the preview's
   scroll.
+- `read_marks` holds the stops you have read: for each agent session, by
+  node id, when the latest stop you read began (Unix milliseconds). A stop
+  that began later reads unread again ([live state in the TUI](#live-state-in-the-tui)
+  explains what counts as reading one). Each write keeps the marks another
+  TUI wrote (the later stop wins) and the newest 2,000; an entry that is
+  not a number is skipped. A run with `--no-resume-view` reads the marks
+  and writes nothing.
 - Rows are named by keys: the row's kind (`group`, `session`, `mux`,
   `pr`, `history`, `pin`, `nested`, `bucket`, `remote`, `synthetic`), a
   colon, and the node id, record id, pin id, label, or slug that names
@@ -3211,6 +3223,8 @@ of the TUI. The sections above describe the current behavior in full;
 - **`o` opens the right pane's cursor value from either pane**, and the
   `?` page, generated from the keys themselves, lists every key on a row
   of its own.
+- **`c` marks the selected row's agents read and `C` clears every unread
+  mark**, in every view; both are in the row menu (`.`) while they apply.
 
 ### Keys on the right pane
 

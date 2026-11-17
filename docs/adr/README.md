@@ -78,6 +78,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0242](0242-a-hook-trace-records-what-hook-write-receives-with-every-free-text-value-redacted.md) | A Hook Trace Records What `hook write` Receives, With Every Free-Text Value Redacted | Accepted |
 | [0243](0243-real-sessions-corrected-three-assumptions-the-hook-writers-made.md) | Real Sessions Corrected Three Assumptions The Hook Writers Made | Accepted |
 | [0244](0244-a-manual-driver-records-real-harness-sessions.md) | A Manual Driver Records Real Harness Sessions | Accepted |
+| [0245](0245-tui-an-agent-that-stops-reads-unread-until-you-read-it-and-reads-persist.md) | An Agent That Stops Reads Unread Until You Read It, And Reads Persist | Accepted |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |
@@ -264,10 +265,10 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0211](0211-tui-the-header-counts-every-agent-waiting-on-you.md) | The Header Counts Every Agent Waiting On You | Accepted |
 | [0212](0212-tui-a-session-row-shows-its-running-subagents-after-its-label.md) | A Session Row Shows Its Running Subagents After Its Label | Accepted |
 | [0213](0213-tui-the-detail-pane-says-what-a-nodes-agents-are-doing.md) | The Detail Pane Says What A Node's Agents Are Doing | Accepted (amended by 0214) |
-| [0214](0214-tui-a-finished-turn-reads-unseen-until-you-look-at-it.md) | A Finished Turn Reads Unseen Until You Look At It | Accepted (amended by 0231) |
+| [0214](0214-tui-a-finished-turn-reads-unseen-until-you-look-at-it.md) | A Finished Turn Reads Unseen Until You Look At It | Accepted (amended by 0231, 0245) |
 | [0215](0215-tui-rows-float-and-filter-by-live-state-only-when-the-tree-is-built.md) | Rows Float And Filter By Live State Only When The Tree Is Built | Accepted (amended) |
 | [0216](0216-tui-one-key-jumps-to-the-agent-that-has-waited-longest.md) | One Key Jumps To The Agent That Has Waited Longest | Accepted |
-| [0231](0231-tui-a-turn-watched-in-an-attached-client-reads-seen-when-the-client-comes-back.md) | A Turn Watched In An Attached Client Reads Seen When The Client Comes Back | Accepted |
+| [0231](0231-tui-a-turn-watched-in-an-attached-client-reads-seen-when-the-client-comes-back.md) | A Turn Watched In An Attached Client Reads Seen When The Client Comes Back | Accepted (amended by 0245) |
 | [0233](0233-tui-a-mux-mark-recedes-when-every-agent-in-its-state-is-quiet.md) | A Mux's Mark Recedes When Every Agent In Its State Is Quiet | Accepted |
 | [0234](0234-tui-a-pinned-mux-reads-the-word-of-its-agents-mark.md) | A Pinned Mux Reads The Word Of Its Agents' Mark | Accepted |
 | [0236](0236-tui-the-event-loop-takes-the-input-that-is-waiting-before-it-draws.md) | The Event Loop Takes The Input That Is Waiting Before It Draws | Accepted |

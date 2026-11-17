@@ -7,6 +7,9 @@ live-state plan (`docs/plans/live-state/README.md`; the options are in
 section 5 of `tui-options.md` there): seen and unseen for `ready`,
 derived read-only, bold for unseen and plain for seen, the same shape,
 nothing persisted. Amended by
+[ADR 0245](0245-tui-an-agent-that-stops-reads-unread-until-you-read-it-and-reads-persist.md):
+a wait and an error read unread too, the words are unread and read, and
+the marks of agent sessions persist in the TUI state file. Amended by
 [ADR 0231](0231-tui-a-turn-watched-in-an-attached-client-reads-seen-when-the-client-comes-back.md):
 a turn that ended while the client watched its mux reads seen when the
 client comes back to the TUI's session (decision 1, and the first

@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted. Carries out the operator's decision of 2026-11-13 on the
+Accepted. Amended by
+[ADR 0245](0245-tui-an-agent-that-stops-reads-unread-until-you-read-it-and-reads-persist.md):
+a return reads every stop, not only a finished turn. Carries out the operator's decision of 2026-11-13 on the
 follow-up to [ADR 0214](0214-tui-a-finished-turn-reads-unseen-until-you-look-at-it.md)
 (option A, inside tmux only). Amends ADR 0214 decision 1 (a second way
 for a turn in a mux to be seen) and its consequences (the gap a timer

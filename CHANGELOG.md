@@ -14,6 +14,16 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **An agent that stops reads unread until you read it, and a read stays
+  read.** The bold mark a finished turn has until you look at it now goes
+  on every stop: an agent that waits for you (`!`), finishes a turn (`›`),
+  or fails (`×`), and a mux's mark is bold while an agent in the state it
+  shows is unread. Attaching to the mux, or resting the cursor on a session
+  with no mux, reads the stop as before; `c` marks the selected row's
+  agents read, `C` clears every unread mark, and both are in the row menu.
+  The marks of agent sessions are kept in the TUI's state file, so a
+  restart no longer brings them back, and the detail pane and glossary now
+  say unread and read where they said unseen and seen.
 - **`just record <harness>` records a real harness session.** It runs
   Claude Code, Codex, or Pi through a scenario of the checks that tied off
   live state (a turn, an approval declined and granted, an interrupt, a

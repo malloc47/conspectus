@@ -99,12 +99,12 @@ record a pin points at, shown only when History lists pinned records.
   than its source's quiet window) is dimmed and keeps its shape.
   On the cursor row the mark takes the highlight like the other cells, so
   its shape still reads where reverse video draws no color.
-- A ready mark (`›`, and Pinned's `ready`) is bold while its finished
-  turn is one you haven't seen, and plain once you have (see
-  [The live cell](#the-live-cell)). The weight is added to the same shape
-  and color, never in their place. On the cursor row, which the highlight
-  draws bold, the two look alike, and the detail pane's `state` field
-  says `unseen` or `seen` in words.
+- A waiting, ready, or error mark (`!`, `›`, `×`, and Pinned's `waiting`,
+  `ready`, and `error`) is bold while the stop it shows is one you haven't
+  read, and plain once you have (see [The live cell](#the-live-cell)). The
+  weight is added to the same shape and color, never in their place. On
+  the cursor row, which the highlight draws bold, the two look alike, and
+  the detail pane's `state` field says `unread` or `read` in words.
 - A row for something stopped, removed, missing, planned, or unknown is
   drawn as a ghost. A group header for such an entity is too.
 
@@ -134,9 +134,9 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `∘` | not linked: a session with no definitive mux (none or ambiguous), or a mux with no client | dim | Session rows, Mux rows, nested sessions |
 | `⊘` | a mux that has stopped | ghost | Stopped mux rows in the Mux view |
 | `?` | can't be checked: a mux whose server didn't answer, or a PR with no state yet; in the live cell, an agent whose evidence is too old to trust | dim | Mux rows, stopped mux rows, PR rows; the live cell |
-| `!` | live state: the agent is waiting on you (a permission prompt, a question, a plan, other input); before a number, how many wait | yellow (the theme's warning color) | The live cell of session and mux rows, nested ones included, in every view; group headers, with the count |
+| `!` | live state: the agent is waiting on you (a permission prompt, a question, a plan, other input); before a number, how many wait | yellow (the theme's warning color); bold while the wait is unread | The live cell of session and mux rows, nested ones included, in every view; group headers, with the count |
 | `»` | live state: working (a turn, a compaction, or a start under way) | green (the theme's info color); dimmed when quiet | The live cell |
-| `›` | live state: ready, the turn is over and the agent takes a prompt | green (the theme's success color); bold while the finished turn is unseen | The live cell |
+| `›` | live state: ready, the turn is over and the agent takes a prompt | green (the theme's success color); bold while the finished turn is unread | The live cell |
 | `·` | live state: no evidence, or the session exited; on a mux, no agent with live state but exited ones | dim | The live cell |
 | `○` | an open pull request | green | PR rows |
 | `◐` | a draft pull request (open and marked draft) | yellow | PR rows |
@@ -179,10 +179,10 @@ its own shape:
 
 | Mark | Session | Mux |
 |---|---|---|
-| `!` | waiting on you | some agent of it waits on you |
+| `!` | waiting on you; bold until you have read the wait | some agent of it waits on you; bold while the wait of an agent in that state is unread |
 | `»` | working, compacting, or starting | its most urgent agent is working |
-| `›` | ready for a prompt; bold until you have seen the finished turn | its most urgent agent is ready; bold while a ready agent's turn is unseen |
-| `×` | its turn ended on an error | its most urgent agent failed |
+| `›` | ready for a prompt; bold until you have read the finished turn | its most urgent agent is ready; bold while a ready agent's turn is unread |
+| `×` | its turn ended on an error; bold until you have read the failure | its most urgent agent failed; bold while a failed agent's error is unread |
 | `?` | its evidence is too old to trust | its most urgent agent can't be told |
 | `·` | no evidence, or it exited | no agent of it has live state, or every one exited |
 
@@ -196,24 +196,25 @@ agents in other states do not count, and a wait, a finished turn, or an
 error never goes quiet, so a mux that shows one never dims. Nothing
 animates: the Braille spinner keeps meaning a pending refresh.
 
-A finished turn is **unseen** until you have looked at it, and its `›`
-is bold until then. For an agent in a mux (a session's preferred mux,
-or the mux of the pane an agent no session matches runs in), looking is
-a tmux client attaching to that mux after the turn ended: the mux's last
-attach time is at or after the turn's end, or a refresh that came after
-the turn ended lists a client attached. Attaching through Conspectus
+An agent that stops, after working, is **unread** until you have read the
+stop: a wait (`!`), a finished turn (`›`), or an error (`×`), and its mark
+is bold until then. For an agent in a mux (a session's preferred mux, or
+the mux of the pane an agent no session matches runs in), reading is a
+tmux client attaching to that mux after the stop began: the mux's last
+attach time is at or after the stop's start, or a refresh that came after
+the stop began lists a client attached. Attaching through Conspectus
 counts once the refresh that follows lists it. Inside tmux, a client
-that stayed on the mux while the turn ended counts when it switches
-back to the TUI's session, at once, and only for turns that ended
+that stayed on the mux while the stop began counts when it switches
+back to the TUI's session, at once, and only for stops that began
 before it left. For a session with no
-mux, looking is resting the cursor on one of its rows, in any view, for
+mux, reading is resting the cursor on one of its rows, in any view, for
 a second; a cursor that only passes the row while you scroll does not
-count. A turn found seen stays seen until the agent finishes a later
-one, even when a later refresh no longer shows a client attached, so a
-mark never turns bold again for the same turn. The TUI keeps this in
-memory only and writes nothing: a new TUI starts with the finished
-turns of sessions with no mux unseen again. A mux's `›` is bold while
-any of its ready agents' turns is unseen. In the frames below, which are
+count. A stop found read stays read until the agent stops again, even when
+a later refresh no longer shows a client attached, so a mark never turns
+bold again for the same stop. The marks of agent sessions are kept in the
+TUI's state file, so a new TUI starts with them read; the marks of agents
+in panes no session matches are kept in memory only. A mux's mark is bold
+while any agent counted in the state it shows is unread. In the frames below, which are
 plain text, the agent-deck launcher's `›` is plain (a client attached to
 its mux after its turn ended) and the codex parent's is bold (it has no
 mux, and the cursor has not rested on it). A group header above the rows
@@ -245,13 +246,13 @@ instead: in the state cell, or for live state in the live cell.
 | `closed` | a closed, unmerged pull request | `⊗` | Pinned, History |
 | `waiting` | a running session whose agent is waiting on you, or a running mux whose mark is `!`; in place of `in mux`, `resumable`, or `live` | `!` | Pinned, and sessions nested under a pin |
 | `working` | a running session whose agent is working, compacting, or starting, or a running mux whose mark is `»`; in place of `in mux`, `resumable`, or `live` | `»` | Pinned, and sessions nested under a pin |
-| `ready` | a running session whose agent is ready for a prompt, or a running mux whose mark is `›`; in place of `in mux`, `resumable`, or `live`; bold while the finished turn is unseen | `›` | Pinned, and sessions nested under a pin |
+| `ready` | a running session whose agent is ready for a prompt, or a running mux whose mark is `›`; in place of `in mux`, `resumable`, or `live`; bold while the finished turn is unread | `›` | Pinned, and sessions nested under a pin |
 | `error` | a running session whose agent's turn ended on an error, or a running mux whose mark is `×`; in place of `in mux`, `resumable`, or `live` | `×` | Pinned, and sessions nested under a pin |
 
 In Pinned, the word of a live pull request takes the style of its state
 glyph (green, yellow, magenta, red, or dim for `unknown`), and a live
 session's or a mux's `waiting`, `working`, `ready`, or `error` the style of its live
-mark (dimmed when quiet, bold when unseen); other live words are green. A mux reads
+mark (dimmed when quiet, bold when unread); other live words are green. A mux reads
 the word of the mark its row draws in the Mux view, by the same precedence
 (waiting, then error, then ready, then working); one that has no agent with a state
 to show keeps `live`. A session whose
@@ -583,7 +584,7 @@ the repo header's columns:
 | 2 | Session key | the harness's own id | always | first 8 cells, dim, padded to 8 |
 | 3 | Harness chip | the session's harness | always | 10 cells |
 | 4 | Age | last activity | always | 4 cells |
-| 5 | Live | what the agent is doing now (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when quiet; bold while a finished turn is unseen; keeps its mark while a refresh is pending |
+| 5 | Live | what the agent is doing now (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when quiet; bold while a stop (a wait, a finished turn, an error) is unread; keeps its mark while a refresh is pending |
 | 6 | State | `⊸` linked to a definitive mux, `∘` not | always | 1 cell; a spinner while a refresh is pending |
 | 7 | Label | alias, title, or mux name (see above) | when one applies | cut at 32 cells |
 | 8 | Subagents | `+N`: the subagents its agent runs now (see [Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings)) | while its agent reports one or more | dim; `+9+` from ten on, so at most 3 cells |
@@ -680,7 +681,7 @@ mux, so a header can show `! N` with no `(N)`.
 | 2 | Name | the mux name without its backend prefix | always | blue; a column of 18 cells, 20 once the row leaves it 37 cells, 24 from 71, and 30 from 103 (counted after the cursor gutter, the indent, and the prefix); long names keep their start and end |
 | 3 | Chip | its agents' harness chips, as many as fit in a column of at most two, with `+N` for the rest; else the pane's harness; else a program chip; else ` no agent ` | always | 10 cells each; the column is as wide as the widest row's chips, so the age lines up |
 | 4 | Age | the mux's own last activity | always | 4 cells |
-| 5 | Live | the state of its agents that needs you first (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when every agent in the state it shows is quiet; bold while a ready agent's finished turn is unseen; keeps its mark while a refresh is pending |
+| 5 | Live | the state of its agents that needs you first (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when every agent in the state it shows is quiet; bold while an agent's stop in the state it shows is unread; keeps its mark while a refresh is pending |
 | 6 | State | `⊸` a client is attached, `∘` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
 | 7 | Preview | last message of the one agent | only with exactly one visible agent, and at least 7 cells for it | dim italic |
 
