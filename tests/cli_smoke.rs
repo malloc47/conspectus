@@ -2291,7 +2291,7 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     hook(&["status", "pi"])
         .stdout(predicate::str::contains("outdated\tpi"))
         .stdout(predicate::str::contains("off\tpi"))
-        .stderr(predicate::str::contains(&format!(
+        .stderr(predicate::str::contains(format!(
             "is version 1 and this build installs version {}",
             pi_extension_version()
         )));
@@ -2306,7 +2306,7 @@ fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
     hook(&["status", "pi"])
         .stdout(predicate::str::contains("outdated\tpi"))
         .stdout(predicate::str::contains("no-events\tpi"))
-        .stderr(predicate::str::contains(&format!(
+        .stderr(predicate::str::contains(format!(
             "is version 2 and this build installs version {}",
             pi_extension_version()
         )))
