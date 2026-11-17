@@ -3,11 +3,11 @@ id: CSP-894
 title: >-
   Pane content search: a finished scan can report a stale progress count (flaky
   panes_tests)
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-17 08:58'
-updated_date: '2026-11-17 13:29'
+updated_date: '2026-11-17 13:55'
 labels:
   - test
   - content-search
@@ -29,13 +29,19 @@ Cause, read from `src/content_search/panes.rs` (`PaneSource::run`): each worker 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A pane scan's last progress event always reports every pane scanned (or the cancelled count), whatever order its workers finish in: it ends with an authoritative report after the workers join, as the session scan does, and unified search never lets a source's reported progress go backwards
-- [ ] #2 A test makes the interleaving certain rather than rare (for example workers released in a fixed order against a fake whose captures block), and it fails against the current code; the pane tests that assert progress no longer depend on timing
-- [ ] #3 The gate's flake list drops this test, and the fix is described in the commit that makes it
+- [x] #1 A pane scan's last progress event always reports every pane scanned (or the cancelled count), whatever order its workers finish in: it ends with an authoritative report after the workers join, as the session scan does, and unified search never lets a source's reported progress go backwards
+- [x] #2 A test makes the interleaving certain rather than rare (for example workers released in a fixed order against a fake whose captures block), and it fails against the current code; the pane tests that assert progress no longer depend on timing
+- [x] #3 The gate's flake list drops this test, and the fix is described in the commit that makes it
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The pane scan's workers counted a pane scanned and then reported the count, so a worker held up between the two could be heard after the last and leave a finished scan on a smaller count; that was the flaky `matching_panes_report_line_snippet_and_highlight` and, in the product, a Search view left at "1 of 3". `PaneSource::run` now ends with an authoritative progress report after its workers join (as the session scan does), and the unified search keeps each source's count from going backwards, so `Done` and the live sum cannot read a stale one. A new test holds the first worker's report until another has reported every pane (two workers, a bounded wait), and fails against the old code with `scanned: 1` last (checked by removing the fix); another feeds the unified search an earlier count after a later one. The gate's flake list (my notes, not the repository's) drops the test. Gate: `just check`, `cargo test`, the separation rehearsal, `just plugins`, nextest with no `conspectus` on PATH, and `backlog doctor` all pass on the first run.
+<!-- SECTION:FINAL_SUMMARY:END -->
