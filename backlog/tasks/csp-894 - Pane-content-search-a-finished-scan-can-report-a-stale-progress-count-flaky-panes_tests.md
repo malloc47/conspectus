@@ -3,10 +3,11 @@ id: CSP-894
 title: >-
   Pane content search: a finished scan can report a stale progress count (flaky
   panes_tests)
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-17 08:58'
-updated_date: '2026-11-17 08:59'
+updated_date: '2026-11-17 13:29'
 labels:
   - test
   - content-search

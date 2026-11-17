@@ -3,9 +3,11 @@ id: CSP-886
 title: >-
   Make the tmux end-to-end harness report why an outer tmux server failed to
   start
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-15 03:14'
+updated_date: '2026-11-17 13:29'
 labels:
   - test
 dependencies: []
