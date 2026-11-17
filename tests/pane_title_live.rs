@@ -13,6 +13,9 @@ use std::process::Command as StdCommand;
 use assert_cmd::Command;
 use serde_json::Value;
 
+#[path = "support/tmux.rs"]
+mod tmux;
+
 /// Planted in every title: it must never reach any output.
 const SENTINEL: &str = "sentinel-task-4c19e2";
 
@@ -58,14 +61,17 @@ impl World {
     }
 
     fn tmux(&self, args: &[&str]) -> bool {
-        StdCommand::new("tmux")
-            .args(args)
-            .env("LC_CTYPE", "C.UTF-8")
-            .env("TMUX_TMPDIR", &self.tmux_tmpdir)
-            .env_remove("TMUX")
-            .env_remove("TMUX_PANE")
-            .status()
-            .is_ok_and(|status| status.success())
+        let output = tmux::run(&self.tmux_tmpdir, args, || {
+            let mut command = StdCommand::new("tmux");
+            command
+                .args(args)
+                .env("LC_CTYPE", "C.UTF-8")
+                .env("TMUX_TMPDIR", &self.tmux_tmpdir)
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE");
+            command
+        });
+        tmux::succeeded(&self.tmux_tmpdir, args, &output)
     }
 
     /// A session `name` whose pane runs a shell that calls itself

@@ -21,6 +21,8 @@ use std::time::{Duration, Instant};
 
 #[path = "support/program.rs"]
 mod program;
+#[path = "support/tmux.rs"]
+mod tmux;
 
 /// How long a screen may take to converge before the test fails. Generous
 /// because the suite runs many processes at once; a stale screen that
@@ -140,30 +142,40 @@ impl World {
         ]
     }
 
+    /// `tmux` against the server whose sockets are under `tmpdir`: a call
+    /// that starts it runs again when the start failed ([`tmux::run`]).
+    fn tmux_at(&self, tmpdir: &std::path::Path, args: &[&str]) -> std::process::Output {
+        tmux::run(tmpdir, args, || {
+            let mut command = Command::new("tmux");
+            command
+                .args(["-f", "/dev/null"])
+                .args(args)
+                .env_remove("TMUX")
+                .env("HOME", self.root.join("home"))
+                .env("LC_CTYPE", "C.UTF-8")
+                .env("TMUX_TMPDIR", tmpdir);
+            command
+        })
+    }
+
     /// `tmux` against the inner server (the muxes under test).
     fn inner(&self, args: &[&str]) -> std::process::Output {
-        Command::new("tmux")
-            .args(["-f", "/dev/null"])
-            .args(args)
-            .env_remove("TMUX")
-            .env("HOME", self.root.join("home"))
-            .env("LC_CTYPE", "C.UTF-8")
-            .env("TMUX_TMPDIR", &self.inner)
-            .output()
-            .expect("tmux")
+        self.tmux_at(&self.inner, args)
     }
 
     /// `tmux` against the outer server (the operator's terminal).
     fn outer(&self, args: &[&str]) -> std::process::Output {
-        Command::new("tmux")
-            .args(["-f", "/dev/null"])
-            .args(args)
-            .env_remove("TMUX")
-            .env("HOME", self.root.join("home"))
-            .env("LC_CTYPE", "C.UTF-8")
-            .env("TMUX_TMPDIR", &self.outer)
-            .output()
-            .expect("tmux")
+        self.tmux_at(&self.outer, args)
+    }
+
+    /// [`World::outer`], which must succeed: a failure says what tmux said.
+    fn outer_ok(&self, args: &[&str]) {
+        tmux::assert_ok(&self.outer, args, &self.outer(args));
+    }
+
+    /// [`World::inner`], which must succeed.
+    fn inner_ok(&self, args: &[&str]) {
+        tmux::assert_ok(&self.inner, args, &self.inner(args));
     }
 
     fn conspectus(&self, args: &[&str]) -> std::process::Output {
@@ -235,21 +247,17 @@ impl World {
                 screen.contains("sessions · mux")
             }
         };
-        assert!(
-            self.outer(&[
-                "new-session",
-                "-d",
-                "-s",
-                "host",
-                "-x",
-                "150",
-                "-y",
-                "40",
-                &command
-            ])
-            .status
-            .success()
-        );
+        self.outer_ok(&[
+            "new-session",
+            "-d",
+            "-s",
+            "host",
+            "-x",
+            "150",
+            "-y",
+            "40",
+            &command,
+        ]);
         wait_until("the TUI to list muxes", CONVERGE, || up(&self.screen()));
     }
 
@@ -257,40 +265,32 @@ impl World {
     /// and the operator's terminal is a client attached to it.
     fn start_tui_inside(&self) {
         let command = self.tui_command(true);
-        assert!(
-            self.inner(&[
-                "new-session",
-                "-d",
-                "-s",
-                "ui",
-                "-x",
-                "150",
-                "-y",
-                "40",
-                &command
-            ])
-            .status
-            .success()
-        );
+        self.inner_ok(&[
+            "new-session",
+            "-d",
+            "-s",
+            "ui",
+            "-x",
+            "150",
+            "-y",
+            "40",
+            &command,
+        ]);
         let attach = format!(
             "env -u TMUX TMUX_TMPDIR='{}' tmux attach -t ui; echo CLIENT-EXITED; sleep 120",
             self.inner.display()
         );
-        assert!(
-            self.outer(&[
-                "new-session",
-                "-d",
-                "-s",
-                "host",
-                "-x",
-                "150",
-                "-y",
-                "40",
-                &attach
-            ])
-            .status
-            .success()
-        );
+        self.outer_ok(&[
+            "new-session",
+            "-d",
+            "-s",
+            "host",
+            "-x",
+            "150",
+            "-y",
+            "40",
+            &attach,
+        ]);
         wait_until("the TUI to list muxes", CONVERGE, || {
             self.tui_pane().contains('▣')
         });
@@ -312,7 +312,7 @@ impl World {
     fn keys(&self, keys: &[&str]) {
         let mut args = vec!["send-keys", "-t", "host"];
         args.extend_from_slice(keys);
-        assert!(self.outer(&args).status.success());
+        self.outer_ok(&args);
         sleep(Duration::from_millis(250));
     }
 
@@ -323,7 +323,7 @@ impl World {
         if !shell {
             args.extend(["sleep", "600"]);
         }
-        assert!(self.inner(&args).status.success());
+        self.inner_ok(&args);
     }
 
     fn pin(&self, name: &str) {
@@ -1512,7 +1512,7 @@ fn no_resume_view_creates_no_state_file_but_a_run_without_it_does() {
 
     // Without the flag, the same run writes it, so the check above
     // would notice a write.
-    assert!(world.outer(&["kill-server"]).status.success());
+    world.outer_ok(&["kill-server"]);
     world.run_tui_once("--no-live-preview");
     let written = fs::read_to_string(world.state_file()).expect("a state file");
     assert!(written.contains(r#""last_view": "sessions""#), "{written}");

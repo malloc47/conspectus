@@ -79,6 +79,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0243](0243-real-sessions-corrected-three-assumptions-the-hook-writers-made.md) | Real Sessions Corrected Three Assumptions The Hook Writers Made | Accepted |
 | [0244](0244-a-manual-driver-records-real-harness-sessions.md) | A Manual Driver Records Real Harness Sessions | Accepted |
 | [0245](0245-tui-an-agent-that-stops-reads-unread-until-you-read-it-and-reads-persist.md) | An Agent That Stops Reads Unread Until You Read It, And Reads Persist | Accepted |
+| [0246](0246-tests-run-tmux-through-one-helper-that-reports-and-retries-a-failed-start.md) | Tests Run tmux Through One Helper That Reports And Retries A Failed Start | Accepted |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |
