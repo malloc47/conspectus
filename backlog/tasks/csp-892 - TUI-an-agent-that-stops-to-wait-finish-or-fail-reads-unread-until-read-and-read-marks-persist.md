@@ -3,11 +3,11 @@ id: CSP-892
 title: >-
   TUI: an agent that stops to wait, finish, or fail reads unread until read, and
   read marks persist
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-17 01:02'
-updated_date: '2026-11-17 01:46'
+updated_date: '2026-11-17 01:57'
 labels:
   - live-state
   - ls-tui
@@ -33,6 +33,12 @@ The operator asked (2026-11-16) for an agent that goes from working to a stop to
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+An agent whose live cell is waiting, ready, or in error now reads unread until its stop has been read, and its mark (`!`, `›`, `×`, and Pinned's words) draws bold; a mux's mark is bold while an agent counted in the state it shows is unread (the mux's unread is a count per state). Reading is ADR 0214's evidence (a client attached to the mux at or after the stop began, the operator's return to the TUI's session, the cursor resting on a session with no mux) applied to the time the shown state began, and `working`, compacting, starting, exited, and unknown are never unread. The marks of agent sessions are saved in `tui-state.json` as `read_marks` (node id to when the latest read stop began), loaded at start, merged on every write with the marks another TUI wrote (the later stop wins), bounded to the newest 2,000, read leniently (a bad entry costs only itself), written at the next tick, at quit, and at a gesture; a `--no-resume-view` run reads and writes nothing. The detail pane, glossary, and help legend say unread and read; `docs/tui-columns.md`, the operations guide, the design document, and the changelog follow, and ADR 0245 (amending 0214 and 0231) records the decisions, among them that a `ready` with no evidence stays unread and that pane agents' reads stay in memory. Verified by the full suite (5,900 tests) including new tests for stops in every state across attach and rest evidence, the state file's round trip, merge, bound, and lenient reads, and a render test that the waiting and error marks go bold and plain with the shape and color unchanged; and by the pre-main gate (just check, cargo test, the separation rehearsal, just plugins, nextest with no conspectus on PATH, backlog doctor).
+<!-- SECTION:FINAL_SUMMARY:END -->

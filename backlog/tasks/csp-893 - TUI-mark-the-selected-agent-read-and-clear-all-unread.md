@@ -1,11 +1,11 @@
 ---
 id: CSP-893
 title: 'TUI: mark the selected agent read, and clear all unread'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-17 01:02'
-updated_date: '2026-11-17 01:46'
+updated_date: '2026-11-17 01:57'
 labels:
   - live-state
   - ls-tui
@@ -31,6 +31,12 @@ The gestures for the unread marks of the task before this one: the operator want
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+`c` marks the entity in view read (a session's agent, or every agent counted on a mux; a row with no agent says so) and `C` clears every unread mark, in every view, each with a toast that says how many; both are bindings of the key tables (`read.mark`, `read.clear`), so the footer, status hints, and help list them with no hand-written text, and both are entries of the row action menu (`Mark read` while the entity in view has an unread agent, `Clear all unread` while any agent is unread) with the key table's shortcuts. A gesture that reads something writes the state file through the existing persist effect and offers no undo; one that reads nothing writes nothing. Consistency tests assert the same gesture does the same thing in the Sessions, Pinned, and Mux views, that a mux row reads only its counted agents, that clearing reads sessions and pane agents alike, and that the menu's entries appear and disappear as they apply. Gate: as for CSP-892.
+<!-- SECTION:FINAL_SUMMARY:END -->
