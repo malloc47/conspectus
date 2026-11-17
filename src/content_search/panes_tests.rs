@@ -71,6 +71,65 @@ fn source(tmux: FakeTmux, attribution: Attribution) -> PaneSource {
     PaneSource::new(Arc::new(tmux), vec![None], attribution).at(1_000)
 }
 
+/// The progress events a run reports, in the order they reach the
+/// consumer, with the first pane to finish held until another worker has
+/// reported every pane: the order a loaded machine can produce, made certain.
+fn progress_with_the_first_report_held_back(source: &PaneSource) -> Vec<Progress> {
+    use std::sync::{Condvar, Mutex};
+    use std::time::{Duration, Instant};
+
+    let seen = Mutex::new(Vec::new());
+    let all_reported = (Mutex::new(false), Condvar::new());
+    let options = ScanOptions {
+        workers: 2,
+        ..ScanOptions::default()
+    };
+    source.run(
+        &query("retry budget"),
+        &options,
+        &CancelToken::new(),
+        &|event| {
+            let SourceEvent::Progress(progress) = event else {
+                return;
+            };
+            if progress.scanned == 1 {
+                // The worker that counted first is slow to report: wait
+                // (bounded) until the other worker has reported them all.
+                let (flag, signal) = &all_reported;
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let mut done = flag.lock().unwrap();
+                while !*done {
+                    let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                        break;
+                    };
+                    done = signal.wait_timeout(done, left).unwrap().0;
+                }
+            }
+            seen.lock().unwrap().push(progress);
+            if progress.scanned == progress.total {
+                *all_reported.0.lock().unwrap() = true;
+                all_reported.1.notify_all();
+            }
+        },
+    );
+    seen.into_inner().unwrap()
+}
+
+#[test]
+fn the_last_progress_a_pane_scan_reports_counts_every_pane_whatever_order_workers_report_in() {
+    let source = source(fake(), Attribution::new());
+    let reported = progress_with_the_first_report_held_back(&source);
+    assert_eq!(
+        reported.last().copied(),
+        Some(Progress {
+            scanned: 3,
+            total: 3,
+            skipped: 0
+        }),
+        "the scan ends on the full count, not on a held-back one: {reported:?}"
+    );
+}
+
 #[test]
 fn a_listing_parses_into_panes() {
     let panes = parse_pane_list(LISTING, Some("sock"));

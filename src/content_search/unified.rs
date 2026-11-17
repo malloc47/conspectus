@@ -134,7 +134,12 @@ pub fn search(
                         SourceEvent::Progress(progress) => {
                             let total = {
                                 let mut latest = latest.lock().unwrap();
-                                latest[index] = progress;
+                                // A source's counts only grow, and its
+                                // workers can report them out of order: a
+                                // count lower than the one held is stale.
+                                if progress.scanned >= latest[index].scanned {
+                                    latest[index] = progress;
+                                }
                                 sum(&latest)
                             };
                             let _ = tx.send(ContentEvent::Progress {

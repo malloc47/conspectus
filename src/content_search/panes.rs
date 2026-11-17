@@ -348,6 +348,11 @@ impl ContentSource for PaneSource {
                 });
             }
         });
+        // Workers report as they finish a pane, and one can be held up
+        // between its count and its report while another reports the next
+        // count, so a consumer can see the counts out of order. This is the
+        // report that is last, and the one a consumer ends on.
+        emit(SourceEvent::Progress(progress()));
     }
 }
 

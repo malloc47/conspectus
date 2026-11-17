@@ -945,6 +945,12 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A content search's pane scan ends on its full count.** The pane scan's
+  workers reported how many panes were scanned as they finished, and one
+  held up between its count and its report could be heard after the last,
+  leaving the Search view's progress at `1 of 3` after the scan was done.
+  The scan now ends with its final count, and a search never lets a
+  source's count go backwards.
 - **A Pi `/compact` with nothing to compact no longer reads as an
   error.** Pi refuses a session too small to compact with a failure
   message, and the extension read it as a failed compaction, so the

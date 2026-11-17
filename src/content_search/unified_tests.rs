@@ -161,6 +161,50 @@ fn a_panicking_source_costs_only_its_own_results() {
     assert_eq!(summary.results.len(), 2);
 }
 
+/// A source whose workers report out of order: the count of every pane,
+/// then an earlier count that was held up.
+struct OutOfOrder;
+
+impl ContentSource for OutOfOrder {
+    fn kind(&self) -> SourceKind {
+        SourceKind::Pane
+    }
+
+    fn run(
+        &self,
+        _: &ContentQuery,
+        _: &ScanOptions,
+        _: &CancelToken,
+        emit: &(dyn Fn(SourceEvent) + Sync),
+    ) {
+        for scanned in [3, 1] {
+            emit(SourceEvent::Progress(Progress {
+                scanned,
+                total: 3,
+                skipped: 0,
+            }));
+        }
+    }
+}
+
+#[test]
+fn a_count_that_arrives_late_never_lowers_the_progress_a_search_reports() {
+    let summary = search_blocking(
+        vec![Box::new(OutOfOrder)],
+        query("x"),
+        ScanOptions::default(),
+        &CancelToken::new(),
+    );
+    assert_eq!(
+        summary.progress,
+        Progress {
+            scanned: 3,
+            total: 3,
+            skipped: 0
+        }
+    );
+}
+
 struct Waiting(Arc<AtomicBool>);
 
 impl ContentSource for Waiting {
