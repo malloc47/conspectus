@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-11-17 08:58'
+updated_date: '2026-11-17 08:59'
 labels:
   - test
   - content-search
@@ -22,7 +23,7 @@ ordinal: 970000
 
 Cause, read from `src/content_search/panes.rs` (`PaneSource::run`): each worker does `scanned.fetch_add(1)`, then builds `progress()` and calls `emit`. Between a worker's increment and its emit, another worker can increment and emit first, so the events reach the consumer out of order and the last one can carry a smaller `scanned` than an earlier one. The test's `run` helper keeps the last `Progress` it sees, so it reads a stale count, and so does the product: `unified.rs` stores the latest progress of each source (`latest[index] = progress`) and sums them, so a finished pane scan can leave the Search view reading `1 of 3 scanned`. The session scan (`scan.rs`) does not have this, because it ends with an authoritative `finish(progress(), ...)` after its workers join; the pane source ends with no final report.
 
-The pane source has two other tests that read `found.progress` (the neighbors of the failing one), and the same race can fail any of them under load.
+`an_unreadable_pane_counts_as_skipped` asserts `found.progress.scanned == 3` through the same helper, so it has the same exposure; the other progress assertions in that file read `total` or `skipped`, which no race moves.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
