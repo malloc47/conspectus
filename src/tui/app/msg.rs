@@ -284,6 +284,12 @@ pub enum Msg {
     Unpin(String),
     /// The undo key: reverse the newest recorded operation.
     Undo,
+    /// `c` (or the row menu's Mark read): mark the agents of the entity
+    /// in view read, so their unread marks go plain (ADR 0245).
+    MarkRead,
+    /// `C` (or the row menu's Clear all unread): mark every agent's stop
+    /// read (ADR 0245).
+    ClearUnread,
     /// The executor finished an operation that can be undone.
     UndoRecorded(crate::tui::undo::Undo),
     /// Pin menu → open the pin edit form.

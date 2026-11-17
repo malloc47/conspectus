@@ -116,14 +116,14 @@ impl From<LiveStateKey> for LiveMark {
 /// What a row shows of its entity's live state: the mark, whether the
 /// evidence for it has gone quiet (work with no news for longer than the
 /// source's quiet window), which draws the same mark dimmed, and whether
-/// it is a finished turn the operator has not seen yet, which draws the
-/// same mark bold. Neither changes the shape.
+/// it is a stop the operator has not read yet (an agent waiting, ready, or
+/// in error), which draws the same mark bold. Neither changes the shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LiveSign {
     pub mark: LiveMark,
     pub quiet: bool,
-    /// A ready mark whose turn the operator has not seen (ADR 0214);
-    /// always `false` for any other mark.
+    /// A mark of a stop (waiting, ready, or error) the operator has not
+    /// read (ADR 0214, ADR 0245); always `false` for any other mark.
     pub unseen: bool,
 }
 
@@ -142,7 +142,7 @@ impl LiveSign {
             Self {
                 mark,
                 quiet: cell.confidence == LiveConfidence::Quiet,
-                unseen: mark == LiveMark::Ready && cell.unseen,
+                unseen: cell.unseen,
             }
         })
     }
@@ -152,16 +152,16 @@ impl LiveSign {
     /// the rest), or none when no agent of it has live state. It is
     /// drawn quiet when every agent in that state is quiet, and bright
     /// while any of them is fresh; the agents in other states do not
-    /// count, and a state that never goes quiet never dims. A ready mark
-    /// is unseen while any of the mux's ready agents ended a turn the
-    /// operator has not seen.
+    /// count, and a state that never goes quiet never dims. The mark is
+    /// unread while any agent counted in the state it shows has stopped
+    /// there unread.
     pub fn of_mux(live: MuxLive) -> Self {
         live.counts.dominant().map_or(Self::NONE, |state| {
             let mark = LiveMark::of_state(state);
             Self {
                 mark,
                 quiet: live.quiet.get(state) >= live.counts.get(state),
-                unseen: mark == LiveMark::Ready && live.unseen > 0,
+                unseen: live.unseen.get(state) > 0,
             }
         })
     }
@@ -186,7 +186,7 @@ impl LiveSign {
     }
 
     /// The mark's style, receding (the theme's muted look) when quiet,
-    /// and bold when it is a turn the operator has not seen.
+    /// and bold when it is a stop the operator has not read.
     pub fn style(self, theme: &Theme) -> Style {
         let mut style = self.mark.style(theme);
         if self.quiet {

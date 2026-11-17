@@ -124,12 +124,13 @@ fn a_session_row_carries_its_cell_and_a_session_without_evidence_none() {
             _ => None,
         })
         .expect("the session has a row");
+    // The session waits and nothing says the operator read the wait.
     assert_eq!(
         cell,
-        snapshot
-            .node_live
-            .get(&hosted())
-            .map(|b| LiveCell::of(b, NOW_MS))
+        snapshot.node_live.get(&hosted()).map(|b| LiveCell {
+            unseen: true,
+            ..LiveCell::of(b, NOW_MS)
+        })
     );
 
     snapshot.node_live.remove(&hosted());
@@ -183,7 +184,10 @@ fn a_pins_row_carries_the_value_of_the_entity_it_points_at() {
 
     assert_eq!(
         slot("e44d01cb"),
-        MixedLive::Session(LiveCell::of(&snapshot.node_live[&hosted()], NOW_MS))
+        MixedLive::Session(LiveCell {
+            unseen: true,
+            ..LiveCell::of(&snapshot.node_live[&hosted()], NOW_MS)
+        })
     );
     assert_eq!(
         slot("conspectus-main"),

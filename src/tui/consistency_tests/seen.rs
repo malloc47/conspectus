@@ -263,3 +263,225 @@ fn every_listing_of_an_entity_carries_one_judgment() {
         "no mux, never rested on: {judged:?}"
     );
 }
+
+/// The toast text among `effects`, if any.
+fn toast_text(effects: &[crate::tui::Effect]) -> Option<String> {
+    effects.iter().find_map(|effect| match effect {
+        crate::tui::Effect::Toast(feedback) => Some(feedback.text.clone()),
+        _ => None,
+    })
+}
+
+/// Whether `effects` ask for the state file to be written.
+fn persists(effects: &[crate::tui::Effect]) -> bool {
+    effects
+        .iter()
+        .any(|effect| matches!(effect, crate::tui::Effect::Persist))
+}
+
+#[test]
+fn marking_read_acts_on_the_entity_in_view_in_every_view_that_lists_it() {
+    let snapshot = with_table();
+    for view in [View::Sessions, View::Pinned] {
+        let mut app = unfolded(listing_with(view, &snapshot, LiveOverlay::off()));
+        let others = app.unread_of(None).len();
+        let solo = session(SOLO);
+        assert_eq!(app.unread_of(Some(&solo)).len(), 1, "{view:?}: unread");
+        app.set_selection(row_of(&app, SOLO));
+        let effects = app.update(Msg::MarkRead);
+        assert_eq!(
+            toast_text(&effects).as_deref(),
+            Some("marked 1 agent read"),
+            "{view:?}"
+        );
+        assert!(persists(&effects), "{view:?}: the mark is saved");
+        assert!(app.unread_of(Some(&solo)).is_empty(), "{view:?}: read");
+        assert_eq!(
+            app.unread_of(None).len(),
+            others - 1,
+            "{view:?}: only that agent was read"
+        );
+        // Nothing left to read there: it says so and saves nothing.
+        let effects = app.update(Msg::MarkRead);
+        assert_eq!(toast_text(&effects).as_deref(), Some("nothing unread here"));
+        assert!(!persists(&effects), "{view:?}: no change, no write");
+    }
+}
+
+#[test]
+fn marking_a_mux_read_reads_the_agents_counted_on_it_and_no_others() {
+    let snapshot = with_table();
+    let mut app = unfolded(listing_with(View::Mux, &snapshot, LiveOverlay::off()));
+    let main = NodeId::MuxSession(mux("conspectus-main"));
+    assert_eq!(app.unread_of(Some(&main)).len(), 2, "hosted and beside");
+    let before = app.unread_of(None).len();
+    app.set_selection(RowId::MuxSession(main.clone()));
+    let effects = app.update(Msg::MarkRead);
+    assert_eq!(
+        toast_text(&effects).as_deref(),
+        Some("marked 2 agents read")
+    );
+    assert!(app.unread_of(Some(&main)).is_empty());
+    assert_eq!(
+        app.unread_of(None).len(),
+        before - 2,
+        "the loose session and the other mux's panes stay unread"
+    );
+}
+
+#[test]
+fn marking_read_on_a_row_with_no_agent_says_so_and_changes_nothing() {
+    let snapshot = with_table();
+    let mut app = unfolded(listing_with(View::Sessions, &snapshot, LiveOverlay::off()));
+    let group = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| matches!(row.id, RowId::Group(_)))
+        .expect("a group row")
+        .id
+        .clone();
+    let before = app.unread_of(None);
+    app.set_selection(group);
+    let effects = app.update(Msg::MarkRead);
+    assert_eq!(
+        toast_text(&effects).as_deref(),
+        Some("nothing to mark read: this row has no agent")
+    );
+    assert_eq!(app.unread_of(None), before);
+    assert!(!persists(&effects));
+}
+
+#[test]
+fn clearing_all_unread_reads_every_agent_in_every_view_and_saves_once() {
+    let snapshot = with_table();
+    for view in [View::Sessions, View::Mux, View::Pinned] {
+        let mut app = unfolded(listing_with(view, &snapshot, LiveOverlay::off()));
+        let unread = app.unread_of(None).len();
+        assert!(unread >= 4, "{view:?}: sessions and panes wait: {unread}");
+        let effects = app.update(Msg::ClearUnread);
+        assert_eq!(
+            toast_text(&effects),
+            Some(format!("cleared {unread} unread agents")),
+            "{view:?}"
+        );
+        assert!(persists(&effects), "{view:?}");
+        assert!(app.unread_of(None).is_empty(), "{view:?}: every agent read");
+        assert!(
+            app.build_persisted_state().read_marks.len() >= 3,
+            "{view:?}: the sessions' marks are in the state file's payload"
+        );
+        let effects = app.update(Msg::ClearUnread);
+        assert_eq!(toast_text(&effects).as_deref(), Some("nothing unread"));
+        assert!(!persists(&effects), "{view:?}");
+    }
+}
+
+#[test]
+fn the_row_menu_offers_mark_read_and_clear_all_unread_only_while_they_apply() {
+    use crate::tui::actions::row_menu_for;
+    let snapshot = with_table();
+    let mut app = unfolded(listing_with(View::Sessions, &snapshot, LiveOverlay::off()));
+    let labels = |app: &App| -> Vec<String> {
+        row_menu_for(app)
+            .map(|menu| {
+                menu.entries()
+                    .iter()
+                    .map(|entry| entry.label.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    app.set_selection(row_of(&app, SOLO));
+    let before = labels(&app);
+    assert!(before.contains(&"Mark read".to_string()), "{before:?}");
+    assert!(
+        before.contains(&"Clear all unread".to_string()),
+        "{before:?}"
+    );
+    // The menu's shortcuts are the key table's.
+    let menu = row_menu_for(&app).expect("a menu");
+    let shortcut = |label: &str| {
+        menu.entries()
+            .iter()
+            .find(|entry| entry.label == label)
+            .and_then(|entry| entry.shortcut)
+    };
+    assert_eq!(
+        shortcut("Mark read").map(|key| tuikit::keys::key_label(&key)),
+        Some(crate::tui::keybindings::key_name("read.mark"))
+    );
+    assert_eq!(
+        shortcut("Clear all unread").map(|key| tuikit::keys::key_label(&key)),
+        Some(crate::tui::keybindings::key_name("read.clear"))
+    );
+    app.update(Msg::MarkRead);
+    let after = labels(&app);
+    assert!(!after.contains(&"Mark read".to_string()), "read: {after:?}");
+    assert!(
+        after.contains(&"Clear all unread".to_string()),
+        "others remain"
+    );
+    app.update(Msg::ClearUnread);
+    assert!(!labels(&app).contains(&"Clear all unread".to_string()));
+}
+
+#[test]
+fn an_unread_wait_and_an_unread_error_draw_their_marks_bold_in_the_sessions_and_mux_views() {
+    // The same weight as a finished turn's, on the other two stops: the
+    // shape and the color stay, and attaching to the mux plains them.
+    for (state, detail, glyph) in [
+        (
+            LiveState::Waiting,
+            LiveDetail::Permission,
+            crate::tui::icons::live::WAITING,
+        ),
+        (
+            LiveState::Error,
+            LiveDetail::Failed,
+            crate::tui::icons::live::ERROR,
+        ),
+    ] {
+        let world = |last_attached: Option<i64>| {
+            let mut snapshot = with_table();
+            snapshot
+                .node_live
+                .retain(|node, _| *node == session(HOSTED));
+            snapshot.pane_live.clear();
+            snapshot
+                .node_live
+                .insert(session(HOSTED), running(state, Some(detail), 0));
+            for node in &mut snapshot.nodes {
+                if let GraphNode::MuxSession(node) = node
+                    && node.id == mux("conspectus-main")
+                {
+                    node.last_attached_epoch = last_attached;
+                }
+            }
+            snapshot
+        };
+        let mark = |snapshot: &GraphSnapshot, view: View, key: &str| {
+            let mut app = unfolded(listing_with(view, snapshot, LiveOverlay::off()));
+            park_away(&mut app, |row| {
+                matches!(&row.kind, RowKind::MuxSession(row) if row.mux == mux("conspectus-main"))
+                    || stands_for(row, HOSTED)
+            });
+            cell_of(&mut app, key, glyph)
+        };
+        for (view, key) in [(View::Mux, "conspectus-main"), (View::Sessions, "e44d01cb")] {
+            let (unread, before) = mark(&world(None), view, key);
+            assert!(
+                unread.modifier.contains(Modifier::BOLD),
+                "{state:?} in {view:?}: nothing has read the stop:\n{before}"
+            );
+            let (read, after) = mark(&world(Some(NOW)), view, key);
+            assert!(
+                !read.modifier.contains(Modifier::BOLD),
+                "{state:?} in {view:?}: a client attached since:\n{after}"
+            );
+            assert_eq!(read.fg, unread.fg, "{state:?} in {view:?}: the color stays");
+            assert_eq!(read.symbol(), unread.symbol(), "{state:?} in {view:?}");
+            assert_eq!(after, before, "{state:?} in {view:?}: nothing else changes");
+        }
+    }
+}

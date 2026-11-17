@@ -10,7 +10,7 @@ use crate::model::{
     MuxSessionNode, Provenance, RelationKind,
 };
 use crate::tui::rows::seen::{ClientReturn, SEEN_REST};
-use crate::tui::rows::{LiveSign, MuxLive, RowKind};
+use crate::tui::rows::{LiveMark, LiveSign, MuxLive, RowKind};
 
 /// When the first snapshot loads, Unix seconds.
 const LOADED: i64 = 1_700_000_000;
@@ -25,12 +25,10 @@ fn work() -> MuxSessionId {
     MuxSessionId::new("tmux:work")
 }
 
-/// A turn that ended at `ended_ms`, its process found running, so it
-/// reads `ready` at any time.
-fn ready(ended_ms: i64) -> LiveBinding {
+/// An agent that stopped in `state` at `at_ms`, its process found running.
+fn stopped(state: LiveState, detail: LiveDetail, at_ms: i64) -> LiveBinding {
     LiveBinding::new(
-        LiveObservation::new(LiveState::Ready, LiveSource::Hook, ended_ms)
-            .with_detail(LiveDetail::Finished),
+        LiveObservation::new(state, LiveSource::Hook, at_ms).with_detail(detail),
         Liveness::Alive,
     )
 }
@@ -39,6 +37,24 @@ fn ready(ended_ms: i64) -> LiveBinding {
 /// at `last_attached`), and `loose`, in no mux; each ready since its
 /// turn ended at the time given.
 fn world(attached: bool, last_attached: Option<i64>, hosted: i64, loose: i64) -> GraphSnapshot {
+    world_of(
+        (LiveState::Ready, LiveDetail::Finished),
+        attached,
+        last_attached,
+        hosted,
+        loose,
+    )
+}
+
+/// [`world`] with both sessions stopped in `stop` (a state and its detail)
+/// instead of ready.
+fn world_of(
+    stop: (LiveState, LiveDetail),
+    attached: bool,
+    last_attached: Option<i64>,
+    hosted: i64,
+    loose: i64,
+) -> GraphSnapshot {
     let mut snapshot = GraphSnapshot::empty();
     for key in ["hosted", "loose"] {
         snapshot
@@ -64,8 +80,8 @@ fn world(attached: bool, last_attached: Option<i64>, hosted: i64, loose: i64) ->
     link.state = LinkState::Active;
     snapshot.candidate_links.push(link);
     snapshot.node_live = BTreeMap::from([
-        (session("hosted"), ready(hosted)),
-        (session("loose"), ready(loose)),
+        (session("hosted"), stopped(stop.0, stop.1, hosted)),
+        (session("loose"), stopped(stop.0, stop.1, loose)),
     ]);
     crate::resolve::resolve_snapshot(snapshot)
 }
@@ -114,7 +130,7 @@ fn a_turn_seen_while_a_client_was_attached_stays_seen_after_it_leaves() {
     // ended, and no client is on it.
     let mut app = app_over(&world(false, Some(LOADED - 600), ENDED_MS, ENDED_MS));
     assert!(unseen(&app, "hosted"));
-    assert_eq!(mux_live(&app).unseen, 1);
+    assert_eq!(mux_live(&app).unseen.ready, 1);
     assert!(
         LiveSign::of_mux(mux_live(&app)).unseen,
         "its mux's › is bold"
@@ -128,7 +144,7 @@ fn a_turn_seen_while_a_client_was_attached_stays_seen_after_it_leaves() {
         LOADED + 5,
     );
     assert!(!unseen(&app, "hosted"), "a client was on it after the turn");
-    assert_eq!(mux_live(&app).unseen, 0);
+    assert_eq!(mux_live(&app).unseen.ready, 0);
 
     // The client left again; the listing no longer says anyone looked.
     load(
@@ -222,19 +238,29 @@ fn resting_on_a_session_in_a_mux_does_not_see_it() {
 }
 
 #[test]
-fn seeing_a_turn_persists_nothing_and_changes_no_other_value() {
+fn reading_a_stop_adds_its_mark_to_the_state_file_and_changes_no_other_value() {
     let mut app = app_over(&world(false, None, ENDED_MS, ENDED_MS));
     app.set_selection(RowId::AgentSession(session("loose")));
     let before = app.build_persisted_state();
+    assert!(before.read_marks.is_empty(), "nothing is read yet");
     let rows_before: Vec<_> = app.tree().rows.iter().map(|row| row.id.clone()).collect();
     let start = Instant::now();
     app.note_cursor_rest(start);
     app.note_cursor_rest(start + SEEN_REST);
     assert!(!unseen(&app, "loose"));
+    let after = app.build_persisted_state();
     assert_eq!(
-        app.build_persisted_state(),
+        after.read_marks.values().copied().collect::<Vec<_>>(),
+        [ENDED_MS],
+        "the state file would hold the mark: the stop that was read"
+    );
+    assert_eq!(
+        crate::tui_state::PersistedState {
+            read_marks: before.read_marks.clone(),
+            ..after.clone()
+        },
         before,
-        "the state file would be written the same"
+        "and nothing else about it changes"
     );
     let rows_after: Vec<_> = app.tree().rows.iter().map(|row| row.id.clone()).collect();
     assert_eq!(rows_after, rows_before, "the rows stay where they were");
@@ -242,9 +268,36 @@ fn seeing_a_turn_persists_nothing_and_changes_no_other_value() {
         app.selection(),
         Some(&RowId::AgentSession(session("loose")))
     );
-    // A new TUI remembers nothing.
-    let fresh = app_over(&world(false, None, ENDED_MS, ENDED_MS));
+    // A TUI that starts without the file reads it unread again; one that
+    // loads the mark does not.
+    let mut fresh = app_over(&world(false, None, ENDED_MS, ENDED_MS));
     assert!(unseen(&fresh, "loose"));
+    fresh.seen.load_marks(&after.read_marks);
+    fresh.settle_seen();
+    assert!(!unseen(&fresh, "loose"), "the mark survived the restart");
+}
+
+#[test]
+fn a_mark_is_written_once_when_it_moves_and_a_stop_after_it_is_unread() {
+    let mut app = app_over(&world(false, None, ENDED_MS, ENDED_MS));
+    assert!(!app.seen.take_changed(), "nothing moved yet");
+    app.set_selection(RowId::AgentSession(session("loose")));
+    let start = Instant::now();
+    app.note_cursor_rest(start);
+    app.note_cursor_rest(start + SEEN_REST);
+    assert!(app.seen.take_changed(), "the mark moved");
+    assert!(!app.seen.take_changed(), "and is taken once");
+    // A stop that began after the mark is another stop.
+    let later = app_over(&world(false, None, ENDED_MS + 1, ENDED_MS + 1));
+    let marks = app.build_persisted_state().read_marks;
+    let mut later = later;
+    later.seen.load_marks(&marks);
+    later.settle_seen();
+    assert!(unseen(&later, "loose"), "a later stop is unread");
+    assert!(
+        !later.seen.take_changed(),
+        "marks taken from the file are no news to write back"
+    );
 }
 
 fn client_came_back(session: &str, at_ms: i64) -> Msg {
@@ -261,14 +314,14 @@ fn a_turn_watched_in_an_attached_client_reads_seen_when_the_client_comes_back() 
     // listed a client on it: only the return can say it was watched.
     let mut app = app_over(&world(false, Some(LOADED - 600), ENDED_MS, ENDED_MS));
     assert!(unseen(&app, "hosted"));
-    assert_eq!(mux_live(&app).unseen, 1);
+    assert_eq!(mux_live(&app).unseen.ready, 1);
 
     app.update(client_came_back("work", ENDED_MS + 20_000));
     assert!(
         !unseen(&app, "hosted"),
         "the client left the mux after the turn ended"
     );
-    assert_eq!(mux_live(&app).unseen, 0, "its mux's mark follows");
+    assert_eq!(mux_live(&app).unseen.ready, 0, "its mux's mark follows");
     assert!(
         unseen(&app, "loose"),
         "a session in no mux is seen by resting on it"
@@ -293,7 +346,7 @@ fn a_return_from_another_session_or_before_the_turn_leaves_it_unseen() {
         unseen(&app, "hosted"),
         "the client had left the mux before the turn ended"
     );
-    assert_eq!(mux_live(&app).unseen, 1);
+    assert_eq!(mux_live(&app).unseen.ready, 1);
 }
 
 #[test]
@@ -315,4 +368,77 @@ fn a_return_noted_before_the_next_snapshot_still_sees_the_turn_in_it() {
         LOADED + 150,
     );
     assert!(unseen(&app, "hosted"), "the client has not been back since");
+}
+
+#[test]
+fn a_wait_and_a_failure_read_unread_like_a_finished_turn_until_looked_at() {
+    for (state, detail, mark) in [
+        (
+            LiveState::Waiting,
+            LiveDetail::Permission,
+            LiveMark::Waiting,
+        ),
+        (LiveState::Ready, LiveDetail::Finished, LiveMark::Ready),
+        (LiveState::Error, LiveDetail::Failed, LiveMark::Error),
+    ] {
+        let stop = (state, detail);
+        // The mux was last attached before the stop began, and nobody has
+        // looked at the session that is in no mux.
+        let mut app = app_over(&world_of(
+            stop,
+            false,
+            Some(LOADED - 600),
+            ENDED_MS,
+            ENDED_MS,
+        ));
+        assert!(unseen(&app, "hosted"), "{state:?}: unread in a mux");
+        assert!(unseen(&app, "loose"), "{state:?}: unread with no mux");
+        let sign = LiveSign::of_mux(mux_live(&app));
+        assert_eq!(sign.mark, mark, "{state:?}: the mux's mark is the state's");
+        assert!(
+            sign.unseen,
+            "{state:?}: its mark is bold while any agent is"
+        );
+        assert_eq!(mux_live(&app).unseen.get(state), 1);
+
+        // A client attached to the mux after the stop: the mux's agent is
+        // read, and the mux's mark with it; the loose one is read by
+        // resting the cursor on its row.
+        load(
+            &mut app,
+            &world_of(stop, true, Some(LOADED - 600), ENDED_MS, ENDED_MS),
+            LOADED + 5,
+        );
+        assert!(!unseen(&app, "hosted"), "{state:?}: attaching reads it");
+        assert!(!LiveSign::of_mux(mux_live(&app)).unseen, "{state:?}");
+        assert!(
+            unseen(&app, "loose"),
+            "{state:?}: attaching reads only that mux"
+        );
+        app.set_selection(RowId::AgentSession(session("loose")));
+        let start = Instant::now();
+        app.note_cursor_rest(start);
+        app.note_cursor_rest(start + SEEN_REST);
+        assert!(!unseen(&app, "loose"), "{state:?}: resting reads it");
+    }
+}
+
+#[test]
+fn working_and_the_states_that_are_no_stop_are_never_unread() {
+    for state in [
+        LiveState::Working,
+        LiveState::Compacting,
+        LiveState::Starting,
+    ] {
+        let mut snapshot = world(false, None, ENDED_MS, ENDED_MS);
+        snapshot.node_live = BTreeMap::from([(
+            session("loose"),
+            LiveBinding::new(
+                LiveObservation::new(state, LiveSource::Hook, ENDED_MS),
+                Liveness::Alive,
+            ),
+        )]);
+        let app = app_over(&snapshot);
+        assert!(!unseen(&app, "loose"), "{state:?} is not a stop");
+    }
 }

@@ -752,6 +752,8 @@ impl App {
         if let Some(choice) = persisted.session_preview {
             self.session_preview = choice;
         }
+        // The stops the operator read in an earlier run stay read.
+        self.seen.load_marks(&persisted.read_marks);
 
         // Pre-populate view_states from persisted state.
         self.hold_saved_trees(
@@ -827,6 +829,7 @@ impl App {
             }
         }
         crate::tui_state::PersistedState {
+            read_marks: self.seen.session_marks(),
             last_view: Some(active_view),
             sort: Some(self.sort),
             mux_recency: Some(self.mux_recency),
@@ -1209,6 +1212,7 @@ impl App {
         match msg {
             Msg::Quit => {
                 self.should_quit = true;
+                effects.extend(self.read_mark_effects());
                 effects.push(Effect::Quit);
             }
             Msg::SetData {
@@ -1622,6 +1626,8 @@ impl App {
                 }
             },
             Msg::UndoRecorded(entry) => self.undo.push(entry),
+            Msg::MarkRead => effects.extend(self.mark_read()),
+            Msg::ClearUnread => effects.extend(self.clear_unread()),
             Msg::TogglePin => {
                 // `p` acts on the entity in view: it unpins what is
                 // already pinned and pins the rest, each at once. An

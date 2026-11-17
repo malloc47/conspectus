@@ -9,23 +9,24 @@ use tuikit::glyphs::marks;
 use super::{CoreField, FieldValue};
 use crate::model::MuxSessionId;
 use crate::model::live::{LiveConfidence, LiveCounts, LiveDetail, LiveState};
+use crate::tui::rows::live::is_stop;
 use crate::tui::rows::{LiveCell, LiveSign, LiveValues};
 
 /// The words of `cell`'s state: its name, then its detail's when it has
-/// one (`waiting`, `permission`), then, for a finished turn, whether the
-/// operator has seen it (`ready`, `finished`, `unseen`).
+/// one (`waiting`, `permission`), then, for a stop (waiting, ready, or
+/// error), whether the operator has read it (`ready`, `finished`,
+/// `unread`).
 fn state_words(cell: LiveCell) -> Vec<&'static str> {
-    let seen = (cell.state == LiveState::Ready).then_some(if cell.unseen { UNSEEN } else { SEEN });
+    let read = is_stop(cell.state).then_some(if cell.unseen { UNREAD } else { READ });
     std::iter::once(cell.state.name())
         .chain(cell.detail.map(LiveDetail::name))
-        .chain(seen)
+        .chain(read)
         .collect()
 }
 
-/// The words a ready turn's state ends with: whether the operator has
-/// seen it.
-const UNSEEN: &str = "unseen";
-const SEEN: &str = "seen";
+/// The words a stop's state ends with: whether the operator has read it.
+const UNREAD: &str = "unread";
+const READ: &str = "read";
 
 /// What a session's agent is doing, from the cell its row's mark is drawn
 /// from: `state` (the mark, then the state and its detail in words),
@@ -67,8 +68,8 @@ fn counted_states(counts: LiveCounts) -> Vec<LiveState> {
 }
 
 /// What a mux's agents are doing: `agents`, its counts led by the mark
-/// its row shows (`1 waiting · 1 error`, and `2 ready (1 unseen)` while
-/// some of its finished turns are unseen), and `pane_agents`, the agents in
+/// its row shows (`1 waiting · 1 error`, and `2 ready (1 unread)` while
+/// some of the stops in a state are unread), and `pane_agents`, the agents in
 /// its panes that no session matches, each with its pane and state (they
 /// count in `agents` too but have no row or node of their own). None
 /// without evidence.
@@ -82,11 +83,9 @@ pub(super) fn mux_fields(live: &LiveValues, mux: &MuxSessionId) -> Vec<CoreField
             .iter()
             .map(|state| {
                 let count = format!("{} {}", counts.get(*state), state.name());
-                match *state {
-                    LiveState::Ready if mux_live.unseen > 0 => {
-                        format!("{count} ({} {UNSEEN})", mux_live.unseen)
-                    }
-                    _ => count,
+                match mux_live.unseen.get(*state) {
+                    0 => count,
+                    unread => format!("{count} ({unread} {UNREAD})"),
                 }
             })
             .collect::<Vec<_>>()
@@ -99,7 +98,12 @@ pub(super) fn mux_fields(live: &LiveValues, mux: &MuxSessionId) -> Vec<CoreField
                     values: states
                         .iter()
                         .map(|state| state.name())
-                        .chain((mux_live.unseen > 0).then_some(UNSEEN))
+                        .chain(
+                            states
+                                .iter()
+                                .any(|state| mux_live.unseen.get(*state) > 0)
+                                .then_some(UNREAD),
+                        )
                         .map(str::to_string)
                         .collect(),
                 }),

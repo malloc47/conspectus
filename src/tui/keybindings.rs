@@ -49,6 +49,12 @@ use crate::tui::keymap::{Action, INSPECT_KEY};
 /// The undo key. Toasts that offer an undo name it from here.
 pub const UNDO_KEY: char = 'u';
 
+/// `c`: mark the selected row's agents read (ADR 0245).
+pub const READ_KEY: char = 'c';
+
+/// `C`: clear every unread mark (ADR 0245).
+pub const CLEAR_UNREAD_KEY: char = 'C';
+
 /// The left pane's scope: the row tree's keys, while it has focus.
 pub const LEFT_PANE: Scope = Scope::Pane("left");
 
@@ -130,6 +136,10 @@ pub enum Command {
     MuxMenu,
     TogglePin,
     Undo,
+    /// `c`: mark the selection's agents read.
+    MarkRead,
+    /// `C`: clear every unread mark.
+    ClearUnread,
     /// `.`: the selection's action menu.
     Menu,
     SwitchView(View),
@@ -192,6 +202,8 @@ impl Command {
             Command::MuxMenu => Action::OpenMuxMenu,
             Command::TogglePin => msg(Msg::TogglePin),
             Command::Undo => msg(Msg::Undo),
+            Command::MarkRead => msg(Msg::MarkRead),
+            Command::ClearUnread => msg(Msg::ClearUnread),
             Command::Menu => msg(Msg::OpenRowMenu),
             Command::SwitchView(view) => Action::SwitchView(view),
             Command::NextView => Action::CycleView(1),
@@ -347,6 +359,14 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
     bind("undo", GLOBAL, &[ch(UNDO_KEY)], Command::Undo).help(
         heading::ROW_ACTIONS,
         "Undo the last pin or unpin, as far back as this session goes; a removed pin comes back with its overrides and its place in the order",
+    ),
+    bind("read.mark", GLOBAL, &[ch(READ_KEY)], Command::MarkRead).help(
+        heading::ROW_ACTIONS,
+        "Mark the selected row's agents read: the waits, finished turns, and errors in bold that you have not read (a session's, or a mux's agents)",
+    ),
+    bind("read.clear", GLOBAL, &[ch(CLEAR_UNREAD_KEY)], Command::ClearUnread).help(
+        heading::ROW_ACTIONS,
+        "Clear every unread mark, whatever the view lists: all agents read",
     ),
     bind("row.menu", GLOBAL, &[ch('.')], Command::Menu)
         .verb("menu")

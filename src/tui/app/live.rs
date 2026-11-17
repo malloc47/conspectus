@@ -50,6 +50,7 @@ impl App {
         if rebound || rechecked || aged {
             self.refill_live(now_ms);
         }
+        self.persist_read_marks();
     }
 
     /// Give the rows on screen their live values at `now_ms`, and the

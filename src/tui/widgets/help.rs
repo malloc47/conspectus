@@ -146,8 +146,8 @@ fn live_state_legend(theme: &Theme) -> HelpSection {
                 };
                 section.legend(
                     Span::styled(mark.glyph(), unseen.style(theme)),
-                    "Ready, unseen",
-                    "bold: a finished turn you haven't seen, until you attach to its mux or, for a session with no mux, rest the cursor on its row for a second",
+                    "Unread",
+                    "bold: a stop you haven't read (a wait, a finished turn, or an error; the waiting and error marks go bold the same way), until you attach to its mux, rest the cursor on its row for a second (a session with no mux), or mark it read",
                 )
             } else {
                 section

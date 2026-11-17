@@ -117,6 +117,7 @@ fn full_state_round_trips_sort_filter_and_view_slots() {
     let dir = TempDir::new().expect("tempdir");
     let cache = cache_in(&dir);
     let mut state = PersistedState {
+        read_marks: Default::default(),
         last_view: Some(View::Mux),
         sort: Some(Sort::Recency),
         mux_recency: None,
@@ -167,6 +168,7 @@ fn each_view_keeps_its_own_agent_state_filter_and_waiting_float() {
     let dir = TempDir::new().expect("tempdir");
     let cache = cache_in(&dir);
     let mut state = PersistedState {
+        read_marks: Default::default(),
         last_view: Some(View::Sessions),
         sort: None,
         mux_recency: None,
@@ -216,6 +218,7 @@ fn mux_recency_basis_round_trips() {
     let dir = TempDir::new().expect("tempdir");
     let cache = cache_in(&dir);
     let state = PersistedState {
+        read_marks: Default::default(),
         last_view: Some(View::Mux),
         sort: Some(Sort::Recency),
         mux_recency: Some(crate::tui::MuxRecency::LastAttached),
@@ -235,6 +238,7 @@ fn preview_wrap_round_trips_and_ignores_unknown_tokens() {
     let dir = TempDir::new().expect("tempdir");
     let cache = cache_in(&dir);
     let state = PersistedState {
+        read_marks: Default::default(),
         last_view: None,
         sort: None,
         mux_recency: None,
@@ -329,6 +333,7 @@ fn session_preview_round_trips_and_ignores_unknown_tokens() {
     let dir = TempDir::new().expect("tempdir");
     let cache = cache_in(&dir);
     let state = PersistedState {
+        read_marks: Default::default(),
         session_preview: Some(crate::tui::SessionPreview::Pane),
         ..PersistedState::default()
     };
@@ -697,4 +702,126 @@ fn an_id_whose_text_reads_back_as_another_gets_no_key() {
         })
     };
     assert_ne!(colon("a:mux_session:b", "c"), colon("a", "b:mux_session:c"));
+}
+
+fn marks(entries: &[(&str, i64)]) -> BTreeMap<String, i64> {
+    entries
+        .iter()
+        .map(|(key, at_ms)| ((*key).to_string(), *at_ms))
+        .collect()
+}
+
+fn state_with(read_marks: BTreeMap<String, i64>) -> PersistedState {
+    PersistedState {
+        last_view: Some(View::Sessions),
+        read_marks,
+        ..PersistedState::default()
+    }
+}
+
+#[test]
+fn read_marks_round_trip_and_the_file_without_any_reads_back_none() {
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    let state = state_with(marks(&[
+        ("agent_session:a", 5_000),
+        ("agent_session:b", 9_000),
+    ]));
+    write_tui_state(&cache, &state).expect("write");
+    assert_eq!(
+        read_tui_state(&cache).expect("read").read_marks,
+        state.read_marks
+    );
+    let empty = TempDir::new().expect("tempdir");
+    write_tui_state(&cache_in(&empty), &state_with(BTreeMap::new())).expect("write");
+    assert!(
+        read_tui_state(&cache_in(&empty))
+            .expect("read")
+            .read_marks
+            .is_empty()
+    );
+    let text = fs::read_to_string(cache_in(&empty).path().expect("path")).expect("file");
+    assert!(!text.contains("read_marks"), "no marks, no key: {text}");
+}
+
+#[test]
+fn a_write_keeps_the_marks_another_run_wrote_and_the_later_stop_wins() {
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    write_tui_state(
+        &cache,
+        &state_with(marks(&[
+            ("agent_session:a", 5_000),
+            ("agent_session:b", 9_000),
+        ])),
+    )
+    .expect("first run");
+    // Another TUI knows a newer stop of `a`, an older one of `b`, and a
+    // third agent; the first run's marks are not lost.
+    write_tui_state(
+        &cache,
+        &state_with(marks(&[
+            ("agent_session:a", 7_000),
+            ("agent_session:b", 1_000),
+            ("agent_session:c", 3_000),
+        ])),
+    )
+    .expect("second run");
+    assert_eq!(
+        read_tui_state(&cache).expect("read").read_marks,
+        marks(&[
+            ("agent_session:a", 7_000),
+            ("agent_session:b", 9_000),
+            ("agent_session:c", 3_000),
+        ])
+    );
+}
+
+#[test]
+fn the_file_keeps_only_the_newest_marks() {
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    let many: BTreeMap<String, i64> = (0..MAX_READ_MARKS as i64 + 50)
+        .map(|n| (format!("agent_session:s{n:05}"), n))
+        .collect();
+    write_tui_state(&cache, &state_with(many)).expect("write");
+    let kept = read_tui_state(&cache).expect("read").read_marks;
+    assert_eq!(kept.len(), MAX_READ_MARKS);
+    assert!(
+        !kept.contains_key("agent_session:s00000"),
+        "the oldest went"
+    );
+    assert!(
+        kept.contains_key(&format!("agent_session:s{:05}", MAX_READ_MARKS + 49)),
+        "the newest stayed"
+    );
+}
+
+#[test]
+fn a_bad_mark_costs_only_itself_and_a_file_of_another_shape_only_the_marks() {
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    let path = cache.path().expect("path");
+    fs::create_dir_all(path.parent().unwrap()).expect("mkdir");
+    fs::write(
+        &path,
+        r#"{"schema_version": 1, "last_view": "mux",
+            "read_marks": {"agent_session:a": 5, "agent_session:b": "soon", "agent_session:c": 2.5, "agent_session:d": null}}"#,
+    )
+    .expect("write");
+    let state = read_tui_state(&cache).expect("read");
+    assert_eq!(
+        state.last_view,
+        Some(View::Mux),
+        "the rest of the file reads"
+    );
+    assert_eq!(state.read_marks, marks(&[("agent_session:a", 5)]));
+    fs::write(
+        &path,
+        r#"{"schema_version": 1, "last_view": "mux", "read_marks": ["a", "b"]}"#,
+    )
+    .expect("write");
+    let state = read_tui_state(&cache).expect("read");
+    assert_eq!(state.last_view, Some(View::Mux));
+    assert!(state.read_marks.is_empty());
 }

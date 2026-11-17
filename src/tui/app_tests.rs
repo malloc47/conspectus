@@ -2536,6 +2536,7 @@ fn restore_persisted_state_applies_state_and_mirrors_config() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let cache = crate::tui_state::TuiStateCache::default().with_xdg_state_home(dir.path());
     let mut persisted = crate::tui_state::PersistedState {
+        read_marks: Default::default(),
         last_view: Some(View::Sessions),
         sort: Some(crate::tui::Sort::Recency),
         mux_recency: None,
@@ -2581,6 +2582,7 @@ fn restore_persisted_state_preserves_explicit_cli_overrides() {
         ..crate::filter::RowFilter::default()
     };
     let mut persisted = crate::tui_state::PersistedState {
+        read_marks: Default::default(),
         last_view: Some(View::Sessions),
         sort: Some(crate::tui::Sort::Recency),
         mux_recency: None,

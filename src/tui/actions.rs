@@ -775,6 +775,26 @@ pub fn row_menu_for(app: &App) -> Option<ActionMenu<crate::tui::Msg>> {
                 .confirm(Confirm::Inline),
         );
     }
+    // What `c` and `C` do, from the menu too.
+    if !app.unread_of(subject.node.as_ref()).is_empty()
+        && matches!(
+            subject.node,
+            Some(NodeId::AgentSession(_) | NodeId::MuxSession(_))
+        )
+    {
+        entries.push(
+            Entry::new("Mark read", Msg::MarkRead)
+                .detail("its waits, finished turns, and errors you have not read")
+                .shortcut(tuikit::keys::ch(crate::tui::keybindings::READ_KEY)),
+        );
+    }
+    if !app.unread_of(None).is_empty() {
+        entries.push(
+            Entry::new("Clear all unread", Msg::ClearUnread)
+                .detail("mark every agent read")
+                .shortcut(tuikit::keys::ch(crate::tui::keybindings::CLEAR_UNREAD_KEY)),
+        );
+    }
     if in_history {
         entries.push(
             Entry::new("Clean up…", Msg::OpenCleanUp)

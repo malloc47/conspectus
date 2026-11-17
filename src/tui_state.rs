@@ -35,6 +35,12 @@
 //! }
 //! ```
 //!
+//! `read_marks` holds the stops the operator has read (ADR 0245): for
+//! each agent session, by node id, when the latest stop read began. A
+//! write merges the file's marks with its own (the later stop wins) and
+//! keeps the newest [`MAX_READ_MARKS`]; an entry that is not a whole
+//! number costs only itself.
+//!
 //! A view's `expanded` rows and `selected` row are named by row keys
 //! ([`row_key`]), whose encoding `row_keys` names; the selection carries
 //! the keys of the rows above it, top-level first, so a restart whose
@@ -120,6 +126,16 @@ struct RawState {
     row_keys: Option<u32>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     view_states: BTreeMap<String, ViewStateRaw>,
+    /// The stops the operator has read (ADR 0245): for each agent
+    /// session, by node id, when the latest stop read began, Unix epoch
+    /// milliseconds. Only a session has a mark; a value that is not a
+    /// number costs only that mark.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "lenient_marks"
+    )]
+    read_marks: BTreeMap<String, i64>,
     #[serde(flatten)]
     extra: BTreeMap<String, serde_json::Value>,
 }
@@ -219,6 +235,55 @@ where
     Ok(lenient_keys(deserializer)?.unwrap_or_default())
 }
 
+/// The read marks of a file: an object's entries whose values are whole
+/// numbers, and none when it is anything else, so one bad entry (or a
+/// file from a build that wrote another shape) costs only that mark.
+fn lenient_marks<'de, D>(deserializer: D) -> Result<BTreeMap<String, i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let Some(object) = value.as_object() else {
+        return Ok(BTreeMap::new());
+    };
+    Ok(object
+        .iter()
+        .filter_map(|(key, value)| Some((key.clone(), value.as_i64()?)))
+        .collect())
+}
+
+/// The most read marks the state file keeps: the ones whose stops are the
+/// newest. An agent whose mark is dropped reads unread again only if it
+/// stopped no later than the mark, which for the oldest of two thousand
+/// stops is long past.
+pub const MAX_READ_MARKS: usize = 2000;
+
+/// `marks` with `other` merged in (the later stop wins for an agent in
+/// both), cut to [`MAX_READ_MARKS`] newest.
+fn merged_marks(
+    marks: &BTreeMap<String, i64>,
+    other: &BTreeMap<String, i64>,
+) -> BTreeMap<String, i64> {
+    let mut merged = marks.clone();
+    for (key, at_ms) in other {
+        let slot = merged.entry(key.clone()).or_insert(i64::MIN);
+        *slot = (*slot).max(*at_ms);
+    }
+    if merged.len() > MAX_READ_MARKS {
+        let mut newest: Vec<(String, i64)> = merged.into_iter().collect();
+        newest.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        newest.truncate(MAX_READ_MARKS);
+        merged = newest.into_iter().collect();
+    }
+    merged
+}
+
+/// The key an agent session's read mark has in the state file: its node
+/// id in its text form, when that reads back as the same id.
+pub(crate) fn mark_key(node: &NodeId) -> Option<String> {
+    node_text(node)
+}
+
 /// Snapshot of the full TUI state suitable for serialisation.
 /// Carried from `App` → write, and deserialised → `App` on restart.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -229,6 +294,9 @@ pub struct PersistedState {
     pub preview_wrap: Option<crate::tui::WrapMode>,
     pub session_preview: Option<crate::tui::SessionPreview>,
     pub view_states: BTreeMap<View, PersistedViewSlot>,
+    /// The stops the operator has read, by [`mark_key`] and when the
+    /// latest of them began (ADR 0245).
+    pub read_marks: BTreeMap<String, i64>,
 }
 
 /// Per-view saved filter, grouping, and tree recovered from the state
@@ -450,6 +518,7 @@ pub fn read_tui_state(cache: &TuiStateCache) -> Option<PersistedState> {
         preview_wrap,
         session_preview,
         view_states,
+        read_marks: merged_marks(&raw.read_marks, &BTreeMap::new()),
     })
 }
 
@@ -480,6 +549,9 @@ pub fn write_tui_state(cache: &TuiStateCache, state: &PersistedState) -> io::Res
         .preview_wrap
         .map(|w| crate::tui::preview_wrap::token(w).to_string());
     raw.session_preview = state.session_preview.map(|p| p.as_str().to_string());
+    // Marks only grow: another TUI's marks in the file stay, and the later
+    // stop wins for an agent both know.
+    raw.read_marks = merged_marks(&raw.read_marks, &state.read_marks);
     let mut previous = std::mem::take(&mut raw.view_states);
     for (view, slot) in &state.view_states {
         let name = view_to_snake_case(*view);
@@ -559,6 +631,7 @@ impl Default for RawState {
             session_preview: None,
             row_keys: None,
             view_states: BTreeMap::new(),
+            read_marks: BTreeMap::new(),
             extra: BTreeMap::new(),
         }
     }

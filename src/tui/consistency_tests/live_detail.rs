@@ -134,7 +134,7 @@ fn the_detail_pane_takes_a_store_change_in_place_and_keeps_its_cursor() {
     walk_to(&mut app, "state");
     assert_eq!(
         node_field(&app, "state").map(|field| field.value),
-        Some("waiting · permission".to_string())
+        Some("waiting · permission · unread".to_string())
     );
     store
         .apply_event(&LiveEvent::new(
@@ -158,8 +158,8 @@ fn the_detail_pane_takes_a_store_change_in_place_and_keeps_its_cursor() {
     );
     let state = node_field(&app, "state").expect("the state field");
     assert_eq!(
-        state.value, "ready · finished · unseen",
-        "the field reads the turn's end, which nobody has looked at yet"
+        state.value, "ready · finished · unread",
+        "the field reads the turn's end, which nobody has read yet"
     );
     assert_eq!(
         state.live_mark.map(LiveSign::glyph),
@@ -213,7 +213,7 @@ fn the_live_fields_preview_what_they_mean_and_the_related_rows_still_drill() {
         crate::tui::preview::preview_subject(&app),
         crate::tui::preview::PreviewSubject::Field(FieldValue::Glossary {
             field: "state",
-            values: vec!["waiting".into(), "permission".into()],
+            values: vec!["waiting".into(), "permission".into(), "unread".into()],
         })
     );
     let shown = preview(&mut app);
@@ -270,7 +270,7 @@ fn a_mux_lists_its_agents_and_the_ones_no_session_matches() {
     select(&mut app, "conspectus-main");
     assert_eq!(
         node_field(&app, "agents").map(|field| field.value),
-        Some("1 waiting · 1 error".to_string()),
+        Some("1 waiting (1 unread) · 1 error (1 unread)".to_string()),
         "the mux counts {HOSTED} and {BESIDE}"
     );
     assert!(node_field(&app, "pane_agents").is_none());
@@ -279,11 +279,11 @@ fn a_mux_lists_its_agents_and_the_ones_no_session_matches() {
     select(&mut app, "scratch");
     assert_eq!(
         node_field(&app, "agents").map(|field| field.value),
-        Some("1 waiting · 1 unknown".to_string())
+        Some("1 waiting (1 unread) · 1 unknown".to_string())
     );
     assert_eq!(
         node_field(&app, "pane_agents").map(|field| field.value),
-        Some("%4 waiting · input  (+1)".to_string())
+        Some("%4 waiting · input · unread  (+1)".to_string())
     );
 }
 

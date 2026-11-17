@@ -13,7 +13,9 @@
 //! nothing is written and no effect is emitted.
 
 use super::*;
+use crate::tui::Effect;
 use crate::tui::rows::seen::{self, Agent, ClientReturn, SEEN_REST, SeenContext};
+use tuikit::feedback::Feedback;
 
 impl App {
     /// What judges whether a ready turn was seen: the memory, and when
@@ -27,7 +29,94 @@ impl App {
         }
     }
 
-    /// Keep every ready turn the rows on screen found seen.
+    /// Write the state file when a session's read mark moved since it
+    /// was last written, from outside the reducer (the tick's own).
+    pub(crate) fn persist_read_marks(&mut self) {
+        if self.seen.take_changed() {
+            self.persist_state();
+        }
+    }
+
+    /// The effects the reducer owes a session's moved read mark: the
+    /// state file's write, once.
+    pub(super) fn read_mark_effects(&mut self) -> Vec<Effect> {
+        if self.seen.take_changed() {
+            vec![Effect::Persist]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The agents with an unread stop that `node` stands for, each with
+    /// when that stop began: a session's own, or a mux's, the agents
+    /// counted on it; every agent when `node` is `None`.
+    pub(crate) fn unread_of(&self, node: Option<&NodeId>) -> Vec<(Agent, i64)> {
+        let Some(handle) = &self.handle else {
+            return Vec::new();
+        };
+        let snapshot = handle.snapshot();
+        let stands_for = |agent: &Agent| match node {
+            None => true,
+            Some(NodeId::MuxSession(mux)) => agent.mux(snapshot).as_ref() == Some(mux),
+            Some(session) => *agent == Agent::Session(session.clone()),
+        };
+        self.tree
+            .live
+            .unread()
+            .filter(|(agent, _)| stands_for(agent))
+            .collect()
+    }
+
+    /// Read the unread stops of `node`'s agents ([`Self::unread_of`]).
+    /// Returns how many it read, and fills the rows again so their marks
+    /// go plain in place.
+    fn read_unread(&mut self, node: Option<&NodeId>) -> usize {
+        let unread = self.unread_of(node);
+        let read = unread.len();
+        for (agent, since_ms) in unread {
+            self.seen.see(agent, since_ms);
+        }
+        if read > 0 {
+            self.refill_live(crate::tui::rows::tree_current_unix_ms());
+        }
+        read
+    }
+
+    /// `c`: mark the agents of the entity in view read, with a toast that
+    /// says how many (ADR 0245).
+    pub(super) fn mark_read(&mut self) -> Vec<Effect> {
+        let node = crate::tui::actions::action_subject(self).node;
+        let known = node
+            .as_ref()
+            .is_some_and(|node| matches!(node, NodeId::AgentSession(_) | NodeId::MuxSession(_)));
+        let mut effects = Vec::new();
+        let toast = if known {
+            match self.read_unread(node.as_ref()) {
+                0 => Feedback::info("nothing unread here"),
+                1 => Feedback::success("marked 1 agent read"),
+                many => Feedback::success(format!("marked {many} agents read")),
+            }
+        } else {
+            Feedback::warning("nothing to mark read: this row has no agent")
+        };
+        effects.extend(self.read_mark_effects());
+        effects.push(Effect::Toast(toast));
+        effects
+    }
+
+    /// `C`: mark every agent's stop read.
+    pub(super) fn clear_unread(&mut self) -> Vec<Effect> {
+        let toast = match self.read_unread(None) {
+            0 => Feedback::info("nothing unread"),
+            1 => Feedback::success("cleared 1 unread agent"),
+            many => Feedback::success(format!("cleared {many} unread agents")),
+        };
+        let mut effects = self.read_mark_effects();
+        effects.push(Effect::Toast(toast));
+        effects
+    }
+
+    /// Keep every stop the rows on screen found read.
     pub(super) fn remember_seen_turns(&mut self) {
         let turns: Vec<(Agent, i64)> = self.tree.live.seen_turns().collect();
         for (agent, ended_ms) in turns {
@@ -49,7 +138,7 @@ impl App {
     /// own load time (its rows were built before it was set), and keep
     /// the ones it shows seen.
     pub(super) fn settle_seen(&mut self) {
-        if self.tree.live.any_ready() {
+        if self.tree.live.any_stopped() {
             self.refill_live(crate::tui::rows::tree_current_unix_ms());
         }
     }

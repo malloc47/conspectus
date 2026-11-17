@@ -44,9 +44,21 @@ pub struct LiveCell {
     pub subagents: u16,
     /// What reported the state.
     pub source: LiveSource,
-    /// A `ready` turn the operator has not seen yet (ADR 0214); always
-    /// `false` in any other state.
+    /// A stop the operator has not read yet (ADR 0214, ADR 0245): the
+    /// agent is waiting, ready, or in error, and has not been looked at
+    /// since that state began. The name is the model's older word for it
+    /// (unseen); the operator reads unread. Always `false` in any other
+    /// state.
     pub unseen: bool,
+}
+
+/// Whether `state` is one an agent stops in, after working: waiting for
+/// the operator, ready for a prompt, or failed. Only a stop can be unread.
+pub(crate) const fn is_stop(state: LiveState) -> bool {
+    matches!(
+        state,
+        LiveState::Waiting | LiveState::Ready | LiveState::Error
+    )
 }
 
 impl LiveCell {
@@ -80,8 +92,8 @@ impl LiveCell {
 }
 
 /// What a mux's row knows of its agents' live state: how many are in
-/// each state, how many of those have gone quiet, and how many of its
-/// ready ones ended a turn the operator has not seen.
+/// each state, how many of those have gone quiet, and how many of each
+/// stop (waiting, ready, error) the operator has not read.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct MuxLive {
     pub counts: LiveCounts,
@@ -89,7 +101,9 @@ pub struct MuxLive {
     /// (work with no news past its source's quiet window). Only the
     /// states that can go quiet are ever above zero.
     pub quiet: LiveCounts,
-    pub unseen: u32,
+    /// Of [`Self::counts`], how many agents in each state are unread
+    /// ([`LiveCell::unseen`]); above zero only for the stops.
+    pub unseen: LiveCounts,
 }
 
 impl MuxLive {
@@ -133,16 +147,16 @@ pub struct LiveValues {
     /// For each mux, how many of the agents in `counts` are quiet, by
     /// state.
     quiet: BTreeMap<MuxSessionId, LiveCounts>,
-    /// For each mux, how many ready agents counted on it ended a turn the
-    /// operator has not seen.
-    unseen: BTreeMap<MuxSessionId, u32>,
+    /// For each mux, how many agents counted on it, by state, stopped
+    /// there and have not been read.
+    unseen: BTreeMap<MuxSessionId, LiveCounts>,
     /// Every agent of the tables waiting on the operator.
     waiting: usize,
 }
 
 impl LiveValues {
     /// `tables`, bound to `snapshot`, read at `now_ms`, each ready turn
-    /// judged seen or not by `seen`. A mux counts by the rule of
+    /// judged read or not by `seen`. A mux counts by the rule of
     /// [`GraphSnapshot::live_counts_of_mux`].
     pub(crate) fn at(
         snapshot: &GraphSnapshot,
@@ -152,8 +166,8 @@ impl LiveValues {
     ) -> Self {
         let mut cells = cells_at(tables.nodes, now_ms);
         let mut panes = cells_at(tables.panes, now_ms);
-        let mut unseen: BTreeMap<MuxSessionId, u32> = BTreeMap::new();
-        let ready = cells
+        let mut unseen: BTreeMap<MuxSessionId, LiveCounts> = BTreeMap::new();
+        let stops = cells
             .iter_mut()
             .map(|(node, cell)| (Agent::Session(node.clone()), cell))
             .chain(
@@ -161,12 +175,12 @@ impl LiveValues {
                     .iter_mut()
                     .map(|(pane, cell)| (Agent::Pane(pane.clone()), cell)),
             )
-            .filter(|(_, cell)| cell.state == LiveState::Ready);
-        for (agent, cell) in ready {
+            .filter(|(_, cell)| is_stop(cell.state));
+        for (agent, cell) in stops {
             let mux = agent.mux(snapshot);
             cell.unseen = seen::unseen(snapshot, &agent, mux.as_ref(), cell.since_ms, seen);
             if let Some(mux) = mux.filter(|_| cell.unseen) {
-                *unseen.entry(mux).or_default() += 1;
+                unseen.entry(mux).or_default().add(cell.state);
             }
         }
         let waiting = cells
@@ -184,10 +198,10 @@ impl LiveValues {
         }
     }
 
-    /// Every ready turn these values found seen, with when it ended, for
-    /// the memory to keep ([`seen::SeenTurns::see`]).
+    /// Every stop these values found read, with when it began, for the
+    /// memory to keep ([`seen::SeenTurns::see`]).
     pub(crate) fn seen_turns(&self) -> impl Iterator<Item = (Agent, i64)> + '_ {
-        let seen = |cell: &LiveCell| cell.state == LiveState::Ready && !cell.unseen;
+        let seen = |cell: &LiveCell| is_stop(cell.state) && !cell.unseen;
         let sessions = self
             .cells
             .iter()
@@ -201,13 +215,29 @@ impl LiveValues {
         sessions.chain(panes)
     }
 
-    /// Whether any agent is ready, so judging its turn again could
-    /// change what the rows show.
-    pub(crate) fn any_ready(&self) -> bool {
+    /// Every agent whose stop is unread, with when that stop began, in
+    /// order: sessions first, then the agents of panes no session matches.
+    pub(crate) fn unread(&self) -> impl Iterator<Item = (Agent, i64)> + '_ {
+        let sessions = self
+            .cells
+            .iter()
+            .filter(|(_, cell)| cell.unseen)
+            .map(|(node, cell)| (Agent::Session(node.clone()), cell.since_ms));
+        let panes = self
+            .panes
+            .iter()
+            .filter(|(_, cell)| cell.unseen)
+            .map(|(pane, cell)| (Agent::Pane(pane.clone()), cell.since_ms));
+        sessions.chain(panes)
+    }
+
+    /// Whether any agent has stopped (waiting, ready, or in error), so
+    /// judging its stop again could change what the rows show.
+    pub(crate) fn any_stopped(&self) -> bool {
         self.cells
             .values()
             .chain(self.panes.values())
-            .any(|cell| cell.state == LiveState::Ready)
+            .any(|cell| is_stop(cell.state))
     }
 
     /// How many agents anywhere wait on the operator: every entry of the
@@ -242,7 +272,7 @@ impl LiveValues {
         self.cells.get(id).copied()
     }
 
-    /// A mux's counts, its quiet agents, and its unseen turns; empty
+    /// A mux's counts, its quiet agents, and its unread stops; empty
     /// without evidence.
     pub(crate) fn mux(&self, id: &MuxSessionId) -> MuxLive {
         MuxLive {

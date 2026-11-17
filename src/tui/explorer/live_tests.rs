@@ -11,6 +11,7 @@ use crate::tui::explorer::grid::field_row;
 use crate::tui::explorer::{ExplorerInputs, NodeView, build_node_view};
 use crate::tui::rows::LiveMark;
 use crate::tui::theme::Theme;
+use ratatui::style::Modifier;
 
 /// The time the views are read at, in Unix seconds.
 const NOW: i64 = 1_700_003_600;
@@ -138,7 +139,7 @@ fn a_session_with_live_state_says_what_since_when_from_what_and_how_fresh() {
         ]
     );
     let state = field(&view, "state");
-    assert_eq!(state.value, "waiting · permission");
+    assert_eq!(state.value, "waiting · permission · unread");
     assert_eq!(
         state.live_mark.map(|sign| (sign.mark, sign.quiet)),
         Some((LiveMark::Waiting, false)),
@@ -149,7 +150,7 @@ fn a_session_with_live_state_says_what_since_when_from_what_and_how_fresh() {
         state.preview,
         Some(FieldValue::Glossary {
             field: "state",
-            values: vec!["waiting".into(), "permission".into()],
+            values: vec!["waiting".into(), "permission".into(), "unread".into()],
         })
     );
     let since = field(&view, "since");
@@ -261,8 +262,8 @@ fn subagents_show_while_the_agent_runs_them_and_its_state_can_be_told() {
     let ready = view(&snapshot, &session("idle"));
     assert_eq!(
         field(&ready, "state").value,
-        "ready · unseen",
-        "a state without a detail is its name, then whether its turn was seen"
+        "ready · unread",
+        "a state without a detail is its name, then whether its stop was read"
     );
 }
 
@@ -305,32 +306,39 @@ fn a_mux_counts_its_agents_in_rollup_order_and_lists_its_pane_agents() {
     );
     let agents = field(&view, "agents");
     assert_eq!(
-        agents.value, "2 waiting · 1 error · 1 starting",
+        agents.value, "2 waiting (2 unread) · 1 error (1 unread) · 1 starting",
         "waiting, then error, then the rest, as the row's mark ranks them"
     );
     assert_eq!(
         agents.live_mark,
-        Some(LiveSign::of_mux(
-            snapshot.live_counts_of_mux(&mux_id(), NOW_MS).into()
-        )),
+        Some(LiveSign {
+            // Its waiting agents' stops are unread.
+            unseen: true,
+            ..LiveSign::of_mux(snapshot.live_counts_of_mux(&mux_id(), NOW_MS).into())
+        }),
         "the field leads with the mux row's mark"
     );
     assert_eq!(
         agents.preview,
         Some(FieldValue::Glossary {
             field: "state",
-            values: vec!["waiting".into(), "error".into(), "starting".into()],
+            values: vec![
+                "waiting".into(),
+                "error".into(),
+                "starting".into(),
+                "unread".into()
+            ],
         })
     );
     let panes = field(&view, "pane_agents");
     assert_eq!(
-        panes.value, "%4 waiting · input  (+1)",
+        panes.value, "%4 waiting · input · unread  (+1)",
         "the first and how many more, as a list field reads"
     );
     assert_eq!(
         panes.preview,
         Some(FieldValue::List(vec![
-            "%4 waiting · input".into(),
+            "%4 waiting · input · unread".into(),
             "%5 starting".into()
         ]))
     );
@@ -341,7 +349,10 @@ fn a_mux_whose_agents_all_have_sessions_lists_no_pane_agents() {
     let mut snapshot = live_world();
     snapshot.pane_live.clear();
     let view = view(&snapshot, &NodeId::MuxSession(mux_id()));
-    assert_eq!(field(&view, "agents").value, "1 waiting · 1 error");
+    assert_eq!(
+        field(&view, "agents").value,
+        "1 waiting (1 unread) · 1 error (1 unread)"
+    );
     assert!(!labels(&view.core_fields).contains(&"pane_agents"));
 }
 
@@ -385,7 +396,11 @@ fn a_live_field_draws_the_rows_mark_and_recedes_when_its_evidence_is_not_fresh()
         .iter()
         .find(|span| span.content == "!")
         .expect("the mark");
-    assert_eq!(mark.style, LiveMark::Waiting.style(&theme));
+    assert_eq!(
+        mark.style,
+        LiveMark::Waiting.style(&theme).add_modifier(Modifier::BOLD),
+        "an unread stop's mark is bold"
+    );
     let value = waiting
         .spans
         .iter()

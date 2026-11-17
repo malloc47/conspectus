@@ -10,10 +10,14 @@
 //! ([`ClientReturn`]). For a session with no mux, the cursor resting on
 //! one of its rows in this TUI for [`SEEN_REST`].
 //!
-//! A turn found seen stays seen, in this TUI's memory ([`SeenTurns`]),
-//! until a later turn ends: a refresh that no longer shows the client
-//! attached can't make it unseen again. Nothing is written anywhere, and
-//! the memory starts empty with each TUI.
+//! A stop found seen stays seen, in this TUI's memory ([`SeenTurns`]),
+//! until a later stop begins: a refresh that no longer shows the client
+//! attached can't make it unseen again. The marks of agent sessions are
+//! kept in the TUI's state file and loaded back at the next start
+//! (ADR 0245); a pane's agent has no mark that outlives the TUI.
+//!
+//! The model's word is unseen and the operator's is unread: the same
+//! judgment, for a waiting, ready, or failed agent alike.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -72,6 +76,9 @@ pub(crate) struct SeenTurns {
     turns: BTreeMap<Agent, i64>,
     /// The latest return from each session, by server socket and name.
     returns: BTreeMap<(String, String), i64>,
+    /// Whether a session's mark moved since the state file last took it
+    /// ([`Self::take_changed`]).
+    changed: bool,
 }
 
 /// No turn seen, for readers with no memory of their own.
@@ -79,6 +86,7 @@ pub(crate) struct SeenTurns {
 static NOTHING_SEEN: SeenTurns = SeenTurns {
     turns: BTreeMap::new(),
     returns: BTreeMap::new(),
+    changed: false,
 };
 
 impl SeenTurns {
@@ -91,12 +99,45 @@ impl SeenTurns {
     /// Remember that the turn of `agent` that ended at `ended_ms` was
     /// seen. Says whether that is news.
     pub(crate) fn see(&mut self, agent: Agent, ended_ms: i64) -> bool {
+        let session = matches!(agent, Agent::Session(_));
         let seen = self.turns.entry(agent).or_insert(i64::MIN);
         if *seen >= ended_ms {
             return false;
         }
         *seen = ended_ms;
+        self.changed |= session;
         true
+    }
+
+    /// The marks of the agent sessions, for the state file: each
+    /// session's [`mark_key`](crate::tui_state::mark_key) and when its
+    /// latest read stop began. A pane's agent is left out.
+    pub(crate) fn session_marks(&self) -> BTreeMap<String, i64> {
+        self.turns
+            .iter()
+            .filter_map(|(agent, at_ms)| match agent {
+                Agent::Session(node) => Some((crate::tui_state::mark_key(node)?, *at_ms)),
+                Agent::Pane(_) => None,
+            })
+            .collect()
+    }
+
+    /// Take the marks a state file holds: a key that is no session's
+    /// node id is skipped, and nothing taken here is news to write back.
+    pub(crate) fn load_marks(&mut self, marks: &BTreeMap<String, i64>) {
+        for (key, at_ms) in marks {
+            let Some(node @ NodeId::AgentSession(_)) = NodeId::parse(key) else {
+                continue;
+            };
+            let seen = self.turns.entry(Agent::Session(node)).or_insert(i64::MIN);
+            *seen = (*seen).max(*at_ms);
+        }
+    }
+
+    /// Whether a session's mark moved since the last call, which is when
+    /// the state file is due a write.
+    pub(crate) fn take_changed(&mut self) -> bool {
+        std::mem::take(&mut self.changed)
     }
 
     /// Remember that the client came back from a session. Says whether
