@@ -70,7 +70,7 @@ fn code(path: &Path) -> Vec<String> {
 /// The first word of each command a shell line runs: the line split where a
 /// pipe, a `;`, an `&`, a parenthesis, or a backquote starts another.
 fn commands(line: &str) -> Vec<String> {
-    line.split(|c| matches!(c, '|' | ';' | '&' | '(' | ')' | '`'))
+    line.split(['|', ';', '&', '(', ')', '`'])
         .filter_map(|part| part.split_whitespace().next())
         .map(str::to_string)
         .collect()
