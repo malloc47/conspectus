@@ -14,6 +14,17 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **`just record <harness>` records a real harness session.** It runs
+  Claude Code, Codex, or Pi through a scenario of the checks that tied off
+  live state (a turn, an approval declined and granted, an interrupt, a
+  question, subagents, compaction, `/clear`, a closed pane, `kill -9`) in a
+  private tmux server, with a copy of the harness's configuration and a
+  scratch state directory, and keeps the redacted hook traces, a table of
+  each, and screen snapshots in `record-out/`. It spends the model quota of
+  the account the harness is signed in to, so it is manual: it prints the
+  quota and the directories, asks you to type `record`, runs in its own
+  memory-capped systemd scope, and is in no check or CI job. See
+  `scripts/record/README.md`.
 - **`CONSPECTUS_HOOK_TRACE` records what a harness sends.** Set it to a
   name (letters, digits, `.`, `_`, `-`) in the environment a harness
   starts with, and each `conspectus hook write` adds one JSON line to

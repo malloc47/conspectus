@@ -823,7 +823,12 @@ one-shot command. A one-shot command sees one probe, so it never clears or raise
 a hook's state from the title. The TUI does not ask tmux any more often
 than that.
 
-Only Codex's titles are read, and only the start of each: the rest of
+Only Codex's titles are read. Claude Code's and Pi's say nothing of what the
+agent is doing (recorded: `✳ Claude Code`, then `✳ <session name>`, in every
+state; Pi's is its name and the project's, unless an extension sets another),
+so a Claude Code or Pi pane is shown by its hooks and, for Claude Code, its
+[agent list](#claude-codes-agent-list) alone. Only the start of each of
+Codex's titles is read: the rest of
 the title is the thread's name and the project's, which can hold words
 you typed, and Conspectus keeps none of it. It reads the title, keeps
 which of the three it was, and drops the text; the title appears in no
@@ -1210,6 +1215,14 @@ To read a trace: `jq -c '[.t_ms, .payload.hook_event_name, .events, .applied,
 delete them all, remove the `hook-trace` directory. A trace grows by about a
 kilobyte per hook call, so leave the variable unset when you are not
 recording.
+
+To record whole scenarios against a real Claude Code, Codex, or Pi (and read
+the result against the reducers) after a harness update, use `just record
+<harness>` (ADR 0244). It starts the harness in a private tmux server with a
+copy of its configuration and a scratch state directory, so nothing of yours
+is written; it spends the model quota of the account the harness is signed in
+to, so it asks first and runs only by hand. `scripts/record/README.md` has the
+scenarios and what each run keeps.
 
 ## Configuration File
 

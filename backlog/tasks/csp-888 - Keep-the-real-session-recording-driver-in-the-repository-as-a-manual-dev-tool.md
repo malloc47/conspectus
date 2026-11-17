@@ -1,10 +1,11 @@
 ---
 id: CSP-888
 title: Keep the real-session recording driver in the repository as a manual dev tool
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-16 18:01'
-updated_date: '2026-11-16 20:02'
+updated_date: '2026-11-16 22:54'
 labels:
   - live-state
   - ls-emit
