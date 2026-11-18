@@ -7,7 +7,10 @@ the Plain and Smart wraps break rows by the framework's shared rule, so a
 word that ends exactly at the preview's edge stays on its row. Amended by
 [ADR 0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md): `PreviewWrap` is the framework's `WrapMode` and the layout its
 `richtext::layout_capture` (the pane width is the source's width there);
-Conspectus keeps the setting's tokens and the Controls label.
+Conspectus keeps the setting's tokens and the Controls label. Amended by
+[ADR 0251](0251-tui-smart-wrap-shortens-the-rules-around-a-label.md): when a
+label past the edge keeps smart wrap from cutting a line, it shortens the
+line's rules, runs of four or more of one decoration character, to fit it.
 
 ## Context
 

@@ -148,7 +148,7 @@ host's index marks each of them as framework-owned.
 | --- | --- | --- | --- |
 | [0056](0056-one-pager.md) | Readers are one pager over content the host lays out | Accepted | 0177, 0178 |
 | [0057](0057-log-lists.md) | A log list reads the host's log, with the selected entry's detail in an embedded pager | Accepted | 0105, 0179 |
-| [0058](0058-captured-screen-wrap-modes.md) | A captured screen is laid out in one of three wrap modes | Accepted | 0106, 0181 |
+| [0058](0058-captured-screen-wrap-modes.md) | A captured screen is laid out in one of three wrap modes | Accepted | 0106, 0181, 0251 |
 
 ### Data display and chrome
 

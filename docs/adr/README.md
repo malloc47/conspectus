@@ -199,7 +199,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted (amended by 0190, 0191, 0211) |
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161, 0188); framework-owned in part |
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179); framework-owned in part |
-| [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181, 0250); framework-owned in part |
+| [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181, 0250, 0251); framework-owned in part |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended by 0112) |
 | [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144, 0213, 0237; see 0147) |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted (amended by 0248) |
@@ -279,6 +279,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0236](0236-tui-the-event-loop-takes-the-input-that-is-waiting-before-it-draws.md) | The Event Loop Takes The Input That Is Waiting Before It Draws | Accepted |
 | [0237](0237-tui-a-preview-loads-once-the-cursor-rests-on-its-row.md) | A Preview Loads Once The Cursor Rests On Its Row | Accepted |
 | [0238](0238-tui-a-mux-panes-capture-runs-on-a-worker-thread.md) | A Mux Pane's Capture Runs On A Worker Thread | Accepted |
+| [0251](0251-tui-smart-wrap-shortens-the-rules-around-a-label.md) | Smart Wrap Shortens The Rules Around A Label | Accepted; framework-owned |
 
 ## Transcript viewer
 
