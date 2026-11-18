@@ -140,12 +140,40 @@ screenshots:
     shot search-view "6sthe<C-s>"
 
 # Needs the dev-only `snapshot` feature (fixture mode). There is no live
-# discovery, so nothing on the demo machine leaks into the view; press `r`
-# to reload the fixture after editing it.
+# discovery, so nothing on the demo machine leaks into the view. The clock
+# is pinned to the showcase's anchor time, so its agents' live states and
+# unread marks show as in the screenshots instead of reading stale, and
+# the read marks you make stay in this run. It runs on a copy of the
+# fixture, `target/demo/showcase.json`, which `r` reloads from disk and
+# `demo-stop` edits (the checked-in fixture stays as it is).
 #
 # Interactive TUI on the checked-in showcase fixture, for demos
 demo:
-    cargo run --quiet --features snapshot -- tui --fixture tests/fixtures/showcase.json
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p target/demo
+    cp tests/fixtures/showcase.json target/demo/showcase.json
+    cargo run --quiet --features snapshot -- tui --fixture target/demo/showcase.json \
+        --snapshot-now {{showcase_now}}
+
+# The showcase's working agent (the hook session `showcase-hook-current`)
+# starts waiting, a few seconds before the anchor time. Run it from another
+# terminal while `just demo` runs, then press `r` in the demo to reload:
+# that session's mark turns to a bold `!` (unread) with its row bold, and
+# `c` or `C` reads it. Run `just demo` again to start over.
+#
+# Stage a stop in the running demo (press `r` there to load it)
+demo-stop:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -f target/demo/showcase.json || { echo "start 'just demo' first" >&2; exit 1; }
+    jq --argjson now {{showcase_now}} '
+        (.node_live[] | select(.node_id.session_key == "showcase-hook-current")) |= (
+            .state = "waiting" | .detail = "input"
+            | .since_ms = (($now - 5) * 1000) | .observed_ms = ($now * 1000)
+        )' target/demo/showcase.json > target/demo/showcase.json.new
+    mv target/demo/showcase.json.new target/demo/showcase.json
+    echo "showcase-hook-current now waits; press r in the demo to reload"
 
 check: fmt clippy nextest tuikit-features-if-changed doc diff-check
 

@@ -78,8 +78,9 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0242](0242-a-hook-trace-records-what-hook-write-receives-with-every-free-text-value-redacted.md) | A Hook Trace Records What `hook write` Receives, With Every Free-Text Value Redacted | Accepted |
 | [0243](0243-real-sessions-corrected-three-assumptions-the-hook-writers-made.md) | Real Sessions Corrected Three Assumptions The Hook Writers Made | Accepted |
 | [0244](0244-a-manual-driver-records-real-harness-sessions.md) | A Manual Driver Records Real Harness Sessions | Accepted |
-| [0245](0245-tui-an-agent-that-stops-reads-unread-until-you-read-it-and-reads-persist.md) | An Agent That Stops Reads Unread Until You Read It, And Reads Persist | Accepted |
+| [0245](0245-tui-an-agent-that-stops-reads-unread-until-you-read-it-and-reads-persist.md) | An Agent That Stops Reads Unread Until You Read It, And Reads Persist | Accepted (amended by 0248) |
 | [0246](0246-tests-run-tmux-through-one-helper-that-reports-and-retries-a-failed-start.md) | Tests Run tmux Through One Helper That Reports And Retries A Failed Start | Accepted |
+| [0248](0248-tui-the-showcase-demo-pins-the-clock-and-keeps-its-reads-in-memory.md) | The Showcase Demo Pins The Clock And Keeps Its Reads In Memory | Accepted |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |
@@ -198,7 +199,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181); framework-owned in part |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended by 0112) |
 | [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144, 0213, 0237; see 0147) |
-| [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
+| [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted (amended by 0248) |
 | [0114](0114-prs-view-grouped-by-checkout.md) | A PRs View Grouped By Checkout | Accepted (amended by 0129, 0130, 0151) |
 | [0115](0115-forge-discovery-over-discovered-repos.md) | Forge Discovery Over Every Discovered Repo | Accepted (amended by 0136) |
 | [0116](0116-lazy-forge-cadence-and-hard-refresh.md) | Lazy Forge Cadence And A Hard Refresh | Accepted (amended by 0136) |
@@ -312,7 +313,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
 | [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted (amended by 0164; amended twice 2026-11-14); framework-owned in part |
 | [0068](0068-snapshot-fixture-mode.md) | Fixture Mode For The Snapshot Tool | Accepted |
-| [0069](0069-interactive-fixture-mode-for-tui.md) | Interactive Fixture Mode For The TUI | Accepted |
+| [0069](0069-interactive-fixture-mode-for-tui.md) | Interactive Fixture Mode For The TUI | Accepted (amended by 0248) |
 | [0070](0070-showcase-scenario.md) | Showcase Scenario For Comprehensive Functionality Exercise | Accepted |
 | [0100](0100-comments-carry-rationale-not-backlog-ids.md) | Comments Carry Rationale, Not Backlog IDs | Accepted; framework-owned in part |
 | [0124](0124-sibling-test-files.md) | Large Unit-Test Modules Live In Sibling Files | Accepted; framework-owned in part |

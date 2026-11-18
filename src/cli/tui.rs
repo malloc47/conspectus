@@ -146,8 +146,11 @@ pub(super) struct TuiArgs {
         requires = "snapshot_fixture"
     )]
     snapshot_fixture_root: Option<PathBuf>,
-    /// Render ages against this Unix time instead of the clock, so a
-    /// frame reads the same whenever it is rendered.
+    /// Render ages, and judge live state, against this Unix time instead
+    /// of the clock, so a frame reads the same whenever it is rendered.
+    /// With `--fixture`, the interactive TUI keeps that time too, so a
+    /// fixture written for a day long past still shows its agents' live
+    /// states.
     #[cfg(feature = "snapshot")]
     #[arg(long = "snapshot-now", value_name = "EPOCH")]
     snapshot_now: Option<i64>,
@@ -503,6 +506,9 @@ impl TuiArgs {
 
         #[cfg(feature = "snapshot")]
         if let Some(path) = self.fixture {
+            if let Some(now) = self.snapshot_now {
+                crate::tui::rows::freeze_clock(now);
+            }
             return crate::tui::run_from_fixture(config, path);
         }
 

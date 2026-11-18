@@ -998,7 +998,8 @@ fn build_showcase(world: &mut ScenarioWorld) -> Result<()> {
 /// No entry records a process, so each holds for fifteen minutes from its
 /// latest evidence, measured from the showcase's anchor time; the
 /// scenario TUI, which reads them against today's clock, shows them all
-/// as stale.
+/// as stale. `just demo` runs the fixture with the clock pinned to the
+/// anchor, which shows them (ADR 0248).
 fn add_live_state_to_showcase(world: &ScenarioWorld) -> Result<()> {
     use crate::live_store::{LiveContext, LiveSnapshot, LiveStore, LiveTmux};
     use crate::model::live::{LiveDetail, LiveState};

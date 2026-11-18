@@ -292,6 +292,11 @@ HOME=/fixture conspectus tui --snapshot \
 
 # Re-render the README screenshots (needs `termshot` from the dev shell)
 just screenshots
+
+# Interactive, on a copy of the fixture, with the clock pinned to the
+# anchor time so the live states and unread marks show (ADR 0248);
+# `just demo-stop` in another terminal stages a stop, and `r` loads it
+just demo
 ```
 
 The showcase builder carries everything the screenshots show, so the
@@ -317,7 +322,7 @@ Coverage at a glance:
 | Forks | 1 (atelier alpha) |
 | Forge PRs | 2 (open + draft) |
 | Resolved relationships | 37 across 11 distinct relation kinds incl. `parent_session` lineage |
-| Live state | 11 sessions (waiting × 4 in three groups since different times, the orphan in Ungrouped for two hours, the pinned one in `project` on its subagent's question for an hour, the codex fork under its parent in `repo-a` for half an hour, and another in `project` for a minute, so `W` has an order to walk; working with 3 subagents, quiet working, ready × 2, the agent-deck launcher's turn seen since its mux was attached after it ended and the codex parent's, in no mux, unseen; error, stale, exited) and 2 agents in panes of `project` no session matches (a quiet working one and a newer one starting, so `project`'s `»` is dimmed), in the world's own `state/conspectus/live-state.json`; no process is recorded, so each holds for fifteen minutes from the anchor time and the scenario TUI shows them stale |
+| Live state | 11 sessions (waiting × 4 in three groups since different times, the orphan in Ungrouped for two hours, the pinned one in `project` on its subagent's question for an hour, the codex fork under its parent in `repo-a` for half an hour, and another in `project` for a minute, so `W` has an order to walk; working with 3 subagents, quiet working, ready × 2, the agent-deck launcher's turn seen since its mux was attached after it ended and the codex parent's, in no mux, unseen; error, stale, exited) and 2 agents in panes of `project` no session matches (a quiet working one and a newer one starting, so `project`'s `»` is dimmed), in the world's own `state/conspectus/live-state.json`; no process is recorded, so each holds for fifteen minutes from the anchor time; the scenario TUI, which reads today's clock, shows them stale, and `just demo` (the fixture, with the clock pinned) shows them |
 
 ## Adding A Scenario
 

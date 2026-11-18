@@ -735,7 +735,7 @@ enable through `--all-features`. It builds in release too (`cargo build
 cargo run --features snapshot -- tui --snapshot --snapshot-pane left --snapshot-keys 'jj<Enter>'
 cargo run --features snapshot -- tui --snapshot --snapshot-fixture tests/fixtures/showcase.json --snapshot-pane right --snapshot-keys 'j<Tab>jjjjjjjjj'
 cargo run --features snapshot -- tui --snapshot --snapshot-fixture tests/fixtures/showcase.json
-cargo run --features snapshot -- tui --fixture tests/fixtures/showcase.json   # interactive; `r` reloads
+cargo run --features snapshot -- tui --fixture tests/fixtures/showcase.json --snapshot-now 1790769600   # interactive; `r` reloads
 ```
 
 After `<Tab>`, `j` moves the right pane's cursor, one field or row at a time.
@@ -744,9 +744,16 @@ session, four of them its live state, onto its first Related row; a node of
 another kind, or a session with more or less live state to report, lists a
 different number of fields.
 
-`just demo` runs that last command, which is the easiest way to show the TUI
-without exposing your own sessions. `just screenshots` re-renders the images in
-this README from the same showcase world.
+`just demo` runs that last command on a copy of the fixture, which is the
+easiest way to show the TUI without exposing your own sessions. The
+`--snapshot-now` time is the showcase's anchor, so its agents' live states
+show (waiting, ready, error, and the bold unread ones) where today's clock
+would read every one stale; what you read with `c`, `C`, or the cursor stays
+in memory, so the next run starts unread again. To watch a stop arrive, run
+`just demo-stop` in another terminal and press `r` in the demo: the hook
+session that was working starts waiting, and its row turns bold. `just
+screenshots` re-renders the images in this README from the same showcase
+world.
 
 The TUI's controls, theme, and key tables are the framework crate
 [`crates/tuikit`](crates/tuikit/README.md), a member of this Cargo workspace;

@@ -278,6 +278,37 @@ fn reading_a_stop_adds_its_mark_to_the_state_file_and_changes_no_other_value() {
 }
 
 #[test]
+fn a_fixture_or_scenario_tui_keeps_its_marks_in_memory() {
+    // The marks a state file holds are not taken, and a mark made here is
+    // not offered to it: a stop read in one demo run is unread in the next.
+    let stopped = world(false, None, ENDED_MS, ENDED_MS);
+    let mut reader = app_over(&stopped);
+    reader.set_selection(RowId::AgentSession(session("loose")));
+    let start = Instant::now();
+    reader.note_cursor_rest(start);
+    reader.note_cursor_rest(start + SEEN_REST);
+    let marks = reader.build_persisted_state().read_marks;
+    assert!(!marks.is_empty(), "an ordinary TUI keeps the mark");
+
+    let mut demo = app_over(&stopped);
+    demo.keep_read_marks_in_memory();
+    demo.seen.load_marks(&marks);
+    demo.settle_seen();
+    assert!(unseen(&demo, "loose"), "the file's marks are not taken");
+
+    demo.set_selection(RowId::AgentSession(session("loose")));
+    let start = Instant::now();
+    demo.note_cursor_rest(start);
+    demo.note_cursor_rest(start + SEEN_REST);
+    assert!(!unseen(&demo, "loose"), "its own marks still read");
+    assert!(
+        demo.build_persisted_state().read_marks.is_empty(),
+        "none is written"
+    );
+    assert!(!demo.seen.take_changed(), "and none is due a write");
+}
+
+#[test]
 fn a_mark_is_written_once_when_it_moves_and_a_stop_after_it_is_unread() {
     let mut app = app_over(&world(false, None, ENDED_MS, ENDED_MS));
     assert!(!app.seen.take_changed(), "nothing moved yet");

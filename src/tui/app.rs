@@ -710,6 +710,14 @@ impl App {
         self.state_file = StateFile::ReadWrite(cache);
     }
 
+    /// Keep the operator's read marks out of the state file, and the
+    /// file's out of the run: a fixture or scenario TUI shows a world of
+    /// its own, and a mark made in one run must not hide the unread stops
+    /// of the next. Call it before [`Self::restore_persisted_state`].
+    pub fn keep_read_marks_in_memory(&mut self) {
+        self.seen.in_memory_only();
+    }
+
     /// Restore from the state file without ever writing it: the saved
     /// sort, filters, and groupings still apply, and the run leaves
     /// the file as it found it, absent included

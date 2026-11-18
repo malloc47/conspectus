@@ -1053,7 +1053,23 @@ pub(in crate::tui) fn resumed_app(
     config: &RunConfig,
     cache: crate::tui_state::TuiStateCache,
 ) -> App {
+    resumed_app_of(App::new(config.clone()), config, cache)
+}
+
+/// [`resumed_app`] for a fixture or scenario TUI: the same view state,
+/// but its read marks stay in memory, so a stop read in one run is
+/// unread again in the next and the operator's file gains none.
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+pub(in crate::tui) fn resumed_static_app(
+    config: &RunConfig,
+    cache: crate::tui_state::TuiStateCache,
+) -> App {
     let mut app = App::new(config.clone());
+    app.keep_read_marks_in_memory();
+    resumed_app_of(app, config, cache)
+}
+
+fn resumed_app_of(mut app: App, config: &RunConfig, cache: crate::tui_state::TuiStateCache) -> App {
     if config.resume_view {
         app.enable_view_persistence(cache);
     } else {
@@ -1120,7 +1136,7 @@ fn static_event_loop(
     // distinct entry point in `src/tui/snapshot.rs` that deliberately
     // skips this so the on-disk file stays unconditionally unmoved when
     // the snapshot tooling runs.
-    let app = resumed_app(&config, crate::tui_state::TuiStateCache::from_env());
+    let app = resumed_static_app(&config, crate::tui_state::TuiStateCache::from_env());
     let mode = StaticMode {
         tmux,
         snapshot: initial_snapshot,

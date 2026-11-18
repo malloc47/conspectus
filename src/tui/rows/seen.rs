@@ -79,6 +79,9 @@ pub(crate) struct SeenTurns {
     /// Whether a session's mark moved since the state file last took it
     /// ([`Self::take_changed`]).
     changed: bool,
+    /// Whether the marks live in this TUI's memory alone
+    /// ([`Self::in_memory_only`]).
+    memory_only: bool,
 }
 
 /// No turn seen, for readers with no memory of their own.
@@ -87,6 +90,7 @@ static NOTHING_SEEN: SeenTurns = SeenTurns {
     turns: BTreeMap::new(),
     returns: BTreeMap::new(),
     changed: false,
+    memory_only: false,
 };
 
 impl SeenTurns {
@@ -105,14 +109,25 @@ impl SeenTurns {
             return false;
         }
         *seen = ended_ms;
-        self.changed |= session;
+        self.changed |= session && !self.memory_only;
         true
+    }
+
+    /// Keep every mark in this TUI's memory: none is taken from the state
+    /// file or offered to it. For a TUI that shows a world of its own
+    /// (a fixture or a scenario), whose sessions the operator's state
+    /// file knows nothing of.
+    pub(crate) fn in_memory_only(&mut self) {
+        self.memory_only = true;
     }
 
     /// The marks of the agent sessions, for the state file: each
     /// session's [`mark_key`](crate::tui_state::mark_key) and when its
     /// latest read stop began. A pane's agent is left out.
     pub(crate) fn session_marks(&self) -> BTreeMap<String, i64> {
+        if self.memory_only {
+            return BTreeMap::new();
+        }
         self.turns
             .iter()
             .filter_map(|(agent, at_ms)| match agent {
@@ -125,6 +140,9 @@ impl SeenTurns {
     /// Take the marks a state file holds: a key that is no session's
     /// node id is skipped, and nothing taken here is news to write back.
     pub(crate) fn load_marks(&mut self, marks: &BTreeMap<String, i64>) {
+        if self.memory_only {
+            return;
+        }
         for (key, at_ms) in marks {
             let Some(node @ NodeId::AgentSession(_)) = NodeId::parse(key) else {
                 continue;

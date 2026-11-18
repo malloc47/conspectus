@@ -14,6 +14,13 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **`just demo` shows live state and unread marks.** The interactive
+  showcase runs on a copy of the fixture with the clock pinned to the
+  showcase's anchor time (`tui --fixture` takes `--snapshot-now`), so its
+  agents' states and bold unread rows show instead of reading stale, and
+  what you read stays in memory. `just demo-stop` stages a stop in the
+  running demo (press `r` to load it). The fixture and scenario TUIs no
+  longer write read marks to the TUI's state file.
 - **An agent that stops reads unread until you read it, and a read stays
   read.** The bold mark a finished turn has until you look at it now goes
   on every stop: an agent that waits for you (`!`), finishes a turn (`›`),
