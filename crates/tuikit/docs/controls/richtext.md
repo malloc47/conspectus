@@ -77,9 +77,14 @@ usually wider than the area showing it.
   trailing padding, then: cuts the line at the edge when everything past
   it is decoration (box drawing, block elements, dashes and rules) or
   blank; otherwise squeezes interior runs of two or more spaces, widest
-  first, when that fits the line on one row; otherwise wraps it with a
-  hanging indent as deep as its leading indent (when that indent is less
-  than half the width).
+  first, when that fits the line on one row; otherwise shortens its rules,
+  widest first, when that fits it; otherwise wraps it with a hanging
+  indent as deep as its leading indent (when that indent is less than half
+  the width). A rule is a run of at least four cells of one decoration
+  character, so a label past the edge (`──── name ─`, `==== 3 passed ====`)
+  stays on its row between shorter rules, while `--flag` and `===` keep
+  their length. A rule shortens to no fewer than one cell and keeps evenly
+  spaced cells, so a rule drawn in two styles keeps their proportions.
 - **None** keeps the source's own layout: each line re-wrapped by
   character at `source_width`, the width the source laid it out at, then
   each row clipped to the area with no mark, as a terminal clips. Without

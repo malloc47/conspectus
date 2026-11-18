@@ -82,6 +82,90 @@ fn smart_squeezes_padding_to_keep_a_status_line_on_one_row() {
 }
 
 #[test]
+fn smart_shortens_the_rule_before_a_label_to_keep_it_on_one_row() {
+    // A prompt rule 155 columns wide with the source's name near its
+    // right end: the label sits in the overflow, so cutting would lose it.
+    let rule = format!("{} notes ─", "─".repeat(147));
+    assert_eq!(
+        rows(&rule, WrapMode::Smart, None, 60),
+        [format!("{} notes ─", "─".repeat(52))]
+    );
+}
+
+#[test]
+fn smart_shortens_the_rules_on_both_sides_of_a_centered_label() {
+    let banner = format!("{} 3 passed in 0.21s {}", "=".repeat(30), "=".repeat(30));
+    assert_eq!(
+        rows(&banner, WrapMode::Smart, None, 39),
+        [format!(
+            "{} 3 passed in 0.21s {}",
+            "=".repeat(10),
+            "=".repeat(10)
+        )]
+    );
+}
+
+#[test]
+fn smart_still_cuts_a_rule_whose_label_fits_before_the_edge() {
+    let rule = format!("── notes {}", "─".repeat(140));
+    assert_eq!(
+        rows(&rule, WrapMode::Smart, None, 30),
+        [format!("── notes {}", "─".repeat(21))]
+    );
+}
+
+#[test]
+fn smart_never_shortens_short_dash_runs_in_content() {
+    // Runs of fewer than four rule characters are content: shortening
+    // them would turn `--all-targets` into `-all-targets`.
+    for text in [
+        "cargo test --workspace --all-targets --all-features -- --nocapture",
+        "if left === right && next --> done ==> fold -> ok ___ ~~~ end",
+    ] {
+        assert_eq!(
+            rows(text, WrapMode::Smart, None, 24),
+            rows(text, WrapMode::Plain, None, 24),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn smart_wraps_a_labeled_rule_whose_label_alone_overflows() {
+    let rule = format!(
+        "{} a label wider than the area {}",
+        "─".repeat(20),
+        "─".repeat(20)
+    );
+    assert_eq!(
+        rows(&rule, WrapMode::Smart, None, 12),
+        rows(&rule, WrapMode::Plain, None, 12)
+    );
+}
+
+#[test]
+fn smart_keeps_the_proportions_of_a_rule_drawn_in_two_styles() {
+    // A progress bar half done: one rule character, two colors.
+    let done = Style::default().fg(Color::Green);
+    let left = Style::default().fg(Color::DarkGray);
+    let bar = Line::from(vec![
+        Span::styled("━".repeat(20), done),
+        Span::styled("━".repeat(20), left),
+        Span::raw(" 50% 0:00:03"),
+    ]);
+    let laid_out = layout_capture(&[bar], WrapMode::Smart, None, 30);
+    assert_eq!(laid_out.len(), 1);
+    assert_eq!(
+        laid_out[0].to_string(),
+        format!("{} 50% 0:00:03", "━".repeat(18))
+    );
+    assert_eq!(laid_out[0].spans[0].content, "━".repeat(9));
+    assert_eq!(laid_out[0].spans[0].style, done);
+    assert_eq!(laid_out[0].spans[1].content, "━".repeat(9));
+    assert_eq!(laid_out[0].spans[1].style, left);
+}
+
+#[test]
 fn smart_word_wraps_content_with_a_hanging_indent() {
     assert_eq!(
         rows(
@@ -170,10 +254,12 @@ fn tabs_expand_to_eight_column_stops() {
 #[test]
 fn every_row_fits_the_area_width() {
     let capture = format!(
-        "{}\n│ prompt{}│\nplain words that go on and on and on\n\t\tindented\n{}",
+        "{}\n│ prompt{}│\nplain words that go on and on and on\n\t\tindented\n{}\n{} label {}",
         "═".repeat(90),
         " ".repeat(70),
-        "x".repeat(200)
+        "x".repeat(200),
+        "─".repeat(80),
+        "─".repeat(3)
     );
     for mode in WrapMode::ALL {
         for width in [1u16, 5, 17, 40] {

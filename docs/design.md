@@ -1165,8 +1165,8 @@ A transcript is bottom-anchored on its newest turns, or anchored at the
 search match it opens on, and `J` / `K` scroll from there; a step past
 either end is taken back at once (ADR 0181). The pane capture (ADR 0025) is bottom-anchored
 on its last non-blank output. A wrap mode fits it to the pane's width: `smart` (the default)
-wraps content but truncates rules, borders, and padding; `plain` wraps
-everything; `none` keeps tmux's layout and clips. It's set by
+wraps content but truncates rules, borders, and padding, and shortens a
+rule around a label (ADR 0251); `plain` wraps everything; `none` keeps tmux's layout and clips. It's set by
 `[tui] preview_wrap` and the controls overlay (ADR 0106).
 
 Traversal through N levels of the graph is explicit rather than

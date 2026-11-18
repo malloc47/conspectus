@@ -19,7 +19,8 @@ pub enum WrapMode {
     /// Wrap every line at the area's width, rules and borders included.
     Plain,
     /// Wrap content but truncate formatting (rules, box borders, and
-    /// padding), so decorations do not spill onto extra rows. The default.
+    /// padding), so decorations do not spill onto extra rows; a rule with
+    /// a label past the edge shortens around the label. The default.
     #[default]
     Smart,
     /// Keep the source's own layout: lines re-wrapped at the width the
@@ -127,10 +128,14 @@ fn clip_line(line: &Line<'_>, width: usize) -> Line<'static> {
         .unwrap_or_default()
 }
 
+/// The fewest cells of one rule character that make a rule. Shorter
+/// runs are content (`--flag`, `===`, `->`) and are never shortened.
+const MIN_RULE_RUN: usize = 4;
+
 /// Smart wrap for one line: drop trailing padding, truncate when only
-/// decoration would spill past the edge, squeeze interior padding when
-/// that makes the line fit, and otherwise word-wrap with a hanging
-/// indent.
+/// decoration would spill past the edge, squeeze interior padding or
+/// else shorten rules when that makes the line fit, and otherwise
+/// word-wrap with a hanging indent.
 fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Line<'static>> {
     while line.last().is_some_and(Cell::is_blank) {
         line.pop();
@@ -138,6 +143,7 @@ fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Line<'static>> {
     if line_width(&line) <= width {
         return vec![cells_line(line)];
     }
+    let excess = line_width(&line) - width;
     let (kept, overflow) = split_at_width(&line, width);
     if overflow
         .iter()
@@ -149,8 +155,20 @@ fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Line<'static>> {
         }
         return vec![cells_line(kept)];
     }
-    if let Some(squeezed) = squeeze_padding(&line, width) {
-        return vec![cells_line(squeezed)];
+    // A label in the overflow (a rule ending in the source's name, a
+    // banner centered between two rules) is content, so the line is not
+    // cut; its padding goes first, then its rules shorten around it.
+    let lead = line.iter().take_while(|cell| cell.is_blank()).count();
+    let padding = runs_of(&line, lead, 2, |cell| {
+        (cell.width == 1 && cell.is_blank()).then_some(())
+    });
+    let rules = runs_of(&line, 0, MIN_RULE_RUN, |cell| {
+        (cell.width == 1 && cell.is_decoration()).then_some(cell.text.as_str())
+    });
+    if let Some(shortened) =
+        shorten_runs(&line, &padding, excess).or_else(|| shorten_runs(&line, &rules, excess))
+    {
+        return vec![cells_line(shortened)];
     }
     let indent = line
         .iter()
@@ -161,44 +179,53 @@ fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Line<'static>> {
     text::wrap_line(&cells_line(line), width, hanging)
 }
 
-/// Shrink interior runs of two or more spaces (never the leading
-/// indent), widest first, until the line fits `width`. `None` when
-/// even single spaces everywhere wouldn't fit, so the caller wraps the
-/// line untouched instead of mangling real content.
-fn squeeze_padding(line: &[Cell], width: usize) -> Option<Vec<Cell>> {
-    let mut overflow = line_width(line).checked_sub(width)?;
-    let indent = line.iter().take_while(|cell| cell.is_blank()).count();
-    // Interior blank runs as (start, len), longer than one cell.
-    let mut runs: Vec<(usize, usize)> = Vec::new();
-    let mut index = indent;
+/// The maximal runs, as `(start, len)`, of at least `min` cells from
+/// `from` on whose `class` is the same `Some`. A cell of class `None`
+/// belongs to no run.
+fn runs_of<'a, K: PartialEq>(
+    line: &'a [Cell],
+    from: usize,
+    min: usize,
+    class: impl Fn(&'a Cell) -> Option<K>,
+) -> Vec<(usize, usize)> {
+    let mut runs = Vec::new();
+    let mut index = from;
     while index < line.len() {
-        if line[index].is_blank() && line[index].width == 1 {
-            let start = index;
-            while index < line.len() && line[index].is_blank() && line[index].width == 1 {
-                index += 1;
-            }
-            if index - start > 1 {
-                runs.push((start, index - start));
-            }
-        } else {
+        let Some(key) = class(&line[index]) else {
+            index += 1;
+            continue;
+        };
+        let start = index;
+        while index < line.len() && class(&line[index]).as_ref() == Some(&key) {
             index += 1;
         }
+        if index - start >= min {
+            runs.push((start, index - start));
+        }
     }
+    runs
+}
+
+/// `line` with its `runs` shortened by `excess` cells in all, widest
+/// first, each to no fewer than one cell. A shortened run keeps evenly
+/// spaced cells, so a run drawn in two styles (a progress bar) keeps
+/// their proportions. `None` when the runs can't give that much, so the
+/// caller wraps the line untouched instead of mangling real content.
+fn shorten_runs(line: &[Cell], runs: &[(usize, usize)], excess: usize) -> Option<Vec<Cell>> {
     let spare: usize = runs.iter().map(|(_, len)| len - 1).sum();
-    if spare < overflow {
+    if spare < excess {
         return None;
     }
     let mut keep: Vec<usize> = runs.iter().map(|(_, len)| *len).collect();
-    while overflow > 0 {
+    for _ in 0..excess {
         let widest = (0..keep.len()).max_by_key(|&i| keep[i])?;
         keep[widest] -= 1;
-        overflow -= 1;
     }
     let mut out = Vec::with_capacity(line.len());
     let mut cursor = 0;
-    for ((start, len), kept) in runs.iter().zip(keep) {
-        out.extend_from_slice(&line[cursor..*start]);
-        out.extend_from_slice(&line[*start..*start + kept]);
+    for (&(start, len), kept) in runs.iter().zip(keep) {
+        out.extend_from_slice(&line[cursor..start]);
+        out.extend((0..kept).map(|i| line[start + i * len / kept].clone()));
         cursor = start + len;
     }
     out.extend_from_slice(&line[cursor..]);

@@ -1373,7 +1373,9 @@ teardown_grace = "3s"
   fresh; `--no-resume-view` opens every view on its default folds and
   writes nothing. See [TUI state](#tui-state).
 - **Preview wrap (ADR 0106):** `smart` wraps content but truncates
-  rules, box borders, and padding that would spill onto extra rows;
+  rules, box borders, and padding that would spill onto extra rows, and
+  shortens a rule around a label past the edge (`──── claude ─`) to keep
+  it on one row;
   `plain` wraps every line; `none` keeps tmux's layout at the pane's
   width and clips what doesn't fit. The controls overlay (`f`) has a
   "Preview wrap" section; the last pick is remembered across runs and
