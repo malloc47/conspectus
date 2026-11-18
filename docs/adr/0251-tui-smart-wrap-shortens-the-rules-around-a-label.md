@@ -6,7 +6,10 @@ Accepted. Amends [ADR 0106](0106-preview-pane-wrap-modes.md) (decision 2,
 the smart mode) as the framework carries it since
 [ADR 0181](0181-tui-rich-text-is-a-framework-feature-and-the-preview-scrolls-in-a-region.md).
 Framework-owned: restated in the framework's record 0058. No new key, setting,
-or write path.
+or write path. Amended by
+[ADR 0252](0252-tui-the-previews-smart-wrap-settings-and-cleanup-rules-come-from-config.md):
+the decoration characters, the shortest rule, and the shortening itself are
+settings in `[tui.preview]`, with this record's values as the built-in ones.
 
 ## Context
 

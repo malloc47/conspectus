@@ -11,6 +11,9 @@ Conspectus keeps the setting's tokens and the Controls label. Amended by
 [ADR 0251](0251-tui-smart-wrap-shortens-the-rules-around-a-label.md): when a
 label past the edge keeps smart wrap from cutting a line, it shortens the
 line's rules, runs of four or more of one decoration character, to fit it.
+Amended by [ADR 0252](0252-tui-the-previews-smart-wrap-settings-and-cleanup-rules-come-from-config.md):
+smart wrap's settings come from `[tui.preview]`, and `[[tui.preview.rules]]`
+fit lines that match a pattern some other way.
 
 ## Context
 

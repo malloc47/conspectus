@@ -21,8 +21,9 @@
     shortens its rules, widest first, when that fits it; otherwise
     word-wraps it with a hanging indent matching its leading indent.
   - A **rule** is a run of at least four cells of one decoration
-    character; shorter runs (`--flag`, `===`, `->`) are content and keep
-    their length. A rule shortens to no fewer than one cell and keeps
+    character (by default; record 0072 makes the characters, the length,
+    and the shortening settings); shorter runs (`--flag`, `===`, `->`) are
+    content and keep their length. A rule shortens to no fewer than one cell and keeps
     evenly spaced cells, so a run drawn in two styles (a progress bar)
     keeps their proportions.
   - **Plain** word-wraps every line as it is.
