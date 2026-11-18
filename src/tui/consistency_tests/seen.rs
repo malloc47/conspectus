@@ -179,6 +179,34 @@ fn an_unread_row_is_bold_in_its_words_and_a_read_one_is_not() {
 }
 
 #[test]
+fn an_aliased_session_reads_unread_by_its_other_words_as_its_alias_is_bold_anyway() {
+    let mut snapshot = with_table();
+    snapshot
+        .aliases
+        .insert(session(SOLO), "ingest-refactor".to_string());
+    let mut app = unfolded(listing_with(View::Sessions, &snapshot, LiveOverlay::off()));
+    park_away(&mut app, |row| stands_for(row, SOLO));
+    let weight = |app: &mut App, word: &str| {
+        cell_of(app, "solo", word)
+            .0
+            .modifier
+            .contains(Modifier::BOLD)
+    };
+    // Unread, its key is bold beside its alias.
+    assert!(weight(&mut app, "ingest-refactor"));
+    assert!(weight(&mut app, "solo0000"));
+    app.set_selection(row_of(&app, SOLO));
+    let start = Instant::now();
+    app.note_cursor_rest(start);
+    app.note_cursor_rest(start + SEEN_REST);
+    park_away(&mut app, |row| stands_for(row, SOLO));
+    // Read, the alias keeps its weight and the key loses it: the row
+    // still tells the two apart.
+    assert!(weight(&mut app, "ingest-refactor"));
+    assert!(!weight(&mut app, "solo0000"));
+}
+
+#[test]
 fn an_unread_mux_row_is_bold_in_its_name_and_a_read_one_is_not() {
     let world = |last_attached: Option<i64>| {
         let mut snapshot = with_table();
