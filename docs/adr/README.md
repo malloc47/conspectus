@@ -83,6 +83,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0247](0247-tui-an-unread-row-is-bold-throughout-and-two-keys-walk-the-unread-stops.md) | An Unread Row Is Bold Throughout, And Two Keys Walk The Unread Stops | Accepted |
 | [0248](0248-tui-the-showcase-demo-pins-the-clock-and-keeps-its-reads-in-memory.md) | The Showcase Demo Pins The Clock And Keeps Its Reads In Memory | Accepted |
 | [0249](0249-tui-a-mux-that-can-never-report-state-shows-no-live-mark.md) | A Mux That Can Never Report State Shows No Live Mark | Accepted |
+| [0250](0250-tui-a-live-pane-preview-holds-its-capture-and-scrolls-back-from-the-newest-line.md) | A Live Pane Preview Holds Its Capture And Scrolls Back From The Newest Line | Accepted |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |
@@ -198,7 +199,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted (amended by 0190, 0191, 0211) |
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161, 0188); framework-owned in part |
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179); framework-owned in part |
-| [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181); framework-owned in part |
+| [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181, 0250); framework-owned in part |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended by 0112) |
 | [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144, 0213, 0237; see 0147) |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted (amended by 0248) |

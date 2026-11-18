@@ -2718,7 +2718,10 @@ graph explorer. Every other key means what it means on the left pane:
 `Alt+Enter` reveal, `J`/`K` scroll the Preview, `Tab` moves focus, `q`
 quits. The keys that move the left tree do nothing here, and a letter
 means the letter on either pane, so a chord of it (`Alt-j`, `Ctrl-j`)
-moves neither the explorer nor the tree. The Preview keeps the place
+moves neither the explorer nor the tree. A mux's Preview is the pane's
+capture, which opens on the pane's newest output; `K` scrolls back through
+the last hundred lines of scrollback the capture holds beyond the screen,
+and `J` returns toward the newest line. The Preview keeps the place
 `J`/`K` scrolled it to through a refresh, `r`, and a filter or sort
 change; it goes back to where it starts (the top, a transcript's newest
 turns, or the search match it opens on) when it shows something else:

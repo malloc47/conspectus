@@ -271,7 +271,9 @@ pub(super) fn draw_explorer_preview(app: &App, buf: &mut Buffer, area: Rect) -> 
     let view = if let Some(source) = neighbor_source {
         lines.push(Line::raw(""));
         let body_height = rows_under(&lines, area.width, area.height as usize);
-        source_view(app, &source, area.width, body_height).below(Text::from(lines))
+        source_view(app, &source, area.width, body_height)
+            .fitted_under_a_header(body_height)
+            .below(Text::from(lines))
     } else {
         let mut text = Text::from(lines);
         if let Some(neighbor_text) = neighbor_text {

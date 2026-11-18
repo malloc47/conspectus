@@ -17,6 +17,9 @@ pub(super) struct PreviewView {
     /// the scrollbar. `None` scrolls the text by the Preview's offset
     /// from the top.
     pub region: Option<ScrollRegion>,
+    /// Where the text's scroll counts from: the top, or, for the output of
+    /// a live pane, the newest line.
+    pub anchor: Anchor,
 }
 
 impl PreviewView {
@@ -24,6 +27,32 @@ impl PreviewView {
         Self {
             text: text.into(),
             region: None,
+            anchor: Anchor::Top,
+        }
+    }
+
+    /// This text scrolled from its last line, so it opens on the newest
+    /// output and `K` goes back through what came before it.
+    pub(super) fn scrolled_from_the_end(self) -> Self {
+        Self {
+            anchor: Anchor::Bottom,
+            ..self
+        }
+    }
+
+    /// Cut to the last `height` lines when it scrolls from its last line:
+    /// the body of a zone whose header takes the rest of the rows, which
+    /// keeps its newest output on screen under that header and does not
+    /// scroll.
+    pub(super) fn fitted_under_a_header(self, height: usize) -> Self {
+        if self.anchor != Anchor::Bottom {
+            return self;
+        }
+        let start = self.text.lines.len().saturating_sub(height.max(1));
+        Self {
+            text: Text::from(self.text.lines[start..].to_vec()),
+            anchor: Anchor::Top,
+            ..self
         }
     }
 
@@ -35,6 +64,7 @@ impl PreviewView {
         Self {
             text,
             region: self.region,
+            anchor: self.anchor,
         }
     }
 }
@@ -60,7 +90,7 @@ pub(super) fn draw_preview_view(
     match view.region {
         None => app
             .preview_region()
-            .draw_lines(Anchor::Top, area, buf, view.text),
+            .draw_lines(view.anchor, area, buf, view.text),
         // The thumb tracks the transcript; a failure banner above it
         // stays put.
         Some(placed) => placed.draw_cut(area, buf, view.text),
@@ -84,7 +114,9 @@ pub(super) fn preview_view_for_selection(app: &App, width: u16, height: usize) -
             // output stays on screen below the banner.
             let banner = failure_banner(entry, app.theme());
             let body_height = rows_under(&banner.lines, width, height);
-            selection_preview_body(app, width, body_height).below(banner)
+            selection_preview_body(app, width, body_height)
+                .fitted_under_a_header(body_height)
+                .below(banner)
         }
         None => selection_preview_body(app, width, height),
     }
@@ -229,13 +261,17 @@ pub(super) fn source_view(
         | PreviewSource::Process(_)
         | PreviewSource::PullRequest(_) => loaded_view(app, source, width),
         PreviewSource::Transcript(_) => transcript_view(app, source, width, height),
-        PreviewSource::Pane(mux) => PreviewView::text(format_preview_for_mux(
-            app,
-            mux,
-            width,
-            height,
-            app.config().color,
-        )),
+        PreviewSource::Pane(mux) => {
+            let text = format_preview_for_mux(app, mux, width, height, app.config().color);
+            let view = PreviewView::text(text);
+            // The pane's whole capture, newest output last: it scrolls back
+            // from there, unless a search marked the rows to show.
+            if crate::tui::preview::search::preview_search(app).is_some() {
+                view
+            } else {
+                view.scrolled_from_the_end()
+            }
+        }
     }
 }
 
@@ -361,11 +397,13 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
     PreviewView {
         text: Text::from(window),
         region: Some(placed),
+        anchor: Anchor::Top,
     }
 }
 
-/// Lay the pane capture out per the active wrap mode (ADR 0106) and
-/// keep the bottom `height` rows: the pane's newest output.
+/// Lay the pane capture out per the active wrap mode (ADR 0106): every
+/// row of it, newest last, for the Preview to scroll back through; with
+/// a search, the `height` rows around its matches.
 pub(super) fn format_preview_for_mux(
     app: &App,
     mux: &MuxSessionId,
@@ -397,8 +435,7 @@ pub(super) fn format_preview_for_mux(
                         height,
                     )
                 } else {
-                    let start = rows.len().saturating_sub(height.max(1));
-                    Text::from(rows[start..].to_vec())
+                    Text::from(rows)
                 }
             }
             PreviewContent::NoTarget => Text::raw(format!(

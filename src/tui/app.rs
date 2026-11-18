@@ -1149,12 +1149,19 @@ impl App {
     }
 
     /// What the Preview's scroll counts from: the search match a
-    /// transcript opens on, a transcript's newest turns, or the top.
+    /// transcript opens on, a transcript's or a live pane's newest rows, or
+    /// the top.
     fn preview_anchor(&self) -> Anchor {
-        if !matches!(
-            crate::tui::preview::preview_source(self),
-            Some(PreviewSource::Transcript(_))
-        ) {
+        let source = crate::tui::preview::preview_source(self);
+        if matches!(source, Some(PreviewSource::Pane(_))) {
+            // A live pane opens on its newest output, unless a search
+            // marked the rows it shows.
+            if crate::tui::preview::search::preview_search(self).is_some() {
+                Anchor::Top
+            } else {
+                Anchor::Bottom
+            }
+        } else if !matches!(source, Some(PreviewSource::Transcript(_))) {
             Anchor::Top
         } else if crate::tui::preview::search::preview_search(self)
             .is_some_and(|search| search.turn.is_some())

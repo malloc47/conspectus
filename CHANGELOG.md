@@ -12,6 +12,14 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 framework crate of its own (ADRs 0150 to 0199), so its menus, dialogs,
 forms, lists, readers, and keys look and behave alike.
 
+### Fixed
+
+- **`J` and `K` scroll a live mux pane's Preview back.** A mux's Preview
+  held only the last screenful of the pane's capture, so `K` had nothing
+  above it to scroll to. It now holds the capture's scrollback (the last
+  hundred lines beyond the screen), opens on the newest output, and keeps
+  the place you scrolled to through a refresh.
+
 ### Added
 
 - **A mux that can never report state shows no live mark.** A shell, an

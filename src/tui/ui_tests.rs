@@ -3227,8 +3227,9 @@ fn mux_preview_renders_compact_header_and_bottom_cropped_capture() {
         "agentdeck_conspectus-very-long-session-name-with-suffix_12345678",
         Some("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7"),
     );
+    // A step toward the newest rows, which the capture opens on, goes
+    // nowhere.
     app.update(Msg::ScrollPreviewBy(1));
-    app.update(Msg::ScrollPreviewBy(-1));
 
     let area = Rect::new(0, 0, 100, 14);
     let buffer = render_to_buffer(&mut app, area);
@@ -3275,16 +3276,101 @@ fn mux_preview_skips_the_blank_rows_below_a_quiet_panes_output() {
     assert_eq!(rows, ["$ conspectus serve", "listening on :7777"]);
 }
 
-#[test]
-fn mux_preview_keeps_the_newest_rows_that_fit() {
-    let capture = (1..=30)
-        .map(|n| format!("line {n}"))
+/// A capture of `rows` rows, `row 01` to `row NN`.
+fn numbered_capture(rows: usize) -> String {
+    (1..=rows)
+        .map(|n| format!("row {n:02}"))
         .collect::<Vec<_>>()
-        .join("\n");
-    let app = muxed_app("busy", Some(&capture));
+        .join("\n")
+}
+
+/// The Preview zone of `app` at a size that shows about six rows.
+fn preview_screen(app: &mut App) -> String {
+    buffer_to_string(&render_to_buffer(app, Rect::new(0, 0, 100, 14)))
+}
+
+#[test]
+fn mux_preview_holds_the_whole_capture_newest_row_last() {
+    let app = muxed_app("busy", Some(&numbered_capture(30)));
     let preview = preview_text_for_selection(&app, 80, 3);
     let rows: Vec<String> = preview.lines.iter().map(ToString::to_string).collect();
-    assert_eq!(rows, ["line 28", "line 29", "line 30"]);
+    assert_eq!(rows, numbered_capture(30).lines().collect::<Vec<_>>());
+}
+
+#[test]
+fn mux_preview_opens_on_the_newest_rows_and_k_scrolls_back_through_the_capture() {
+    let mut app = muxed_app("busy", Some(&numbered_capture(30)));
+    let newest = preview_screen(&mut app);
+    assert!(newest.contains("row 30"), "{newest}");
+    assert!(!newest.contains("row 01"), "{newest}");
+
+    // J, toward the newest rows, goes nowhere from there.
+    app.update(Msg::ScrollPreviewBy(1));
+    assert_eq!(preview_screen(&mut app), newest);
+
+    // K goes back a row at a time, and J returns the same way.
+    for _ in 0..3 {
+        app.update(Msg::ScrollPreviewBy(-1));
+    }
+    let back = preview_screen(&mut app);
+    assert!(
+        !back.contains("row 30") && back.contains("row 27"),
+        "{back}"
+    );
+    for _ in 0..3 {
+        app.update(Msg::ScrollPreviewBy(1));
+    }
+    assert_eq!(preview_screen(&mut app), newest);
+
+    // And all the way back to the first row the capture holds.
+    for _ in 0..100 {
+        app.update(Msg::ScrollPreviewBy(-1));
+    }
+    let oldest = preview_screen(&mut app);
+    assert!(
+        oldest.contains("row 01") && !oldest.contains("row 30"),
+        "{oldest}"
+    );
+}
+
+#[test]
+fn mux_preview_keeps_its_place_from_the_newest_row_through_a_refresh() {
+    let mut app = muxed_app("busy", Some(&numbered_capture(30)));
+    app.update(Msg::ScrollPreviewBy(-2));
+    let before = preview_screen(&mut app);
+    assert!(
+        before.contains("row 28") && !before.contains("row 29"),
+        "{before}"
+    );
+    // The pane printed a row: the capture is read again.
+    app.update(Msg::SetPreview {
+        source: PreviewSource::Pane(crate::model::MuxSessionId::new("busy")),
+        content: PreviewContent::text(numbered_capture(31)),
+    });
+    let after = preview_screen(&mut app);
+    assert!(
+        after.contains("row 29") && !after.contains("row 30"),
+        "{after}"
+    );
+}
+
+#[test]
+fn a_header_over_a_capture_keeps_the_newest_rows_on_screen() {
+    use super::preview_pane::PreviewView;
+    let rows = || Text::from(vec![Line::raw("one"), Line::raw("two"), Line::raw("three")]);
+    let view = PreviewView::text(rows())
+        .scrolled_from_the_end()
+        .fitted_under_a_header(2);
+    let lines: Vec<String> = view.text.lines.iter().map(ToString::to_string).collect();
+    assert_eq!(lines, ["two", "three"]);
+    assert_eq!(
+        view.anchor,
+        tuikit::scroll::Anchor::Top,
+        "it does not scroll"
+    );
+    // A view that scrolls from the top is left as it is.
+    let top = PreviewView::text(rows()).fitted_under_a_header(2);
+    assert_eq!(top.text.lines.len(), 3);
 }
 
 #[test]
