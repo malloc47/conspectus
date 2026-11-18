@@ -26,7 +26,8 @@ leaves it off and builds none of them.
 
 The host keeps where the text comes from (a capture it ran, a document it
 read), which wrap mode a person picked and how that setting is spelled in
-its configuration, the width it lays out at, and how the lines are framed:
+its configuration, smart wrap's settings and which lines of a source fit
+some other way, the width it lays out at, and how the lines are framed:
 a gutter beside them, a window onto them ([`ScrollRegion`](scroll.md#the-region)
 or a [pager](pager.md)), a find painted over them.
 
@@ -61,6 +62,9 @@ assert!(lines.iter().all(|line| line.width() <= 30));
 | `ansi_text(raw, color)` | text with ANSI escapes as styled text: each SGR sequence styles the spans after it | with `color` off, the characters with no styles; text the parser refuses comes back as it is rather than not at all |
 | `layout_capture(lines, mode, source_width, width)` | a parsed capture laid out as rows no wider than `width` | trailing blank lines (only whitespace, whatever their style) go first, so the newest output sits at the bottom; tabs stop every 8 columns |
 | `WrapMode::{Plain, Smart, None}`, `WrapMode::ALL` | how a capture's lines fit an area narrower than their source | `Smart` is the default; `ALL` lists the default first |
+| `layout_capture_with(lines, mode, source_width, width, smart, fit)` | `layout_capture` with smart wrap's settings and a fit for each line | `fit` is asked once per line, under `Smart` only, before trailing blank lines go, so a dropped line leaves no blank rows at the bottom |
+| `SmartWrap { decoration, min_rule_run, shorten_rules }`, `SmartWrap::is_decoration(c)` | smart wrap's settings: the characters that draw structure (inclusive ranges), the fewest of one that make a rule, and whether a labeled line's rules shorten | `Default` is box drawing, block elements, dashes and rule characters, a rule of four, and shortening on |
+| `LineFit::{Smart, Cut, Wrap, RightAlign, Drop}`, `LineFit::ALL` | how one line fits under `Smart` | `Smart` is the default; `ALL` lists the default first |
 | `markdown(body, width, theme)` | Markdown as lines no wider than `width` | headings, emphasis, lists, quotes, links, and inline code styled; fenced code highlighted by its info string; pipe tables laid out by `render_table`; blank lines between blocks kept |
 | `code(source, language)` | source in `language` (an info string: `rust`, `py`, `toml`) as highlighted lines | one line per source line, not wrapped; a language the highlighter does not know gives plain lines |
 | `segment_body(body)` | a body of Markdown as `BodySegment`s: Markdown slices and `ParsedTable`s | fenced code is never a table; a row of the wrong width is padded or cut to the header's |
@@ -91,6 +95,18 @@ usually wider than the area showing it.
   a source width it clips each line.
 
 Every row fits the width in every mode.
+
+### Settings and a fit per line
+
+Smart wrap's decoration characters, its shortest rule, and whether it
+shortens rules are a `SmartWrap` the host may change; the values above are
+its `Default`. `layout_capture_with` also asks the host how each line fits,
+for a source's known quirks: a `LineFit` of `Smart` fits it as above, `Cut`
+clips it at the edge, `Wrap` word-wraps it as `Plain` does, `RightAlign`
+shrinks its leading padding until it ends at the edge on one row (text
+that alone is wider loses all of it and fits the smart way), and `Drop`
+leaves it out. The host decides by whatever it knows about the line: its
+text, where it came from.
 
 ### Markdown and tables
 

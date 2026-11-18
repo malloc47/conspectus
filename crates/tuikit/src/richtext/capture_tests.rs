@@ -272,3 +272,179 @@ fn every_row_fits_the_area_width() {
         }
     }
 }
+
+fn smart_rows_with(
+    text: &str,
+    width: u16,
+    smart: &SmartWrap,
+    fit: impl Fn(&Line<'_>) -> LineFit,
+) -> Vec<String> {
+    layout_capture_with(&lines(text), WrapMode::Smart, None, width, smart, fit)
+        .iter()
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[test]
+fn the_default_settings_are_what_layout_capture_uses() {
+    let capture = format!(
+        "{}\n{} notes ─\n  ⏵⏵ on{}ctx: 4%",
+        "─".repeat(90),
+        "─".repeat(80),
+        " ".repeat(60)
+    );
+    for width in [10u16, 30, 60] {
+        assert_eq!(
+            smart_rows_with(&capture, width, &SmartWrap::default(), |_| LineFit::Smart),
+            rows(&capture, WrapMode::Smart, None, width)
+        );
+    }
+}
+
+#[test]
+fn the_decoration_setting_decides_what_is_cut() {
+    let stars = SmartWrap {
+        decoration: std::iter::once('*'..='*').collect(),
+        ..SmartWrap::default()
+    };
+    assert!(stars.is_decoration('*') && !stars.is_decoration('─'));
+    assert_eq!(
+        smart_rows_with(&"*".repeat(30), 10, &stars, |_| LineFit::Smart),
+        ["*".repeat(10)]
+    );
+    // A box-drawing rule is no longer decoration, so it wraps.
+    assert_eq!(
+        smart_rows_with(&"─".repeat(30), 10, &stars, |_| LineFit::Smart).len(),
+        3
+    );
+}
+
+#[test]
+fn the_shortest_rule_setting_decides_which_runs_shorten() {
+    let text = format!("-- {} -- tail", "x".repeat(10));
+    // At the default four, the two-dash runs are content: the line wraps.
+    assert_eq!(
+        smart_rows_with(&text, 20, &SmartWrap::default(), |_| LineFit::Smart).len(),
+        2
+    );
+    let pairs = SmartWrap {
+        min_rule_run: 2,
+        ..SmartWrap::default()
+    };
+    assert_eq!(
+        smart_rows_with(&text, 20, &pairs, |_| LineFit::Smart),
+        [format!("-- {} - tail", "x".repeat(10))]
+    );
+}
+
+#[test]
+fn rules_wrap_when_shortening_is_off() {
+    let rule = format!("{} notes ─", "─".repeat(147));
+    let off = SmartWrap {
+        shorten_rules: false,
+        ..SmartWrap::default()
+    };
+    assert_eq!(
+        smart_rows_with(&rule, 60, &off, |_| LineFit::Smart),
+        rows(&rule, WrapMode::Plain, None, 60)
+    );
+}
+
+#[test]
+fn a_right_aligned_line_loses_only_the_padding_it_must() {
+    let hint = format!("{}new task? /clear", " ".repeat(70));
+    let right = |_: &Line<'_>| LineFit::RightAlign;
+    assert_eq!(
+        smart_rows_with(&hint, 30, &SmartWrap::default(), right),
+        [format!("{}new task? /clear", " ".repeat(14))]
+    );
+    // Already fitting, it keeps all of it.
+    let short = format!("{}hint", " ".repeat(6));
+    assert_eq!(
+        smart_rows_with(&short, 30, &SmartWrap::default(), right),
+        std::slice::from_ref(&short)
+    );
+    // Its text alone wider than the area: the text, wrapped the smart way.
+    let long = format!("{}alpha beta gamma delta", " ".repeat(40));
+    assert_eq!(
+        smart_rows_with(&long, 12, &SmartWrap::default(), right),
+        ["alpha beta ", "gamma delta"]
+    );
+}
+
+#[test]
+fn cut_and_wrap_fit_a_line_as_they_say() {
+    let text = "alpha beta gamma delta";
+    assert_eq!(
+        smart_rows_with(text, 12, &SmartWrap::default(), |_| LineFit::Cut),
+        ["alpha beta g"]
+    );
+    assert_eq!(
+        smart_rows_with(text, 12, &SmartWrap::default(), |_| LineFit::Wrap),
+        rows(text, WrapMode::Plain, None, 12)
+    );
+}
+
+#[test]
+fn a_dropped_line_leaves_no_blank_rows_at_the_bottom() {
+    let capture = "output\n\n\nhint to drop\n";
+    let fit = |line: &Line<'_>| {
+        if line.to_string() == "hint to drop" {
+            LineFit::Drop
+        } else {
+            LineFit::Smart
+        }
+    };
+    assert_eq!(
+        smart_rows_with(capture, 30, &SmartWrap::default(), fit),
+        ["output"]
+    );
+}
+
+#[test]
+fn only_smart_wrap_asks_for_a_fit_or_reads_its_settings() {
+    let capture = format!("{}\nkeep", "─".repeat(40));
+    let stars = SmartWrap {
+        decoration: std::iter::once('*'..='*').collect(),
+        ..SmartWrap::default()
+    };
+    for mode in [WrapMode::Plain, WrapMode::None] {
+        let laid_out = layout_capture_with(&lines(&capture), mode, Some(40), 12, &stars, |_| {
+            panic!("{mode:?} asked for a fit")
+        });
+        assert_eq!(
+            laid_out,
+            layout_capture(&lines(&capture), mode, Some(40), 12)
+        );
+    }
+}
+
+#[test]
+fn every_fit_keeps_rows_within_the_area() {
+    let capture = format!(
+        "{}\n{}label {}\n{}right\n\t\tindented words that wrap\n{}",
+        "═".repeat(90),
+        " ".repeat(30),
+        "─".repeat(50),
+        " ".repeat(80),
+        "x".repeat(200)
+    );
+    for fit in LineFit::ALL {
+        for width in [1u16, 5, 17, 40] {
+            let laid_out = layout_capture_with(
+                &lines(&capture),
+                WrapMode::Smart,
+                None,
+                width,
+                &SmartWrap::default(),
+                |_| fit,
+            );
+            for row in laid_out {
+                assert!(
+                    row.width() <= usize::from(width),
+                    "{fit:?} at {width}: {row:?}"
+                );
+            }
+        }
+    }
+}

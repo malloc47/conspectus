@@ -4,7 +4,11 @@
 //! A capture is laid out for the terminal's width, not the area's.
 //! [`layout_capture`] turns the parsed capture into display rows that each
 //! fit the area, per [`WrapMode`], so the caller can keep exactly as many
-//! of the newest rows as the area has room for.
+//! of the newest rows as the area has room for. [`layout_capture_with`]
+//! takes the smart wrap's settings ([`SmartWrap`]) and a [`LineFit`] for
+//! each line, for a host that knows its sources' quirks.
+
+use std::ops::RangeInclusive;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -33,6 +37,88 @@ impl WrapMode {
     pub const ALL: [WrapMode; 3] = [Self::Smart, Self::Plain, Self::None];
 }
 
+/// What [`WrapMode::Smart`] counts as decoration, and how it treats rules.
+/// [`Default`] is the framework's choice; a host may let its user tune it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SmartWrap {
+    /// Characters that draw structure rather than say anything (rules,
+    /// box borders, block shading), as inclusive ranges. A line whose
+    /// overflow is only these and blanks is cut at the edge.
+    pub decoration: Vec<RangeInclusive<char>>,
+    /// The fewest cells of one decoration character that make a rule.
+    /// Shorter runs are content (`--flag`, `===`, `->`) and keep their
+    /// length.
+    pub min_rule_run: usize,
+    /// Whether a line whose overflow carries a label shortens its rules
+    /// to fit on one row, rather than wrapping.
+    pub shorten_rules: bool,
+}
+
+impl Default for SmartWrap {
+    fn default() -> Self {
+        Self {
+            decoration: vec![
+                '\u{2500}'..='\u{259F}', // box drawing + block elements
+                '\u{2010}'..='\u{2015}', // hyphens and dashes
+                '\u{23AF}'..='\u{23AF}', // horizontal line extension
+                '-'..='-',
+                '='..='=',
+                '_'..='_',
+                '~'..='~',
+            ],
+            min_rule_run: 4,
+            shorten_rules: true,
+        }
+    }
+}
+
+impl SmartWrap {
+    /// Whether `c` is one of the [`decoration`](Self::decoration)
+    /// characters.
+    pub fn is_decoration(&self, c: char) -> bool {
+        self.decoration.iter().any(|range| range.contains(&c))
+    }
+
+    fn is_decoration_cell(&self, cell: &Cell) -> bool {
+        cell.text
+            .chars()
+            .next()
+            .is_some_and(|c| self.is_decoration(c))
+    }
+}
+
+/// How one line of a capture fits the area under [`WrapMode::Smart`]. The
+/// host picks it per line, so a source's known quirk (a status line it
+/// right-aligns, a hint not worth a row) fits as the host means it to.
+/// The other modes lay every line out their own way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum LineFit {
+    /// The smart wrap's own fit, by its [`SmartWrap`] settings.
+    #[default]
+    Smart,
+    /// Cut at the edge, as a terminal clips a row.
+    Cut,
+    /// Word-wrap the line as it is, as [`WrapMode::Plain`] does.
+    Wrap,
+    /// Shrink the leading padding so the line ends at the edge, on one
+    /// row; when its text alone is wider, the text without the padding
+    /// fits the smart way.
+    RightAlign,
+    /// Leave the line out.
+    Drop,
+}
+
+impl LineFit {
+    /// Every fit, the default first.
+    pub const ALL: [LineFit; 5] = [
+        Self::Smart,
+        Self::Cut,
+        Self::Wrap,
+        Self::RightAlign,
+        Self::Drop,
+    ];
+}
+
 /// One terminal cell's worth of styled text. Zero-width characters
 /// (combining marks) ride along with the cell before them.
 #[derive(Clone, Debug, PartialEq)]
@@ -54,18 +140,6 @@ impl Cell {
     fn is_blank(&self) -> bool {
         self.text.chars().all(char::is_whitespace)
     }
-
-    /// Rules, box borders, and block shading: characters that draw
-    /// structure rather than say anything.
-    fn is_decoration(&self) -> bool {
-        self.text.chars().next().is_some_and(|c| {
-            matches!(c,
-                '\u{2500}'..='\u{259F}' // box drawing + block elements
-                | '\u{2010}'..='\u{2015}' // hyphens and dashes
-                | '\u{23AF}' // horizontal line extension
-                | '-' | '=' | '_' | '~')
-        })
-    }
 }
 
 /// Lay out a parsed capture as display rows no wider than `width`.
@@ -73,6 +147,8 @@ impl Cell {
 /// first so the latest output sits at the bottom. `source_width` is the
 /// width the source laid the capture out at, used by [`WrapMode::None`]
 /// to reproduce its own wrapping; without it, that mode clips each line.
+/// Smart wrap uses the [`SmartWrap`] defaults and fits every line its own
+/// way; [`layout_capture_with`] sets both.
 ///
 /// ```
 /// use ratatui::text::Line;
@@ -91,19 +167,71 @@ pub fn layout_capture(
     source_width: Option<u16>,
     width: u16,
 ) -> Vec<Line<'static>> {
+    layout_capture_with(
+        lines,
+        mode,
+        source_width,
+        width,
+        &SmartWrap::default(),
+        |_| LineFit::Smart,
+    )
+}
+
+/// [`layout_capture`] with the smart wrap's settings and a fit for each
+/// line. Under [`WrapMode::Smart`], `fit` is asked once per line of the
+/// capture, before trailing blank lines are dropped, so a dropped line
+/// leaves no blank rows behind it at the bottom; the other modes never
+/// ask it and ignore `smart`.
+///
+/// ```
+/// use ratatui::text::Line;
+/// use tuikit::richtext::{LineFit, SmartWrap, WrapMode, layout_capture_with};
+///
+/// let hint = format!("{}press ? for help", " ".repeat(50));
+/// let capture = [Line::raw("output"), Line::raw(hint)];
+/// let rows = layout_capture_with(&capture, WrapMode::Smart, None, 30, &SmartWrap::default(), |line| {
+///     if line.to_string().ends_with("for help") {
+///         LineFit::RightAlign
+///     } else {
+///         LineFit::Smart
+///     }
+/// });
+/// // The hint keeps its place at the right edge, on one row.
+/// assert_eq!(rows.len(), 2);
+/// assert_eq!(rows[1].to_string(), format!("{}press ? for help", " ".repeat(14)));
+/// ```
+pub fn layout_capture_with(
+    lines: &[Line<'_>],
+    mode: WrapMode,
+    source_width: Option<u16>,
+    width: u16,
+    smart: &SmartWrap,
+    fit: impl Fn(&Line<'_>) -> LineFit,
+) -> Vec<Line<'static>> {
     let width = usize::from(width.max(1));
-    let mut cells: Vec<Vec<Cell>> = lines.iter().map(line_cells).collect();
+    let mut cells: Vec<(LineFit, Vec<Cell>)> = lines
+        .iter()
+        .map(|line| {
+            let fit = if mode == WrapMode::Smart {
+                fit(line)
+            } else {
+                LineFit::Smart
+            };
+            (fit, line_cells(line))
+        })
+        .filter(|(fit, _)| *fit != LineFit::Drop)
+        .collect();
     while cells
         .last()
-        .is_some_and(|line| line.iter().all(Cell::is_blank))
+        .is_some_and(|(_, line)| line.iter().all(Cell::is_blank))
     {
         cells.pop();
     }
     let mut rows = Vec::new();
-    for line in cells {
+    for (fit, line) in cells {
         match mode {
             WrapMode::Plain => rows.extend(text::wrap_line(&cells_line(line), width, 0)),
-            WrapMode::Smart => rows.extend(smart_rows(line, width)),
+            WrapMode::Smart => rows.extend(fitted_rows(line, fit, width, smart)),
             WrapMode::None => {
                 let line = cells_line(line);
                 let source_rows = match source_width.map(usize::from) {
@@ -119,6 +247,47 @@ pub fn layout_capture(
     rows
 }
 
+/// One line under smart wrap, fitted as `fit` says.
+fn fitted_rows(
+    mut line: Vec<Cell>,
+    fit: LineFit,
+    width: usize,
+    smart: &SmartWrap,
+) -> Vec<Line<'static>> {
+    match fit {
+        LineFit::Smart => smart_rows(line, width, smart),
+        LineFit::Wrap => text::wrap_line(&cells_line(line), width, 0),
+        LineFit::Cut => {
+            let mut kept = split_at_width(&line, width).0.to_vec();
+            while kept.last().is_some_and(Cell::is_blank) {
+                kept.pop();
+            }
+            vec![cells_line(kept)]
+        }
+        LineFit::RightAlign => {
+            while line.last().is_some_and(Cell::is_blank) {
+                line.pop();
+            }
+            // Leading padding goes from the left until the line fits, or
+            // all of it when the text alone is wider.
+            let mut excess = line_width(&line).saturating_sub(width);
+            let lead = line.iter().take_while(|cell| cell.is_blank()).count();
+            let mut cut = 0;
+            while excess > 0 && cut < lead {
+                excess = excess.saturating_sub(line[cut].width);
+                cut += 1;
+            }
+            let line = line.split_off(if excess > 0 { lead } else { cut });
+            if excess > 0 {
+                smart_rows(line, width, smart)
+            } else {
+                vec![cells_line(line)]
+            }
+        }
+        LineFit::Drop => Vec::new(),
+    }
+}
+
 /// `line` cut to `width` cells with no mark, as a terminal clips a row:
 /// the first row of a character wrap.
 fn clip_line(line: &Line<'_>, width: usize) -> Line<'static> {
@@ -128,15 +297,11 @@ fn clip_line(line: &Line<'_>, width: usize) -> Line<'static> {
         .unwrap_or_default()
 }
 
-/// The fewest cells of one rule character that make a rule. Shorter
-/// runs are content (`--flag`, `===`, `->`) and are never shortened.
-const MIN_RULE_RUN: usize = 4;
-
 /// Smart wrap for one line: drop trailing padding, truncate when only
 /// decoration would spill past the edge, squeeze interior padding or
 /// else shorten rules when that makes the line fit, and otherwise
 /// word-wrap with a hanging indent.
-fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Line<'static>> {
+fn smart_rows(mut line: Vec<Cell>, width: usize, smart: &SmartWrap) -> Vec<Line<'static>> {
     while line.last().is_some_and(Cell::is_blank) {
         line.pop();
     }
@@ -147,7 +312,7 @@ fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Line<'static>> {
     let (kept, overflow) = split_at_width(&line, width);
     if overflow
         .iter()
-        .all(|cell| cell.is_blank() || cell.is_decoration())
+        .all(|cell| cell.is_blank() || smart.is_decoration_cell(cell))
     {
         let mut kept = kept.to_vec();
         while kept.last().is_some_and(Cell::is_blank) {
@@ -162,9 +327,13 @@ fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Line<'static>> {
     let padding = runs_of(&line, lead, 2, |cell| {
         (cell.width == 1 && cell.is_blank()).then_some(())
     });
-    let rules = runs_of(&line, 0, MIN_RULE_RUN, |cell| {
-        (cell.width == 1 && cell.is_decoration()).then_some(cell.text.as_str())
-    });
+    let rules = if smart.shorten_rules {
+        runs_of(&line, 0, smart.min_rule_run, |cell| {
+            (cell.width == 1 && smart.is_decoration_cell(cell)).then_some(cell.text.as_str())
+        })
+    } else {
+        Vec::new()
+    };
     if let Some(shortened) =
         shorten_runs(&line, &padding, excess).or_else(|| shorten_runs(&line, &rules, excess))
     {
