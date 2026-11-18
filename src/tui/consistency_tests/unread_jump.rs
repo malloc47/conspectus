@@ -121,6 +121,32 @@ fn the_previous_key_goes_the_other_way_from_the_newest_and_wraps() {
 }
 
 #[test]
+fn the_keys_open_the_groups_above_the_row_they_land_on() {
+    let mut app = listing_with(View::Sessions, &four_stops(), LiveOverlay::off());
+    // Fold every group, from the last up, so the sessions are hidden.
+    let groups: Vec<RowId> = app
+        .tree()
+        .rows
+        .iter()
+        .filter(|row| matches!(row.kind, crate::tui::rows::RowKind::Group(_)))
+        .map(|row| row.id.clone())
+        .collect();
+    for group in groups.iter().rev() {
+        app.set_selection(group.clone());
+        app.update(Msg::CollapseRow);
+    }
+    let hidden = |app: &App| {
+        !app.visible_rows()
+            .iter()
+            .any(|row| row.id == RowId::AgentSession(session(SOLO)))
+    };
+    assert!(hidden(&app), "the session starts folded away");
+    press(&mut app, '}');
+    assert!(!hidden(&app), "its groups opened");
+    assert_eq!(landed(&app), "session solo000001");
+}
+
+#[test]
 fn the_mux_view_walks_its_own_rows_and_does_not_leave_for_a_session_with_no_mux() {
     let mut app = listing_with(View::Mux, &four_stops(), LiveOverlay::off());
     select(&mut app, "scratch");
