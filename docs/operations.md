@@ -1275,6 +1275,14 @@ filters = { harness = ["codex"], max_age = "7d", mux_state = ["attached"] }
 [tui.detail]
 show_edge_meta = false      # provenance · confidence · state on link rows
 
+[tui.preview]               # smart wrap's settings; see below (ADR 0252)
+min_rule_run = 4
+
+[[tui.preview.rules]]       # fit lines of a pane that match some other way
+name = "banner"
+match = '^=+ .* =+$'
+fit = "cut"
+
 [server]
 live_poll_without_hooks = false  # also ask Claude Code's agent list for agents without hooks (ADR 0222)
 
@@ -1379,13 +1387,71 @@ teardown_grace = "3s"
   `plain` wraps every line; `none` keeps tmux's layout at the pane's
   width and clips what doesn't fit. The controls overlay (`f`) has a
   "Preview wrap" section; the last pick is remembered across runs and
-  takes precedence over the config value.
+  takes precedence over the config value. `[tui.preview]` tunes smart
+  wrap and fits an agent's quirks; see the next section.
 
 Unknown sections and unknown keys are ignored. Malformed TOML
 surfaces as a `ConfigDiagnostic` on stderr but does not abort the
 run. The legacy `[session]` section (pre-ADR 0021) is recognized
 solely to emit a one-line diagnostic pointing at the new schema; its
 contents are ignored.
+
+### `[tui.preview]` — smart wrap's settings and cleanup rules (ADR 0252)
+
+Smart wrap fits an agent's screen to the Preview. Its settings, and rules
+for lines an agent draws in a way smart wrap gets wrong, are configurable.
+The built-in values are a document in this same format; the user's config,
+then the project's, merge over it.
+
+```toml
+[tui.preview]
+# Characters that draw structure: one character, or an inclusive range.
+decoration = ["\u2500..\u259F", "\u2010..\u2015", "\u23AF", "-", "=", "_", "~"]
+min_rule_run = 4        # fewest repeats of one decoration character that make a rule
+shorten_rules = true    # shorten a rule around a label past the edge, not wrap it
+
+[[tui.preview.rules]]
+name = "claude-code-clear-hint"   # built in
+harness = "claude-code"           # optional: only panes running this harness
+match = '^\s+new task\? /clear to save \S+ tokens\s*$'
+fit = "right-align"               # smart | cut | wrap | right-align | drop
+# enabled = false                 # turns the rule of this name off
+```
+
+- **Settings.** A line whose overflow past the Preview's edge is only
+  `decoration` characters and blanks is cut at the edge. A run of at least
+  `min_rule_run` of one of them is a rule; with `shorten_rules`, a line
+  whose overflow carries a label (`──── claude ─`) shortens its rules to
+  fit on one row. Shorter runs (`--flag`, `===`) keep their length. Each
+  key merges on its own: a project's `min_rule_run` leaves the user's
+  `decoration` in place.
+- **Rules.** `match` is a regular expression tested against a line's text,
+  its colors dropped. The first rule that applies to the pane and matches a
+  line decides its `fit`: `cut` clips it at the edge, `wrap` word-wraps it
+  as plain wrap does, `right-align` shrinks its leading padding until it
+  ends at the edge on one row, `drop` leaves it out, and `smart` fits it as
+  smart wrap would (useful to exempt lines from a later rule). A line no
+  rule matches gets smart wrap's own fit.
+- **Scope.** `harness` (a harness key: `claude-code`, `codex`, `opencode`,
+  `aider`, `pi`) applies the rule only to a pane running that harness: one
+  whose mux an agent session of it is linked to, where its process was
+  found, or whose command names it. A pane Conspectus cannot attribute gets
+  only the rules that name no harness.
+- **Merging.** A rule replaces any earlier rule of its `name`, the built-in
+  ones included, and takes all of its fields from the replacement. A
+  file's rules are checked before the earlier ones', so yours win over the
+  built-in ones when both match. `enabled = false` removes the rule of that
+  name.
+- **Built in.** `claude-code-clear-hint` right-aligns Claude Code's
+  `new task? /clear to save … tokens` hint, which Claude Code draws behind
+  padding wider than most Previews, so it takes one row at the Preview's
+  right edge.
+- **Mistakes.** A bad setting is reported and keeps its earlier value. A
+  rule with an invalid pattern, fit, or harness, or with a key the schema
+  does not name, is reported and skipped; a misspelled `harness` would
+  otherwise apply the rule to every pane.
+- Rules apply under smart wrap only: `plain` and `none` show the pane as it
+  is.
 
 ### `[tui.theme]` — palette overrides (ADR 0032, ADR 0153)
 

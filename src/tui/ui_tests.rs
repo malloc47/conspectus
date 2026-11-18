@@ -8008,3 +8008,92 @@ fn the_tree_window_follows_the_copy_of_a_duplicated_row_the_cursor_is_on() {
         "the first copy is scrolled away:\n{text}"
     );
 }
+
+/// `rules` (a config file's `[[tui.preview.rules]]`) merged over the
+/// built-in Preview rules of `app`.
+fn with_preview_rules(app: &mut App, rules: &str) {
+    #[derive(serde::Deserialize)]
+    struct Document {
+        tui: Tui,
+    }
+    #[derive(serde::Deserialize)]
+    struct Tui {
+        preview: crate::tui::preview_rules::PreviewFile,
+    }
+    let file = toml::from_str::<Document>(rules)
+        .expect("rules")
+        .tui
+        .preview;
+    let problems = crate::tui::preview_rules::merge(&mut app.config_mut().preview, file);
+    assert!(problems.is_empty(), "{problems:?}");
+}
+
+fn mux_preview_rows(app: &App, width: u16) -> Vec<String> {
+    preview_text_for_selection(app, width, 20)
+        .lines
+        .iter()
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[test]
+fn mux_preview_fits_lines_by_the_rules_for_what_the_pane_runs() {
+    // The fixture's pane holds a Codex session.
+    let mut app = muxed_app("agent", Some("output\nnoise line\nlast"));
+    with_preview_rules(
+        &mut app,
+        "[[tui.preview.rules]]\nname = \"elsewhere\"\nharness = \"claude-code\"\n\
+         match = '^noise'\nfit = \"drop\"\n",
+    );
+    assert_eq!(mux_preview_rows(&app, 40), ["output", "noise line", "last"]);
+    with_preview_rules(
+        &mut app,
+        "[[tui.preview.rules]]\nname = \"here\"\nharness = \"codex\"\n\
+         match = '^noise'\nfit = \"drop\"\n",
+    );
+    assert_eq!(mux_preview_rows(&app, 40), ["output", "last"]);
+    // Plain wrap shows every line as it is.
+    app.update(Msg::SetPreviewWrap(crate::tui::WrapMode::Plain));
+    assert_eq!(mux_preview_rows(&app, 40), ["output", "noise line", "last"]);
+}
+
+#[test]
+fn mux_preview_right_aligns_the_clear_hint_where_its_rule_applies() {
+    let hint = format!("{}new task? /clear to save 494.6k tokens", " ".repeat(143));
+    let capture = format!("output\n{hint}");
+    let mut app = muxed_app("agent", Some(&capture));
+    // The built-in rule is for Claude Code panes; this one runs Codex, so
+    // the hint wraps the smart way: its padding, then its words.
+    assert_eq!(
+        mux_preview_rows(&app, 60),
+        [
+            "output".to_string(),
+            " ".repeat(60),
+            "new task? /clear to save 494.6k tokens".to_string()
+        ]
+    );
+    with_preview_rules(
+        &mut app,
+        "[[tui.preview.rules]]\nname = \"claude-code-clear-hint\"\nharness = \"codex\"\n\
+         match = '^\\s+new task\\? /clear'\nfit = \"right-align\"\n",
+    );
+    assert_eq!(
+        mux_preview_rows(&app, 60),
+        [
+            "output".to_string(),
+            format!("{}new task? /clear to save 494.6k tokens", " ".repeat(22))
+        ]
+    );
+}
+
+#[test]
+fn mux_preview_follows_the_smart_wrap_settings() {
+    let capture = format!("{} notes ─", "─".repeat(80));
+    let mut app = muxed_app("agent", Some(&capture));
+    assert_eq!(
+        mux_preview_rows(&app, 40),
+        [format!("{} notes ─", "─".repeat(32))]
+    );
+    app.config_mut().preview.smart.shorten_rules = false;
+    assert_eq!(mux_preview_rows(&app, 40).len(), 3);
+}

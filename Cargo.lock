@@ -364,6 +364,7 @@ dependencies = [
  "notify",
  "predicates",
  "ratatui",
+ "regex",
  "rkyv",
  "rusqlite",
  "serde",

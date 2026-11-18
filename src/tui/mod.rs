@@ -26,6 +26,7 @@ pub mod messages;
 pub mod modal;
 pub mod paths;
 pub mod preview;
+pub mod preview_rules;
 pub mod preview_wrap;
 pub mod relation_path;
 pub mod resume;
@@ -140,6 +141,9 @@ pub struct RunConfig {
     /// from `[tui] session_preview`; the controls overlay changes it in
     /// memory and the last choice is restored from persisted TUI state.
     pub default_session_preview: SessionPreview,
+    /// The Preview's smart-wrap settings and cleanup rules (ADR 0252),
+    /// from `[tui.preview]` over the built-in ones.
+    pub preview: preview_rules::PreviewConfig,
     /// Terminal width (columns) below which the body reflows from
     /// side-by-side panes to a vertical stack. Sourced
     /// from `[tui] narrow_layout_threshold`; the renderer reads this
@@ -211,6 +215,7 @@ impl RunConfig {
             default_mux_recency: MuxRecency::default(),
             default_preview_wrap: WrapMode::default(),
             default_session_preview: SessionPreview::default(),
+            preview: preview_rules::PreviewConfig::default(),
             narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
             live_poll: crate::discovery::live_poller::PollScope::default(),

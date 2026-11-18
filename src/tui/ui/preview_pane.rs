@@ -418,12 +418,30 @@ pub(super) fn format_preview_for_mux(
                 // text (ADR 0181): the escapes parsed (or dropped without
                 // color), then the capture fitted in the active wrap mode.
                 let parsed = tuikit::richtext::ansi_text(&capture.text, color);
+                // ADR 0252: the smart wrap's settings, and the rules that
+                // apply to what the pane runs.
+                let preview = &app.config().preview;
+                let harnesses = match app.snapshot_handle() {
+                    Some(handle) if !preview.rules.is_empty() => {
+                        crate::tui::preview_rules::pane_harnesses(handle.snapshot(), mux)
+                    }
+                    _ => std::collections::BTreeSet::new(),
+                };
+                let rules = preview.rules_for(&harnesses);
+                let fit = |line: &Line<'_>| {
+                    if rules.is_empty() {
+                        return tuikit::richtext::LineFit::Smart;
+                    }
+                    crate::tui::preview_rules::line_fit(&rules, &line.to_string())
+                };
                 let layout = |columns| {
-                    tuikit::richtext::layout_capture(
+                    tuikit::richtext::layout_capture_with(
                         &parsed.lines,
                         app.preview_wrap(),
                         capture.width,
                         columns,
+                        &preview.smart,
+                        fit,
                     )
                 };
                 let mut rows = layout(width);

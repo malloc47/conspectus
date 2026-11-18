@@ -30,6 +30,15 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **The Preview's cleanup is configurable.** `[tui.preview]` sets which
+  characters smart wrap treats as decoration, how long a run of one is
+  before it is a rule, and whether rules shorten around a label.
+  `[[tui.preview.rules]]` entries fit the lines of a pane that match a
+  pattern some other way (cut, wrap, right-align, or drop), optionally only
+  in panes running a given harness; built-in rules can be replaced or turned
+  off by name. The first built-in rule keeps Claude Code's right-aligned
+  `new task? /clear to save … tokens` hint on one row at the Preview's
+  right edge, where it took a row of blanks and then a row of text.
 - **A mux that can never report state shows no live mark.** A shell, an
   editor, or the daemon's own `conspectus-server` (no session linked, no
   agent counted, no harness in its pane, and a stopped one that ran no

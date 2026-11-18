@@ -283,6 +283,7 @@ impl ScenarioWorld {
             default_mux_recency: crate::tui::MuxRecency::default(),
             default_preview_wrap: crate::tui::WrapMode::default(),
             default_session_preview: crate::tui::SessionPreview::default(),
+            preview: crate::tui::preview_rules::PreviewConfig::default(),
             narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
             live_poll: crate::discovery::live_poller::PollScope::default(),

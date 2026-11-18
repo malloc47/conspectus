@@ -328,6 +328,9 @@ pub struct TuiConfig {
     /// Starting preview for agent sessions in tmux (ADR 0112). Sourced
     /// from `[tui] session_preview`; defaults to the transcript.
     pub session_preview: crate::tui::SessionPreview,
+    /// The Preview's smart-wrap settings and cleanup rules (ADR 0252),
+    /// from `[tui.preview]` over the built-in ones.
+    pub preview: crate::tui::preview_rules::PreviewConfig,
 }
 
 impl Default for TuiConfig {
@@ -342,6 +345,7 @@ impl Default for TuiConfig {
             default_view: None,
             preview_wrap: crate::tui::WrapMode::default(),
             session_preview: crate::tui::SessionPreview::default(),
+            preview: crate::tui::preview_rules::PreviewConfig::default(),
         }
     }
 }
@@ -607,6 +611,10 @@ struct TuiFile {
     /// `[tui] session_preview` — `transcript` or `pane`.
     #[serde(default)]
     session_preview: Option<String>,
+    /// `[tui.preview]` table (ADR 0252): the Preview's smart-wrap
+    /// settings and its `[[tui.preview.rules]]`.
+    #[serde(default)]
+    preview: Option<crate::tui::preview_rules::PreviewFile>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1369,6 +1377,15 @@ fn merge_tui(
 
     if let Some(theme_file) = file.theme {
         merge_tui_theme(&mut config.theme, theme_file, path, diagnostics);
+    }
+
+    if let Some(preview) = file.preview {
+        for message in crate::tui::preview_rules::merge(&mut config.preview, preview) {
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message,
+            });
+        }
     }
 }
 

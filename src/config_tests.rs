@@ -1905,3 +1905,61 @@ fn an_invalid_live_poll_without_hooks_is_a_diagnostic_and_keeps_it_off() {
         );
     }
 }
+
+#[test]
+fn tui_preview_layers_merge_project_over_user_over_built_in() {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &temp.path().join(".config").join(USER_CONFIG_RELATIVE),
+        "[tui.preview]\nmin_rule_run = 3\nshorten_rules = false\n\
+         [[tui.preview.rules]]\nname = \"user\"\nmatch = 'u'\nfit = \"cut\"\n\
+         [[tui.preview.rules]]\nname = \"both\"\nmatch = 'b'\nfit = \"cut\"\n",
+    );
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[tui.preview]\nmin_rule_run = 5\n\
+         [[tui.preview.rules]]\nname = \"both\"\nmatch = 'b'\nfit = \"drop\"\n",
+    );
+    let outcome = ConfigLoader::new()
+        .with_home(temp.path())
+        .load_from(&project);
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    let preview = &outcome.config.tui.preview;
+    assert_eq!(preview.smart.min_rule_run, 5);
+    assert!(!preview.smart.shorten_rules, "the user's value stays");
+    let rules: Vec<(&str, tuikit::richtext::LineFit)> = preview
+        .rules
+        .iter()
+        .map(|rule| (rule.name.as_str(), rule.fit))
+        .collect();
+    assert_eq!(
+        rules,
+        [
+            ("both", tuikit::richtext::LineFit::Drop),
+            ("user", tuikit::richtext::LineFit::Cut),
+            (
+                "claude-code-clear-hint",
+                tuikit::richtext::LineFit::RightAlign
+            ),
+        ]
+    );
+}
+
+#[test]
+fn tui_preview_problems_are_diagnosed_against_their_file() {
+    let outcome = load_tui_config("[tui.preview]\nmin_rule_run = \"four\"\n");
+    assert_eq!(
+        outcome.config.tui.preview,
+        crate::tui::preview_rules::PreviewConfig::default()
+    );
+    let messages = diagnostic_messages(&outcome);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("min_rule_run"), "{messages:?}");
+    assert!(
+        outcome.diagnostics[0]
+            .path
+            .ends_with(PROJECT_CONFIG_FILENAME)
+    );
+}

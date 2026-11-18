@@ -1,0 +1,36 @@
+# The Preview's built-in smart-wrap settings and cleanup rules, in the
+# format of a config file's `[tui.preview]` section. The user's config, then
+# the project's, merge over these: a setting key by key, a rule by name
+# (`enabled = false` turns one off). `docs/operations.md` describes the keys.
+# A test holds the settings here equal to the framework's defaults.
+
+[tui.preview]
+# Characters that draw structure rather than say anything: one character,
+# or an inclusive range `a..b`. A line whose overflow is only these and
+# blanks is cut at the Preview's edge.
+decoration = [
+  "\u2500..\u259F", # box drawing and block elements
+  "\u2010..\u2015", # hyphens and dashes
+  "\u23AF",        # horizontal line extension
+  "-",
+  "=",
+  "_",
+  "~",
+]
+# The fewest repeats of one decoration character that make a rule; shorter
+# runs (`--flag`, `===`, `->`) are content and keep their length.
+min_rule_run = 4
+# Shorten the rules of a line whose overflow carries a label, so it fits on
+# one row, rather than wrapping it.
+shorten_rules = true
+
+# Checked in order, the first match deciding; rules from the user's and the
+# project's config are checked before these.
+
+# Claude Code right-aligns this hint on its status line behind padding wider
+# than most Previews; shrink the padding so it ends at the edge on one row.
+[[tui.preview.rules]]
+name = "claude-code-clear-hint"
+harness = "claude-code"
+match = '^\s+new task\? /clear to save \S+ tokens\s*$'
+fit = "right-align"
