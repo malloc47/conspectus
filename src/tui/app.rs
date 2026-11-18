@@ -1740,7 +1740,9 @@ impl App {
                     }
                 }
             }
-            Msg::NextWaiting => effects.extend(self.jump_to_next_waiting()),
+            Msg::NextWaiting => effects.extend(self.jump_along(waiting::Walk::Waiting)),
+            Msg::NextUnread => effects.extend(self.jump_along(waiting::Walk::NextUnread)),
+            Msg::PreviousUnread => effects.extend(self.jump_along(waiting::Walk::PreviousUnread)),
             Msg::RevealSelected => {
                 let subject = crate::tui::actions::action_subject(self);
                 let result = match (&subject.pin, &subject.node) {

@@ -54,6 +54,10 @@ fn every_key_the_program_takes_is_a_binding() {
         (Focus::Right, typed('K'), "preview.up"),
         (Focus::Left, typed('W'), "waiting.next"),
         (Focus::Right, typed('W'), "waiting.next"),
+        (Focus::Left, typed('}'), "unread.next"),
+        (Focus::Right, typed('}'), "unread.next"),
+        (Focus::Left, typed('{'), "unread.previous"),
+        (Focus::Right, typed('{'), "unread.previous"),
     ] {
         assert_eq!(reached(focus, event), Some(id), "{focus:?} {event:?}");
     }
@@ -268,6 +272,8 @@ fn a_message_names_the_key_its_binding_takes() {
         ("quit", "q"),
         // The jump's messages and the help legend.
         ("waiting.next", "W"),
+        ("unread.next", "}"),
+        ("unread.previous", "{"),
     ] {
         assert_eq!(key_name(id), label, "{id}");
     }
@@ -288,6 +294,30 @@ fn w_jumps_to_what_waits_and_names_itself_only_while_something_does() {
     );
     let app = App::new(crate::tui::RunConfig::defaults());
     assert!(!binding.can_act(&app), "nothing waits in an empty app");
+}
+
+/// The walk over unread stops takes the braces: `J` and `K` keep scrolling
+/// the preview, `[` and `]` keep switching views, and the status bar names
+/// the walk only while a stop is unread.
+#[test]
+fn the_braces_walk_the_unread_stops_and_name_themselves_only_while_one_is_unread() {
+    assert_eq!(reached(Focus::Left, typed('J')), Some("preview.down"));
+    assert_eq!(reached(Focus::Left, typed('K')), Some("preview.up"));
+    assert_eq!(reached(Focus::Left, typed(']')), Some("view.next"));
+    assert_eq!(reached(Focus::Left, typed('[')), Some("view.previous"));
+    let app = App::new(crate::tui::RunConfig::defaults());
+    for (id, msg) in [
+        ("unread.next", Msg::NextUnread),
+        ("unread.previous", Msg::PreviousUnread),
+    ] {
+        let binding = keymap().get(id).expect("the walk's binding");
+        assert_eq!(binding.scope(), Scope::Global, "{id}: from either pane");
+        assert_eq!(binding.action().action(), Action::Msg(Box::new(msg)));
+        assert!(
+            !binding.can_act(&app),
+            "{id}: nothing is unread in an empty app"
+        );
+    }
 }
 
 /// A message that offers a binding's other keys names them in the order

@@ -167,6 +167,10 @@ pub enum Command {
     Reveal,
     /// `W`: the next agent waiting on the operator.
     NextWaiting,
+    /// `}`: the next agent with an unread stop.
+    NextUnread,
+    /// `{`: the previous agent with an unread stop.
+    PreviousUnread,
     /// `Backspace` on the left pane: return from a reveal.
     Back,
     /// `Tab`: the other pane.
@@ -227,6 +231,8 @@ impl Command {
             Command::Last => msg(Msg::End),
             Command::Reveal => msg(Msg::RevealSelected),
             Command::NextWaiting => msg(Msg::NextWaiting),
+            Command::NextUnread => msg(Msg::NextUnread),
+            Command::PreviousUnread => msg(Msg::PreviousUnread),
             Command::Back => msg(Msg::NavBack),
             Command::Focus => msg(Msg::CycleFocus),
             Command::PreviewDown => msg(Msg::ScrollPreviewBy(1)),
@@ -500,6 +506,22 @@ pub const PROGRAM_KEYS: &[Bind<Command, App>] = &[
         .help(
             heading::NAVIGATION,
             "Jump to the next agent waiting on you, the longest wait first, wrapping: to its row in this view (in Mux, its mux's row), else in Sessions (Mux for an agent no session matches yet), with the groups above it opened; Backspace returns from a switch",
+        ),
+    // `]` and `[` switch views and `J` and `K` scroll the preview, so the
+    // walk over unread stops takes their shifted braces.
+    bind("unread.next", GLOBAL, &[ch('}')], Command::NextUnread)
+        .verb("next unread")
+        .rank(status_rank::DEFAULT_ACTION)
+        .available_when(App::has_unread)
+        .help(
+            heading::NAVIGATION,
+            "Jump to the next agent with an unread stop, the oldest stop first, wrapping: to its row in this view (in Mux, its mux's row), else in Sessions (Mux for an agent no session matches yet), with the groups above it opened; Backspace returns from a switch",
+        ),
+    bind("unread.previous", GLOBAL, &[ch('{')], Command::PreviousUnread)
+        .available_when(App::has_unread)
+        .help(
+            heading::NAVIGATION,
+            "Jump to the previous agent with an unread stop, wrapping, as the next-unread key does",
         ),
     bind("reveal.back", LEFT_PANE, &[key(KeyCode::Backspace)], Command::Back)
         .verb("back")

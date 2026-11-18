@@ -492,6 +492,15 @@ state within about a second, with or without `conspectus serve`.
   by the views' filters, it says so and the cursor stays. Then `Enter` or
   `a` attaches as usual. The status bar shows `W next waiting` while
   anything waits.
+- **`}` and `{` walk the unread stops.** An agent that stopped to wait,
+  finish, or fail reads unread (its mark and its row's key, label or
+  name, and preview are bold) until you attach to its mux, rest the cursor
+  on its row for a second (a session with no mux), or mark it read with
+  `c` (`C` clears every mark). `}` goes to the next unread agent and `{` to
+  the previous, the oldest stop first, wrapping; unlike `W` they stay in
+  your view while it has another unread row (in Mux, the muxes), and switch
+  views only when it has none. The status bar shows `} next unread` while
+  any stop is unread.
 - **Controls** floats the waiting sessions (or muxes) to the top of
   their groups, or lists only one state: see the bullets above.
 - **From a shell,** `conspectus table sessions --state waiting --columns

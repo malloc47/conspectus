@@ -1,5 +1,6 @@
-//! The key that jumps to the agent waiting on the operator longest
-//! (ADR 0216).
+//! The keys that jump to the agent waiting on the operator longest
+//! (ADR 0216), and to the next and the previous agent with an unread stop
+//! (ADR 0247).
 //!
 //! The agents are the ones the rows' live values read as waiting, the set
 //! the header's `! N` counts, the longest wait first. Each is somewhere:
@@ -11,6 +12,9 @@
 //! is on, wrapping, and says in the status line where it went or why it
 //! stayed. Moving the cursor and switching views are view state, so no
 //! effect is emitted beyond the view's persisting.
+//!
+//! The unread walk is the same walk over the agents with an unread stop,
+//! the oldest stop first, in either direction.
 
 use std::collections::BTreeMap;
 
@@ -33,6 +37,57 @@ enum Place {
     There(View, NodeId),
 }
 
+/// Which agents a jump walks, and which way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Walk {
+    /// The agents waiting on the operator, the longest wait first, on.
+    Waiting,
+    /// The agents with an unread stop, the oldest stop first, on.
+    NextUnread,
+    /// The same agents, back.
+    PreviousUnread,
+}
+
+impl Walk {
+    /// The id of the binding that starts the walk.
+    fn binding(self) -> &'static str {
+        match self {
+            Self::Waiting => "waiting.next",
+            Self::NextUnread => "unread.next",
+            Self::PreviousUnread => "unread.previous",
+        }
+    }
+
+    /// What the walked agents are doing, as the status line says it.
+    fn word(self) -> &'static str {
+        match self {
+            Self::Waiting => "waiting",
+            Self::NextUnread | Self::PreviousUnread => "unread",
+        }
+    }
+
+    /// The walk goes on from the cursor rather than back.
+    fn forward(self) -> bool {
+        self != Self::PreviousUnread
+    }
+
+    /// The status line when no agent is in the walk.
+    fn none(self) -> &'static str {
+        match self {
+            Self::Waiting => "no agent is waiting on you",
+            Self::NextUnread | Self::PreviousUnread => "no agent is unread",
+        }
+    }
+
+    /// The status line when the cursor's agent is the only one.
+    fn no_other(self) -> &'static str {
+        match self {
+            Self::Waiting => "no other agent is waiting on you",
+            Self::NextUnread | Self::PreviousUnread => "no other agent is unread",
+        }
+    }
+}
+
 impl App {
     /// Whether some agent waits on the operator, so the jump key has
     /// somewhere to go and the status bar names it.
@@ -40,17 +95,25 @@ impl App {
         self.tree.waiting_anywhere > 0
     }
 
-    /// Move to the agent waiting on the operator that comes after the one
-    /// the cursor is on (the longest-waiting one when it is on none),
-    /// wrapping, and say where it went; with nowhere to go, stay and say
-    /// why.
-    pub(super) fn jump_to_next_waiting(&mut self) -> Vec<Effect> {
-        let key = key_name("waiting.next");
-        let waiting = self.tree.live.waiting_agents();
+    /// Whether some agent has a stop the operator has not read, so the
+    /// unread keys have somewhere to go and the status bar names them.
+    pub fn has_unread(&self) -> bool {
+        self.tree.live.unread().next().is_some()
+    }
+
+    /// Move to the agent of `walk` that comes after (or, for the walk
+    /// back, before) the one the cursor is on, the first (or last) one
+    /// when it is on none, wrapping, and say where it went; with nowhere
+    /// to go, stay and say why.
+    pub(super) fn jump_along(&mut self, walk: Walk) -> Vec<Effect> {
+        let key = key_name(walk.binding());
+        let word = walk.word();
+        let waiting = match walk {
+            Walk::Waiting => self.tree.live.waiting_agents(),
+            Walk::NextUnread | Walk::PreviousUnread => self.tree.live.unread_agents(),
+        };
         let Some(handle) = self.handle.as_ref().filter(|_| !waiting.is_empty()) else {
-            self.status_message = Some(Feedback::warning(format!(
-                "{key}: no agent is waiting on you"
-            )));
+            self.status_message = Some(Feedback::warning(format!("{key}: {}", walk.none())));
             return Vec::new();
         };
         let snapshot = handle.snapshot().clone();
@@ -66,24 +129,40 @@ impl App {
                 .position(|place| *place == Some(Place::Here(at)))
         });
         let total = waiting.len();
-        let start = current.map_or(0, |index| index + 1);
-        let elsewhere = |place: &Option<Place>| match place {
-            Some(Place::Here(at)) => Some(*at) != cursor,
-            Some(Place::There(..)) => true,
-            None => false,
+        // The index `step` places on from the cursor's agent (from the
+        // start of the walk when the cursor is on none).
+        let at_step = |step: usize| {
+            if walk.forward() {
+                (current.map_or(0, |index| index + 1) + step) % total
+            } else {
+                (current.unwrap_or(0) + 2 * total - 1 - step) % total
+            }
         };
-        let Some(next) = (0..total)
-            .map(|step| (start + step) % total)
-            .find(|index| elsewhere(&places[*index]))
-        else {
+        let here =
+            |place: &Option<Place>| matches!(place, Some(Place::Here(at)) if Some(*at) != cursor);
+        let elsewhere =
+            |place: &Option<Place>| here(place) || matches!(place, Some(Place::There(..)));
+        // The unread walk stays in the view while it can: in Mux, an agent
+        // with no mux is not an unread mux, and a press there does not
+        // switch views unless nothing else in this one is unread.
+        let first = |reachable: &dyn Fn(&Option<Place>) -> bool| {
+            (0..total)
+                .map(at_step)
+                .find(|index| reachable(&places[*index]))
+        };
+        let next = match walk {
+            Walk::Waiting => first(&elsewhere),
+            Walk::NextUnread | Walk::PreviousUnread => first(&here).or_else(|| first(&elsewhere)),
+        };
+        let Some(next) = next else {
             let hidden = places.iter().filter(|place| place.is_none()).count();
             self.status_message = Some(Feedback::warning(match (current, hidden) {
-                (Some(_), 0) => format!("{key}: no other agent is waiting on you"),
+                (Some(_), 0) => format!("{key}: {}", walk.no_other()),
                 (Some(_), hidden) => {
-                    format!("{key}: no other waiting agent is listed; the filters hide {hidden}")
+                    format!("{key}: no other {word} agent is listed; the filters hide {hidden}")
                 }
-                (None, 1) => format!("{key}: 1 waiting, but the filters hide it"),
-                (None, hidden) => format!("{key}: {hidden} waiting, but the filters hide them"),
+                (None, 1) => format!("{key}: 1 {word}, but the filters hide it"),
+                (None, hidden) => format!("{key}: {hidden} {word}, but the filters hide them"),
             }));
             return Vec::new();
         };
@@ -92,7 +171,7 @@ impl App {
             crate::tui::rows::tree_current_unix_epoch(),
         )
         .ago();
-        let reached = format!("{} of {total} waiting, since {since}", next + 1);
+        let reached = format!("{} of {total} {word}, since {since}", next + 1);
         match places[next].clone() {
             Some(Place::Here(at)) => {
                 self.tree_state.select_at(&self.tree.rows, at);

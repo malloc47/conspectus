@@ -1,7 +1,8 @@
 //! A finished turn the operator has not seen reads as one they have, only
 //! heavier: in every view that lists its session or its mux, the mark (in
-//! Pinned, the word) keeps its shape and its color and is bold, and
-//! nothing else on the row changes. Every listing of one entity agrees,
+//! Pinned, the word) keeps its shape and its color and is bold, as are the
+//! row's own words (a session's key and label, a mux's name), and nothing
+//! else about the row changes. Every listing of one entity agrees,
 //! and looking at a session with no mux (resting the cursor on one of its
 //! rows) turns them all plain at once.
 
@@ -126,6 +127,95 @@ fn an_unseen_ready_mark_is_bold_and_a_seen_one_plain_with_the_same_shape() {
         assert_eq!(seen.symbol(), unseen.symbol(), "{view:?}: the shape stays");
         assert_eq!(after, before, "{view:?}: nothing else on the row changes");
     }
+}
+
+#[test]
+fn an_unread_row_is_bold_in_its_words_and_a_read_one_is_not() {
+    // The loose session finished a turn and has no mux. Its key and its
+    // label, which no mark's boldness reaches, are bold while the turn is
+    // unread, and plain once it is read, in the colors they always had.
+    let snapshot = with_table();
+    let mut app = unfolded(listing_with(View::Sessions, &snapshot, LiveOverlay::off()));
+    let (key, label) = app
+        .tree()
+        .rows
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::AgentSession(row) if row.primary_node == session(SOLO) => Some((
+                row.session.session_key.chars().take(8).collect::<String>(),
+                row.tree_label()
+                    .map(|label| label.chars().take(12).collect::<String>())
+                    .expect("the session has a label"),
+            )),
+            _ => None,
+        })
+        .expect("the session's row");
+    park_away(&mut app, |row| stands_for(row, SOLO));
+    let unread: Vec<_> = [&key, &label]
+        .into_iter()
+        .map(|word| cell_of(&mut app, "solo", word))
+        .collect();
+    for (word, (cell, line)) in [&key, &label].into_iter().zip(&unread) {
+        assert!(
+            cell.modifier.contains(Modifier::BOLD),
+            "`{word}` is bold while the turn is unread:\n{line}"
+        );
+    }
+
+    app.set_selection(row_of(&app, SOLO));
+    let start = Instant::now();
+    app.note_cursor_rest(start);
+    app.note_cursor_rest(start + SEEN_REST);
+    park_away(&mut app, |row| stands_for(row, SOLO));
+    for (word, (before, text)) in [&key, &label].into_iter().zip(&unread) {
+        let (after, line) = cell_of(&mut app, "solo", word);
+        assert!(
+            !after.modifier.contains(Modifier::BOLD),
+            "`{word}` is plain once read:\n{line}"
+        );
+        assert_eq!(after.fg, before.fg, "`{word}`: the color stays");
+        assert_eq!(&line, text, "`{word}`: only the weight changes");
+    }
+}
+
+#[test]
+fn an_unread_mux_row_is_bold_in_its_name_and_a_read_one_is_not() {
+    let world = |last_attached: Option<i64>| {
+        let mut snapshot = with_table();
+        snapshot
+            .node_live
+            .retain(|node, _| *node == session(HOSTED));
+        snapshot.pane_live.clear();
+        snapshot.node_live.insert(
+            session(HOSTED),
+            running(LiveState::Ready, Some(LiveDetail::Finished), 0),
+        );
+        for node in &mut snapshot.nodes {
+            if let GraphNode::MuxSession(node) = node
+                && node.id == mux("conspectus-main")
+            {
+                node.last_attached_epoch = last_attached;
+            }
+        }
+        snapshot
+    };
+    let name = |snapshot: &GraphSnapshot| {
+        let mut app = unfolded(listing_with(View::Mux, snapshot, LiveOverlay::off()));
+        park_away(
+            &mut app,
+            |row| matches!(&row.kind, RowKind::MuxSession(row) if row.mux == mux("conspectus-main")),
+        );
+        cell_of(&mut app, "conspectus-main", "conspectus-main")
+    };
+    let (unread, before) = name(&world(None));
+    assert!(
+        unread.modifier.contains(Modifier::BOLD),
+        "no client attached since the turn ended:\n{before}"
+    );
+    let (read, after) = name(&world(Some(NOW)));
+    assert!(!read.modifier.contains(Modifier::BOLD), "{after}");
+    assert_eq!(read.fg, unread.fg, "the name keeps its color");
+    assert_eq!(after, before, "only the weight changes");
 }
 
 #[test]

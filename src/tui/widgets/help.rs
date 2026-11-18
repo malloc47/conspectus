@@ -147,7 +147,11 @@ fn live_state_legend(theme: &Theme) -> HelpSection {
                 section.legend(
                     Span::styled(mark.glyph(), unseen.style(theme)),
                     "Unread",
-                    "bold: a stop you haven't read (a wait, a finished turn, or an error; the waiting and error marks go bold the same way), until you attach to its mux, rest the cursor on its row for a second (a session with no mux), or mark it read",
+                    format!(
+                        "bold, with the rest of the row: a stop you haven't read (a wait, a finished turn, or an error; the waiting and error marks go bold the same way), until you attach to its mux, rest the cursor on its row for a second (a session with no mux), or mark it read. {} and {} go to the next and the previous unread stop",
+                        crate::tui::keybindings::key_name("unread.next"),
+                        crate::tui::keybindings::key_name("unread.previous"),
+                    ),
                 )
             } else {
                 section

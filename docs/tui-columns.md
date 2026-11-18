@@ -214,7 +214,21 @@ a later refresh no longer shows a client attached, so a mark never turns
 bold again for the same stop. The marks of agent sessions are kept in the
 TUI's state file, so a new TUI starts with them read; the marks of agents
 in panes no session matches are kept in memory only. A mux's mark is bold
-while any agent counted in the state it shows is unread. In the frames below, which are
+while any agent counted in the state it shows is unread. The row says so
+beyond its mark: a session row's key, label (a title; an alias is bold
+anyway), and preview, and a mux row's name and preview, are bold while the
+stop they show is unread, in the colors they always had. The chip, the age,
+and the link glyph keep their style, and the cursor row is bold anyway, so
+the detail pane's `state` is what says `unread` or `read` there. `}` goes
+to the next agent with an unread stop and `{` to the previous one, the
+oldest stop first, wrapping (`2 of 4 unread, since 1h ago`); like `W`
+they land on the row standing for the agent in the view on screen (in Mux,
+its mux's row), but they stay in the view while another unread agent has a
+row there, and switch views only when none does (Sessions; Mux for an
+agent in a pane no session matches), with Backspace back. The status bar
+names `} next unread` while any stop is unread. The interactive showcase
+(`just demo`) runs against the showcase's anchor time and keeps what you
+read in memory, so it shows all of this and starts unread again each run. In the frames below, which are
 plain text, the agent-deck launcher's `›` is plain (a client attached to
 its mux after its turn ended) and the codex parent's is bold (it has no
 mux, and the cursor has not rested on it). A group header above the rows
@@ -581,16 +595,16 @@ the repo header's columns:
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
 | 1 | Prefix | cursor gutter, indent, disclosure (only if the session has forks beneath it), `●`, pin marker | always | |
-| 2 | Session key | the harness's own id | always | first 8 cells, dim, padded to 8 |
+| 2 | Session key | the harness's own id | always | first 8 cells, dim, padded to 8; bold while the row's stop is unread |
 | 3 | Harness chip | the session's harness | always | 10 cells |
 | 4 | Age | last activity | always | 4 cells |
-| 5 | Live | what the agent is doing now (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when quiet; bold while a stop (a wait, a finished turn, an error) is unread; keeps its mark while a refresh is pending |
+| 5 | Live | what the agent is doing now (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when quiet; bold while a stop (a wait, a finished turn, an error) is unread, as are cells 2, 7, and 11 of the row; keeps its mark while a refresh is pending |
 | 6 | State | `⊸` linked to a definitive mux, `∘` not | always | 1 cell; a spinner while a refresh is pending |
-| 7 | Label | alias, title, or mux name (see above) | when one applies | cut at 32 cells |
+| 7 | Label | alias, title, or mux name (see above) | when one applies | cut at 32 cells; bold for an alias, and for a title while the row's stop is unread |
 | 8 | Subagents | `+N`: the subagents its agent runs now (see [Labels, chips, counts, and warnings](#labels-chips-counts-and-warnings)) | while its agent reports one or more | dim; `+9+` from ten on, so at most 3 cells |
 | 9 | `was in` chip | the session's last mux | only if that mux is stopped | dim |
 | 10 | Project | repo or directory name | only in flat grouping | 16 cells, cut with `…` |
-| 11 | Preview | last message | only if it gets at least 7 cells | dim italic |
+| 11 | Preview | last message | only if it gets at least 7 cells | dim italic; bold while the row's stop is unread |
 
 While a content filter is active (`--contains TEXT`, or the Content row in
 Controls), the rows are the sessions whose transcripts mention the text, and
@@ -678,12 +692,12 @@ mux, so a header can show `! N` with no `(N)`.
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
 | 1 | Prefix | cursor gutter, indent, disclosure (only with more than one agent attached), `▣`, pin marker | always | |
-| 2 | Name | the mux name without its backend prefix | always | blue; a column of 18 cells, 20 once the row leaves it 37 cells, 24 from 71, and 30 from 103 (counted after the cursor gutter, the indent, and the prefix); long names keep their start and end |
+| 2 | Name | the mux name without its backend prefix | always | blue; a column of 18 cells, 20 once the row leaves it 37 cells, 24 from 71, and 30 from 103 (counted after the cursor gutter, the indent, and the prefix); long names keep their start and end; bold while a stop its mark shows is unread |
 | 3 | Chip | its agents' harness chips, as many as fit in a column of at most two, with `+N` for the rest; else the pane's harness; else a program chip; else ` no agent ` | always | 10 cells each; the column is as wide as the widest row's chips, so the age lines up |
 | 4 | Age | the mux's own last activity | always | 4 cells |
-| 5 | Live | the state of its agents that needs you first (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when every agent in the state it shows is quiet; bold while an agent's stop in the state it shows is unread; keeps its mark while a refresh is pending |
+| 5 | Live | the state of its agents that needs you first (see [The live cell](#the-live-cell)) | always | 1 cell; dimmed when every agent in the state it shows is quiet; bold while an agent's stop in the state it shows is unread, as are cells 2 and 7 of the row; keeps its mark while a refresh is pending |
 | 6 | State | `⊸` a client is attached, `∘` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
-| 7 | Preview | last message of the one agent | only with exactly one visible agent, and at least 7 cells for it | dim italic |
+| 7 | Preview | last message of the one agent | only with exactly one visible agent, and at least 7 cells for it | dim italic; bold while a stop its mark shows is unread |
 
 ### Stopped mux row
 

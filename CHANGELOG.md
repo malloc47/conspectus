@@ -14,6 +14,13 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **An unread row is bold in its words, and `}` and `{` walk the unread
+  stops.** The key, label, and preview of a session row, and the name and
+  preview of a mux row, are bold while its stop is unread, not only the
+  one-cell mark. `}` goes to the next agent with an unread stop and `{` to
+  the previous, oldest first and wrapping, staying in your view while it
+  has another unread row; the status bar names `} next unread` while any
+  stop is unread.
 - **`just demo` shows live state and unread marks.** The interactive
   showcase runs on a copy of the fixture with the clock pinned to the
   showcase's anchor time (`tui --fixture` takes `--snapshot-now`), so its

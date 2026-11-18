@@ -533,6 +533,7 @@ impl LeftColumns<'_> {
     fn session_cells(&self, session: &AgentSessionRow, pending: bool) -> Cells<Col> {
         let theme = self.theme;
         let secondary = Style::default().fg(theme.inert);
+        let sign = LiveSign::of_session(session.live);
         let state = match self.spinner.filter(|_| pending) {
             Some(glyph) => Cell::text(glyph, secondary),
             None => Cell::spans(vec![mux_indicator_span(session.mux_state, theme)]),
@@ -540,7 +541,7 @@ impl LeftColumns<'_> {
         let mut cells = vec![
             (
                 Col::Key,
-                Cell::text(&session.session.session_key, secondary).clip(),
+                Cell::text(&session.session.session_key, unread_bold(secondary, sign)).clip(),
             ),
             (
                 Col::Chip,
@@ -550,14 +551,12 @@ impl LeftColumns<'_> {
                 Col::Age,
                 age_cell(session.recency.as_deref(), session.activity_epoch, self.now),
             ),
-            (
-                Col::Live,
-                live_cell(LiveSign::of_session(session.live), theme),
-            ),
+            (Col::Live, live_cell(sign, theme)),
             (Col::State, state),
         ];
         // The alias shows always and bold; a title only when it tells the
-        // session apart from another in its group.
+        // session apart from another in its group. A row whose stop is
+        // unread is bold throughout (its label too).
         if let Some(label) = session.tree_label().filter(|label| !label.is_empty()) {
             let aliased = session
                 .alias
@@ -566,7 +565,7 @@ impl LeftColumns<'_> {
             let style = if aliased {
                 Style::default().add_modifier(Modifier::BOLD)
             } else {
-                Style::default()
+                unread_bold(Style::default(), sign)
             };
             cells.push((Col::Label, Cell::text(label, style)));
         }
@@ -600,7 +599,7 @@ impl LeftColumns<'_> {
             }
             None => {
                 if let Some(preview) = session.preview.as_deref().filter(|p| !p.is_empty()) {
-                    cells.push((Col::Preview, preview_cell(preview, theme)));
+                    cells.push((Col::Preview, preview_cell(preview, sign, theme)));
                 }
             }
         }
@@ -635,12 +634,13 @@ impl LeftColumns<'_> {
             Some(false) => (state::UNLINKED, Style::default().add_modifier(theme.muted)),
             None => (state::UNKNOWN, Style::default().add_modifier(theme.muted)),
         });
+        let sign = LiveSign::of_mux(mux.live);
         let mut cells = vec![
             (
                 Col::MuxName,
                 Cell::text(
                     compact_mux_native_id(&mux.native_id),
-                    Style::default().fg(theme.link),
+                    unread_bold(Style::default().fg(theme.link), sign),
                 ),
             ),
             (
@@ -651,7 +651,7 @@ impl LeftColumns<'_> {
                 Col::MuxAge,
                 age_cell(mux.recency.as_deref(), mux.activity_epoch, self.now),
             ),
-            (Col::MuxLive, live_cell(LiveSign::of_mux(mux.live), theme)),
+            (Col::MuxLive, live_cell(sign, theme)),
             (Col::MuxState, state),
         ];
         match &mux.content_hit {
@@ -668,7 +668,7 @@ impl LeftColumns<'_> {
                     .as_deref()
                     .filter(|preview| !preview.is_empty())
                 {
-                    cells.push((Col::MuxContent, preview_cell(preview, theme)));
+                    cells.push((Col::MuxContent, preview_cell(preview, sign, theme)));
                 }
             }
         }
@@ -887,12 +887,22 @@ fn live_cell(sign: LiveSign, theme: &Theme) -> Cell {
     Cell::text(sign.glyph(), sign.style(theme))
 }
 
-/// A last-message preview: inert italics, cut at the end.
-fn preview_cell(preview: &str, theme: &Theme) -> Cell {
-    Cell::text(
-        preview,
-        Style::default()
-            .fg(theme.inert)
-            .add_modifier(Modifier::ITALIC),
-    )
+/// A last-message preview: inert italics, cut at the end, and bold on a
+/// row whose stop is unread.
+fn preview_cell(preview: &str, sign: LiveSign, theme: &Theme) -> Cell {
+    let style = Style::default()
+        .fg(theme.inert)
+        .add_modifier(Modifier::ITALIC);
+    Cell::text(preview, unread_bold(style, sign))
+}
+
+/// `style`, bold when `sign` is a stop the operator has not read: the
+/// words of an unread row (its key, label, or name, and preview) are
+/// bold as its live mark is, so the row reads unread at a glance.
+fn unread_bold(style: Style, sign: LiveSign) -> Style {
+    if sign.unseen {
+        style.add_modifier(Modifier::BOLD)
+    } else {
+        style
+    }
 }

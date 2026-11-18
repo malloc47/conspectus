@@ -207,6 +207,7 @@ fn the_demo_shows_unread_stops_keeps_reads_in_memory_and_takes_a_staged_stop() {
         Demo::state_field(&screen).is_some_and(|state| state.ends_with("unread")),
         "its stop is unread, whatever the state file remembers:\n{screen}"
     );
+    assert!(screen.contains("} next unread"), "{screen}");
 
     // `c` reads it.
     demo.keys("a", "c");

@@ -131,6 +131,7 @@ mod subagents;
 mod text;
 mod text_entry;
 mod undo;
+mod unread_jump;
 
 use fixtures::*;
 

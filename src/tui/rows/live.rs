@@ -231,6 +231,14 @@ impl LiveValues {
         sessions.chain(panes)
     }
 
+    /// The agents [`Self::unread`] finds, the oldest stop first and ties
+    /// by agent: the order the unread keys walk (ADR 0247).
+    pub(crate) fn unread_agents(&self) -> Vec<(Agent, i64)> {
+        let mut agents: Vec<(Agent, i64)> = self.unread().collect();
+        agents.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+        agents
+    }
+
     /// Whether any agent has stopped (waiting, ready, or in error), so
     /// judging its stop again could change what the rows show.
     pub(crate) fn any_stopped(&self) -> bool {

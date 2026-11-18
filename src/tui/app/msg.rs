@@ -322,6 +322,11 @@ pub enum Msg {
     /// `W` → move to the next agent waiting on the operator, the longest
     /// wait first (ADR 0216).
     NextWaiting,
+    /// `}` → move to the next agent with an unread stop, the oldest stop
+    /// first (ADR 0247).
+    NextUnread,
+    /// `{` → move to the previous agent with an unread stop.
+    PreviousUnread,
     /// Pane viewer → attach to the mux the pane belongs to. A stopped or
     /// gone mux is refused with a note in the viewer.
     AttachPane,

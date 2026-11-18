@@ -757,7 +757,12 @@ client that watched the mux switches back to the TUI's session (ADR
 0231), or, for a session with no mux, once the cursor rested on its row
 for a second, or once the operator marked it read (`c`, or `C` for every
 unread mark); kept read until the agent stops again, and, for agent
-sessions, in the TUI's state file across restarts. Controls can float the rows marked `!` above the
+sessions, in the TUI's state file across restarts. The row's own words
+(a session's key and label, a mux's name, a preview) are bold while its
+stop is unread, and `}` and `{` walk the unread stops, the oldest first
+(ADR 0247). The interactive showcase demo pins the clock to the
+showcase's anchor time so these show in it, and keeps its reads in memory
+(ADR 0248). Controls can float the rows marked `!` above the
 rest of their group (Sessions) or above the other running muxes (Mux),
 and narrow the lists to one agent state (`agent state`, `--state` on
 `table`, `tui`, and `search`, `state` in the views' config filters); a
