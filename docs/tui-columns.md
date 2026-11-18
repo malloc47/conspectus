@@ -137,7 +137,7 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `!` | live state: the agent is waiting on you (a permission prompt, a question, a plan, other input); before a number, how many wait | yellow (the theme's warning color); bold while the wait is unread | The live cell of session and mux rows, nested ones included, in every view; group headers, with the count |
 | `»` | live state: working (a turn, a compaction, or a start under way) | green (the theme's info color); dimmed when quiet | The live cell |
 | `›` | live state: ready, the turn is over and the agent takes a prompt | green (the theme's success color); bold while the finished turn is unread | The live cell |
-| `·` | live state: no evidence, or the session exited; on a mux, no agent with live state but exited ones | dim | The live cell |
+| `·` | live state: no evidence, or the session exited; on a mux, no agent with live state but exited ones; not drawn on a mux that can never report state | dim | The live cell |
 | `○` | an open pull request | green | PR rows |
 | `◐` | a draft pull request (open and marked draft) | yellow | PR rows |
 | `⊕` | a merged pull request | magenta | PR rows |
@@ -174,8 +174,8 @@ pane's live cell, says the agent is ready; its shape pairs with working's
 Session rows and mux rows carry one cell right after the age that says
 what the agent is doing now, from the reports its harness's hooks or
 plugin make (see [operations.md](operations.md#live-agent-state)). It is
-always filled, so no state hides behind an empty cell, and each value has
-its own shape:
+filled on every row that can report a state, so no state hides behind an
+empty cell, and each value has its own shape:
 
 | Mark | Session | Mux |
 |---|---|---|
@@ -185,6 +185,13 @@ its own shape:
 | `×` | its turn ended on an error; bold until you have read the failure | its most urgent agent failed; bold while a failed agent's error is unread |
 | `?` | its evidence is too old to trust | its most urgent agent can't be told |
 | `·` | no evidence, or it exited | no agent of it has live state, or every one exited |
+
+A mux that can never report a state draws no mark at all, where the others
+draw `·`: no session is linked to it, no agent (running or exited) is
+counted on it, and its pane runs no harness, as with a shell, an editor,
+or the daemon's own `conspectus-server`, and so with a stopped mux whose
+last run had no agent. `·` says an agent is there with nothing to report,
+which these rows do not have; the rest of the row is as it was.
 
 A mux has no state of its own: its mark is the state of its agents that
 needs the operator first, waiting, then error, then ready, then working,

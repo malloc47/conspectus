@@ -366,7 +366,14 @@ fn shown(app: &mut App, snapshot: &GraphSnapshot) -> Vec<(NodeId, Shown, String)
             .iter()
             .position(|token| is_age(&token.text))
             .unwrap_or_else(|| panic!("no age: {line}"));
-        Shown::Mark(tokens[age + 1].text.clone())
+        // A mux that can never report state draws no mark (ADR 0249): the
+        // token after its age is its state glyph. It says what a mux with
+        // no state says, as far as these checks go; the blank cell has a
+        // test of its own.
+        Shown::Mark(match super::columns::live_after(&tokens, age) {
+            Some(at) => tokens[at].text.clone(),
+            None => crate::tui::icons::live::NONE.to_string(),
+        })
     };
     rows.iter()
         .zip(lines)
@@ -697,7 +704,7 @@ fn live_state_changes_the_live_cells_and_the_waiting_counts_and_nothing_else() {
                 );
                 if let Some((was, is)) = diffs.first() {
                     assert!(
-                        was.to_string() == crate::tui::icons::live::NONE
+                        (was.to_string() == crate::tui::icons::live::NONE || *was == ' ')
                             && live_marks.contains(&is.to_string().as_str()),
                         "{view:?} at {width}: the change is not a live mark:\n{before}\n{after}"
                     );
@@ -975,4 +982,122 @@ fn a_pinned_mux_draws_its_word_in_its_marks_style() {
             "the word is drawn as the mark is ({hosted} and {beside} minutes)"
         );
     }
+}
+
+/// `snapshot` with a mux that ran no agent, gone: a ghost row of the Mux
+/// view.
+fn with_a_gone_agentless_mux(mut snapshot: GraphSnapshot) -> GraphSnapshot {
+    let mut history = std::mem::take(&mut snapshot.history);
+    history.muxes.push(crate::model::MuxRecord {
+        meta: crate::model::RecordMeta {
+            id: "h_srv".into(),
+            key: "mux_session:tmux:conspectus-server".into(),
+            first_seen: NOW - 400_000,
+            last_seen: NOW - 345_600,
+            origin: Default::default(),
+            display: Default::default(),
+            rebuilt_from: None,
+        },
+        recipe: crate::model::MuxRecipe {
+            backend: "tmux".into(),
+            name: "conspectus-server".into(),
+            cwd: Some("/home/op/src/conspectus".into()),
+            harness: None,
+            ..Default::default()
+        },
+        extra: Default::default(),
+    });
+    crate::history::project::project_into(&mut snapshot, &mut history, NOW);
+    snapshot.history = history;
+    resolve_snapshot(snapshot)
+}
+
+/// The lines of the Mux view of `snapshot` with its stopped muxes, wide
+/// enough that every cell shows.
+fn mux_lines(snapshot: &GraphSnapshot) -> Vec<String> {
+    let mut app = listing_with(View::Mux, snapshot, LiveOverlay::off());
+    app.update(Msg::SetFilter(RowFilter {
+        show_pinned_history: true,
+        show_stopped_muxes: true,
+        ..RowFilter::default()
+    }));
+    row_lines(&mut app, 220)
+}
+
+/// The line of the row named `name`.
+fn line_of<'a>(lines: &'a [String], name: &str) -> &'a str {
+    lines
+        .iter()
+        .find(|line| line.contains(name))
+        .unwrap_or_else(|| panic!("no row for {name}:\n{}", lines.join("\n")))
+}
+
+#[test]
+fn a_mux_that_can_never_report_state_draws_no_live_mark_and_one_that_may_keeps_it() {
+    let none = crate::tui::icons::live::NONE;
+    let snapshot = with_a_gone_agentless_mux(live_world());
+    let lines = mux_lines(&snapshot);
+    // A running shell-only mux and a stopped one that ran no agent have
+    // nothing to report: the cell is blank, and the rest of the row is as
+    // it was.
+    for name in ["scratch", "conspectus-server"] {
+        let line = line_of(&lines, name);
+        assert!(line.contains("no agent"), "{line}");
+        assert!(!line.contains(none), "{name} draws no mark:\n{line}");
+    }
+    // A mux with an agent linked to it, and a stopped one that ran one,
+    // keep the mark that says there is no state yet.
+    for name in ["conspectus-main", "old-experiment", "config-agent3"] {
+        let line = line_of(&lines, name);
+        assert!(
+            line.contains(none),
+            "{name} keeps the no-state mark:\n{line}"
+        );
+    }
+
+    // A pane that runs a harness may report once its hooks are on, so the
+    // mark stays; a pane that runs a shell or a server never will.
+    let running = |command: &str| {
+        let mut snapshot = snapshot.clone();
+        for node in &mut snapshot.nodes {
+            if let GraphNode::MuxSession(node) = node
+                && node.id == mux("scratch")
+            {
+                node.active_pane_command = Some(command.to_string());
+            }
+        }
+        mux_lines(&resolve_snapshot(snapshot))
+    };
+    let harness = running("claude");
+    assert!(
+        line_of(&harness, "scratch").contains(none),
+        "{}",
+        line_of(&harness, "scratch")
+    );
+    let server = running("conspectus");
+    assert!(
+        !line_of(&server, "scratch").contains(none),
+        "{}",
+        line_of(&server, "scratch")
+    );
+
+    // Evidence of an agent in a pane keeps the cell (an exited one's is
+    // checked with the quiet, stale, and exited marks).
+    let lines = mux_lines(&with_table());
+    assert!(
+        line_of(&lines, "scratch").contains('!'),
+        "{}",
+        line_of(&lines, "scratch")
+    );
+}
+
+#[test]
+fn a_session_with_no_live_state_keeps_the_no_state_mark() {
+    let mut app = listing_with(View::Sessions, &live_world(), LiveOverlay::off());
+    let lines = row_lines(&mut app, 220);
+    let line = lines
+        .iter()
+        .find(|line| line.contains("Untitled walk"))
+        .expect("the loose session's row");
+    assert!(line.contains(crate::tui::icons::live::NONE), "{line}");
 }

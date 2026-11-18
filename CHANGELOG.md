@@ -14,6 +14,12 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **A mux that can never report state shows no live mark.** A shell, an
+  editor, or the daemon's own `conspectus-server` (no session linked, no
+  agent counted, no harness in its pane, and a stopped one that ran no
+  agent) used to draw the no-state `·`, which says an agent is there with
+  nothing to report. Its live cell is blank now; a mux that has or may
+  have an agent keeps the mark.
 - **An unread row is bold in its words, and `}` and `{` walk the unread
   stops.** The key, label, and preview of a session row, and the name and
   preview of a mux row, are bold while its stop is unread, not only the

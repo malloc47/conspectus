@@ -17,8 +17,8 @@ use tuikit::tree::{self, RowColumns, RowCtx, RowMark};
 
 use super::*;
 use crate::tui::rows::{
-    EntityState, HitRow, LiveSign, MixedLive, MixedRow, MixedTone, PaneHitRow, PaneRow, PinMarker,
-    Row,
+    EntityState, HitRow, LiveMark, LiveSign, MixedLive, MixedRow, MixedTone, PaneHitRow, PaneRow,
+    PinMarker, Row,
 };
 use crate::tui::widgets::badge::{
     command_badge, harness_badge, hits_chip, no_agent_chip, subagents_chip, waiting_count_chip,
@@ -651,7 +651,10 @@ impl LeftColumns<'_> {
                 Col::MuxAge,
                 age_cell(mux.recency.as_deref(), mux.activity_epoch, self.now),
             ),
-            (Col::MuxLive, live_cell(sign, theme)),
+            (
+                Col::MuxLive,
+                quiet_live_cell(sign, mux.never_reports_state(), theme),
+            ),
             (Col::MuxState, state),
         ];
         match &mux.content_hit {
@@ -813,7 +816,18 @@ impl LeftColumns<'_> {
             ),
             (
                 Col::MuxLive,
-                live_cell(LiveSign::of_mixed(mixed.live), theme),
+                // A stopped mux whose last run had no agent never had
+                // one to report.
+                quiet_live_cell(
+                    LiveSign::of_mixed(mixed.live),
+                    mixed.chip.as_ref().is_none_or(|chip| !chip.agent)
+                        && match mixed.live {
+                            MixedLive::Mux(live) => live.counts.is_empty(),
+                            MixedLive::None => true,
+                            MixedLive::Session(_) => false,
+                        },
+                    theme,
+                ),
             ),
             (Col::MuxState, state),
             (
@@ -885,6 +899,17 @@ fn age_cell(age: Option<&str>, epoch: Option<i64>, now: i64) -> Cell {
 /// decide it: the TUI reads live state from its store on its own.
 fn live_cell(sign: LiveSign, theme: &Theme) -> Cell {
     Cell::text(sign.glyph(), sign.style(theme))
+}
+
+/// A mux's live cell: [`live_cell`], except blank when `never_reports` (no
+/// agent can ever report on it) and it has no live evidence either, so a
+/// shell or a server is not drawn as a mux whose state is missing.
+fn quiet_live_cell(sign: LiveSign, never_reports: bool, theme: &Theme) -> Cell {
+    if never_reports && sign.mark == LiveMark::None {
+        Cell::empty()
+    } else {
+        live_cell(sign, theme)
+    }
 }
 
 /// A last-message preview: inert italics, cut at the end, and bold on a

@@ -711,6 +711,21 @@ pub struct MuxSessionRow {
     pub live: MuxLive,
 }
 
+impl MuxSessionRow {
+    /// Whether nothing about the mux can ever report agent state: no
+    /// session is linked to it, no agent (running or exited) is counted
+    /// on it, and its pane runs no harness (a shell, an editor, a server).
+    /// Its live cell has no state to show, so it shows nothing (ADR 0249);
+    /// a mux that has or may have an agent keeps the no-state mark, which
+    /// says it has none to report yet.
+    pub fn never_reports_state(&self) -> bool {
+        self.held_sessions == 0
+            && self.agent_labels.is_empty()
+            && self.program_harness.is_none()
+            && self.live.counts.is_empty()
+    }
+}
+
 /// A PR row in the prs view.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PrRow {

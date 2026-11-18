@@ -82,6 +82,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0246](0246-tests-run-tmux-through-one-helper-that-reports-and-retries-a-failed-start.md) | Tests Run tmux Through One Helper That Reports And Retries A Failed Start | Accepted |
 | [0247](0247-tui-an-unread-row-is-bold-throughout-and-two-keys-walk-the-unread-stops.md) | An Unread Row Is Bold Throughout, And Two Keys Walk The Unread Stops | Accepted |
 | [0248](0248-tui-the-showcase-demo-pins-the-clock-and-keeps-its-reads-in-memory.md) | The Showcase Demo Pins The Clock And Keeps Its Reads In Memory | Accepted |
+| [0249](0249-tui-a-mux-that-can-never-report-state-shows-no-live-mark.md) | A Mux That Can Never Report State Shows No Live Mark | Accepted |
 | [0227](0227-pi-subagent-tools-are-named-in-the-environment-pi-starts-with.md) | Pi's Subagent Tools Are Named In The Environment Pi Starts With | Accepted |
 | [0228](0228-the-opencode-server-plugin-reads-pending-permission-asks-when-it-starts.md) | The opencode Server Plugin Reads Pending Permission Asks When It Starts | Accepted |
 | [0229](0229-an-opencode-2-client-reports-the-sessions-it-shows-when-no-server-plugin-does.md) | An opencode 2.x Client Reports The Sessions It Shows When No Server Plugin Does | Accepted |
@@ -263,7 +264,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0199](0199-tui-framework-separation-is-rehearsed-in-ci.md) | The Framework's Separation Is Rehearsed In CI | Accepted; framework-owned in part |
 | [0200](0200-tui-the-application-runtime-stays-in-conspectus-until-a-second-program-needs-it.md) | The Application Runtime Stays In Conspectus Until A Second Program Needs It | Accepted; framework-owned in part |
 | [0202](0202-tui-each-view-reopens-with-the-rows-it-had-expanded-and-selected.md) | Each View Reopens With The Rows It Had Expanded And Selected | Accepted (amended: `--no-resume-view` writes nothing) |
-| [0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md) | Session And Mux Rows Show Live State In A One-Cell Column After The Age | Accepted (amended by 0212, 0214, 0215, 0233, 0234) |
+| [0209](0209-tui-session-and-mux-rows-show-live-state-in-a-one-cell-column-after-the-age.md) | Session And Mux Rows Show Live State In A One-Cell Column After The Age | Accepted (amended by 0212, 0214, 0215, 0233, 0234, 0249) |
 | [0210](0210-tui-group-headers-count-the-agents-waiting-beneath-them.md) | Group Headers Count The Agents Waiting Beneath Them | Accepted (amended) |
 | [0211](0211-tui-the-header-counts-every-agent-waiting-on-you.md) | The Header Counts Every Agent Waiting On You | Accepted |
 | [0212](0212-tui-a-session-row-shows-its-running-subagents-after-its-label.md) | A Session Row Shows Its Running Subagents After Its Label | Accepted |

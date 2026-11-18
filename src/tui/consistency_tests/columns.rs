@@ -130,6 +130,19 @@ fn drawn_rows(app: &mut App, width: u16) -> Vec<(Kind, u8, String)> {
 /// Where a row's lined-up cells sit (see [`grid`]).
 type Grid = (Option<usize>, Option<usize>, Option<usize>);
 
+/// Where a row's live mark is, given where its age is: the token after the
+/// age when a live mark is followed by the state glyph. A mux that can
+/// never report state has a blank live cell (ADR 0249), so the token after
+/// its age is its state glyph, which can be the same `?`.
+pub(super) fn live_after(tokens: &[Token], age: usize) -> Option<usize> {
+    let at = age + 1;
+    (tokens.get(at).is_some_and(|token| is_live(&token.text))
+        && tokens
+            .get(at + 1)
+            .is_some_and(|token| is_state(&token.text)))
+    .then_some(at)
+}
+
 fn is_state(token: &str) -> bool {
     [
         state::LINKED,
@@ -187,8 +200,8 @@ fn grid(kind: Kind, line: &str) -> Grid {
         Kind::Session | Kind::Mux | Kind::Pr => {
             let age = tokens.iter().position(|token| is_age(&token.text));
             let live = age
-                .map(|at| at + 1)
-                .filter(|at| kind != Kind::Pr && tokens.get(*at).is_some_and(|t| is_live(&t.text)));
+                .filter(|_| kind != Kind::Pr)
+                .and_then(|at| live_after(&tokens, at));
             let state = live
                 .or(age)
                 .and_then(|at| tokens.get(at + 1))
@@ -280,9 +293,12 @@ fn the_lined_up_cells_of_every_row_kind_share_their_columns_at_every_width() {
                 std::collections::BTreeMap::new();
             for (kind, depth, line) in &drawn {
                 let (end, live, glyph) = grid(*kind, line);
+                // A mux with no agent can never report state, so its live
+                // cell is blank (ADR 0249).
+                let agentless = *kind == Kind::Mux && line.contains("no agent");
                 if matches!(kind, Kind::Session | Kind::Mux) && end.is_some() {
                     assert!(
-                        live.is_some() && glyph.is_some(),
+                        (live.is_some() || agentless) && glyph.is_some(),
                         "{name} at {width}: a {kind:?} row keeps its live mark and its state\n{line}"
                     );
                 }
@@ -312,6 +328,15 @@ fn the_lined_up_cells_of_every_row_kind_share_their_columns_at_every_width() {
                     continue;
                 }
                 let entry = seen.entry((*kind, *depth)).or_insert((end, live, glyph));
+                // A blank live cell holds its column open for the others.
+                if entry.1.is_none() {
+                    entry.1 = live;
+                }
+                let live = if agentless && live.is_none() {
+                    entry.1
+                } else {
+                    live
+                };
                 assert_eq!(
                     *entry,
                     (end, live, glyph),

@@ -131,7 +131,7 @@ fn live_state_legend(theme: &Theme) -> HelpSection {
                 LiveMark::None => (
                     "No state",
                     format!(
-                        "the session has ended, or its harness's hooks are off ({} hook init <harness> turns them on); a mux shows its most urgent agent's state, and this when none has one",
+                        "the session has ended, or its harness's hooks are off ({} hook init <harness> turns them on); a mux shows its most urgent agent's state, and this when none has one; a mux that can never have an agent (a shell or a server) shows nothing",
                         crate::invocation::invoked_name()
                     )
                     .into(),
