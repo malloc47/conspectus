@@ -3390,6 +3390,42 @@ fn mux_preview_follows_the_wrap_mode() {
 }
 
 #[test]
+fn mux_preview_rules_take_one_row_beside_the_scrollbar() {
+    // More rows than the zone holds, so the scrollbar takes a column. A
+    // rule cut at the zone's edge would break a lone `─` onto a row of its
+    // own beside it.
+    let capture = format!("{}\n{}\n> prompt", numbered_capture(30), "─".repeat(200));
+    let mut app = muxed_app("agent", Some(&capture));
+    let screen = preview_screen(&mut app);
+    let lines: Vec<&str> = screen.lines().collect();
+    let prompt = lines
+        .iter()
+        .position(|line| line.contains("> prompt"))
+        .expect("the prompt is on screen");
+    assert!(lines[prompt - 1].contains(&"─".repeat(20)), "{screen}");
+    assert!(lines[prompt - 2].contains("row 30"), "{screen}");
+}
+
+#[test]
+fn mux_preview_that_fits_its_zone_keeps_every_column() {
+    let capture = format!("{}\n> prompt", "─".repeat(60));
+    let app = muxed_app("agent", Some(&capture));
+    let rows: Vec<String> = preview_text_for_selection(&app, 20, 10)
+        .lines
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(rows, ["─".repeat(20), "> prompt".to_string()]);
+    // Overflowing, it lays the rule out a cell narrower.
+    let rows: Vec<String> = preview_text_for_selection(&app, 20, 1)
+        .lines
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(rows, ["─".repeat(19), "> prompt".to_string()]);
+}
+
+#[test]
 fn mux_preview_of_an_all_blank_pane_says_empty() {
     let app = muxed_app("idle", Some("\n\n   \n"));
     let preview = preview_text_for_selection(&app, 80, 5).to_string();

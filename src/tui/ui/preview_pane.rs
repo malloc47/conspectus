@@ -418,12 +418,22 @@ pub(super) fn format_preview_for_mux(
                 // text (ADR 0181): the escapes parsed (or dropped without
                 // color), then the capture fitted in the active wrap mode.
                 let parsed = tuikit::richtext::ansi_text(&capture.text, color);
-                let rows = tuikit::richtext::layout_capture(
-                    &parsed.lines,
-                    app.preview_wrap(),
-                    capture.width,
-                    width,
-                );
+                let layout = |columns| {
+                    tuikit::richtext::layout_capture(
+                        &parsed.lines,
+                        app.preview_wrap(),
+                        capture.width,
+                        columns,
+                    )
+                };
+                let mut rows = layout(width);
+                // Rows that overflow the zone scroll beside a scrollbar,
+                // which takes a column: laid out at the full width, every
+                // row that fills it (a rule cut at the edge) would wrap a
+                // cell onto a row of its own.
+                if rows.len() > height && width > 1 {
+                    rows = layout(width - 1);
+                }
                 if rows.is_empty() {
                     return placeholder(app, "(empty pane)", width);
                 }

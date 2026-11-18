@@ -14,6 +14,14 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A mux pane's rules stay on one row in its Preview.** Since the
+  Preview began scrolling the pane's capture, every row as wide as the
+  Preview, a rule cut at its edge above all, broke a lone cell onto a row
+  of its own beside the scrollbar. And a rule with a label near its end,
+  like the one above Claude Code's prompt that ends in the session's name,
+  wrapped onto several rows of rule fragments under smart wrap. The
+  capture now leaves the scrollbar its column, and smart wrap shortens
+  such a rule around its label instead of wrapping it.
 - **`J` and `K` scroll a live mux pane's Preview back.** A mux's Preview
   held only the last screenful of the pane's capture, so `K` had nothing
   above it to scroll to. It now holds the capture's scrollback (the last
