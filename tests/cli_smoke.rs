@@ -1685,7 +1685,11 @@ fn binary_in_a_store() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let scratch = tempfile::Builder::new()
         .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
         .expect("scratch beside the build");
-    let store = scratch.path().join("nix/store");
+    // The binary sees its own path with links resolved, so the store is
+    // named that way too; a build directory reached through a symlink
+    // would otherwise put the binary outside the store it is told about.
+    let root = fs::canonicalize(scratch.path()).expect("scratch path");
+    let store = root.join("nix/store");
     let bin = store.join("0abc-conspectus-0.2.0/bin");
     fs::create_dir_all(&bin).expect("store bin");
     let program = bin.join("conspectus");
