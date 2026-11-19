@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-13 03:55'
-updated_date: '2026-11-16 13:58'
+updated_date: '2026-11-18 17:53'
 labels:
   - h-devloop
 milestone: m-11
@@ -30,8 +30,8 @@ None of this lives in the repository, but this machine is where the agent loop r
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An exclusion of the cargo target directories (or of one target root that worktrees can share) from endpoint scanning is requested from the machine administrators, and the outcome is recorded in the task notes
-- [ ] #2 If an excluded location is granted, how a worktree points its target directory there is decided, and recorded in an ADR if it becomes a repository convention
+- [x] #1 An exclusion of the cargo target directories (or of one target root that worktrees can share) from endpoint scanning is requested from the machine administrators, and the outcome is recorded in the task notes
+- [x] #2 If an excluded location is granted, how a worktree points its target directory there is decided, and recorded in an ADR if it becomes a repository convention
 - [ ] #3 Scratch directories that finished sessions left in `/tmp` are removed, and agent scratch no longer accumulates in RAM-backed `/tmp` across sessions
 - [x] #4 The `target/` directories of merged or abandoned worktrees are cleaned
 - [ ] #5 A full `just check` run with the usual set of agent sessions open completes with swap headroom and no OOM kill in the kernel log
@@ -91,4 +91,27 @@ Cleanup 2026-11-16 (operator asked for steps 8-10 of the wrap-up):
 - Removed 9,700 directories from RAM-backed /tmp: `nix-shell.*` (8,790) and `nix-develop-*` (910) folders older than two days, owned by the operator, and not used by any running process (checked against every process's TMPDIR/NIX_BUILD_TOP environment, working directory, and open files). They held 0.46 GB of files; /tmp went from 65% to 59% used. 310 recent or in-use ones were left. Agents no longer create these: scripts/dev-env.sh drops the per-call temporary directory (ADR 0226).
 - The merged worktrees' target/ directories (followups, live-state) are removed with those worktrees; the main checkout's target/ (47 GB) and the operator's launch-spinner and pin-resume-preserve-argv worktrees were left alone.
 - Still with the operator: AC #1 (send the scanner-exclusion request drafted above), AC #2 (follows from #1), AC #5 (swap: 4 GB /swap.img stays 100% used; more swap or fewer idle sessions).
+
+AC #1 outcome (2026-11-18). The operator asked the security team. Source under ~/src stays scanned. ~/drw is the machine's allow-listed path, meant for proprietary work code and its dependencies (its README), and the exemption does not follow symlinks. Security confirmed that this repository's build directory may live in ~/drw, provided the rest of the repository stays physically under ~/src. The drafted request above was not sent.
+
+AC #2, decided and done. Each checkout's build output now lives at `~/drw/build/<checkout path below $HOME>/target`, behind a `target` symlink in the checkout. Nothing in the repository changed, so there is no ADR. The pieces, all local to this clone:
+- `.git/info/exclude` has `/target`, shared by all worktrees. The tracked `/target/` pattern matches only directories, so without it the link shows as untracked and `git worktree remove` refuses to remove the worktree.
+- `.git/hooks/post-checkout` links `target` in every new checkout, including `git worktree add`. It recreates a missing destination, and it warns when `target` is a real directory.
+- The three existing checkouts (main, launch-spinner, pin-resume-preserve-argv) were moved with an atomic `renameat2` exchange, so `target/release/conspectus` stayed resolvable throughout. That binary is behind `~/bin/conspectus`, the daemon, the TUIs, and every harness hook.
+
+Verified afterwards:
+- `cargo metadata` still reports `target_directory` as `/home/jwaggoner/src/oss/conspectus/target`, and `cargo nextest run --no-run` compiled 0 crates.
+- `git status` is clean in all three checkouts.
+- A throwaway `git worktree add` got the link, and `git worktree remove` then worked without `--force`.
+- A full nextest run: 5,964 of 5,965 passed. The one failure was `cli_smoke::hook_init_installs_a_path_that_stays_for_a_binary_in_the_nix_store`. It named its fake Nix store through the link while the binary resolves its own path. `tests/cli_smoke.rs` now canonicalizes the scratch root, and all 139 `cli_smoke` tests pass.
+
+Caveats:
+- `cargo clean` deletes the link. Re-run the hook (`sh .git/hooks/post-checkout`) or check out again.
+- Removing a worktree leaves its directory under `~/drw/build`. To list the orphans:
+  `find ~/drw/build -name target -prune -type d | while read -r d; do c=${d#"$HOME/drw/build/"}; [ -d "$HOME/${c%/target}" ] || echo "$d"; done`
+
+Scanner measurements (s1-agent + s1-scanner ticks; all noisy, because other sessions keep the scanner busy):
+- **File scanning:** `s1-scanner` cost about 0 for writing new binaries in every placement, including `~/src`.
+- **Process starts:** 16 fresh copies, then 1,000 starts per placement, 4 rounds. Lowest per ~20 s window: `~/src` real directory 420 (never lower), `~/src` symlink into `~/drw` 195, literal `~/drw` path 139, idle about 125. Start latency was the same in all three (about 3.6 ms), so the scanner costs CPU but does not delay starts.
+- **Full nextest run after the move:** 0.86 cores, against 0.07 idle. Much of that comes from processes the tests start outside `target/` (git, sh, and tmux from /nix/store, and scripts under /tmp), plus background bursts: right after builds, idle windows ran at 1.7 to 1.8 cores.
 <!-- SECTION:NOTES:END -->
