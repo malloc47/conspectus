@@ -14,6 +14,15 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **The forge chip stops naming a failure once the forge reads again.**
+  When `gh` failed (a GitHub Enterprise host answering `503` during an
+  outage, say), the saved graph kept the report after the host
+  recovered, once more for every refresh that failed. The header went on
+  naming the first repo alphabetically until a full rebuild with
+  `conspectus refresh`, and the History view never marked a PR gone. A
+  forge refresh now replaces what the forge reported last time, so the
+  chip shows only a failure that is still happening. A report already
+  saved clears on the next forge refresh.
 - **A mux pane's rules stay on one row in its Preview.** Since the
   Preview began scrolling the pane's capture, every row as wide as the
   Preview, a rule cut at its edge above all, broke a lone cell onto a row

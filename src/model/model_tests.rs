@@ -350,6 +350,94 @@ fn evict_provider_clears_resolved_relationships_to_force_re_resolve() {
     );
 }
 
+fn unavailable(provider: &str, reason: &str) -> Diagnostic {
+    Diagnostic::ProviderUnavailable {
+        provider: provider.to_string(),
+        reason: reason.to_string(),
+    }
+}
+
+/// One of every diagnostic kind, plus another provider's
+/// `ProviderUnavailable`: what an eviction must leave alone.
+fn bystander_diagnostics() -> Vec<Diagnostic> {
+    vec![
+        Diagnostic::UnresolvedEndpoint {
+            link_id: "a-link".to_string(),
+            relation: RelationKind::CreatedCheckout,
+        },
+        Diagnostic::Config {
+            path: "/cfg.toml".to_string(),
+            message: "bad key".to_string(),
+        },
+        Diagnostic::Conflict {
+            source: NodeId::Repo(RepoId::new("/r/.git")),
+            relation: RelationKind::CreatedCheckout,
+            selected_link_id: "a".to_string(),
+            competing_link_ids: vec!["b".to_string()],
+        },
+        Diagnostic::LegacyPins {
+            count: 1,
+            ids: vec!["old".to_string()],
+        },
+        unavailable("gitlab", "glab missing"),
+    ]
+}
+
+#[test]
+fn evict_provider_drops_the_diagnostics_that_provider_reported() {
+    let mut snap = GraphSnapshot::empty();
+    snap.diagnostics = bystander_diagnostics();
+    snap.diagnostics
+        .push(unavailable("github", "gh pr list --repo h/o/a failed: 503"));
+    snap.diagnostics
+        .push(unavailable("github", "gh pr list --repo h/o/b failed: 503"));
+    snap.diagnostics
+        .push(unavailable("github", "gh pr list --repo h/o/b failed: 503"));
+
+    snap.evict_provider("github");
+
+    assert_eq!(
+        snap.diagnostics,
+        bystander_diagnostics(),
+        "only github's own reports go; every other diagnostic stays"
+    );
+}
+
+#[test]
+fn evict_provider_drops_diagnostics_even_when_the_provider_has_no_slice() {
+    // A run where every query failed leaves a diagnostic and no node
+    // or link for the provider to own.
+    let mut snap = GraphSnapshot::empty();
+    snap.diagnostics
+        .push(unavailable("github", "gh pr list --repo h/o/a failed: 503"));
+
+    snap.evict_provider("github");
+
+    assert!(snap.diagnostics.is_empty(), "{:?}", snap.diagnostics);
+}
+
+#[test]
+fn clearing_provider_diagnostics_leaves_the_slice_alone() {
+    let repo = RepoNode::new(RepoId::new("/kept/.git"));
+    let id = NodeId::Repo(repo.id.clone());
+    let mut snap = GraphSnapshot::empty();
+    snap.nodes.push(GraphNode::Repo(repo));
+    snap.node_provenance.insert(
+        id.clone(),
+        NodeProvenance {
+            provider: "github".to_string(),
+            freshness_epoch: Some(100),
+        },
+    );
+    snap.diagnostics.push(unavailable("github", "gh missing"));
+
+    snap.clear_provider_diagnostics("github");
+
+    assert!(snap.diagnostics.is_empty());
+    assert_eq!(snap.nodes.len(), 1, "the node stays");
+    assert!(snap.node_provenance.contains_key(&id));
+}
+
 // ---- ADR 0083 rkyv archive round-trip coverage ----
 
 /// Construct a `GraphSnapshot` populated with one of every

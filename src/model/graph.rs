@@ -786,9 +786,14 @@ impl GraphSnapshot {
     /// * `resolved_relationships` are cleared because the resolver
     ///   runs against `candidate_links` and must re-derive after
     ///   the candidate set changes.
-    /// * `aliases`, `pins`, and `diagnostics` are independent of
-    ///   provider identity and survive intact.
+    /// * The `ProviderUnavailable` diagnostics `provider` reported go
+    ///   with its slice (see [`Self::clear_provider_diagnostics`]), so
+    ///   the re-run reports what is wrong now and nothing it reported
+    ///   on an earlier run.
+    /// * `aliases`, `pins`, and every other diagnostic are independent
+    ///   of provider identity and survive intact.
     pub fn evict_provider(&mut self, provider: &str) {
+        self.clear_provider_diagnostics(provider);
         let mut evicted_ids: BTreeSet<NodeId> = BTreeSet::new();
         for (id, prov) in &self.node_provenance {
             if prov.provider == provider {
@@ -812,6 +817,21 @@ impl GraphSnapshot {
                 != provider
         });
         self.resolved_relationships.clear();
+    }
+
+    /// Drop the [`Diagnostic::ProviderUnavailable`] entries `provider`
+    /// reported, and no other diagnostic. They describe one run's
+    /// reading, and a merge only ever appends, so one left behind
+    /// outlives the failure it reported: a forge that has recovered
+    /// would keep saying it can't be read, once more for every
+    /// failed run since.
+    pub fn clear_provider_diagnostics(&mut self, provider: &str) {
+        self.diagnostics.retain(|diagnostic| {
+            !matches!(
+                diagnostic,
+                Diagnostic::ProviderUnavailable { provider: reporter, .. } if reporter == provider
+            )
+        });
     }
 }
 

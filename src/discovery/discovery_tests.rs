@@ -682,6 +682,258 @@ fn discover_local_with_runs_forge_provider_for_github_repos() {
     );
 }
 
+/// A real git repo under `parent` whose `origin` is a GitHub remote, so
+/// forge discovery has a repo to ask about.
+fn github_repo_fixture(parent: &std::path::Path) -> std::path::PathBuf {
+    let repo_root = parent.join("repo");
+    std::fs::create_dir(&repo_root).expect("repo dir");
+    let run_git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo_root)
+            .output()
+            .expect("run git");
+        assert!(output.status.success(), "git {} failed", args.join(" "));
+    };
+    run_git(&["init", "--initial-branch", "main"]);
+    run_git(&["config", "user.name", "Conspectus Test"]);
+    run_git(&["config", "user.email", "test@example.invalid"]);
+    run_git(&["remote", "add", "origin", "git@github.com:octo/repo.git"]);
+    std::fs::write(repo_root.join("README.md"), "fixture\n").expect("write fixture");
+    run_git(&["add", "README.md"]);
+    run_git(&["commit", "-m", "initial"]);
+    repo_root
+}
+
+/// A `gh` stand-in that answers every query with one PR, or, while
+/// `failing` is set, with the server error a forge gives in an outage.
+#[derive(Clone, Default)]
+struct OutageGh {
+    failing: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl OutageGh {
+    fn in_outage() -> Self {
+        let gh = Self::default();
+        gh.failing.store(true, std::sync::atomic::Ordering::SeqCst);
+        gh
+    }
+
+    fn recover(&self) {
+        self.failing
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl crate::discovery::forge::GhRunner for OutageGh {
+    fn list_pull_requests(
+        &self,
+        _repo: &str,
+        _filter: &crate::discovery::forge::PrListFilter,
+        _fields: &str,
+    ) -> anyhow::Result<crate::discovery::forge::GhOutcome> {
+        use crate::discovery::forge::GhOutcome;
+        Ok(if self.failing.load(std::sync::atomic::Ordering::SeqCst) {
+            GhOutcome::Failed {
+                code: Some(1),
+                message: "HTTP 503: 503 Service Unavailable".to_string(),
+            }
+        } else {
+            GhOutcome::PullRequests(r#"[{"number": 42, "headRefName": "main"}]"#.to_string())
+        })
+    }
+
+    fn view_pull_request(
+        &self,
+        _repo: &str,
+        _number: u64,
+        _fields: &str,
+    ) -> anyhow::Result<crate::discovery::forge::GhOutcome> {
+        Ok(crate::discovery::forge::GhOutcome::PullRequests(
+            "{}".to_string(),
+        ))
+    }
+}
+
+/// One warm discovery of `repo` through `gh`, over `prior`, with no
+/// listings cached: every run asks the forge afresh, as a daemon does
+/// once its listings expire.
+fn warm_forge_run(repo: &std::path::Path, gh: OutageGh, prior: GraphSnapshot) -> GraphSnapshot {
+    discover_local_warm_with(
+        [repo],
+        LocalDiscoveryConfig::empty().with_forge_runner(gh),
+        prior,
+        &crate::config::ServerIntervals::default(),
+    )
+    .expect("warm discovery")
+}
+
+/// Why each `github` provider-unavailable diagnostic in `snapshot`
+/// says the forge couldn't be read, in the snapshot's order.
+fn forge_reports(snapshot: &GraphSnapshot) -> Vec<&str> {
+    snapshot
+        .diagnostics
+        .iter()
+        .filter_map(|diagnostic| match diagnostic {
+            Diagnostic::ProviderUnavailable { provider, reason }
+                if provider == providers::GITHUB =>
+            {
+                Some(reason.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn has_forge_prs(snapshot: &GraphSnapshot) -> bool {
+    snapshot
+        .nodes
+        .iter()
+        .any(|node| matches!(node, GraphNode::ForgePr(_)))
+}
+
+fn stale_forge_report(reason: &str) -> Diagnostic {
+    Diagnostic::ProviderUnavailable {
+        provider: providers::GITHUB.to_string(),
+        reason: reason.to_string(),
+    }
+}
+
+#[test]
+fn a_forge_that_recovers_stops_being_reported() {
+    // A run where every query failed leaves no `github` node, so the
+    // freshness gate never names the provider for eviction on the next.
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let repo = github_repo_fixture(temp.path());
+    let gh = OutageGh::in_outage();
+
+    let outage = warm_forge_run(&repo, gh.clone(), GraphSnapshot::empty());
+    assert_eq!(forge_reports(&outage).len(), 1, "{:?}", outage.diagnostics);
+    assert!(!has_forge_prs(&outage));
+
+    gh.recover();
+    let recovered = warm_forge_run(&repo, gh, outage);
+    assert_eq!(
+        forge_reports(&recovered),
+        Vec::<&str>::new(),
+        "the outage is over, and so is its report"
+    );
+    assert!(has_forge_prs(&recovered), "the PRs load again");
+}
+
+#[test]
+fn a_forge_that_keeps_failing_is_reported_once_not_once_per_run() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let repo = github_repo_fixture(temp.path());
+    let gh = OutageGh::in_outage();
+
+    let first = warm_forge_run(&repo, gh.clone(), GraphSnapshot::empty());
+    let second = warm_forge_run(&repo, gh.clone(), first.clone());
+    let third = warm_forge_run(&repo, gh, second.clone());
+
+    assert_eq!(forge_reports(&first).len(), 1, "{:?}", first.diagnostics);
+    assert_eq!(forge_reports(&second), forge_reports(&first));
+    assert_eq!(forge_reports(&third), forge_reports(&first));
+}
+
+#[test]
+fn a_run_that_still_fails_reports_its_own_failure_not_an_earlier_one() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let repo = github_repo_fixture(temp.path());
+    let mut prior = GraphSnapshot::empty();
+    prior
+        .diagnostics
+        .push(stale_forge_report("gh pr list failed: HTTP 405"));
+
+    let snapshot = warm_forge_run(&repo, OutageGh::in_outage(), prior);
+
+    let reports = forge_reports(&snapshot);
+    assert_eq!(reports.len(), 1, "{reports:?}");
+    assert!(reports[0].contains("HTTP 503"), "{reports:?}");
+}
+
+#[test]
+fn a_stale_forge_report_from_a_stored_snapshot_clears_on_the_next_run() {
+    // What `graph.bin` carries into a daemon that has just started,
+    // beside a diagnostic from an unrelated source that must stay.
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let repo = github_repo_fixture(temp.path());
+    let config_problem = Diagnostic::Config {
+        path: "/home/me/.config/conspectus/config.toml".to_string(),
+        message: "unknown key".to_string(),
+    };
+    let mut prior = GraphSnapshot::empty();
+    prior.diagnostics = vec![
+        stale_forge_report("gh pr list failed: HTTP 405"),
+        stale_forge_report("gh pr list failed: HTTP 503"),
+        stale_forge_report("gh pr list failed: HTTP 503"),
+        config_problem.clone(),
+    ];
+
+    let snapshot = warm_forge_run(&repo, OutageGh::default(), prior);
+
+    assert_eq!(forge_reports(&snapshot), Vec::<&str>::new());
+    assert!(snapshot.diagnostics.contains(&config_problem));
+}
+
+#[test]
+fn a_forge_switched_off_reports_nothing_from_an_earlier_run() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let mut prior = GraphSnapshot::empty();
+    prior
+        .diagnostics
+        .push(stale_forge_report("gh pr list failed: HTTP 503"));
+
+    let snapshot = discover_local_warm_with(
+        [temp.path()],
+        LocalDiscoveryConfig::empty(),
+        prior,
+        &crate::config::ServerIntervals::default(),
+    )
+    .expect("warm discovery");
+
+    assert_eq!(forge_reports(&snapshot), Vec::<&str>::new());
+}
+
+#[test]
+fn a_fresh_forge_slice_keeps_what_it_reported() {
+    // The slice is reused rather than re-read, and what the run that
+    // built it said about the forge goes with it.
+    use crate::model::RepoNode;
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let mut prior = GraphSnapshot::empty();
+    let repo_id = crate::model::RepoId::new("/fresh-github/.git");
+    prior
+        .nodes
+        .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+    prior.node_provenance.insert(
+        NodeId::Repo(repo_id),
+        NodeProvenance {
+            provider: providers::GITHUB.to_string(),
+            freshness_epoch: Some(current_epoch()),
+        },
+    );
+    prior
+        .diagnostics
+        .push(stale_forge_report("gh pr list failed: HTTP 503"));
+
+    let snapshot = discover_local_warm_with(
+        [temp.path()],
+        LocalDiscoveryConfig::empty(),
+        prior,
+        &crate::config::ServerIntervals::default(),
+    )
+    .expect("warm discovery");
+
+    assert_eq!(
+        forge_reports(&snapshot).len(),
+        1,
+        "{:?}",
+        snapshot.diagnostics
+    );
+}
+
 #[test]
 fn discover_local_with_skips_forge_when_runner_absent() {
     use crate::model::GraphNode;

@@ -335,6 +335,25 @@ fn a_pr_back_in_the_graph_or_an_unreadable_forge_is_not_gone() {
 }
 
 #[test]
+fn a_pr_is_gone_again_once_the_forge_that_failed_reads_again() {
+    // The forge's last failed run left a report in the snapshot. A run
+    // that read it replaces the report, so the PR that really left the
+    // listing shows as gone instead of being held back for good.
+    let mut snapshot = world();
+    snapshot
+        .diagnostics
+        .push(crate::model::Diagnostic::ProviderUnavailable {
+            provider: crate::discovery::providers::GITHUB.to_string(),
+            reason: "gh pr list failed: HTTP 503".into(),
+        });
+    assert!(!labels(&build(&snapshot, HistoryGrouping::None)).contains(&"#9".to_string()));
+
+    snapshot.evict_provider(crate::discovery::providers::GITHUB);
+
+    assert!(labels(&build(&snapshot, HistoryGrouping::None)).contains(&"#9".to_string()));
+}
+
+#[test]
 fn an_empty_history_builds_an_empty_tree() {
     let snapshot = GraphSnapshot::empty();
     assert!(build(&snapshot, HistoryGrouping::Project).rows.is_empty());

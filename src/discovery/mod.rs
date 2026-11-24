@@ -733,16 +733,23 @@ pub fn discover_local_warm_with(
     // Every forge stamps the `github` provider key until a second
     // forge emits real data. A fresh `github` slice came through the
     // prior merge above.
-    if let Some(forge) = &forge
-        && !gate.fresh.contains(providers::GITHUB)
-    {
-        let fragment = forge
-            .discover_graph(&snapshot, &context)
-            .map_err(|source| DiscoveryError::Provider {
-                provider_keys: vec![providers::GITHUB],
-                source: source.into(),
-            })?;
-        snapshot = merge_fragments([GraphFragment::from(snapshot), fragment]);
+    if !gate.fresh.contains(providers::GITHUB) {
+        // What an earlier run said about the forge is out of date
+        // whether this one re-reads it or has it switched off. The
+        // gate names `github` for eviction only when the prior holds a
+        // node or link stamped with it, which a run where every query
+        // failed never produced, so the diagnostics are cleared here
+        // rather than left to that eviction.
+        snapshot.clear_provider_diagnostics(providers::GITHUB);
+        if let Some(forge) = &forge {
+            let fragment = forge
+                .discover_graph(&snapshot, &context)
+                .map_err(|source| DiscoveryError::Provider {
+                    provider_keys: vec![providers::GITHUB],
+                    source: source.into(),
+                })?;
+            snapshot = merge_fragments([GraphFragment::from(snapshot), fragment]);
+        }
     }
 
     // When the process-tree pass refreshes, drop the deferred prior

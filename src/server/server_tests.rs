@@ -434,12 +434,14 @@ fn throttle_since_returns_early_when_shutdown_flips_mid_wait() {
 
 /// A `gh` stand-in that counts calls and sleeps `delay` on each. With
 /// `stops` set, each call flips that latch, as a shutdown arriving
-/// mid-fetch would.
+/// mid-fetch would. While `failing` is set, each call fails as a forge
+/// in an outage does.
 #[derive(Clone, Default)]
 struct SlowGh {
     calls: Arc<std::sync::atomic::AtomicUsize>,
     delay: Duration,
     stops: Option<Arc<AtomicBool>>,
+    failing: Arc<AtomicBool>,
 }
 
 impl crate::discovery::forge::GhRunner for SlowGh {
@@ -454,6 +456,12 @@ impl crate::discovery::forge::GhRunner for SlowGh {
             stops.store(true, std::sync::atomic::Ordering::SeqCst);
         }
         std::thread::sleep(self.delay);
+        if self.failing.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(crate::discovery::forge::GhOutcome::Failed {
+                code: Some(1),
+                message: "HTTP 503: 503 Service Unavailable".to_string(),
+            });
+        }
         Ok(crate::discovery::forge::GhOutcome::PullRequests(
             r#"[{"number": 3, "headRefName": "main"}]"#.to_string(),
         ))
@@ -630,6 +638,82 @@ fn has_prs(ctx: &DispatchCtx) -> bool {
             .iter()
             .any(|node| matches!(node, GraphNode::ForgePr(_)))
     })
+}
+
+/// Why each `github` provider-unavailable diagnostic in the daemon's
+/// published snapshot says the forge couldn't be read.
+fn published_forge_reports(ctx: &DispatchCtx) -> Vec<String> {
+    let published = load_snapshot_state(&ctx.snapshot_state).expect("published");
+    published
+        .diagnostics
+        .iter()
+        .filter_map(|diagnostic| match diagnostic {
+            crate::model::Diagnostic::ProviderUnavailable { provider, reason }
+                if provider == crate::discovery::providers::GITHUB =>
+            {
+                Some(reason.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_forge_outage_is_reported_while_it_lasts_and_not_after() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let gh = SlowGh::default();
+    let ctx = forge_ctx(temp.path(), gh.clone());
+    // What a `graph.bin` written during an earlier outage carries into
+    // a daemon that has just started.
+    let stored = crate::model::Diagnostic::ProviderUnavailable {
+        provider: crate::discovery::providers::GITHUB.to_string(),
+        reason: "gh pr list failed: HTTP 405: 405 Not Allowed".to_string(),
+    };
+    ctx.snapshot_state
+        .lock()
+        .expect("snapshot state")
+        .as_mut()
+        .expect("seeded")
+        .diagnostics = vec![stored.clone(), stored];
+
+    gh.failing.store(true, std::sync::atomic::Ordering::SeqCst);
+    for _ in 0..3 {
+        assert_eq!(handle_refresh(&refresh_request("forge"), &ctx).result, "ok");
+        let reports = published_forge_reports(&ctx);
+        assert_eq!(
+            reports.len(),
+            1,
+            "one report for the outage, however many refreshes it spans: {reports:?}"
+        );
+        assert!(reports[0].contains("HTTP 503"), "{reports:?}");
+    }
+
+    gh.failing.store(false, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(handle_refresh(&refresh_request("forge"), &ctx).result, "ok");
+    assert_eq!(published_forge_reports(&ctx), Vec::<String>::new());
+    assert!(has_prs(&ctx), "the PRs load again");
+}
+
+#[test]
+fn a_stored_forge_report_clears_on_the_poll_after_a_restart() {
+    // A daemon's first poll finds no listing cached, fetches, and runs
+    // a forge cycle over a snapshot loaded from disk.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let ctx = forge_ctx(temp.path(), SlowGh::default());
+    ctx.snapshot_state
+        .lock()
+        .expect("snapshot state")
+        .as_mut()
+        .expect("seeded")
+        .diagnostics
+        .push(crate::model::Diagnostic::ProviderUnavailable {
+            provider: crate::discovery::providers::GITHUB.to_string(),
+            reason: "gh pr list failed: HTTP 503".to_string(),
+        });
+
+    assert!(forge_tick(&ctx, &ctx.shutdown));
+
+    assert_eq!(published_forge_reports(&ctx), Vec::<String>::new());
 }
 
 #[test]
