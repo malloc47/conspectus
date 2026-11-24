@@ -39,6 +39,14 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **A stopped mux previews the session it hosted last.** Selecting a mux
+  that is no longer running, pinned or only remembered, used to say `no
+  mux target for this row` in the Mux view and `no preview for this row`
+  in History, though its `last hosted` row named a session. The Preview now
+  shows that session as its own row would: its transcript, or its pane
+  under the pane setting once it runs in another mux. A stopped mux that
+  hosted nothing the graph still holds keeps the placeholder, and a stopped
+  pin in the Pinned view keeps its summary.
 - **The Preview's cleanup is configurable.** `[tui.preview]` sets which
   characters smart wrap treats as decoration, how long a run of one is
   before it is a rule, and whether rules shorten around a label.

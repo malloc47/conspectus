@@ -720,6 +720,30 @@ impl GraphSnapshot {
             })
     }
 
+    /// The session `mux` hosted last, which is [`Self::mux_host_of`]
+    /// read the other way: the agent session its `mux_last_hosted` link
+    /// points at, the link history projects for a mux it recorded (ADR
+    /// 0140). `None` when the mux has no such link, or the session it
+    /// names is not a live node (it was never found, or has gone too).
+    /// With several links, the session active most recently.
+    pub fn last_hosted_session(&self, mux: &NodeId) -> Option<NodeId> {
+        self.candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::MuxLastHosted
+                    && matches!(link.state, LinkState::Active)
+                    && &link.source == mux
+            })
+            .filter_map(|link| link.target_node_id())
+            .filter(|id| self.is_live(id))
+            .filter_map(|id| match self.find_node(id) {
+                Some(GraphNode::AgentSession(session)) => Some((session.last_active_epoch, id)),
+                _ => None,
+            })
+            .max_by(|(a, id_a), (b, id_b)| a.cmp(b).then_with(|| id_b.cmp(id_a)))
+            .map(|(_, id)| id.clone())
+    }
+
     /// Whether a new mux named `name` would collide with one Conspectus
     /// knows: a mux node, live or gone, with that session name, or a
     /// mux in history recorded under it. The socket is ignored, so a

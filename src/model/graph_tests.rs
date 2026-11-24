@@ -331,6 +331,116 @@ fn evicting_a_provider_drops_the_live_state_of_its_nodes_only() {
     );
 }
 
+// ---- last_hosted_session ----
+
+/// A snapshot holding the gone mux `name` and a live node for each of
+/// `sessions` (key, last active epoch), with a `mux_last_hosted` link
+/// from the mux to each.
+fn last_hosted(name: &str, sessions: &[(&str, Option<i64>)]) -> GraphSnapshot {
+    let mux_id = NodeId::MuxSession(mux(name));
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(GraphNode::MuxSession(MuxSessionNode::new(
+            mux(name),
+            "tmux",
+            name,
+        )));
+    snapshot
+        .node_presence
+        .insert(mux_id.clone(), NodePresence::Gone { last_seen: 1 });
+    for (key, active) in sessions {
+        let NodeId::AgentSession(id) = session(key) else {
+            unreachable!("`session` builds agent sessions");
+        };
+        let mut node = AgentSessionNode::new(id.clone(), "codex");
+        node.last_active_epoch = *active;
+        snapshot.nodes.push(GraphNode::AgentSession(node));
+        snapshot.candidate_links.push(GraphLink::new(
+            format!("history:{name}:last-hosted:{key}"),
+            mux_id.clone(),
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(id),
+            },
+            RelationKind::MuxLastHosted,
+            Provenance::Cached,
+        ));
+    }
+    snapshot.canonicalize();
+    snapshot
+}
+
+#[test]
+fn a_stopped_mux_names_the_session_it_hosted_last() {
+    let snapshot = last_hosted("gone", &[("a", Some(10))]);
+    assert_eq!(
+        snapshot.last_hosted_session(&NodeId::MuxSession(mux("gone"))),
+        Some(session("a"))
+    );
+}
+
+#[test]
+fn a_mux_with_no_last_hosted_link_names_no_session() {
+    let snapshot = last_hosted("gone", &[]);
+    assert_eq!(
+        snapshot.last_hosted_session(&NodeId::MuxSession(mux("gone"))),
+        None
+    );
+    // Another mux's link is not this mux's.
+    let snapshot = last_hosted("other", &[("a", Some(10))]);
+    assert_eq!(
+        snapshot.last_hosted_session(&NodeId::MuxSession(mux("gone"))),
+        None
+    );
+}
+
+#[test]
+fn a_last_hosted_session_the_graph_does_not_hold_is_not_named() {
+    let mut snapshot = last_hosted("gone", &[("a", Some(10))]);
+    snapshot
+        .nodes
+        .retain(|node| !matches!(node, GraphNode::AgentSession(_)));
+    assert_eq!(
+        snapshot.last_hosted_session(&NodeId::MuxSession(mux("gone"))),
+        None,
+        "the link outlives its node, as a sparse graph's links do"
+    );
+}
+
+#[test]
+fn a_last_hosted_session_that_is_gone_is_not_named() {
+    let mut snapshot = last_hosted("gone", &[("a", Some(10))]);
+    snapshot
+        .node_presence
+        .insert(session("a"), NodePresence::Gone { last_seen: 5 });
+    assert_eq!(
+        snapshot.last_hosted_session(&NodeId::MuxSession(mux("gone"))),
+        None
+    );
+}
+
+#[test]
+fn an_ignored_last_hosted_link_names_no_session() {
+    let mut snapshot = last_hosted("gone", &[("a", Some(10))]);
+    snapshot.candidate_links[0].state = LinkState::Ignored { reason: None };
+    assert_eq!(
+        snapshot.last_hosted_session(&NodeId::MuxSession(mux("gone"))),
+        None
+    );
+}
+
+#[test]
+fn of_several_last_hosted_sessions_the_most_recently_active_is_named() {
+    let snapshot = last_hosted(
+        "gone",
+        &[("old", Some(10)), ("new", Some(30)), ("unknown", None)],
+    );
+    assert_eq!(
+        snapshot.last_hosted_session(&NodeId::MuxSession(mux("gone"))),
+        Some(session("new"))
+    );
+}
+
 // ---- live_state_of ----
 
 #[test]

@@ -410,7 +410,9 @@ pub fn value_source(app: &App, value: &FieldValue) -> Option<PreviewSource> {
 ///
 /// - an agent session shows its transcript, or its pane when the
 ///   operator chose `session_preview = pane` and the session is in tmux;
-/// - a mux session shows its pane, unless it hosts this TUI;
+/// - a mux session shows its pane, unless it hosts this TUI; one that
+///   is no longer live has no pane and shows what the session it hosted
+///   last shows ([`last_hosted_source`]);
 /// - a workspace lists its root;
 /// - a checkout shows `git status` above a listing of its root;
 /// - a repo shows recent commits on its default branch and its remotes;
@@ -424,11 +426,12 @@ pub fn value_source(app: &App, value: &FieldValue) -> Option<PreviewSource> {
 /// - a fork has none, and the renderer shows its fields.
 pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
     // A gone node has no pane, repository, or directory to read
-    // (ADR 0140); its fields are all the preview has.
+    // (ADR 0140); its fields are all the preview has, but for a mux,
+    // whose last session may still have a transcript.
     if let Some(handle) = app.snapshot_handle()
         && !handle.snapshot().is_live(node)
     {
-        return None;
+        return last_hosted_source(app, node);
     }
     match node {
         NodeId::AgentSession(session) => {
@@ -494,6 +497,23 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
     }
 }
 
+/// What a mux that is no longer live previews: what the session it
+/// hosted last previews, so the same mux reads alike in every view (ADR
+/// 0253). That follows the session's own rule ([`node_source`]): its
+/// transcript, or its live pane under `session_preview = pane` once it
+/// runs in another mux. `None` for a live mux, which has its own source,
+/// and for a mux with no session to name or whose session is gone.
+pub fn last_hosted_source(app: &App, mux: &NodeId) -> Option<PreviewSource> {
+    if !matches!(mux, NodeId::MuxSession(_)) {
+        return None;
+    }
+    let snapshot = app.snapshot_handle()?.snapshot();
+    if snapshot.is_live(mux) {
+        return None;
+    }
+    node_source(app, &snapshot.last_hosted_session(mux)?)
+}
+
 /// Whether `mux` is the tmux session this TUI runs in. Its pane would
 /// show the TUI itself.
 fn hosts_this_tui(app: &App, mux: &MuxSessionId) -> bool {
@@ -508,7 +528,8 @@ fn hosts_this_tui(app: &App, mux: &MuxSessionId) -> bool {
 /// - an agent session row resolves as its node does ([`node_source`]),
 ///   keeping its row's tmux state;
 /// - a mux row, a mux candidate, and a pin slot row whose mux is
-///   live show the pane;
+///   live show the pane, and a mux row that is no longer live shows its
+///   last hosted session ([`last_hosted_source`]);
 /// - any other row resolves as the node the right pane shows for it;
 ///   without a source, the renderer decides what to say.
 fn selection_source(app: &App) -> Option<PreviewSource> {
@@ -531,9 +552,11 @@ fn selection_source(app: &App) -> Option<PreviewSource> {
                 Some(PreviewSource::Transcript(session.session.clone()))
             }
         }
-        (_, RowId::Group(NodeId::MuxSession(_)) | RowId::MuxSession(NodeId::MuxSession(_))) => {
-            pane()
-        }
+        (
+            _,
+            RowId::Group(mux @ NodeId::MuxSession(_))
+            | RowId::MuxSession(mux @ NodeId::MuxSession(_)),
+        ) => pane().or_else(|| last_hosted_source(app, mux)),
         // Any other row previews the node the right pane shows for it.
         _ => app
             .explorer()

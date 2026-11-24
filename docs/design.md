@@ -1151,7 +1151,8 @@ Each selected node detail has three conceptual regions:
 
 Each node kind defines its preview (ADR 0112): a session shows its
 transcript through the native viewer (ADR 0052), a mux session its live
-pane capture, a checkout `git status` above a listing, a repo recent
+pane capture (a stopped one, the preview of the session it hosted last, ADR
+0253), a checkout `git status` above a listing, a repo recent
 commits and remotes, a branch recent commits and ahead/behind, a PR its
 body and checks, a process its process tree, and a pin slot its target's
 preview, or its snapshot when the target is gone. Sessions in tmux show the transcript by

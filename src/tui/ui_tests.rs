@@ -6855,6 +6855,24 @@ fn ghost_world() -> GraphSnapshot {
 /// The ghost fixture, with or without its pins. Without them no pin
 /// points at the stopped mux.
 fn ghost_world_with(pinned: bool) -> GraphSnapshot {
+    ghost_world_built(pinned, None)
+}
+
+/// The key of the session [`ghost_world_hosting`] gives the stopped mux.
+const LAST_HOSTED_KEY: &str = "last-session";
+
+fn last_hosted_id() -> AgentSessionId {
+    AgentSessionId::new("claude-code", "/state", LAST_HOSTED_KEY)
+}
+
+/// The ghost fixture where the stopped `config-agent3` last hosted a
+/// session the graph still holds, recorded in its history as a recorder
+/// does, so that projection links it with `mux_last_hosted`.
+fn ghost_world_hosting(pinned: bool) -> GraphSnapshot {
+    ghost_world_built(pinned, Some(LAST_HOSTED_KEY))
+}
+
+fn ghost_world_built(pinned: bool, last_hosted: Option<&str>) -> GraphSnapshot {
     let mut snapshot = crate::tui::rows::pinned::fixture_world();
     if !pinned {
         snapshot.pins.clear();
@@ -6864,13 +6882,40 @@ fn ghost_world_with(pinned: bool) -> GraphSnapshot {
         crate::model::MuxProbe::new(crate::model::MuxProbeStatus::Listed, 1_700_000_000),
     );
     let mut history = std::mem::take(&mut snapshot.history);
+    if let Some(key) = last_hosted {
+        let mut session = AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", key),
+            "claude-code".to_string(),
+        );
+        session.title = Some("Last words".to_string());
+        session.last_active_epoch = Some(1_700_000_000 - 259_300);
+        snapshot.nodes.push(GraphNode::AgentSession(session));
+        let record = history
+            .muxes
+            .iter_mut()
+            .find(|record| record.recipe.name == "config-agent3")
+            .expect("the fixture records the stopped mux");
+        record.recipe.hosted = vec![crate::model::HostedSession {
+            harness: "claude-code".to_string(),
+            session_id: key.to_string(),
+            first_seen: 1_700_000_000 - 300_000,
+            last_seen: 1_700_000_000 - 259_300,
+        }];
+    }
     crate::history::project::project_into(&mut snapshot, &mut history, 1_700_000_000);
     snapshot.history = history;
     crate::resolve::resolve_snapshot(snapshot)
 }
 
 fn mux_app_over(snapshot: &GraphSnapshot, filter: crate::filter::RowFilter) -> App {
-    let mut config = RunConfig::defaults();
+    mux_app_configured(snapshot, filter, RunConfig::defaults())
+}
+
+fn mux_app_configured(
+    snapshot: &GraphSnapshot,
+    filter: crate::filter::RowFilter,
+    mut config: RunConfig,
+) -> App {
     config.default_view = View::Mux;
     let mut app = App::new(config);
     let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
@@ -7418,6 +7463,213 @@ fn a_ghost_mux_has_no_pane_to_preview_but_a_live_one_does() {
         let source = crate::tui::preview::node_source(&app, &id);
         assert_eq!(source.is_some(), live, "{id}: {source:?}");
     }
+}
+
+fn ghost_mux_id() -> NodeId {
+    NodeId::MuxSession(MuxSessionId::new("tmux:config-agent3"))
+}
+
+fn last_hosted_source() -> PreviewSource {
+    PreviewSource::Transcript(last_hosted_id())
+}
+
+/// The Preview's rows as one string.
+fn preview_body(app: &App) -> String {
+    preview_rows(app, 70, 10).join("\n")
+}
+
+#[test]
+fn a_stopped_pinned_mux_previews_the_session_it_hosted_last() {
+    let snapshot = ghost_world_hosting(true);
+    let mut app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    app.set_selection(RowId::MuxSession(ghost_mux_id()));
+
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(last_hosted_source())
+    );
+    assert_eq!(
+        crate::tui::preview::node_source(&app, &ghost_mux_id()),
+        Some(last_hosted_source()),
+        "a drilled-in mux node resolves as its row does"
+    );
+    assert_eq!(preview_body(&app), "loading transcript…");
+
+    app.update(Msg::SetPreview {
+        source: last_hosted_source(),
+        content: transcript_content(3),
+    });
+    let body = preview_body(&app);
+    assert!(body.contains("turn 2"), "{body}");
+    assert!(!body.contains("no mux target"), "{body}");
+}
+
+#[test]
+fn a_stopped_unpinned_mux_previews_it_too() {
+    let snapshot = ghost_world_hosting(false);
+    let filter = crate::filter::RowFilter {
+        show_stopped_muxes: true,
+        ..Default::default()
+    };
+    let mut app = mux_app_over(&snapshot, filter);
+    app.set_selection(RowId::MuxSession(ghost_mux_id()));
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(last_hosted_source())
+    );
+}
+
+#[test]
+fn the_history_view_previews_a_stopped_mux_the_same_way() {
+    let snapshot = ghost_world_hosting(false);
+    let mut app = history_app_over(
+        &snapshot,
+        crate::tui::HistoryGrouping::None,
+        RunConfig::defaults(),
+    );
+    app.set_selection(RowId::History {
+        record_id: "h_agent".into(),
+    });
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(last_hosted_source())
+    );
+}
+
+#[test]
+fn a_running_mux_still_previews_its_pane() {
+    let snapshot = ghost_world_hosting(true);
+    let mut app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    let live = MuxSessionId::new("tmux:conspectus-main");
+    app.set_selection(RowId::MuxSession(NodeId::MuxSession(live.clone())));
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(PreviewSource::Pane(live))
+    );
+}
+
+#[test]
+fn a_stopped_mux_previews_its_session_as_that_sessions_own_row_would() {
+    // The session has since moved into a running mux of its own, and the
+    // operator chose to preview sessions in tmux by their pane.
+    let mut snapshot = ghost_world_hosting(true);
+    let moved_to = MuxSessionId::new("tmux:moved-to");
+    snapshot
+        .nodes
+        .push(GraphNode::MuxSession(crate::model::MuxSessionNode::new(
+            moved_to.clone(),
+            "tmux",
+            "moved-to",
+        )));
+    let mut moved = crate::model::GraphLink::new(
+        "test:last-session-in-moved-to".to_string(),
+        NodeId::AgentSession(last_hosted_id()),
+        crate::model::LinkEndpoint::Node {
+            id: NodeId::MuxSession(moved_to.clone()),
+        },
+        crate::model::RelationKind::LinkedToMux,
+        crate::model::Provenance::Discovered,
+    );
+    moved.state = crate::model::LinkState::Active;
+    snapshot.candidate_links.push(moved);
+    let snapshot = resolve_snapshot(snapshot);
+    let mut app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    app.set_selection(RowId::MuxSession(ghost_mux_id()));
+
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(last_hosted_source()),
+        "by transcript, the default"
+    );
+    app.update(Msg::SetSessionPreview(crate::tui::SessionPreview::Pane));
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(PreviewSource::Pane(moved_to)),
+        "by pane, the session's mux"
+    );
+}
+
+#[test]
+fn no_live_preview_hides_a_stopped_mux_s_session_as_it_hides_the_session() {
+    let snapshot = ghost_world_hosting(true);
+    let mut config = RunConfig::defaults();
+    config.live_preview_enabled = false;
+    let mut app = mux_app_configured(&snapshot, crate::filter::RowFilter::default(), config);
+    app.set_selection(RowId::MuxSession(ghost_mux_id()));
+    // The old placeholder says the same under the flag, so the source
+    // is what shows the session is the one being hidden.
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(last_hosted_source())
+    );
+    assert_eq!(preview_body(&app), "preview disabled (--no-live-preview)");
+}
+
+#[test]
+fn a_stopped_mux_with_no_session_to_show_keeps_its_placeholder() {
+    // It hosted nothing the graph knows.
+    let snapshot = ghost_world_with(true);
+    let mut app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    app.set_selection(RowId::MuxSession(ghost_mux_id()));
+    assert_eq!(crate::tui::preview::preview_source(&app), None);
+    assert_eq!(preview_body(&app), "no mux target for this row");
+
+    // Or what it hosted has gone too.
+    let mut snapshot = ghost_world_hosting(true);
+    snapshot.node_presence.insert(
+        NodeId::AgentSession(last_hosted_id()),
+        crate::model::NodePresence::Gone { last_seen: 1 },
+    );
+    let mut app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    app.set_selection(RowId::MuxSession(ghost_mux_id()));
+    assert_eq!(crate::tui::preview::preview_source(&app), None);
+    assert_eq!(preview_body(&app), "no mux target for this row");
+}
+
+#[test]
+fn a_stopped_pin_in_the_pinned_view_keeps_its_summary() {
+    // The pin's mux hosted a session the graph holds, and the Mux view
+    // previews it; the Pinned view's row is the pin, and says its status.
+    let snapshot = ghost_world_hosting(true);
+    let tree =
+        crate::tui::rows::pinned::build_pinned_tree(crate::tui::rows::pinned::PinnedBuildInputs {
+            snapshot: &snapshot,
+            home: Some(std::path::Path::new("/home/op")),
+            now: Some(1_700_000_000),
+            grouping: crate::tui::PinnedGrouping::None,
+            sort: crate::tui::Sort::Hierarchy,
+        });
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Pinned;
+    let mut app = App::new(config);
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app.set_selection(RowId::Pin {
+        pin_id: "config-agent3".into(),
+    });
+    assert_eq!(crate::tui::preview::preview_source(&app), None);
+    let body = preview_body(&app);
+    assert!(body.contains("config-agent3"), "{body}");
+    assert!(body.contains("stopped"), "{body}");
+}
+
+#[test]
+fn a_frame_of_a_stopped_mux_shows_its_sessions_transcript() {
+    let snapshot = ghost_world_hosting(true);
+    let mut app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    app.set_selection(RowId::MuxSession(ghost_mux_id()));
+    app.update(Msg::SetPreview {
+        source: last_hosted_source(),
+        content: transcript_content(3),
+    });
+    let frame = pinned_frame(&mut app, 140);
+    assert!(frame.contains("turn 2"), "{frame}");
+    assert!(frame.contains("last hosted"), "{frame}");
+    assert!(!frame.contains("no mux target"), "{frame}");
 }
 
 #[test]
