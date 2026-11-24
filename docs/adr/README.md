@@ -116,7 +116,7 @@ What Conspectus remembers about entities that are gone, the slots the operator p
 | [0093](0093-operator-initiated-mux-teardown.md) | Operator-Initiated Mux Teardown (`kill-session`) | Accepted (amended by 0142) |
 | [0094](0094-worktree-backed-pins-realized-at-launch.md) | Worktree-Backed Pins Realized at Launch | Superseded by 0142 |
 | [0095](0095-bare-mux-session-creation.md) | Bare Mux Session Creation (No Pin, No Agent) | Accepted (amended by 0142) |
-| [0096](0096-ephemeral-harness-mux-launch.md) | Mux Launch — Harness in a New Mux Without a Pin | Accepted (amended by 0142 and 0171, narrowed by 0169) |
+| [0096](0096-ephemeral-harness-mux-launch.md) | Mux Launch — Harness in a New Mux Without a Pin | Accepted (amended by 0142, 0171, and 0254, narrowed by 0169) |
 | [0097](0097-launch-spec-form-primitive.md) | Shared Launch-Spec Form Primitive | Superseded by 0169 (narrowed by 0167 first) |
 | [0098](0098-pin-resume-preserves-launch-argv.md) | Pin Resume Preserves the Pin's Launch Argv | Accepted (amended by 0142) |
 | [0102](0102-pin-bindings-are-one-to-one.md) | Pin Bindings Are One-To-One | Superseded by 0140 |
@@ -337,3 +337,4 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0136](0136-lazy-forge-fetches-outside-the-writer-lock.md) | Lazy Forge Fetches Outside The Writer Lock | Accepted |
 | [0137](0137-forge-fetches-stop-on-shutdown.md) | Forge Fetches Stop On Daemon Shutdown | Accepted |
 | [0253](0253-tui-a-stopped-mux-previews-the-session-it-hosted-last.md) | A Stopped Mux Previews The Session It Hosted Last | Accepted |
+| [0254](0254-tui-the-launch-form-starts-as-a-copy-of-the-selected-entity.md) | The Launch Form Starts As A Copy Of The Selected Entity | Accepted |

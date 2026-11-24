@@ -47,6 +47,14 @@ forms, lists, readers, and keys look and behave alike.
   under the pane setting once it runs in another mux. A stopped mux that
   hosted nothing the graph still holds keeps the placeholder, and a stopped
   pin in the Pinned view keeps its summary.
+- **The launch form starts as a copy of the row you are on.** `N` already
+  opened it on the next free name in the row's series. It now also takes the
+  row's harness, its launch options and other arguments (a mux started
+  skipping permissions opens with the box checked), its directory while that
+  still exists, and its pin: *don't pin* for a row that is not pinned,
+  *launch, then pin* for a pinned one that is running, and *pin, don't
+  launch* for a pinned one that is not. A group header or a PR leaves the
+  form as it was.
 - **The Preview's cleanup is configurable.** `[tui.preview]` sets which
   characters smart wrap treats as decoration, how long a run of one is
   before it is a rule, and whether rules shorten around a label.

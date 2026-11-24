@@ -216,6 +216,30 @@ impl MuxLaunchForm {
         self
     }
 
+    /// Starts with `argv` in the argv field, which the harness's launch
+    /// options and the command row then follow, as if it had been typed.
+    /// An argv that is only the default stays an empty field, so the
+    /// form still says where its default comes from. Call it after
+    /// [`Self::with_defaults`].
+    #[must_use]
+    pub fn with_argv(mut self, argv: &[String]) -> Self {
+        let text = launch_argv::field_text(argv, self.default.argv());
+        self.set_argv(text);
+        self.follow();
+        self
+    }
+
+    /// Starts with `choice` on the pin row.
+    #[must_use]
+    pub fn with_pin(mut self, choice: PinChoice) -> Self {
+        if let Some(FieldKind::OneOf(row)) = self.form.get_mut(PIN).map(Field::kind_mut)
+            && let Some(index) = PinChoice::ORDER.iter().position(|each| *each == choice)
+        {
+            row.choose(index);
+        }
+        self
+    }
+
     /// Seeds the worktree repo without turning the toggle on, so
     /// switching it on later starts from the launch directory.
     #[must_use]

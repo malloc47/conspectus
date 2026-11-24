@@ -110,7 +110,10 @@ fn right_pane_node(app: &App) -> Option<NodeId> {
         .or_else(|| Some(explorer.id().clone()))
 }
 
-fn pin_named<'a>(snapshot: &'a GraphSnapshot, name: &str) -> Option<&'a crate::model::PinNode> {
+pub(crate) fn pin_named<'a>(
+    snapshot: &'a GraphSnapshot,
+    name: &str,
+) -> Option<&'a crate::model::PinNode> {
     crate::tui::rows::pin_nodes(snapshot)
         .into_iter()
         .find(|pin| pin.id.id == name)

@@ -1817,16 +1817,25 @@ impl App {
                 self.open_new_mux_form(form);
             }
             Msg::OpenMuxLaunchForm => {
-                let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
+                let known_harness_keys = crate::tui::runtime::known_harness_keys();
+                // The form starts as a copy of what the operator is
+                // looking at: its harness, arguments, directory, and pin.
+                let seed = crate::tui::runtime::launch_seed::seed(self, &known_harness_keys);
+                let seeded_cwd = seed
+                    .cwd
+                    .clone()
                     .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
                 let seeded_mux_name =
                     crate::tui::runtime::derive_mux_launch_name(self).unwrap_or_default();
-                let known_harness_keys = crate::tui::runtime::known_harness_keys();
                 let known_mux_names = crate::tui::runtime::known_live_mux_names(self);
-                let default_harness = known_harness_keys.first().cloned().unwrap_or_default();
+                let default_harness = seed
+                    .harness
+                    .clone()
+                    .or_else(|| known_harness_keys.first().cloned())
+                    .unwrap_or_default();
                 let repo = seeded_cwd.clone();
                 let candidates = crate::tui::runtime::known_cwd_candidates(self, Some(&seeded_cwd));
-                let form = crate::tui::widgets::mux_launch::MuxLaunchForm::new(
+                let mut form = crate::tui::widgets::mux_launch::MuxLaunchForm::new(
                     default_harness,
                     seeded_cwd,
                     seeded_mux_name,
@@ -1837,7 +1846,11 @@ impl App {
                     self.config().launch.clone(),
                 ))
                 .with_cwd_candidates(candidates)
-                .with_worktree_repo(repo);
+                .with_worktree_repo(repo)
+                .with_pin(seed.pin);
+                if let Some(argv) = &seed.argv {
+                    form = form.with_argv(argv);
+                }
                 self.open_mux_launch_form(form);
             }
             Msg::CommitMuxLaunch(request) => {

@@ -2543,7 +2543,25 @@ is your home directory: the mark and the completions read it that way, and
 the form saves or runs the expanded path.
 
 `N`, or `m` then **Launch harness in new mux…**, opens the mux launch form
-with the worktree toggle off (switch it on to create or reuse a worktree). The
+with the worktree toggle off (switch it on to create or reuse a worktree). It
+starts as a copy of the entity you are looking at (the right pane's while it
+has focus, else the selected row's), whichever view it is in:
+
+- the **name** is the next free one in the row's series (`worker-1` gives
+  `worker-2`);
+- the **harness** is the row's (a mux's, a session's, a pin's, or a stopped
+  mux's record's), when it is one the form lists, and its launch options and
+  other arguments are how the row was launched: a mux started skipping
+  permissions opens with that box checked;
+- the **cwd** is the row's, while that directory exists. A stopped mux, a
+  removed worktree, or a pin on a deleted checkout names one that may not, and
+  the form then starts where it does with no row selected;
+- the **pin** choice follows the row: *don't pin* for a row that is not
+  pinned, *launch, then pin* for a pinned mux or session that is running, and
+  *pin, don't launch* for a pinned one that is not.
+
+A row that names none of these, such as a group header or a PR, leaves the
+form with its usual defaults, and every field is still yours to change. The
 mux's **name** is the first field. Under it, the **server** checkbox (`[ ] own
 socket`) reveals a **socket** field beneath it, for a tmux server other than
 the default; it is a field like the others, and `Space` (or `←`/`→`) toggles

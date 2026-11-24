@@ -897,8 +897,9 @@ three creation paths plus rename, attach, and teardown:
 - **Mux launch** (ADR 0096) — a harness in a fresh mux. `conspectus mux
   launch <harness> --name <mux-name> [--cwd <path>]` on the CLI; the `m`
   Mux menu in the TUI opens the launch form (ADR 0169), and `N` opens
-  it too (worktree toggle off by default). The default argv comes from launch
-  profiles (ADR 0142).
+  it too (worktree toggle off by default). The form starts as a copy of the
+  selected entity: its name, harness, arguments, directory, and pin (ADR
+  0254). The default argv comes from launch profiles (ADR 0142).
 - **Rebuild** (ADR 0142) — a gone mux, a planned slot, or a mux whose
   agent exited, from its slot or history recipe, as a plan of steps.
 

@@ -49,6 +49,7 @@ mod content;
 mod executor;
 mod handoff;
 mod launch;
+pub(crate) mod launch_seed;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]

@@ -612,3 +612,390 @@ fn with_the_right_pane_focused_the_entity_it_shows_is_the_base() {
         "the right pane's cursor is on the parent session, which runs in `build-3`"
     );
 }
+
+// ----- The launch form starts as a copy of the row --------------------
+
+const SKIP_PERMISSIONS: &str = "--dangerously-skip-permissions";
+const CODEX_SKIP_PERMISSIONS: &str = "--dangerously-bypass-approvals-and-sandbox";
+
+/// What the launch form holds right after it opens over an app.
+#[derive(Debug, PartialEq, Eq)]
+struct Opened {
+    harness: String,
+    argv: String,
+    /// Each launch option's checkbox, in the harness's order.
+    options: Vec<bool>,
+    cwd: String,
+    /// The pin row's choice: 0 `don't pin`, 1 `launch, then pin`, 2
+    /// `pin, don't launch`.
+    pin: usize,
+}
+
+fn open_launch_form(app: &mut App) -> Opened {
+    app.update(Msg::OpenMuxLaunchForm);
+    let form = app.mux_launch_form().expect("the launch form opens");
+    let values = form.values();
+    Opened {
+        harness: values.text(mux_launch::HARNESS).to_string(),
+        argv: values.text(mux_launch::ARGV).to_string(),
+        options: values
+            .check_group(mux_launch::OPTIONS)
+            .map(tuikit::form::CheckGroup::checked)
+            .unwrap_or_default(),
+        cwd: values.text(mux_launch::CWD).to_string(),
+        pin: values
+            .chosen(mux_launch::PIN)
+            .expect("the pin row has a choice"),
+    }
+}
+
+/// A live mux, running `command` in `cwd`.
+fn running_mux(name: &str, cwd: &str, command: &str) -> GraphNode {
+    let mut mux = MuxSessionNode::new(MuxSessionId::new(format!("tmux:{name}")), "tmux", name);
+    mux.cwd = Some(cwd.into());
+    mux.active_pane_start_command = Some(command.into());
+    GraphNode::MuxSession(mux)
+}
+
+/// A stopped mux's history record, with the recipe the operator launched
+/// it by.
+fn recorded_mux(
+    id: &str,
+    name: &str,
+    cwd: &str,
+    harness: &str,
+    argv: &[&str],
+) -> crate::model::MuxRecord {
+    crate::model::MuxRecord {
+        meta: crate::model::RecordMeta {
+            id: id.into(),
+            key: format!("mux_session:tmux:{name}"),
+            first_seen: NOW - 9_000,
+            last_seen: NOW - 8_000,
+            origin: Default::default(),
+            display: Default::default(),
+            rebuilt_from: None,
+        },
+        recipe: crate::model::MuxRecipe {
+            backend: "tmux".into(),
+            name: name.into(),
+            cwd: Some(cwd.into()),
+            harness: Some(harness.into()),
+            argv: Some(argv.iter().map(ToString::to_string).collect()),
+            ..Default::default()
+        },
+        extra: Default::default(),
+    }
+}
+
+fn mux_pin(id: &str, target: Option<&str>) -> PinSlot {
+    PinSlot {
+        id: id.into(),
+        kind: PinKind::Mux,
+        target: target.map(str::to_string),
+        pinned_at: None,
+        overrides: SlotFields::new(),
+        snapshot: SlotFields::new(),
+        order: 0,
+        legacy: false,
+    }
+}
+
+/// Every directory here exists except `/no/such/dir`:
+///
+/// - `work` runs Claude Code skipping permissions, hosts the session
+///   `s-work`, and is pinned (`work-pin`);
+/// - `plain` runs Claude Code without options and hosts the Codex
+///   session `s-codex`;
+/// - `gone-1` is stopped, recorded with Codex skipping permissions in a
+///   directory that is gone, and unpinned;
+/// - `gone-2` is stopped, recorded with Claude Code in `dir`, and pinned
+///   (`gone-pin`);
+/// - `planned` is a mux pin that has not been launched, with Codex and `dir`.
+fn launch_world(dir: &str) -> GraphSnapshot {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(running_mux(
+        "work",
+        dir,
+        &format!("claude {SKIP_PERMISSIONS}"),
+    ));
+    snapshot.nodes.push(running_mux("plain", dir, "claude"));
+    for (key, harness, mux) in [
+        ("s-work", "claude-code", "work"),
+        ("s-codex", "codex", "plain"),
+    ] {
+        let id = AgentSessionId::new(harness, "/state", key);
+        let mut session = AgentSessionNode::new(id.clone(), harness);
+        session.cwd = Some(dir.into());
+        snapshot.nodes.push(GraphNode::AgentSession(session));
+        let mut link = crate::model::GraphLink::new(
+            format!("test:{key}-in-{mux}"),
+            NodeId::AgentSession(id),
+            crate::model::LinkEndpoint::Node {
+                id: NodeId::MuxSession(MuxSessionId::new(format!("tmux:{mux}"))),
+            },
+            crate::model::RelationKind::LinkedToMux,
+            crate::model::Provenance::StrongDiscovered,
+        );
+        link.state = crate::model::LinkState::Active;
+        snapshot.candidate_links.push(link);
+    }
+    let mut history = crate::model::HistorySnapshot::default();
+    history.muxes.push(recorded_mux(
+        "h_gone1",
+        "gone-1",
+        "/no/such/dir",
+        "codex",
+        &["codex", CODEX_SKIP_PERMISSIONS],
+    ));
+    history.muxes.push(recorded_mux(
+        "h_gone2",
+        "gone-2",
+        dir,
+        "claude-code",
+        &["claude"],
+    ));
+    for id in ["h_gone1", "h_gone2"] {
+        history.presence.insert(
+            id.to_string(),
+            crate::model::NodePresence::Gone {
+                last_seen: NOW - 8_000,
+            },
+        );
+    }
+    let mut planned = mux_pin("planned", None);
+    planned.overrides = SlotFields::from([
+        (
+            "harness".to_string(),
+            crate::model::FieldValue::Text("codex".into()),
+        ),
+        (
+            "cwd".to_string(),
+            crate::model::FieldValue::Text(dir.into()),
+        ),
+    ]);
+    snapshot.pins = vec![
+        mux_pin("work-pin", Some("mux_session:tmux:work")),
+        mux_pin("gone-pin", Some("history:h_gone2")),
+        planned,
+    ];
+    snapshot.mux_probes.insert(
+        "tmux".to_string(),
+        crate::model::MuxProbe::new(crate::model::MuxProbeStatus::Listed, NOW),
+    );
+    crate::history::project::project_into(&mut snapshot, &mut history, NOW);
+    snapshot.history = history;
+    resolve_snapshot(snapshot)
+}
+
+fn world_dir() -> tempfile::TempDir {
+    tempfile::tempdir().expect("a directory for the world's muxes")
+}
+
+#[test]
+fn a_running_mux_opens_the_form_with_its_harness_options_and_directory() {
+    let dir = world_dir();
+    let cwd = dir.path().display().to_string();
+    let world = launch_world(&cwd);
+    let opened = open_launch_form(&mut selected(View::Mux, &world, "work"));
+    assert_eq!(opened.harness, "claude-code");
+    assert!(opened.argv.contains(SKIP_PERMISSIONS), "{opened:?}");
+    assert_eq!(opened.options, [true], "skip permissions starts checked");
+    assert_eq!(opened.cwd, cwd);
+
+    let opened = open_launch_form(&mut selected(View::Mux, &world, "plain"));
+    assert_eq!(opened.harness, "claude-code");
+    assert_eq!(
+        opened.options,
+        [false],
+        "no option the mux was not started with"
+    );
+}
+
+#[test]
+fn the_pin_choice_follows_whether_the_row_is_pinned_and_running() {
+    let dir = world_dir();
+    let world = launch_world(&dir.path().display().to_string());
+    for (view, label, pin) in [
+        (View::Mux, "plain", 0),
+        (View::Mux, "work", 1),
+        (View::Mux, "gone-2", 2),
+        (View::History, "h_gone1", 0),
+        (View::Pinned, "work-pin", 1),
+        (View::Pinned, "gone-pin", 2),
+        (View::Pinned, "planned", 2),
+    ] {
+        let opened = open_launch_form(&mut selected(view, &world, label));
+        assert_eq!(opened.pin, pin, "{label} in {view:?}: {opened:?}");
+    }
+}
+
+#[test]
+fn a_stopped_mux_opens_the_form_from_its_record() {
+    let dir = world_dir();
+    let cwd = dir.path().display().to_string();
+    let world = launch_world(&cwd);
+    let opened = open_launch_form(&mut selected(View::History, &world, "h_gone1"));
+    assert_eq!(opened.harness, "codex");
+    assert!(opened.argv.contains(CODEX_SKIP_PERMISSIONS), "{opened:?}");
+    assert_eq!(opened.options, [true]);
+    assert_ne!(
+        opened.cwd, "/no/such/dir",
+        "its directory is gone, so the form does not start there"
+    );
+
+    // Its directory exists: the form starts there. A pinned record is not
+    // listed in History, so it is the Mux view's ghost row.
+    let opened = open_launch_form(&mut selected(View::Mux, &world, "gone-2"));
+    assert_eq!(opened.harness, "claude-code");
+    assert_eq!(opened.cwd, cwd);
+}
+
+#[test]
+fn a_directory_that_is_gone_falls_back_to_the_default_not_to_a_missing_path() {
+    let dir = world_dir();
+    let mut world = launch_world(&dir.path().display().to_string());
+    let fallback = open_launch_form(&mut app_over(View::Mux, &GraphSnapshot::empty())).cwd;
+
+    // A stopped mux whose recorded directory is gone.
+    let opened = open_launch_form(&mut selected(View::History, &world, "h_gone1"));
+    assert_eq!(opened.cwd, fallback, "the cwd a form seeds with no row");
+
+    // A running mux whose directory was deleted under it.
+    for node in &mut world.nodes {
+        if let GraphNode::MuxSession(mux) = node
+            && mux.session_name() == "plain"
+        {
+            mux.cwd = Some("/no/such/dir".into());
+        }
+    }
+    let opened = open_launch_form(&mut selected(View::Mux, &world, "plain"));
+    assert_eq!(opened.cwd, fallback);
+    assert_eq!(
+        opened.harness, "claude-code",
+        "the rest of the row still seeds the form"
+    );
+}
+
+#[test]
+fn a_session_opens_the_form_with_its_harness_and_its_muxs_arguments() {
+    let dir = world_dir();
+    let cwd = dir.path().display().to_string();
+    let world = launch_world(&cwd);
+    let opened = open_launch_form(&mut selected(View::Sessions, &world, "s-work"));
+    assert_eq!(opened.harness, "claude-code");
+    assert_eq!(
+        opened.options,
+        [true],
+        "its mux runs it skipping permissions"
+    );
+    assert_eq!(opened.cwd, cwd);
+    assert_eq!(
+        opened.pin, 0,
+        "the session is not pinned, whatever its mux is"
+    );
+
+    // Its mux runs another harness: the arguments are that program's, not
+    // this session's.
+    let opened = open_launch_form(&mut selected(View::Sessions, &world, "s-codex"));
+    assert_eq!(opened.harness, "codex");
+    assert_eq!(opened.options, [false]);
+    assert!(opened.argv.is_empty(), "{opened:?}");
+}
+
+#[test]
+fn a_planned_pin_opens_the_form_with_what_it_says() {
+    let dir = world_dir();
+    let cwd = dir.path().display().to_string();
+    let world = launch_world(&cwd);
+    let opened = open_launch_form(&mut selected(View::Pinned, &world, "planned"));
+    assert_eq!(opened.harness, "codex");
+    assert_eq!(opened.cwd, cwd);
+    assert_eq!(opened.pin, 2);
+}
+
+#[test]
+fn a_row_that_names_no_harness_leaves_the_forms_defaults() {
+    let dir = world_dir();
+    let root = dir.path().display().to_string();
+    let mut world = launch_world(&root);
+    let repo = crate::model::RepoId::new(format!("{root}/.git"));
+    world
+        .nodes
+        .push(GraphNode::Repo(crate::model::RepoNode::new(repo.clone())));
+    world
+        .nodes
+        .push(GraphNode::Checkout(crate::model::CheckoutNode::new(
+            crate::model::CheckoutId::new(repo, root.as_str()),
+            root.as_str(),
+        )));
+    let world = resolve_snapshot(world);
+    let bare = open_launch_form(&mut app_over(View::Mux, &GraphSnapshot::empty()));
+    let mut app = app_over(View::Sessions, &world);
+    select_a_group(&mut app);
+    let opened = open_launch_form(&mut app);
+    assert_eq!(opened.harness, bare.harness);
+    assert!(opened.argv.is_empty(), "{opened:?}");
+    assert_eq!(opened.pin, 0);
+}
+
+#[test]
+fn a_harness_the_form_cannot_pick_is_not_seeded() {
+    let dir = world_dir();
+    let mut world = launch_world(&dir.path().display().to_string());
+    world.history.muxes[1].recipe.harness = Some("mystery".into());
+    world.history.muxes[1].recipe.argv = Some(vec!["mystery".into(), "--flag".into()]);
+    // The pin's effective fields come from the history record.
+    let world = resolve_snapshot(world);
+    let bare = open_launch_form(&mut app_over(View::Mux, &GraphSnapshot::empty()));
+    let opened = open_launch_form(&mut selected(View::Mux, &world, "gone-2"));
+    assert_eq!(opened.harness, bare.harness);
+    assert!(
+        opened.argv.is_empty(),
+        "flags of a program the form does not know are not carried: {opened:?}"
+    );
+}
+
+#[test]
+fn the_same_entity_opens_the_same_form_in_every_view() {
+    let dir = world_dir();
+    let world = launch_world(&dir.path().display().to_string());
+    let open = |view, label| open_launch_form(&mut selected(view, &world, label));
+    assert_eq!(
+        open(View::Mux, "gone-2"),
+        open(View::Pinned, "gone-pin"),
+        "a pinned stopped mux, from the Mux view and from its pin"
+    );
+    assert_eq!(open(View::Mux, "work"), open(View::Pinned, "work-pin"));
+    // An unpinned stopped mux is in History, and in the Mux view when
+    // asked for.
+    let filter = RowFilter {
+        show_stopped_muxes: true,
+        ..Default::default()
+    };
+    let mut in_mux_view = app_over_filtered(View::Mux, &world, filter);
+    select(&mut in_mux_view, "gone-1");
+    assert_eq!(
+        open_launch_form(&mut in_mux_view),
+        open(View::History, "h_gone1")
+    );
+}
+
+#[test]
+fn the_launch_form_seeds_the_same_with_the_right_pane_focused() {
+    let dir = world_dir();
+    let world = launch_world(&dir.path().display().to_string());
+    // On a Codex session, with the right pane's cursor on the link to
+    // its mux, which runs Claude Code: the entity the pane shows seeds
+    // the form, not the row.
+    let mux = NodeId::MuxSession(MuxSessionId::new("tmux:plain"));
+    assert_eq!(
+        open_launch_form(&mut selected(View::Sessions, &world, "s-codex")).harness,
+        "codex",
+        "without the right pane, the row seeds it"
+    );
+    let mut app = selected(View::Sessions, &world, "s-codex");
+    focus_right_on(&mut app, |node| *node == mux);
+    let opened = open_launch_form(&mut app);
+    assert_eq!(opened.harness, "claude-code");
+}

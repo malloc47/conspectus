@@ -615,3 +615,71 @@ fn the_form_with_the_socket_field_shown() {
     state.handle_key(press(KeyCode::Char(' ')));
     insta::assert_snapshot!(frame_at(&state, 100, 20));
 }
+
+#[test]
+fn a_seeded_argv_checks_the_launch_option_it_carries() {
+    let argv = |args: &[&str]| args.iter().map(ToString::to_string).collect::<Vec<_>>();
+    let state = form("codex", "/tmp", "adhoc", &["codex"], &[]).with_argv(&argv(&[
+        "codex",
+        "--dangerously-bypass-approvals-and-sandbox",
+    ]));
+    assert_eq!(
+        state
+            .form()
+            .values()
+            .check_group(OPTIONS)
+            .map(CheckGroup::checked),
+        Some(vec![true]),
+        "skip permissions starts checked"
+    );
+    assert_eq!(
+        state.command(),
+        "codex --dangerously-bypass-approvals-and-sandbox"
+    );
+    assert_eq!(
+        request(&state).launch_argv,
+        ["codex", "--dangerously-bypass-approvals-and-sandbox"]
+    );
+}
+
+#[test]
+fn a_seeded_argv_that_is_only_the_default_leaves_the_field_following_it() {
+    let profile = ["codex".to_string(), "--flag".to_string()];
+    let state = form("codex", "/tmp", "adhoc", &["codex"], &[])
+        .with_defaults(profile_defaults(&["codex", "--flag"]))
+        .with_argv(&profile);
+    assert_eq!(
+        state.form().values().text(ARGV),
+        "",
+        "an argv the form would use anyway is not typed text"
+    );
+    assert_eq!(
+        state.default_hint().as_deref(),
+        Some("codex --flag — from the project launch profile"),
+        "so the form still says where its command comes from"
+    );
+
+    // Anything else is typed text.
+    let other = ["codex".to_string(), "--other".to_string()];
+    let state = state.with_argv(&other);
+    assert_eq!(state.form().values().text(ARGV), "codex --other");
+    assert_eq!(state.default_hint(), None);
+}
+
+#[test]
+fn a_seeded_pin_choice_starts_selected_and_launches_as_chosen() {
+    for (choice, label) in [
+        (PinChoice::Off, "don't pin"),
+        (PinChoice::Pin, "launch, then pin"),
+        (PinChoice::PlanOnly, "pin, don't launch"),
+    ] {
+        let state = form("codex", "/tmp", "adhoc", &["codex"], &[]).with_pin(choice);
+        assert_eq!(request(&state).pin, choice, "{label}");
+        let shown = state.form().values().chosen(PIN);
+        assert_eq!(
+            shown,
+            PinChoice::ORDER.iter().position(|each| *each == choice),
+            "{label}"
+        );
+    }
+}

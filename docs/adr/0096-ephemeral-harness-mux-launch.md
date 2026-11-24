@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted. Amended by [ADR 0142](0142-rebuild-plans-and-executors.md): the
+Accepted. Amended by
+[ADR 0254](0254-tui-the-launch-form-starts-as-a-copy-of-the-selected-entity.md):
+the TUI form starts as a copy of the selected entity (its harness, arguments,
+directory, and pin), not only its name. Amended by [ADR 0142](0142-rebuild-plans-and-executors.md): the
 launched mux is recorded in history with its argv, `--pin` and `--pin
 --no-launch` replace `pin adopt` and `pin create`, and the default argv
 comes from launch profiles. Narrowed by
