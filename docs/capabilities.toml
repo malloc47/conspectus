@@ -133,8 +133,10 @@ env = "PAGER"
 read = ["..."]
 
 [programs.conspectus]
-adr = ["0141", "0142", "0143", "0105"]
-# The running binary, whatever its file name.
+adr = ["0141", "0142", "0143", "0105", "0255"]
+# The running binary, whatever its file name. When a rebuild has replaced
+# the file a TUI started from, it runs the file now at that path, else
+# its own running image (ADR 0255).
 self = true
 act = ["rebuild ...", "mux new ...", "mux launch ..."]
 

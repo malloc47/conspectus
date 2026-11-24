@@ -4,6 +4,47 @@ use super::*;
 use crate::model::NodeId;
 use crate::tui::messages::{CommandRecord, LogEntry, LogEntryExt, LogTarget};
 
+/// What the operator is told when the TUI had to run a program other than
+/// the file it started from, which a rebuild of Conspectus does to every
+/// TUI left open.
+fn fallback_note(fallback: crate::exec::Fallback) -> &'static str {
+    match fallback {
+        crate::exec::Fallback::Replaced => {
+            "conspectus was replaced while this TUI ran: this used the new one. \
+             Restart the TUI when convenient."
+        }
+        crate::exec::Fallback::Removed => {
+            "conspectus was removed while this TUI ran: this used the copy it is running. \
+             Restart the TUI when convenient."
+        }
+    }
+}
+
+/// Warn, in the message log and as a toast, when `binary` is a fallback. The
+/// action it is for goes on and reports its own outcome as it always does.
+pub(super) fn note_fallback(app: &mut App, binary: &crate::exec::RunningBinary) {
+    let Some(fallback) = binary.fallback else {
+        return;
+    };
+    let note = fallback_note(fallback);
+    app.report(LogEntry::warning(note));
+    app.post_toast(Feedback::warning(note));
+}
+
+/// A spawn that finds no program means the binary this TUI started from is
+/// gone and nothing could stand in for it, so it says what to do about it
+/// rather than ending in a bare `os error 2`.
+pub(super) fn spawn_failure(err: std::io::Error) -> std::io::Error {
+    if err.kind() == std::io::ErrorKind::NotFound {
+        std::io::Error::new(
+            err.kind(),
+            format!("{err}: conspectus is gone from where this TUI started it, so restart the TUI"),
+        )
+    } else {
+        err
+    }
+}
+
 /// Run `conspectus <args>` and capture its full output, both for the
 /// caller's summary and as the command record of the message log entry
 /// (ADR 0105). Output is captured and stdin is null, so the TUI stays
@@ -14,8 +55,9 @@ fn run_conspectus_subprocess(
     label: String,
     args: Vec<String>,
 ) -> (CommandRecord, std::io::Result<Output>) {
-    let program =
-        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus"));
+    let binary = crate::exec::RunningBinary::locate();
+    note_fallback(app, &binary);
+    let program = binary.path;
     let output = {
         let program = program.clone();
         let args = args.clone();
@@ -24,7 +66,8 @@ fn run_conspectus_subprocess(
                 .args(&args)
                 .output()
         })
-    };
+    }
+    .map_err(spawn_failure);
 
     let mut argv = vec![program.display().to_string()];
     argv.extend(args);

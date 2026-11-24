@@ -206,7 +206,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0114](0114-prs-view-grouped-by-checkout.md) | A PRs View Grouped By Checkout | Accepted (amended by 0129, 0130, 0151) |
 | [0115](0115-forge-discovery-over-discovered-repos.md) | Forge Discovery Over Every Discovered Repo | Accepted (amended by 0136) |
 | [0116](0116-lazy-forge-cadence-and-hard-refresh.md) | Lazy Forge Cadence And A Hard Refresh | Accepted (amended by 0136) |
-| [0117](0117-capability-manifest-and-traced-backstop.md) | A Capability Manifest With A Traced Backstop | Accepted |
+| [0117](0117-capability-manifest-and-traced-backstop.md) | A Capability Manifest With A Traced Backstop | Accepted (refined by 0255) |
 | [0118](0118-csp-short-name.md) | `csp` Is The Short Name | Accepted |
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
 | [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted (amended by 0160, 0161, 0191); framework-owned |
@@ -338,3 +338,4 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0137](0137-forge-fetches-stop-on-shutdown.md) | Forge Fetches Stop On Daemon Shutdown | Accepted |
 | [0253](0253-tui-a-stopped-mux-previews-the-session-it-hosted-last.md) | A Stopped Mux Previews The Session It Hosted Last | Accepted |
 | [0254](0254-tui-the-launch-form-starts-as-a-copy-of-the-selected-entity.md) | The Launch Form Starts As A Copy Of The Selected Entity | Accepted |
+| [0255](0255-tui-the-tui-runs-the-binary-that-exists-when-its-own-was-replaced.md) | The TUI Runs The Binary That Exists When Its Own Was Replaced | Accepted |

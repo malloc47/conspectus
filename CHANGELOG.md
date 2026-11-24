@@ -14,6 +14,13 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A TUI left open across a rebuild of Conspectus can still rebuild,
+  launch, and start muxes.** Recreating a pin from a TUI started before a
+  `cargo build --release` failed with `failed to spawn: No such file or
+  directory` and a path ending in `(deleted)`, because the file the TUI
+  started from had been replaced. It now runs the file at that path, or its
+  own running copy if there is none, and warns that it is out of date and
+  should be restarted when convenient.
 - **The forge chip stops naming a failure once the forge reads again.**
   When `gh` failed (a GitHub Enterprise host answering `503` during an
   outage, say), the saved graph kept the report after the host

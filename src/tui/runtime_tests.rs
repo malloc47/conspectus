@@ -2141,3 +2141,92 @@ mod viewer_find_prompt {
         assert_eq!(prompt.map(tuikit::text_edit::LineEdit::value), Some(""));
     }
 }
+
+/// A TUI whose own binary was rebuilt under it (ADR 0255).
+mod replaced_binary {
+    use super::*;
+    use crate::exec::{Fallback, RunningBinary};
+    use crate::tui::runtime::launch::{note_fallback, spawn_failure};
+    use tuikit::feedback::Severity;
+
+    fn binary(fallback: Option<Fallback>) -> RunningBinary {
+        RunningBinary {
+            path: "/opt/conspectus".into(),
+            fallback,
+        }
+    }
+
+    fn logged_summaries(app: &App) -> Vec<(Severity, String)> {
+        app.messages()
+            .newest_first()
+            .map(|entry| (entry.severity, entry.summary.clone()))
+            .collect()
+    }
+
+    fn toast_texts(app: &App) -> Vec<String> {
+        app.toasts()
+            .iter()
+            .map(|toast| toast.text.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_replaced_binary_is_warned_about_in_the_log_and_in_a_toast() {
+        let mut app = App::new(RunConfig::defaults());
+        note_fallback(&mut app, &binary(Some(Fallback::Replaced)));
+
+        let logged = logged_summaries(&app);
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert_eq!(logged[0].0, Severity::Warning);
+        assert!(logged[0].1.contains("was replaced"), "{logged:?}");
+        assert!(logged[0].1.contains("Restart the TUI"), "{logged:?}");
+        let toasts = toast_texts(&app);
+        assert_eq!(toasts.len(), 1, "{toasts:?}");
+        assert_eq!(toasts[0], logged[0].1);
+    }
+
+    #[test]
+    fn a_removed_binary_is_warned_about_as_one_that_is_gone() {
+        let mut app = App::new(RunConfig::defaults());
+        note_fallback(&mut app, &binary(Some(Fallback::Removed)));
+
+        let logged = logged_summaries(&app);
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert!(logged[0].1.contains("was removed"), "{logged:?}");
+        assert!(logged[0].1.contains("Restart the TUI"), "{logged:?}");
+        assert_eq!(toast_texts(&app).len(), 1);
+    }
+
+    #[test]
+    fn a_binary_that_is_as_it_started_says_nothing() {
+        let mut app = App::new(RunConfig::defaults());
+        note_fallback(&mut app, &binary(None));
+        assert!(logged_summaries(&app).is_empty());
+        assert!(toast_texts(&app).is_empty());
+    }
+
+    #[test]
+    fn a_warning_repeated_by_one_action_is_one_log_line() {
+        // The rebuild plan runs two commands; each notes the fallback.
+        let mut app = App::new(RunConfig::defaults());
+        note_fallback(&mut app, &binary(Some(Fallback::Replaced)));
+        note_fallback(&mut app, &binary(Some(Fallback::Replaced)));
+        assert_eq!(logged_summaries(&app).len(), 1);
+    }
+
+    #[test]
+    fn a_spawn_that_finds_no_program_says_to_restart() {
+        let err = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let said = spawn_failure(err);
+        assert_eq!(said.kind(), std::io::ErrorKind::NotFound);
+        let text = said.to_string();
+        assert!(text.contains("restart the TUI"), "{text}");
+    }
+
+    #[test]
+    fn other_spawn_failures_are_left_as_they_are() {
+        let err = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let text = spawn_failure(err).to_string();
+        assert!(!text.contains("restart"), "{text}");
+    }
+}

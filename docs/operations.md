@@ -2392,6 +2392,15 @@ resumed harness for its first moments and reports if it didn't survive
 (ADR 0103). Muxes owned by an orchestrator such as agent-deck are shown
 but not rebuilt.
 
+A rebuild, like a new mux or a launch, is carried out by running `conspectus`
+again from the TUI. If Conspectus itself was rebuilt or upgraded after the TUI
+started (a `cargo build --release`, say), the file the TUI started from is
+gone, and it runs the one now at that path instead. It says so with a warning
+in the message log and a toast, and the action goes on as usual. When nothing
+is left at that path, it runs the copy it is still running. Either way, quit
+and start the TUI again when it suits you: it stays on the old build until you
+do, and the daemon and the other TUIs are on the new one.
+
 ### Renames and worktrees
 
 `conspectus rename mux` keeps pins that name the renamed mux in

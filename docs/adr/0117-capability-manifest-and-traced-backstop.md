@@ -4,6 +4,8 @@
 
 Accepted. Makes ADR 0087 (the mutation envelope) enforceable. ADR 0143
 supersedes ADR 0087; the manifest now enforces ADR 0143.
+Refined by [ADR 0255](0255-tui-the-tui-runs-the-binary-that-exists-when-its-own-was-replaced.md):
+which file runs for the program `conspectus` when the TUI's own was replaced.
 
 ## Context
 
