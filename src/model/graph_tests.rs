@@ -813,3 +813,84 @@ fn a_mux_counts_how_many_of_its_agents_in_each_state_are_quiet() {
     assert_eq!(counts[&mux("main")].working, 3);
     assert_eq!(counts[&mux("main")].waiting, 1);
 }
+
+// ----- Equal links rank by confidence, strongest first -----------------
+
+/// A `linked_to_mux` link from `session("a")` to the mux `tmux:{mux}`,
+/// of `confidence` and the same provenance as its rivals. The ids sort
+/// against the links' strength, so the id tie-break cannot stand in for
+/// the confidence the tests are about.
+fn mux_link(id: &str, mux_name: &str, confidence: Confidence) -> GraphLink {
+    let mut link = GraphLink::new(
+        id,
+        session("a"),
+        LinkEndpoint::Node {
+            id: NodeId::MuxSession(mux(mux_name)),
+        },
+        RelationKind::LinkedToMux,
+        Provenance::Discovered,
+    );
+    link.confidence = confidence;
+    link
+}
+
+fn three_muxes_by_confidence() -> Vec<GraphLink> {
+    vec![
+        mux_link("a-low", "low", Confidence::Low),
+        mux_link("m-medium", "medium", Confidence::Medium),
+        mux_link("z-high", "high", Confidence::High),
+    ]
+}
+
+#[test]
+fn a_session_prefers_the_mux_it_is_linked_to_most_confidently() {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.candidate_links = three_muxes_by_confidence();
+    assert_eq!(
+        snapshot.preferred_mux_for(&session("a")),
+        Some(mux("high")),
+        "high beats medium and low"
+    );
+
+    snapshot.candidate_links.reverse();
+    assert_eq!(
+        snapshot.preferred_mux_for(&session("a")),
+        Some(mux("high")),
+        "the order the links arrive in does not decide"
+    );
+
+    snapshot.candidate_links.retain(|link| link.id != "z-high");
+    assert_eq!(
+        snapshot.preferred_mux_for(&session("a")),
+        Some(mux("medium")),
+        "medium beats low"
+    );
+}
+
+#[test]
+fn pick_preferred_takes_the_most_confident_of_equal_provenance() {
+    let links = three_muxes_by_confidence();
+    let mut refs: Vec<&GraphLink> = links.iter().collect();
+    let id = |picked: Option<&GraphLink>| picked.map(|link| link.id.clone());
+    assert_eq!(id(pick_preferred(&refs)), Some("z-high".to_string()));
+
+    refs.reverse();
+    assert_eq!(id(pick_preferred(&refs)), Some("z-high".to_string()));
+
+    refs.retain(|link| link.id != "z-high");
+    assert_eq!(id(pick_preferred(&refs)), Some("m-medium".to_string()));
+}
+
+#[test]
+fn provenance_still_outranks_confidence() {
+    // A stronger source of evidence wins whatever its confidence says.
+    let mut declared = mux_link("declared", "declared", Confidence::Low);
+    declared.provenance = Provenance::LocalDeclared;
+    let confident = mux_link("confident", "confident", Confidence::High);
+    let links = [confident, declared];
+    let refs: Vec<&GraphLink> = links.iter().collect();
+    assert_eq!(
+        pick_preferred(&refs).map(|link| link.id.as_str()),
+        Some("declared")
+    );
+}

@@ -2121,3 +2121,175 @@ fn mux_rooted_in_keeps_one_workspace_and_a_declared_link_outranks_inference() {
         vec!["inferred"]
     );
 }
+
+// ----- Equal candidates rank by confidence, strongest first ------------
+
+/// Three candidates that tie on every key ahead of confidence, weakest
+/// first. Their ids sort against their strength, so the id tie-break
+/// cannot stand in for the confidence the tests are about.
+fn by_confidence(make: impl Fn(&str, Confidence) -> GraphLink) -> [GraphLink; 3] {
+    [
+        make("a-low", Confidence::Low),
+        make("m-medium", Confidence::Medium),
+        make("z-high", Confidence::High),
+    ]
+}
+
+/// A comparator puts the stronger of two such links first (`Less`), and
+/// the weaker last, whichever way round it is asked.
+fn assert_strongest_first(
+    compare: fn(&GraphLink, &GraphLink) -> std::cmp::Ordering,
+    [low, medium, high]: &[GraphLink; 3],
+) {
+    use std::cmp::Ordering::{Greater, Less};
+    assert_eq!(compare(high, medium), Less, "high before medium");
+    assert_eq!(compare(medium, low), Less, "medium before low");
+    assert_eq!(compare(high, low), Less, "high before low");
+    assert_eq!(compare(low, high), Greater, "low after high");
+}
+
+/// The id `resolve_links` selects among `links`, given either way round.
+fn selected_either_way_round(links: &[GraphLink]) -> String {
+    let selected = |links: &[GraphLink]| {
+        resolve_links(links).resolved_relationships[0]
+            .selected_link_id
+            .clone()
+            .expect("a winner")
+    };
+    let forward = selected(links);
+    let mut reversed = links.to_vec();
+    reversed.reverse();
+    assert_eq!(
+        forward,
+        selected(&reversed),
+        "the order the links arrive in does not decide"
+    );
+    forward
+}
+
+#[test]
+fn the_generic_comparator_puts_the_more_confident_link_first() {
+    let links = by_confidence(|id, confidence| {
+        let mut link = GraphLink::new(
+            id,
+            checkout("/r"),
+            LinkEndpoint::Node {
+                id: branch_node(id),
+            },
+            RelationKind::CheckedOutBranch,
+            Provenance::Discovered,
+        );
+        link.confidence = confidence;
+        link
+    });
+    assert_strongest_first(compare_generic, &links);
+    assert_eq!(selected_either_way_round(&links), "z-high");
+}
+
+#[test]
+fn the_session_mux_comparator_puts_the_more_confident_link_first() {
+    let links = by_confidence(|id, confidence| {
+        linked_to_mux_link(
+            id,
+            session("a"),
+            mux(id),
+            Provenance::Discovered,
+            confidence,
+            None,
+            None,
+        )
+    });
+    assert_strongest_first(compare_session_mux, &links);
+    assert_eq!(selected_either_way_round(&links), "z-high");
+}
+
+#[test]
+fn the_branch_pr_comparator_puts_the_more_confident_link_first() {
+    let links = by_confidence(|id, confidence| {
+        let mut link = branch_pr_link(
+            id,
+            branch_node("feature"),
+            forge_pr(7),
+            Provenance::Discovered,
+            "open",
+            false,
+            Some(1_000),
+        );
+        link.confidence = confidence;
+        link
+    });
+    assert_strongest_first(compare_branch_pr, &links);
+}
+
+#[test]
+fn the_process_identity_comparator_puts_the_more_confident_link_first() {
+    let links = by_confidence(|id, confidence| {
+        let mut link = process_session_link(
+            id,
+            process("p"),
+            session(id),
+            RelationKind::ProcessIdentifiesSession,
+        );
+        link.confidence = confidence;
+        link
+    });
+    assert_strongest_first(compare_process_identity_links, &links);
+
+    let process_id = process("p");
+    let refs: Vec<&GraphLink> = links.iter().collect();
+    let preferred =
+        preferred_process_identity_by_process(std::iter::once((&process_id, refs.as_slice())));
+    assert_eq!(preferred.get(&process_id), Some(&session("z-high")));
+}
+
+#[test]
+fn confidence_decides_only_after_the_stronger_keys_tie() {
+    // A better provenance, evidence, or recency wins whatever the
+    // confidence says; confidence breaks the tie that is left.
+    let declared_but_unsure = linked_to_mux_link(
+        "declared",
+        session("a"),
+        mux("tmux:declared"),
+        Provenance::LocalDeclared,
+        Confidence::Low,
+        None,
+        None,
+    );
+    let discovered_and_sure = linked_to_mux_link(
+        "discovered",
+        session("a"),
+        mux("tmux:discovered"),
+        Provenance::Discovered,
+        Confidence::High,
+        None,
+        None,
+    );
+    assert_eq!(
+        selected_either_way_round(&[discovered_and_sure, declared_but_unsure]),
+        "declared"
+    );
+
+    let exact = linked_to_mux_link(
+        "exact",
+        session("a"),
+        mux("tmux:exact"),
+        Provenance::Discovered,
+        Confidence::Medium,
+        None,
+        Some("exact_cwd_match"),
+    );
+    let prefix = linked_to_mux_link(
+        "prefix",
+        session("a"),
+        mux("tmux:prefix"),
+        Provenance::Discovered,
+        Confidence::High,
+        None,
+        Some("cwd_prefix_match"),
+    );
+    assert_eq!(
+        selected_either_way_round(&[prefix, exact]),
+        "exact",
+        "stronger evidence outranks a higher confidence"
+    );
+}

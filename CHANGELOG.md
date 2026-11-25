@@ -14,6 +14,14 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Fixed
 
+- **A link's confidence breaks ties toward the stronger link.** Wherever
+  Conspectus picks the preferred of several links (a session's mux, the
+  session `v` opens on a mux, the resolver's winner for a relation, a
+  group's first row in the right pane, the CLI's agent, mux, and fork
+  listings), links that tied on provenance and evidence were ordered by
+  confidence the wrong way round, so the least sure one won. Nothing the
+  tool discovers today ties that way, so no output changed; the fix keeps a
+  future link source from having its weakest link chosen.
 - **A TUI left open across a rebuild of Conspectus can still rebuild,
   launch, and start muxes.** Recreating a pin from a TUI started before a
   `cargo build --release` failed with `failed to spawn: No such file or

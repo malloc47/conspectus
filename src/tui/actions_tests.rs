@@ -718,3 +718,46 @@ fn candidates_attached_from_the_right_pane(app: &mut App, muxes: &[NodeId]) -> V
     assert_eq!(app.focus(), Focus::Left);
     attached
 }
+
+#[test]
+fn v_opens_the_session_most_confidently_linked_to_the_mux() {
+    use crate::model::{NodeId, RelationKind};
+    let mux = NodeId::MuxSession(MuxSessionId::new("tmux:work"));
+    let mut snapshot = GraphSnapshot::empty();
+    // The keys sort against the links' strength, so only confidence can
+    // pick the right session.
+    for (key, confidence) in [
+        ("a-low", Confidence::Low),
+        ("m-medium", Confidence::Medium),
+        ("z-high", Confidence::High),
+    ] {
+        let mut link = GraphLink::new(
+            format!("link-{key}"),
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", key)),
+            LinkEndpoint::Node { id: mux.clone() },
+            RelationKind::LinkedToMux,
+            Provenance::Discovered,
+        );
+        link.confidence = confidence;
+        snapshot.candidate_links.push(link);
+    }
+    let session = |key: &str| Some(AgentSessionId::new("codex", "/state", key));
+
+    assert_eq!(
+        preferred_session_for_mux(&snapshot, &mux),
+        session("z-high")
+    );
+    snapshot.candidate_links.reverse();
+    assert_eq!(
+        preferred_session_for_mux(&snapshot, &mux),
+        session("z-high"),
+        "the order the links arrive in does not decide"
+    );
+    snapshot
+        .candidate_links
+        .retain(|link| link.id != "link-z-high");
+    assert_eq!(
+        preferred_session_for_mux(&snapshot, &mux),
+        session("m-medium")
+    );
+}

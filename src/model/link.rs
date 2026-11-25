@@ -196,14 +196,19 @@ impl Provenance {
     }
 }
 
+/// How sure a link's evidence makes it. Ordered by strength, `High >
+/// Medium > Low`, so the descending sorts that pick a link (`right.cmp(&left)`,
+/// as for [`Provenance::precedence`]) put the strongest first.
+///
+/// The variants are declared strongest first, and the archived graph
+/// carries them in that order, so `Ord` is written out below instead of
+/// following the declaration (ADR 0257).
 #[derive(
     Copy,
     Clone,
     Debug,
     Eq,
     PartialEq,
-    Ord,
-    PartialOrd,
     Serialize,
     Deserialize,
     rkyv::Archive,
@@ -217,7 +222,28 @@ pub enum Confidence {
     Low,
 }
 
+impl Ord for Confidence {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.strength().cmp(&other.strength())
+    }
+}
+
+impl PartialOrd for Confidence {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Confidence {
+    /// Larger is stronger.
+    fn strength(self) -> u8 {
+        match self {
+            Self::High => 2,
+            Self::Medium => 1,
+            Self::Low => 0,
+        }
+    }
+
     /// Stable snake_case label used in operator-facing surfaces.
     pub fn snake_case(self) -> &'static str {
         match self {

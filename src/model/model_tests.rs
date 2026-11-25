@@ -974,3 +974,44 @@ fn legacy_pin_advice_names_the_migration_command() {
         .is_none()
     );
 }
+
+#[test]
+fn confidence_orders_by_strength() {
+    use std::cmp::Ordering::{Greater, Less};
+    assert_eq!(Confidence::High.cmp(&Confidence::Medium), Greater);
+    assert_eq!(Confidence::Medium.cmp(&Confidence::Low), Greater);
+    assert_eq!(Confidence::Low.cmp(&Confidence::High), Less);
+    assert!(Confidence::High > Confidence::Low);
+
+    // The descending sort every link comparator uses puts the strongest first.
+    let mut shuffled = [Confidence::Low, Confidence::High, Confidence::Medium];
+    shuffled.sort_by(|left, right| right.cmp(left));
+    assert_eq!(
+        shuffled,
+        [Confidence::High, Confidence::Medium, Confidence::Low]
+    );
+}
+
+#[test]
+fn confidence_keeps_its_wire_and_archive_form() {
+    // The order is strength, but the variants are still named and laid out
+    // as they were: a saved graph and its JSON read the same.
+    for (confidence, name, archived) in [
+        (Confidence::High, "high", 0u8),
+        (Confidence::Medium, "medium", 1),
+        (Confidence::Low, "low", 2),
+    ] {
+        assert_eq!(
+            serde_json::to_string(&confidence).expect("serialize"),
+            format!("\"{name}\"")
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&confidence).expect("archive");
+        assert_eq!(
+            bytes.as_ref(),
+            [archived],
+            "{name} keeps its archived discriminant"
+        );
+        let restored = rkyv::from_bytes::<Confidence, rkyv::rancor::Error>(&bytes).expect("read");
+        assert_eq!(restored, confidence);
+    }
+}

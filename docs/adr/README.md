@@ -43,6 +43,7 @@ The provider-neutral node model, evidence-preserving `GraphLink` candidates, and
 | [0084](0084-first-class-pin-nodes.md) | First-Class Pin Nodes | Accepted (amended by 0141) |
 | [0203](0203-live-state-is-a-neutral-observation-with-a-closed-state-set.md) | Live State Is A Neutral Observation With A Closed State Set | Accepted |
 | [0205](0205-live-state-is-a-snapshot-side-table-bound-to-sessions-and-muxes.md) | Live State Is A Snapshot Side Table Bound To Sessions And Muxes | Accepted (amended) |
+| [0257](0257-a-links-confidence-orders-by-strength.md) | A Link's Confidence Orders By Strength | Accepted |
 
 ## Discovery and attribution
 

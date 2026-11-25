@@ -1764,3 +1764,42 @@ fn fork_lineage_reads_correctly_from_both_ends() {
         "child of"
     );
 }
+
+#[test]
+fn a_group_lists_the_more_confident_link_first() {
+    // Three children of one parent, linked with equal provenance. Each
+    // child's link wins its own slot, so winning does not separate them;
+    // their ids sort against their confidence, so neither does the id.
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(agent("claude-code", "parent", Some("/home/op/src/x"), None));
+    let parent = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "parent"));
+    for (key, confidence) in [
+        ("a-low", Confidence::Low),
+        ("m-medium", Confidence::Medium),
+        ("z-high", Confidence::High),
+    ] {
+        snapshot.nodes.push(agent("claude-code", key, None, None));
+        let child = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", key));
+        let mut child_link = link(
+            &format!("link-{key}"),
+            child,
+            parent.clone(),
+            RelationKind::ParentSession,
+        );
+        child_link.confidence = confidence;
+        snapshot.candidate_links.push(child_link);
+    }
+    let snapshot = resolve_snapshot(snapshot);
+
+    let view = build(&snapshot, &parent, Some(home().as_path()));
+    let upstream = filter_direction(&view, Direction::Upstream);
+    let group = upstream
+        .groups
+        .iter()
+        .find(|g| g.relation == RelationKind::ParentSession)
+        .expect("parent_session group on the parent's side");
+    let order: Vec<&str> = group.links.iter().map(|l| l.link_id.as_str()).collect();
+    assert_eq!(order, ["link-z-high", "link-m-medium", "link-a-low"]);
+}
