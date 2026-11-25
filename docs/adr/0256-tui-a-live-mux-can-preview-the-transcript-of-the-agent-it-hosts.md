@@ -5,7 +5,8 @@
 Accepted. Amends [ADR 0112](0112-node-specific-previews.md) (decision 1, the
 `MuxSession` row of the table) for a live mux, on the operator's opt-in.
 Extends the `[tui]` keys of [ADR 0012](0012-config-file-layout.md) with
-`mux_preview`. No new key, write path, or process.
+`mux_preview`. No new key, write path, or process. Amended by ADR 0258:
+the mux that hosts this TUI previews its agent's transcript too (decision 7).
 
 ## Context
 

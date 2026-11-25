@@ -1332,6 +1332,9 @@ teardown_grace = "3s"
   Pinned view, a mux drilled into, a Related row). A live mux with no
   agent, or whose agent's transcript the viewer cannot read, keeps its
   pane, and a stopped mux still previews the session it hosted last. The
+  tmux session Conspectus itself runs in never previews its pane, which
+  would be Conspectus; under `transcript` it previews its agent's transcript
+  too, and with no agent to show it says there is no mux target (ADR 0258). The
   transcript loads when the cursor rests on the row, on `r`, and when a
   tmux hand-off returns, which are the moments a pane is captured; it can
   lag a prompt or a running tool that the pane shows. `session_preview` is

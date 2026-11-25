@@ -340,4 +340,5 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0253](0253-tui-a-stopped-mux-previews-the-session-it-hosted-last.md) | A Stopped Mux Previews The Session It Hosted Last | Accepted |
 | [0254](0254-tui-the-launch-form-starts-as-a-copy-of-the-selected-entity.md) | The Launch Form Starts As A Copy Of The Selected Entity | Accepted |
 | [0255](0255-tui-the-tui-runs-the-binary-that-exists-when-its-own-was-replaced.md) | The TUI Runs The Binary That Exists When Its Own Was Replaced | Accepted |
-| [0256](0256-tui-a-live-mux-can-preview-the-transcript-of-the-agent-it-hosts.md) | A Live Mux Can Preview The Transcript Of The Agent It Hosts | Accepted |
+| [0256](0256-tui-a-live-mux-can-preview-the-transcript-of-the-agent-it-hosts.md) | A Live Mux Can Preview The Transcript Of The Agent It Hosts | Accepted (amended by 0258) |
+| [0258](0258-tui-the-mux-this-tui-runs-in-previews-its-agents-transcript.md) | The Mux This TUI Runs In Previews Its Agent's Transcript | Accepted |

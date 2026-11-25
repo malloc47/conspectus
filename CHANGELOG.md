@@ -54,6 +54,14 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **The mux Conspectus runs in previews its agent's transcript too.** With
+  `[tui] mux_preview = "transcript"`, every mux showed its agent except the
+  tmux session the TUI itself runs in, whose Preview stayed empty because its
+  pane would be the TUI inside itself. A transcript does not have that
+  problem, so that mux now shows the transcript of the agent it hosts (the one
+  `v` opens on it). Its pane is still never previewed, attaching to it is
+  still refused, and with no agent to show, or under the default `pane`, the
+  row says what it said before.
 - **A live mux can preview its agent's transcript instead of its pane.**
   The pane's capture is the agent's own screen drawn inside the Preview, and
   its borders and colors can read as clutter beside Conspectus's. `[tui]

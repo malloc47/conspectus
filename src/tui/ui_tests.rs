@@ -7749,15 +7749,15 @@ fn a_live_mux_previews_its_pane_unless_the_transcript_is_asked_for() {
     );
 }
 
-#[test]
-fn the_transcript_choice_reaches_every_place_a_live_mux_previews() {
-    let snapshot = ghost_world_hosting(true);
-
-    // The Pinned view's row for the pin on the mux. (The History view
-    // lists only what is gone, so a live mux has no row there.)
+/// An app for each place a live mux previews, with the live mux
+/// selected, or its row in the explorer's cursor: the Pinned view's row
+/// for the pin on it, the Mux view's row, and a Related row that names it.
+/// (The History view lists only what is gone, so a live mux has no row
+/// there.)
+fn live_mux_places(snapshot: &GraphSnapshot) -> Vec<(&'static str, App)> {
     let tree =
         crate::tui::rows::pinned::build_pinned_tree(crate::tui::rows::pinned::PinnedBuildInputs {
-            snapshot: &snapshot,
+            snapshot,
             home: Some(std::path::Path::new("/home/op")),
             now: Some(1_700_000_000),
             grouping: crate::tui::PinnedGrouping::None,
@@ -7767,7 +7767,7 @@ fn the_transcript_choice_reaches_every_place_a_live_mux_previews() {
     config.default_view = View::Pinned;
     let mut pinned = App::new(config);
     pinned.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -7776,34 +7776,15 @@ fn the_transcript_choice_reaches_every_place_a_live_mux_previews() {
         pin_id: "conspectus-main".into(),
     });
 
-    // The Mux view's row.
-    let mux = live_mux_app(&snapshot);
+    let mux = live_mux_app(snapshot);
 
-    for (place, mut app) in [("Pinned", pinned), ("Mux", mux)] {
-        assert_eq!(
-            crate::tui::preview::preview_source(&app),
-            Some(main_pane()),
-            "{place} view, by default"
-        );
-        choose_mux_transcript(&mut app);
-        assert_eq!(
-            crate::tui::preview::preview_source(&app),
-            Some(main_transcript()),
-            "{place} view"
-        );
-    }
-}
-
-#[test]
-fn a_related_row_to_a_live_mux_previews_it_as_the_mux_would() {
-    let snapshot = ghost_world_hosting(true);
-    let mut app = sessions_app_over(snapshot, SessionsGrouping::Graph);
-    app.set_selection(RowId::AgentSession(NodeId::AgentSession(main_session())));
-    // Walk the explorer onto the Related row that names the mux.
+    // The session's Related rows name its mux; walk the explorer onto it.
+    let mut related = sessions_app_over(snapshot.clone(), SessionsGrouping::Graph);
+    related.set_selection(RowId::AgentSession(NodeId::AgentSession(main_session())));
     let mut on_mux = false;
     for _ in 0..20 {
-        app.update(Msg::Explorer(ExplorerKey::Down));
-        if crate::tui::preview::preview_subject(&app)
+        related.update(Msg::Explorer(ExplorerKey::Down));
+        if crate::tui::preview::preview_subject(&related)
             == crate::tui::preview::PreviewSubject::Node(main_mux_id())
         {
             on_mux = true;
@@ -7811,12 +7792,26 @@ fn a_related_row_to_a_live_mux_previews_it_as_the_mux_would() {
         }
     }
     assert!(on_mux, "the session's Related rows name its mux");
-    assert_eq!(crate::tui::preview::preview_source(&app), Some(main_pane()));
-    choose_mux_transcript(&mut app);
-    assert_eq!(
-        crate::tui::preview::preview_source(&app),
-        Some(main_transcript())
-    );
+
+    vec![("Pinned", pinned), ("Mux", mux), ("Related", related)]
+}
+
+#[test]
+fn the_transcript_choice_reaches_every_place_a_live_mux_previews() {
+    let snapshot = ghost_world_hosting(true);
+    for (place, mut app) in live_mux_places(&snapshot) {
+        assert_eq!(
+            crate::tui::preview::preview_source(&app),
+            Some(main_pane()),
+            "{place}, by default"
+        );
+        choose_mux_transcript(&mut app);
+        assert_eq!(
+            crate::tui::preview::preview_source(&app),
+            Some(main_transcript()),
+            "{place}"
+        );
+    }
 }
 
 #[test]
@@ -7901,14 +7896,141 @@ fn the_transcript_choice_leaves_other_rows_as_they_were() {
         crate::tui::preview::preview_source(&app),
         Some(last_hosted_source())
     );
+}
 
-    // The mux this TUI runs in still previews nothing.
+// ----- The mux this TUI runs in (ADR 0258) -----------------------------
+
+/// Make the fixture's live mux the tmux session this TUI runs in.
+fn run_in_main_mux(app: &mut App) {
+    app.config_mut().current_tmux_session = Some("conspectus-main".to_string());
+}
+
+#[test]
+fn the_mux_this_tui_runs_in_previews_its_agents_transcript() {
+    let snapshot = ghost_world_hosting(true);
+    for (place, mut app) in live_mux_places(&snapshot) {
+        choose_mux_transcript(&mut app);
+        run_in_main_mux(&mut app);
+        assert_eq!(
+            crate::tui::preview::preview_source(&app),
+            Some(main_transcript()),
+            "{place}"
+        );
+    }
+    let mut app = live_mux_app(&snapshot);
+    choose_mux_transcript(&mut app);
+    run_in_main_mux(&mut app);
+    assert_eq!(
+        crate::tui::preview::node_source(&app, &main_mux_id()),
+        Some(main_transcript()),
+        "a drilled-in mux node resolves as its row does"
+    );
+}
+
+#[test]
+fn the_mux_this_tui_runs_in_previews_nothing_under_the_pane_choice() {
+    let snapshot = ghost_world_hosting(true);
+    for (place, mut app) in live_mux_places(&snapshot) {
+        run_in_main_mux(&mut app);
+        assert_eq!(crate::tui::preview::preview_source(&app), None, "{place}");
+    }
+    let mut app = live_mux_app(&snapshot);
+    run_in_main_mux(&mut app);
+    assert_eq!(crate::tui::preview::node_source(&app, &main_mux_id()), None);
+    assert_eq!(preview_body(&app), "no mux target for this row");
+}
+
+#[test]
+fn the_mux_this_tui_runs_in_without_a_readable_agent_previews_nothing() {
+    // No session is linked to it.
+    let mut no_agent = ghost_world_hosting(true);
+    no_agent
+        .candidate_links
+        .retain(|link| link.relation != crate::model::RelationKind::LinkedToMux);
+
+    // The one linked to it is not live.
+    let mut gone = ghost_world_hosting(true);
+    gone.node_presence.insert(
+        NodeId::AgentSession(main_session()),
+        crate::model::NodePresence::Gone { last_seen: 1 },
+    );
+
+    // The one `v` opens has a harness no adapter reads.
+    let unreadable = with_preferred_session(
+        ghost_world_hosting(true),
+        AgentSessionId::new("no-such-harness", "/state", "mystery"),
+    );
+
+    for (case, snapshot) in [
+        ("no agent", no_agent),
+        ("a gone agent", gone),
+        ("an unreadable agent", unreadable),
+    ] {
+        let mut app = live_mux_app(&snapshot);
+        choose_mux_transcript(&mut app);
+        run_in_main_mux(&mut app);
+        assert_eq!(
+            crate::tui::preview::preview_source(&app),
+            None,
+            "{case}: never its pane, which would be this TUI"
+        );
+        assert_eq!(preview_body(&app), "no mux target for this row", "{case}");
+    }
+}
+
+#[test]
+fn the_mux_this_tui_runs_in_is_still_never_attached_or_captured() {
     let snapshot = ghost_world_hosting(true);
     let mut app = live_mux_app(&snapshot);
     choose_mux_transcript(&mut app);
-    app.config_mut().current_tmux_session = Some("conspectus-main".to_string());
-    assert_eq!(crate::tui::preview::preview_source(&app), None);
-    assert_eq!(crate::tui::preview::node_source(&app, &main_mux_id()), None);
+    run_in_main_mux(&mut app);
+    assert!(
+        matches!(
+            crate::tui::actions::resolve_attach_target(&app),
+            Err(crate::tui::actions::AttachDisabled::CurrentTmuxSession(_))
+        ),
+        "attaching to it is still refused"
+    );
+    for (place, mut app) in live_mux_places(&snapshot) {
+        choose_mux_transcript(&mut app);
+        run_in_main_mux(&mut app);
+        assert!(
+            !matches!(
+                crate::tui::preview::preview_source(&app),
+                Some(PreviewSource::Pane(_))
+            ),
+            "{place}: its pane is never captured"
+        );
+    }
+}
+
+#[test]
+fn no_live_preview_hides_the_transcript_of_the_mux_this_tui_runs_in() {
+    let snapshot = ghost_world_hosting(true);
+    let mut app = live_mux_app(&snapshot);
+    choose_mux_transcript(&mut app);
+    run_in_main_mux(&mut app);
+    app.config_mut().live_preview_enabled = false;
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(main_transcript())
+    );
+    assert_eq!(preview_body(&app), "preview disabled (--no-live-preview)");
+}
+
+#[test]
+fn a_frame_of_the_mux_this_tui_runs_in_shows_its_agents_transcript() {
+    let snapshot = ghost_world_hosting(true);
+    let mut app = live_mux_app(&snapshot);
+    choose_mux_transcript(&mut app);
+    run_in_main_mux(&mut app);
+    app.update(Msg::SetPreview {
+        source: main_transcript(),
+        content: transcript_content(3),
+    });
+    let frame = pinned_frame(&mut app, 140);
+    assert!(frame.contains("turn 2"), "{frame}");
+    assert!(!frame.contains("no mux target"), "{frame}");
 }
 
 #[test]
