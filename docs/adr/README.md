@@ -201,7 +201,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163, 0179); framework-owned in part |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155, 0181, 0250, 0251, 0252); framework-owned in part |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended by 0112) |
-| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144, 0213, 0237, 0253; see 0147) |
+| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (amended by 0144, 0213, 0237, 0253, 0256; see 0147) |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted (amended by 0248) |
 | [0114](0114-prs-view-grouped-by-checkout.md) | A PRs View Grouped By Checkout | Accepted (amended by 0129, 0130, 0151) |
 | [0115](0115-forge-discovery-over-discovered-repos.md) | Forge Discovery Over Every Discovered Repo | Accepted (amended by 0136) |
@@ -339,3 +339,4 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0253](0253-tui-a-stopped-mux-previews-the-session-it-hosted-last.md) | A Stopped Mux Previews The Session It Hosted Last | Accepted |
 | [0254](0254-tui-the-launch-form-starts-as-a-copy-of-the-selected-entity.md) | The Launch Form Starts As A Copy Of The Selected Entity | Accepted |
 | [0255](0255-tui-the-tui-runs-the-binary-that-exists-when-its-own-was-replaced.md) | The TUI Runs The Binary That Exists When Its Own Was Replaced | Accepted |
+| [0256](0256-tui-a-live-mux-can-preview-the-transcript-of-the-agent-it-hosts.md) | A Live Mux Can Preview The Transcript Of The Agent It Hosts | Accepted |

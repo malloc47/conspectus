@@ -5,6 +5,29 @@ fn session(harness: &str, state_scope: &str, session_key: &str) -> AgentSessionI
 }
 
 #[test]
+fn the_viewer_reads_harnesses_with_a_parser_and_no_others() {
+    for harness in ["claude-code", "codex", "opencode"] {
+        assert!(
+            can_read(&session(harness, "/u/.state", "abc")),
+            "{harness} has a transcript source and a parser"
+        );
+    }
+    assert!(!can_read(&session("no-such-harness", "/u/.state", "abc")));
+}
+
+#[test]
+fn can_read_is_about_the_harness_not_the_file() {
+    // A transcript that has gone says so when it loads; the choice of
+    // preview does not wait for that.
+    let gone = session("claude-code", "/nonexistent/.claude", "never-written");
+    assert!(can_read(&gone));
+    assert!(matches!(
+        load_transcript(&gone),
+        Err(TranscriptMissing::Unavailable(_))
+    ));
+}
+
+#[test]
 fn claude_code_session_maps_to_claude_code_locator() {
     let id = session("claude-code", "/u/.claude", "abc");
     let locator = locator_for_session(&id).expect("claude-code has a locator");

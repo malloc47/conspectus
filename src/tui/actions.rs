@@ -1014,8 +1014,12 @@ pub fn pin_status_hint(snapshot: &GraphSnapshot, pin_id: &str) -> Option<String>
 /// Inverse of [`preferred_mux_for_session`]: find the resolver-
 /// preferred agent session linked to `mux`. Used by the `v`
 /// accelerator and the default-action dispatcher so a mux row's
-/// "view" complements its "attach".
-fn preferred_session_for_mux(snapshot: &GraphSnapshot, mux: &NodeId) -> Option<AgentSessionId> {
+/// "view" complements its "attach"; a mux's Preview names the same
+/// session when it previews its transcript (ADR 0256).
+pub(crate) fn preferred_session_for_mux(
+    snapshot: &GraphSnapshot,
+    mux: &NodeId,
+) -> Option<AgentSessionId> {
     let mut candidates: Vec<&GraphLink> = snapshot
         .candidate_links
         .iter()

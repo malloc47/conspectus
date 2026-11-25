@@ -1491,6 +1491,110 @@ mod worker_ledger {
     }
 }
 
+/// ADR 0256: a mux that previews its agent's transcript loads it when the
+/// mux's pane would have loaded. Neither has a timer; both follow the
+/// cursor landing, `r`, and a returning tmux hand-off.
+mod mux_transcript_cadence {
+    use super::*;
+    use crate::model::{AgentSessionId, MuxSessionId, NodeId};
+    use crate::tui::MuxPreview;
+    use crate::tui::app::SnapshotHandle;
+    use crate::tui::preview::{PreviewContent, PreviewSource};
+    use crate::tui::rows::RowId;
+
+    fn mux() -> MuxSessionId {
+        MuxSessionId::new("tmux:conspectus-main")
+    }
+
+    /// The Mux view over the Pinned fixture's world with the live mux
+    /// selected.
+    fn mux_app(choice: MuxPreview) -> App {
+        let snapshot = crate::tui::rows::pinned::fixture_world();
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Mux;
+        config.mux_preview = choice;
+        let mut app = App::new(config);
+        let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+            &snapshot, &app,
+        ));
+        app.update(Msg::SetData {
+            snapshot: SnapshotHandle::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app.set_selection(RowId::MuxSession(NodeId::MuxSession(mux())));
+        app
+    }
+
+    /// Whether a load starts at each step of one visit to the mux row:
+    /// the cursor landing, resting, `r`, a hand-off returning, and the
+    /// cursor landing again after it was elsewhere.
+    fn loads(choice: MuxPreview) -> Vec<bool> {
+        let mut app = mux_app(choice);
+        let config = app.config().clone();
+        let source = crate::tui::preview::preview_source(&app).expect("the mux has a source");
+        let elsewhere = PreviewSource::Path("/elsewhere".into());
+        let loaded = |app: &mut App| {
+            app.update(Msg::SetPreview {
+                source: source.clone(),
+                content: PreviewContent::Unavailable("whatever it read".to_string()),
+            });
+        };
+        let plans = |app: &App, shown: Option<&PreviewSource>, force: bool| {
+            plan_preview_load(app, &config, shown, force).is_some()
+        };
+
+        let mut steps = vec![plans(&app, None, false)];
+        loaded(&mut app);
+        steps.push(plans(&app, Some(&source), false));
+        steps.push(plans(&app, Some(&source), true));
+        app.update(Msg::HandoffReturned(mux()));
+        steps.push(plans(&app, Some(&source), false));
+        loaded(&mut app);
+        steps.push(plans(&app, Some(&elsewhere), false));
+        steps
+    }
+
+    #[test]
+    fn a_transcript_loads_exactly_when_the_pane_would_have() {
+        assert!(
+            matches!(
+                crate::tui::preview::preview_source(&mux_app(MuxPreview::Transcript)),
+                Some(PreviewSource::Transcript(_))
+            ),
+            "the comparison is between a transcript and a pane"
+        );
+        let pane = loads(MuxPreview::Pane);
+        assert_eq!(pane, [true, false, true, true, true], "the pane's cadence");
+        assert_eq!(loads(MuxPreview::Transcript), pane);
+    }
+
+    #[test]
+    fn the_hosted_sessions_transcript_is_what_loads() {
+        let app = mux_app(MuxPreview::Transcript);
+        let config = app.config().clone();
+        assert_eq!(
+            plan_preview_load(&app, &config, None, false),
+            Some(PreviewSource::Transcript(AgentSessionId::new(
+                "claude-code",
+                "/state",
+                "e44d01cb5a"
+            )))
+        );
+    }
+
+    #[test]
+    fn no_live_preview_loads_neither() {
+        let mut config = RunConfig::defaults();
+        config.live_preview_enabled = false;
+        for choice in [MuxPreview::Pane, MuxPreview::Transcript] {
+            let app = mux_app(choice);
+            assert_eq!(plan_preview_load(&app, &config, None, true), None);
+        }
+    }
+}
+
 /// ADR 0112 §5: when the selection's preview loads.
 mod preview_loading {
     use super::*;

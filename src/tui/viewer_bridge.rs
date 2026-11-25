@@ -45,6 +45,15 @@ pub fn locator_for_session(session: &AgentSessionId) -> Option<SessionLocator> {
         .and_then(|a| a.transcript_source(session))
 }
 
+/// Whether the viewer can read this session's harness at all: it has a
+/// transcript source and a parser. Touches no file, so a transcript that
+/// has gone still counts; [`load_transcript`] says why it is missing.
+pub fn can_read(session: &AgentSessionId) -> bool {
+    registered_adapters()
+        .find(|a| a.harness_key() == session.harness_key)
+        .is_some_and(|a| a.transcript_source(session).is_some() && a.transcript_parser().is_some())
+}
+
 /// Resolve a session into the viewer, opened at its newest turns.
 /// Parser failures degrade to a `TranscriptDocument::unavailable`
 /// document so the viewer can always render a coherent banner

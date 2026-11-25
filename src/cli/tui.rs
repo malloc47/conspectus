@@ -471,6 +471,7 @@ impl TuiArgs {
             default_preview_wrap: outcome.config.tui.preview_wrap,
             // `[tui] session_preview`; restored the same way.
             default_session_preview: outcome.config.tui.session_preview,
+            mux_preview: outcome.config.tui.mux_preview,
             preview: outcome.config.tui.preview.clone(),
             narrow_layout_threshold: outcome.config.tui.narrow_layout_threshold,
             intervals: outcome.config.server.intervals,

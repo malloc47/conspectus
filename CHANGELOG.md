@@ -46,6 +46,17 @@ forms, lists, readers, and keys look and behave alike.
 
 ### Added
 
+- **A live mux can preview its agent's transcript instead of its pane.**
+  The pane's capture is the agent's own screen drawn inside the Preview, and
+  its borders and colors can read as clutter beside Conspectus's. `[tui]
+  mux_preview = "transcript"` previews the transcript of the session the mux
+  hosts (the one `v` opens on it) in Conspectus's own styling, in the Mux
+  view, on a pin's row in the Pinned view, on a mux drilled into, and on a
+  Related row. It loads when the pane would have: when the cursor rests on
+  the row, on `r`, and when a tmux hand-off returns. The default is `pane`,
+  as before; a mux with no live agent, or whose agent's harness the viewer
+  cannot read, keeps its pane. It is a config key only, with no control in
+  the overlay.
 - **A stopped mux previews the session it hosted last.** Selecting a mux
   that is no longer running, pinned or only remembered, used to say `no
   mux target for this row` in the Mux view and `no preview for this row`

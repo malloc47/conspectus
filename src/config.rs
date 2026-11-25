@@ -328,6 +328,9 @@ pub struct TuiConfig {
     /// Starting preview for agent sessions in tmux (ADR 0112). Sourced
     /// from `[tui] session_preview`; defaults to the transcript.
     pub session_preview: crate::tui::SessionPreview,
+    /// What a live mux that hosts an agent session previews (ADR 0256).
+    /// Sourced from `[tui] mux_preview`; defaults to the pane.
+    pub mux_preview: crate::tui::MuxPreview,
     /// The Preview's smart-wrap settings and cleanup rules (ADR 0252),
     /// from `[tui.preview]` over the built-in ones.
     pub preview: crate::tui::preview_rules::PreviewConfig,
@@ -345,6 +348,7 @@ impl Default for TuiConfig {
             default_view: None,
             preview_wrap: crate::tui::WrapMode::default(),
             session_preview: crate::tui::SessionPreview::default(),
+            mux_preview: crate::tui::MuxPreview::default(),
             preview: crate::tui::preview_rules::PreviewConfig::default(),
         }
     }
@@ -611,6 +615,9 @@ struct TuiFile {
     /// `[tui] session_preview` — `transcript` or `pane`.
     #[serde(default)]
     session_preview: Option<String>,
+    /// `[tui] mux_preview` — `pane` or `transcript`.
+    #[serde(default)]
+    mux_preview: Option<String>,
     /// `[tui.preview]` table (ADR 0252): the Preview's smart-wrap
     /// settings and its `[[tui.preview.rules]]`.
     #[serde(default)]
@@ -1370,6 +1377,19 @@ fn merge_tui(
                 message: format!(
                     "invalid `[tui] session_preview` value `{raw}`; \
                      expected one of transcript, pane"
+                ),
+            }),
+        }
+    }
+
+    if let Some(raw) = file.mux_preview {
+        match crate::tui::MuxPreview::parse(&raw) {
+            Some(choice) => config.mux_preview = choice,
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[tui] mux_preview` value `{raw}`; \
+                     expected one of pane, transcript"
                 ),
             }),
         }

@@ -1266,6 +1266,7 @@ show_harness_chips = false  # per-harness count chips in the header
 narrow_layout_threshold = 100  # columns below which the panes stack
 preview_wrap = "smart"      # smart | plain | none — how the Preview fits a mux pane
 session_preview = "transcript"  # transcript | pane — the Preview for a session in tmux
+mux_preview = "pane"        # pane | transcript — the Preview for a live mux that hosts an agent
 # sessions_grouping = "graph"  # deprecated alias for [tui.views.sessions] grouping
 
 [tui.views.sessions]        # also mux and prs (ADR 0031)
@@ -1323,6 +1324,19 @@ teardown_grace = "3s"
   first (ADR 0129, 0130, 0134).
 - **Durations** in `[server.intervals]` and `teardown_grace` use
   `<integer><ms|s|m|h>`.
+- **Mux preview (ADR 0256):** a live mux previews its pane by default,
+  which for a mux running an agent is the agent's own screen drawn inside
+  the Preview. `mux_preview = "transcript"` previews the transcript of the
+  agent it hosts instead, in Conspectus's styling: the session `v` opens
+  on that mux, wherever the mux previews (the Mux view, a pin's row in the
+  Pinned view, a mux drilled into, a Related row). A live mux with no
+  agent, or whose agent's transcript the viewer cannot read, keeps its
+  pane, and a stopped mux still previews the session it hosted last. The
+  transcript loads when the cursor rests on the row, on `r`, and when a
+  tmux hand-off returns, which are the moments a pane is captured; it can
+  lag a prompt or a running tool that the pane shows. `session_preview` is
+  separate: it chooses what a session in tmux shows, and the controls
+  overlay changes it; `mux_preview` is set in the config files only.
 - **Forge cadence (ADR 0116, 0136):** each GitHub remote's PR listing is
   fetched in the background, by the daemon's forge class or, without a
   daemon, by the TUI, and reused until it is older than `forge`. A failed
@@ -2816,7 +2830,9 @@ means the letter on either pane, so a chord of it (`Alt-j`, `Ctrl-j`)
 moves neither the explorer nor the tree. A mux's Preview is the pane's
 capture, which opens on the pane's newest output; `K` scrolls back through
 the last hundred lines of scrollback the capture holds beyond the screen,
-and `J` returns toward the newest line. The Preview keeps the place
+and `J` returns toward the newest line. Under `mux_preview = "transcript"`
+it is the hosted agent's transcript instead, which opens on its newest
+turns and scrolls as any transcript does. The Preview keeps the place
 `J`/`K` scrolled it to through a refresh, `r`, and a filter or sort
 change; it goes back to where it starts (the top, a transcript's newest
 turns, or the search match it opens on) when it shows something else:

@@ -410,9 +410,11 @@ pub fn value_source(app: &App, value: &FieldValue) -> Option<PreviewSource> {
 ///
 /// - an agent session shows its transcript, or its pane when the
 ///   operator chose `session_preview = pane` and the session is in tmux;
-/// - a mux session shows its pane, unless it hosts this TUI; one that
-///   is no longer live has no pane and shows what the session it hosted
-///   last shows ([`last_hosted_source`]);
+/// - a mux session shows its pane, or under `[tui] mux_preview =
+///   "transcript"` the transcript of the agent session it hosts
+///   (`live_mux_source`), unless it hosts this TUI; one that is no
+///   longer live has no pane and shows what the session it hosted last
+///   shows ([`last_hosted_source`]);
 /// - a workspace lists its root;
 /// - a checkout shows `git status` above a listing of its root;
 /// - a repo shows recent commits on its default branch and its remotes;
@@ -447,9 +449,7 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
                 PreviewSource::Pane,
             ))
         }
-        NodeId::MuxSession(mux) => {
-            (!hosts_this_tui(app, mux)).then(|| PreviewSource::Pane(mux.clone()))
-        }
+        NodeId::MuxSession(mux) => (!hosts_this_tui(app, mux)).then(|| live_mux_source(app, mux)),
         NodeId::Pin(pin) => {
             // A slot previews what it points at while that is live.
             let snapshot = app.snapshot_handle()?.snapshot();
@@ -514,6 +514,34 @@ pub fn last_hosted_source(app: &App, mux: &NodeId) -> Option<PreviewSource> {
     node_source(app, &snapshot.last_hosted_session(mux)?)
 }
 
+/// What a live mux previews: its pane, or, when the operator chose
+/// `[tui] mux_preview = "transcript"`, the transcript of the agent
+/// session it hosts, so the agent's own screen does not sit inside
+/// Conspectus's (ADR 0256).
+///
+/// The session is the one `v` opens on the mux. The pane stays when the
+/// mux has no such session, when the session is not live, and when the
+/// viewer cannot read its harness, since the pane is then the only
+/// preview the mux has. Callers have already ruled out a mux that hosts
+/// this TUI and one that is not live.
+fn live_mux_source(app: &App, mux: &MuxSessionId) -> PreviewSource {
+    hosted_transcript(app, mux).unwrap_or_else(|| PreviewSource::Pane(mux.clone()))
+}
+
+/// The transcript source [`live_mux_source`] swaps in for `mux`'s pane,
+/// when the setting asks for it and the mux has a session to show.
+fn hosted_transcript(app: &App, mux: &MuxSessionId) -> Option<PreviewSource> {
+    if app.config().mux_preview != crate::tui::MuxPreview::Transcript {
+        return None;
+    }
+    let snapshot = app.snapshot_handle()?.snapshot();
+    let session =
+        crate::tui::actions::preferred_session_for_mux(snapshot, &NodeId::MuxSession(mux.clone()))?;
+    (snapshot.is_live(&NodeId::AgentSession(session.clone()))
+        && crate::tui::viewer_bridge::can_read(&session))
+    .then_some(PreviewSource::Transcript(session))
+}
+
 /// Whether `mux` is the tmux session this TUI runs in. Its pane would
 /// show the TUI itself.
 fn hosts_this_tui(app: &App, mux: &MuxSessionId) -> bool {
@@ -528,8 +556,10 @@ fn hosts_this_tui(app: &App, mux: &MuxSessionId) -> bool {
 /// - an agent session row resolves as its node does ([`node_source`]),
 ///   keeping its row's tmux state;
 /// - a mux row, a mux candidate, and a pin slot row whose mux is
-///   live show the pane, and a mux row that is no longer live shows its
-///   last hosted session ([`last_hosted_source`]);
+///   live show what a live mux shows ([`live_mux_source`]: the pane, or
+///   the hosted session's transcript when the operator chose that), and
+///   a mux row that is no longer live shows its last hosted session
+///   ([`last_hosted_source`]);
 /// - any other row resolves as the node the right pane shows for it;
 ///   without a source, the renderer decides what to say.
 fn selection_source(app: &App) -> Option<PreviewSource> {
@@ -556,7 +586,10 @@ fn selection_source(app: &App) -> Option<PreviewSource> {
             _,
             RowId::Group(mux @ NodeId::MuxSession(_))
             | RowId::MuxSession(mux @ NodeId::MuxSession(_)),
-        ) => pane().or_else(|| last_hosted_source(app, mux)),
+        ) => crate::tui::actions::resolve_attach_target(app)
+            .ok()
+            .map(|target| live_mux_source(app, &target.mux))
+            .or_else(|| last_hosted_source(app, mux)),
         // Any other row previews the node the right pane shows for it.
         _ => app
             .explorer()

@@ -1568,6 +1568,38 @@ fn tui_session_preview_unknown_value_diagnoses_and_keeps_the_default() {
     );
 }
 
+#[test]
+fn tui_mux_preview_defaults_to_the_pane_and_loads_from_config() {
+    assert_eq!(
+        load_tui_config("[tui]\n").config.tui.mux_preview,
+        crate::tui::MuxPreview::Pane
+    );
+    let outcome = load_tui_config("[tui]\nmux_preview = \"transcript\"\n");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(
+        outcome.config.tui.mux_preview,
+        crate::tui::MuxPreview::Transcript
+    );
+    let outcome = load_tui_config("[tui]\nmux_preview = \"pane\"\n");
+    assert_eq!(outcome.config.tui.mux_preview, crate::tui::MuxPreview::Pane);
+}
+
+#[test]
+fn tui_mux_preview_unknown_value_diagnoses_and_keeps_the_default() {
+    let outcome = load_tui_config("[tui]\nmux_preview = \"session\"\n");
+    assert_eq!(outcome.config.tui.mux_preview, crate::tui::MuxPreview::Pane);
+    let diagnostic = outcome
+        .diagnostics
+        .iter()
+        .find(|d| d.message.contains("mux_preview"))
+        .unwrap_or_else(|| panic!("a diagnostic: {:?}", outcome.diagnostics));
+    assert!(
+        diagnostic.message.contains("pane, transcript"),
+        "it names the choices: {}",
+        diagnostic.message
+    );
+}
+
 fn load_theme_badge_width(raw: &str) -> LoadOutcome {
     let temp = TempDir::new().expect("temp dir");
     let project = temp.path().join("project");

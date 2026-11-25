@@ -200,3 +200,33 @@ fn a_related_row_to_a_session_leads_its_transcript_with_the_evidence() {
     assert!(preview.contains("Where is the pane?"), "{pane}");
     assert!(preview.contains("In tmux."), "{pane}");
 }
+
+/// The Preview zone of the mux view's one row, the tmux session `editor`.
+fn mux_row_preview(world: &World) -> String {
+    let pane = right_pane_after(world, "2j");
+    assert!(pane.contains("▣ mux"), "the mux row is selected:\n{pane}");
+    pane.split("Preview")
+        .nth(1)
+        .unwrap_or_else(|| panic!("a Preview zone:\n{pane}"))
+        .to_string()
+}
+
+#[test]
+fn a_mux_previews_the_transcript_of_its_agent_when_the_config_asks() {
+    let world = world();
+
+    // By default the mux previews its pane, which snapshot mode only holds
+    // a place for.
+    let preview = mux_row_preview(&world);
+    assert!(preview.contains("loading mux preview…"), "{preview}");
+    assert!(!preview.contains("In tmux."), "{preview}");
+
+    let config = world.home.path().join(".config/conspectus/config.toml");
+    fs::create_dir_all(config.parent().expect("a config directory")).expect("config dir");
+    fs::write(&config, "[tui]\nmux_preview = \"transcript\"\n").expect("write config");
+
+    let preview = mux_row_preview(&world);
+    assert!(preview.contains("Where is the pane?"), "{preview}");
+    assert!(preview.contains("In tmux."), "{preview}");
+    assert!(!preview.contains("loading mux preview…"), "{preview}");
+}

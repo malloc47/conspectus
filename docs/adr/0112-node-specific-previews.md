@@ -6,7 +6,8 @@ Accepted. See ADR 0147 for content search, which reads transcripts on
 the same in-memory footing and honors `--no-live-preview`. Amended by ADR 0144: a `Pin` slot has no binding, so its
 preview is its target's preview (see that ADR); the Bound/Unbound row
 below is historical. Amended by ADR 0253: a mux that is no longer live
-previews the session it hosted last. Amended by ADR 0213: a node's live-state fields
+previews the session it hosted last. Amended by ADR 0256: a live mux may
+preview the transcript of the session it hosts, on the operator's opt-in. Amended by ADR 0213: a node's live-state fields
 preview by their types (`since` a timestamp, `state`, `source`, and
 `evidence` from a fixed set, `pane_agents` a list). Amends ADR 0107 (a Related row's evidence becomes a header
 above the neighbor's own preview). Supersedes the Preview rules in

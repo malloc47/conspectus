@@ -141,6 +141,10 @@ pub struct RunConfig {
     /// from `[tui] session_preview`; the controls overlay changes it in
     /// memory and the last choice is restored from persisted TUI state.
     pub default_session_preview: SessionPreview,
+    /// What a live mux that hosts an agent session previews (ADR 0256).
+    /// Sourced from `[tui] mux_preview`; fixed for the run, since no
+    /// control changes it.
+    pub mux_preview: MuxPreview,
     /// The Preview's smart-wrap settings and cleanup rules (ADR 0252),
     /// from `[tui.preview]` over the built-in ones.
     pub preview: preview_rules::PreviewConfig,
@@ -215,6 +219,7 @@ impl RunConfig {
             default_mux_recency: MuxRecency::default(),
             default_preview_wrap: WrapMode::default(),
             default_session_preview: SessionPreview::default(),
+            mux_preview: MuxPreview::default(),
             preview: preview_rules::PreviewConfig::default(),
             narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
@@ -352,6 +357,36 @@ impl SessionPreview {
 
     /// All variants in stable display order.
     pub const ALL: [SessionPreview; 2] = [Self::Transcript, Self::Pane];
+}
+
+/// What the Preview shows for a live mux that hosts an agent session
+/// (ADR 0256). A mux with no such session always shows its pane.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum MuxPreview {
+    /// The live tmux pane, the agent's own screen as it draws it.
+    #[default]
+    Pane,
+    /// The transcript of the session the mux hosts, rendered by the
+    /// native viewer as that session's own row is.
+    Transcript,
+}
+
+impl MuxPreview {
+    /// Stable token used for config.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pane => "pane",
+            Self::Transcript => "transcript",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "pane" => Some(Self::Pane),
+            "transcript" => Some(Self::Transcript),
+            _ => None,
+        }
+    }
 }
 
 /// Top-level grouping in the sessions tree.
